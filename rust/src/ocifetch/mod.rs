@@ -1,8 +1,7 @@
 //! The v1 fetch layer: OCI distribution plus zstd (docs/guides/fetch-v1.md,
 //! plan §1). This module is **not** re-exported from the crate root — it is
 //! wired in behind `#[cfg(feature = "fetch-v1")]` and built/tested on its
-//! own (`cargo test --features fetch-v1 --test ocifetch_conformance`), on
-//! the `v1` branch only, well ahead of 1.0's switch.
+//! own (`cargo test --features fetch-v1 --test ocifetch_conformance`).
 //!
 //! The seam (plan §1.3) is [`ensure`], [`resolve_installed`],
 //! [`list_installed`], [`verify_installed`] and [`fetch_signed`], returning

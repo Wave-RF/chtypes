@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 import platform as _platform_module
+import re
 import shutil
 import tempfile
 from collections.abc import Callable, Sequence
@@ -287,39 +288,67 @@ def _check_predicate_matches_request(predicate: dict, platform_key: str, spellin
         raise ArtifactCorruptError("signed predicate missing integer field 'library_bytes'")
 
 
+def _version_key(version: object) -> tuple[int, ...] | None:
+    """A four-part version as integers, or None for anything else."""
+    if not isinstance(version, str):
+        return None
+    try:
+        return spelling_components(version)
+    except ValueError:
+        return None
+
+
 def _newer_installed(
-    roots: Sequence[Path], platform_key: str, predicate: dict
+    roots: Sequence[Path], platform_key: str, predicate: dict, request_spelling: str
 ) -> tuple[Path, VerifiedRecord, str] | None:
     """PLAN "monotonic-warning": "an installed HIGHER build; the registry
-    offers a LOWER one; ok plus a warning." — the existing (newer) install
-    is KEPT, not replaced by the one the registry just offered, so this
-    returns the winning (dir, record) alongside the warning text rather
-    than a warning alone; the caller resolves to it instead of installing
-    what it just verified.
+    offers a LOWER one; ok plus a warning." The existing (newer) install is
+    KEPT, not replaced by the one the registry just offered, so this returns
+    the winning (dir, record) alongside the warning text rather than a
+    warning alone; the caller resolves to it instead of installing what it
+    just verified. It is the newest such install.
 
-    Scoped to the SAME declared `clickhouse_version` only (not "any
-    lexicographically higher version is cached somewhere") — a build
-    regression under one unchanged version tag is what this guards
-    against; a cache entry for a genuinely different, unrelated version
-    (a different floating family the caller is now intentionally
-    switching to) must never shadow it.
+    Scoped to the REQUEST (docs/guides/fetch-v1.md §9; public issue #481),
+    the rule Go, TypeScript and Rust follow too: only an install whose
+    version lies within the request counts, and it counts when its (version,
+    build) is newer. So a line request (`26.3`) keeps a newer build of that
+    line and never sees another line's install, and an exact request
+    (`26.3.4.1`) keeps only a newer BUILD of that exact version. A request
+    that is not a version spelling (an arbitrary tag) names no range, so
+    nothing is kept for it.
     """
+    if not re.match(C.SPELLING_REGEX, request_spelling):
+        return None
     new_version = predicate.get("clickhouse_version")
     new_build = predicate.get("build")
+    new_key = _version_key(new_version)
+    if new_key is None or not isinstance(new_build, str):
+        return None
+    best: tuple[Path, VerifiedRecord] | None = None
+    best_key: tuple[tuple[int, ...], str] | None = None
     for dir_, record in list_verified_records(roots):
-        if record.platform != platform_key or record.version != new_version:
+        if record.platform != platform_key:
             continue
-        if record.build == new_build:
+        if not version_within_request(record.version, request_spelling):
+            continue
+        version_key = _version_key(record.version)
+        if version_key is None:
             continue
         # build is a fixed-width UTC string: lexicographic == chronological.
-        if record.build > new_build:
-            warning = (
-                f"monotonic warning: an already-installed build ({record.version}/"
-                f"{record.build}) is newer than the one just resolved "
-                f"({new_version}/{new_build})"
-            )
-            return dir_, record, warning
-    return None
+        key = (version_key, record.build)
+        if key <= (new_key, new_build):
+            continue
+        if best_key is None or key > best_key:
+            best, best_key = (dir_, record), key
+    if best is None:
+        return None
+    dir_, record = best
+    warning = (
+        f"monotonic warning: an already-installed build ({record.version}/"
+        f"{record.build}) within {request_spelling} is newer than the one just "
+        f"resolved ({new_version}/{new_build})"
+    )
+    return dir_, record, warning
 
 
 def _tmp_dir_under(root: Path, subdir: str) -> str:
@@ -633,13 +662,32 @@ def _ensure_floating(
     existing_dir = unpacked_dir_for(cache_root_path, manifest_hex)
     existing_record = read_verified_record(existing_dir)
     if existing_record is not None and existing_record.platform == platform_key:
-        resolved = _record_to_resolved(
-            existing_dir,
-            existing_record,
-            request_spelling=request.spelling,
-            already_installed=True,
-            source="cache",
+        # A NEWER build within the request, installed beside it, is still the
+        # answer ("monotonic-warning", docs/guides/fetch-v1.md §9).
+        newer = _newer_installed(
+            roots,
+            platform_key,
+            {"clickhouse_version": existing_record.version, "build": existing_record.build},
+            request.spelling,
         )
+        if newer is not None:
+            newer_dir, newer_record, warning = newer
+            resolved = _record_to_resolved(
+                newer_dir,
+                newer_record,
+                request_spelling=request.spelling,
+                already_installed=True,
+                source="cache",
+            )
+            resolved = replace(resolved, warnings=(*resolved.warnings, warning))
+        else:
+            resolved = _record_to_resolved(
+                existing_dir,
+                existing_record,
+                request_spelling=request.spelling,
+                already_installed=True,
+                source="cache",
+            )
         _maybe_write_lock(
             options,
             lock,
@@ -704,7 +752,7 @@ def _ensure_floating(
         signed_by = verified.signed_by
 
     _check_predicate_matches_request(predicate, platform_key, request.spelling)
-    newer = _newer_installed(roots, platform_key, predicate)
+    newer = _newer_installed(roots, platform_key, predicate, request.spelling)
     if newer is not None:
         newer_dir, newer_record, warning = newer
         resolved = _record_to_resolved(

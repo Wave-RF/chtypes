@@ -166,6 +166,9 @@ func (r *Registry) open(ctx context.Context, request string, mayFetch bool) (_ *
 	if err != nil {
 		return nil, err
 	}
+	if err := checkWithinRequest(l, request, res.Platform); err != nil {
+		return nil, err
+	}
 	r.memo[request] = l
 	r.libs = append(r.libs, l)
 	return l, nil
@@ -182,6 +185,27 @@ func loadInput(res *Resolved, zone, defaults []byte) abi1.LoadInput {
 		Platform:    res.Platform,
 		Timezone:    zone,
 		Defaults:    defaults,
+	}
+}
+
+// checkWithinRequest is the load-time assertion (fetch-v1.md section 9; public
+// issue #481): the library just opened for request must report, in its own
+// build_info, a clickhouse_version within that request — equal to an exact
+// request, within a line one. Otherwise the open fails as
+// CHTYPES_ARTIFACT_CORRUPT with reason build_info_mismatch:clickhouse_version,
+// the code fetch-v1.md section 4 gives a signed version outside the request,
+// whatever the cache answered. The image stays loaded for the requests it
+// does answer.
+func checkWithinRequest(l *Library, request, platform string) error {
+	if ocifetch.SatisfiesRequest(request, l.Version) {
+		return nil
+	}
+	return &ArtifactError{
+		Code: CodeArtifactCorrupt, Request: request, Platform: platform,
+		Reason: "build_info_mismatch:clickhouse_version", Path: l.Path, Want: request, Got: l.Version,
+		Msg: fmt.Sprintf("chtypes: %s refused: build_info_mismatch:clickhouse_version (want a build within %q, got %q): "+
+			"the library opened for ClickHouse %s reports another version [%s]",
+			l.Path, request, l.Version, request, CodeArtifactCorrupt),
 	}
 }
 

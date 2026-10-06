@@ -199,9 +199,9 @@ pub struct BatchResult {
     /// The byte ranges the reader's error recovery skipped. It does not account
     /// for every record: a skipped row's `input_span` can cover more than one
     /// input record, so verdicts can be fewer than records while this is empty.
-    /// A caller that needs every record accounted for declines a body with any
-    /// skipped row or any `unconsumed` range, or compares the verdict count with
-    /// its own count of the body's records (`docs/guides/batches.md`).
+    /// An independent record count can be fooled too. A caller that needs every
+    /// record accounted for declines a body with any skipped row or any
+    /// `unconsumed` range (`docs/guides/batches.md`).
     pub unconsumed: Vec<Span>,
     /// What the reader decided about the body's framing.
     pub framing: Option<Framing>,

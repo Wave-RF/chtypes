@@ -30,9 +30,28 @@ ONLY the four CLIs, never a library call, against it:
          verified.json, without blobs: not installed;
        - the same with blobs: re-verified and installed, the stale directory
          replaced.
+  3. WRITER x READER x LINE (public issue #481). The fixture tree of the
+     `request-scope-*` cases serves two lines, 26.3 and 26.8. Each writer
+     fetches 26.8 into a fresh cache. Each reader, on its own copy of that
+     cache, then fetches 26.3 ONLINE (the path a line with no install of its
+     own takes, which once answered 26.3 with the 26.8 install), and then
+     answers both lines with `fetch --offline`. A cell passes only if every
+     answer is a build within the line asked for, both lines are installed
+     side by side, and the writer's 26.8 record is byte-for-byte unchanged.
+  4. CONCURRENT INSTALLS (public issue #482). N processes (8), released
+     together by a barrier, each run `fetch 26.8` into ONE fresh cache: each
+     binding alone, then all four mixed, for several rounds. A read-only
+     watcher polls `unpacked/sha256/` every millisecond. A set passes only if
+     every process exits 0 naming the one final directory, that directory
+     holds a library whose sha256 is its record's, the watcher saw no torn
+     record or library, no entry vanishing, and no complete entry REPLACED
+     (its inode changing: an installer deleted an entry another process may
+     already be using), nothing else is left under `unpacked/sha256/`, and
+     every binding's `verify` passes on the final cache.
 
-Prints the 4x4 table and the 0.x rows, writes the same to
-$GITHUB_STEP_SUMMARY when set, and exits nonzero if any cell fails.
+Prints the 4x4 table, the 0.x rows, one table per line and the concurrency
+sets, writes the same to $GITHUB_STEP_SUMMARY when set, and exits nonzero if
+any cell fails.
 """
 
 from __future__ import annotations
@@ -40,11 +59,15 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -54,6 +77,26 @@ BINDINGS = ("go", "python", "ts", "rust")
 PLATFORM = "linux-arm64"
 CASE = "line-ok"
 SPELLING = "26.8"
+# Part 3: any request-scope case routes to the tree that serves both lines.
+LINES_CASE = "request-scope-lower-line"
+LINE_HIGH = "26.8"
+LINE_LOW = "26.3"
+# Part 4: processes per set, and rounds per set.
+CONCURRENCY = 8
+CONCURRENCY_ROUNDS = 3
+HEX64 = re.compile(r"^[0-9a-f]{64}$")
+# Run by each concurrent process before it execs its CLI: announce readiness,
+# then wait for the barrier file, so all of them start together.
+BARRIER = (
+    "import os, sys, time\n"
+    "open(sys.argv[1], 'w').close()\n"
+    "deadline = time.monotonic() + 120\n"
+    "while not os.path.exists(sys.argv[2]):\n"
+    "    if time.monotonic() > deadline:\n"
+    "        sys.exit(97)\n"
+    "    time.sleep(0.0005)\n"
+    "os.execvp(sys.argv[3], sys.argv[3:])\n"
+)
 
 
 def sha256_file(path: Path) -> str:
@@ -90,16 +133,23 @@ class Harness:
         self.env["HOME"] = str(work / "home")
         (work / "home").mkdir(exist_ok=True)
 
-    def run(self, binding: str, *args: str) -> subprocess.CompletedProcess[str]:
+    def env_for(self, base: str | None) -> dict[str, str]:
+        if base is None:
+            return self.env
+        return {**self.env, "CHTYPES_ARTIFACTS_URL": base}
+
+    def run(self, binding: str, *args: str, base: str | None = None) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            [*self.clis[binding], *args], env=self.env, capture_output=True, text=True, timeout=300, check=False
+            [*self.clis[binding], *args], env=self.env_for(base), capture_output=True, text=True, timeout=300, check=False
         )
 
-    def fetch(self, binding: str, spelling: str, cache: Path, *, offline: bool) -> subprocess.CompletedProcess[str]:
+    def fetch(
+        self, binding: str, spelling: str, cache: Path, *, offline: bool, base: str | None = None
+    ) -> subprocess.CompletedProcess[str]:
         args = ["fetch", spelling, "--platform", PLATFORM, "--cache", str(cache)]
         if offline:
             args.append("--offline")
-        return self.run(binding, *args)
+        return self.run(binding, *args, base=base)
 
 
 def only_record(cache: Path) -> Path:
@@ -202,6 +252,243 @@ def upgrade_rows(h: Harness, readers: list[str], missing_exit: int, expected: di
     return cells
 
 
+def within(request: str, version: str) -> bool:
+    """Whether a four-part version lies within a request: equal to an exact
+    (four-part) one, a component prefix of a floating one (fetch-v1.md §4)."""
+    want = request.split(".")
+    got = version.split(".")
+    return len(got) == 4 and len(want) <= 4 and got[: len(want)] == want
+
+
+def named_dir(proc: subprocess.CompletedProcess[str]) -> str:
+    lines = [ln for ln in proc.stdout.splitlines() if ln.strip()]
+    return lines[-1].strip() if lines else ""
+
+
+def read_record(entry: Path) -> dict[str, Any] | None:
+    try:
+        rec = json.loads((entry / "verified.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return rec if isinstance(rec, dict) else None
+
+
+def answered_line(proc: subprocess.CompletedProcess[str], line: str, what: str) -> tuple[Path | None, str]:
+    """The directory a fetch named, if it exited 0 and its record's version
+    lies within `line`; otherwise None and why."""
+    if proc.returncode != 0:
+        return None, f"FAIL {what} exit {proc.returncode}: {proc.stderr.strip()[-200:]}"
+    entry = Path(named_dir(proc))
+    rec = read_record(entry)
+    if rec is None:
+        return None, f"FAIL {what} named {str(entry)!r}, which holds no readable record"
+    if not within(line, str(rec.get("version", ""))):
+        return None, f"FAIL {what} answered {line} with {rec.get('version')!r}"
+    return entry, "ok"
+
+
+def line_rows(h: Harness, names: list[str], base: str) -> dict[tuple[str, str], str]:
+    """Part 3: writer x reader x line, two lines in one cache."""
+    cells: dict[tuple[str, str], str] = {}
+    for writer in names:
+        seed = h.work / f"lines-{writer}"
+        wrote = h.fetch(writer, LINE_HIGH, seed, offline=False, base=base)
+        entry, why = answered_line(wrote, LINE_HIGH, f"{writer} fetch {LINE_HIGH}")
+        if entry is None:
+            for reader in names:
+                cells[(f"line {LINE_LOW}: {writer} wrote {LINE_HIGH}", reader)] = f"FAIL (no cache: {why})"
+                cells[(f"line {LINE_HIGH}: {writer} wrote {LINE_HIGH}", reader)] = f"FAIL (no cache: {why})"
+            continue
+        high_rel = entry.resolve().relative_to(seed.resolve())
+        for reader in names:
+            cache = h.work / f"lines-{writer}-{reader}"
+            shutil.copytree(seed, cache)
+            high_record = cache / high_rel / "verified.json"
+            before = high_record.read_bytes()
+            low_key = (f"line {LINE_LOW}: {writer} wrote {LINE_HIGH}", reader)
+            high_key = (f"line {LINE_HIGH}: {writer} wrote {LINE_HIGH}", reader)
+            # The lower line has no install of its own: an ONLINE fetch is the
+            # path that once answered it with the higher line's install.
+            added, why = answered_line(h.fetch(reader, LINE_LOW, cache, offline=False, base=base), LINE_LOW, f"fetch {LINE_LOW}")
+            if added is not None:
+                off, why = answered_line(
+                    h.fetch(reader, LINE_LOW, cache, offline=True, base=base), LINE_LOW, f"fetch {LINE_LOW} --offline"
+                )
+            records = sorted(cache.glob("unpacked/sha256/*/verified.json"))
+            if why == "ok" and len(records) != 2:
+                why = f"FAIL the cache holds {len(records)} records, want one per line"
+            cells[low_key] = why
+            off_high, why_high = answered_line(
+                h.fetch(reader, LINE_HIGH, cache, offline=True, base=base), LINE_HIGH, f"fetch {LINE_HIGH} --offline"
+            )
+            if off_high is not None and high_record.read_bytes() != before:
+                why_high = f"FAIL the {LINE_HIGH} record was rewritten"
+            cells[high_key] = why_high
+    return cells
+
+
+def entry_state(entry: Path) -> str:
+    """complete, unrecorded, torn-record, torn-library or gone: what a reader
+    would find in one final `unpacked/sha256/<hex>/` directory at this
+    instant ("gone": the directory itself went away while it was read)."""
+    record = entry / "verified.json"
+    try:
+        text = record.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return "unrecorded" if entry.is_dir() else "gone"
+    except OSError:
+        return "torn-record"
+    try:
+        rec = json.loads(text)
+        lib = entry / rec["library"]
+        size = lib.stat().st_size
+    except FileNotFoundError:
+        return "torn-library"
+    except (ValueError, KeyError, TypeError, OSError):
+        return "torn-record"
+    return "complete" if size == rec.get("library_bytes") else "torn-library"
+
+
+class Watcher(threading.Thread):
+    """Polls a cache's `unpacked/sha256/` read-only, every millisecond, and
+    counts what a concurrent reader could have met: an entry with no record,
+    a torn record or library, a complete entry vanishing or going incomplete,
+    and a complete entry REPLACED (another inode in its place: the directory a
+    process may already be using was deleted)."""
+
+    def __init__(self, cache: Path) -> None:
+        super().__init__(daemon=True)
+        self.base = cache / "unpacked" / "sha256"
+        self.events: Counter[str] = Counter()
+        self.inodes: dict[str, set[int]] = {}
+        self.complete: set[str] = set()
+        self.stop = threading.Event()
+
+    def scan(self) -> None:
+        try:
+            names = os.listdir(self.base)
+        except FileNotFoundError:
+            names = []
+        present: set[str] = set()
+        for name in names:
+            if not HEX64.match(name):
+                continue
+            entry = self.base / name
+            try:
+                ino = os.stat(entry).st_ino
+            except FileNotFoundError:
+                continue
+            state = entry_state(entry)
+            if state == "gone":
+                continue
+            present.add(name)
+            if state == "complete":
+                seen = self.inodes.setdefault(name, set())
+                if seen and ino not in seen:
+                    self.events["REPLACED"] += 1
+                seen.add(ino)
+                self.complete.add(name)
+            else:
+                if name in self.complete:
+                    self.events["VANISHED"] += 1
+                    self.complete.discard(name)
+                self.events[state.upper()] += 1
+        for name in self.complete - present:
+            self.events["VANISHED"] += 1
+            self.complete.discard(name)
+
+    def run(self) -> None:
+        while not self.stop.is_set():
+            self.scan()
+            time.sleep(0.001)
+        self.scan()
+
+
+def concurrent_round(h: Harness, members: list[str], cache: Path) -> tuple[int, list[str], Counter[str]]:
+    """One round: len(members) processes released together, each fetching
+    SPELLING into `cache`. Returns how many installed a verified library, the
+    failures, and the watcher's events (plus any leftover)."""
+    ready = cache.parent / f"{cache.name}.ready"
+    barrier = cache.parent / f"{cache.name}.go"
+    ready.mkdir()
+    procs = []
+    for i, binding in enumerate(members):
+        argv = [*h.clis[binding], "fetch", SPELLING, "--platform", PLATFORM, "--cache", str(cache)]
+        procs.append((binding, subprocess.Popen(
+            [sys.executable, "-c", BARRIER, str(ready / str(i)), str(barrier), *argv],
+            env=h.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )))
+    deadline = time.monotonic() + 120
+    while len(os.listdir(ready)) < len(members) and time.monotonic() < deadline:
+        time.sleep(0.01)
+    watcher = Watcher(cache)
+    watcher.start()
+    barrier.touch()
+    results = []
+    for binding, p in procs:
+        try:
+            out, err = p.communicate(timeout=300)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            out, err = p.communicate()
+        results.append((binding, subprocess.CompletedProcess(p.args, p.returncode, out, err)))
+    watcher.stop.set()
+    watcher.join()
+    events = watcher.events
+    installed = 0
+    failures: list[str] = []
+    entries = [p for p in sorted((cache / "unpacked" / "sha256").glob("*")) if HEX64.match(p.name)]
+    for i, (binding, proc) in enumerate(results):
+        if proc.returncode != 0:
+            # The first line names the error; a raw runtime error's stack follows it.
+            first = next((ln.strip() for ln in proc.stderr.splitlines() if ln.strip()), "")
+            failures.append(f"#{i + 1} {binding} exit {proc.returncode}: {first[:240]}")
+            continue
+        entry = Path(named_dir(proc))
+        rec = read_record(entry)
+        if rec is None or len(entries) != 1 or os.path.realpath(entry) != os.path.realpath(entries[0]):
+            failures.append(f"#{i + 1} {binding} named {str(entry)!r}, not the one final entry")
+            continue
+        lib = entry / str(rec.get("library", ""))
+        if not lib.is_file() or sha256_file(lib) != rec.get("library_sha256"):
+            failures.append(f"#{i + 1} {binding}: the library under {entry} is not its record's")
+            continue
+        installed += 1
+    for left in sorted((cache / "unpacked" / "sha256").glob("*")):
+        if not HEX64.match(left.name):
+            events["LEFTOVER"] += 1
+    for binding in sorted(set(h.clis)):
+        verified = h.run(binding, "verify", "--cache", str(cache))
+        if verified.returncode != 0:
+            failures.append(f"{binding} verify on the final cache exit {verified.returncode}: {verified.stderr.strip()[-160:]}")
+    return installed, failures, events
+
+
+def concurrency_rows(h: Harness, names: list[str]) -> dict[tuple[str, str], str]:
+    """Part 4: each binding alone, then all of them mixed, CONCURRENCY
+    processes per round, CONCURRENCY_ROUNDS rounds per set."""
+    sets = [(f"{b} x{CONCURRENCY}", [b] * CONCURRENCY) for b in names]
+    if len(names) > 1:
+        sets.append((f"mixed x{CONCURRENCY} ({'+'.join(names)})", [names[i % len(names)] for i in range(CONCURRENCY)]))
+    cells: dict[tuple[str, str], str] = {}
+    for label, members in sets:
+        installed = 0
+        failures: list[str] = []
+        events: Counter[str] = Counter()
+        for rnd in range(CONCURRENCY_ROUNDS):
+            got, failed, seen = concurrent_round(h, members, h.work / f"conc-{label.split()[0]}-{rnd}")
+            installed += got
+            failures += [f"round {rnd + 1}: {f}" for f in failed]
+            events.update(seen)
+        total = len(members) * CONCURRENCY_ROUNDS
+        summary = f"{installed}/{total} installed; events: {', '.join(f'{k} x{v}' for k, v in sorted(events.items())) or 'none'}"
+        bad = failures or installed != total or events
+        cells[(label, "result")] = ("FAIL " if bad else "ok ") + summary
+        for f in failures:
+            print(f"cache-interop: {label}: {f}", file=sys.stderr)
+    return cells
+
+
 def main_run(clis: dict[str, list[str]]) -> int:
     cases = json.loads((FIXTURES / "cases.json").read_text(encoding="utf-8"))["cases"]
     line_ok = next(c for c in cases if c["id"] == CASE)
@@ -248,12 +535,21 @@ def main_run(clis: dict[str, list[str]]) -> int:
                 for reader in names:
                     cells[(f"{writer} writes", reader)] += f" [record differs from {first}: {','.join(diff)}]"
         cells.update(upgrade_rows(h, names, missing_exit, expected))
+        lines_base = f"http://127.0.0.1:{listening[1]}/s-{LINES_CASE}/chtypes/v1"
+        cells.update(line_rows(h, names, lines_base))
+        cells.update(concurrency_rows(h, names))
 
         row_labels = [f"{w} writes" for w in names]
         table = render_table("writer \\ reader", row_labels, names, cells)
-        up_rows = sorted({r for (r, _c) in cells if not r.endswith(" writes")})
+        up_rows = sorted({r for (r, _c) in cells if r.startswith("0.x ")})
         up_table = render_table("0.x upgrade \\ reader", up_rows, names, cells)
-        out = f"{table}\n\n{up_table}\n"
+        line_tables = []
+        for line in (LINE_LOW, LINE_HIGH):
+            rows = [f"line {line}: {w} wrote {LINE_HIGH}" for w in names]
+            line_tables.append(render_table(f"line {line}: writer \\ reader", rows, names, cells))
+        conc_rows = [r for (r, c) in cells if c == "result"]
+        conc_table = render_table(f"concurrent fetch {SPELLING}, {CONCURRENCY_ROUNDS} rounds", conc_rows, ["result"], cells)
+        out = f"{table}\n\n{up_table}\n\n" + "\n\n".join(line_tables) + f"\n\n{conc_table}\n"
         print(out)
         summary = os.environ.get("GITHUB_STEP_SUMMARY")
         if summary:
@@ -262,7 +558,8 @@ def main_run(clis: dict[str, list[str]]) -> int:
         bad = [(r, c, v) for (r, c), v in cells.items() if not v.startswith("ok")]
         for r, c, v in bad:
             print(f"FAILED {r} / {c}: {v}", file=sys.stderr)
-        expected_cells = len(names) * len(names) + 3 * len(names)
+        conc_sets = len(names) + (1 if len(names) > 1 else 0)
+        expected_cells = len(names) * len(names) + 3 * len(names) + 2 * len(names) * len(names) + conc_sets
         if len(cells) != expected_cells:
             print(f"cache-interop: {len(cells)} cells, expected {expected_cells}", file=sys.stderr)
             return 1
@@ -294,6 +591,45 @@ def selftest() -> None:
             raise AssertionError("only_record must refuse a cache with no unpacked directory")
         except RuntimeError:
             pass
+    assert within("26.3", "26.3.4.1") and within("26.3.4.1", "26.3.4.1"), "a build within its line must match"
+    assert not within("26.3", "26.8.5.1"), "another line must not match"
+    assert not within("26.3", "26.30.1.1"), "a line is a component prefix, never a string prefix"
+    assert not within("26.3.4.1", "26.3.9.1"), "an exact request matches only that version"
+    assert named_dir(subprocess.CompletedProcess([], 0, "warning\n/x/y\n\n", "")) == "/x/y"
+    # The watcher must see each kind of state a concurrent reader can meet.
+    with tempfile.TemporaryDirectory() as d:
+        cache = Path(d)
+        base = cache / "unpacked" / "sha256"
+        name = "a" * 64
+
+        def make(entry: Path, *, record: str | None, library: bool) -> None:
+            entry.mkdir(parents=True)
+            if library:
+                (entry / "lib.so").write_bytes(b"12345")
+            if record is not None:
+                (entry / "verified.json").write_text(record)
+
+        good = json.dumps({"library": "lib.so", "library_bytes": 5})
+        w = Watcher(cache)
+        w.scan()
+        assert not w.events, w.events
+        make(base / name, record=good, library=True)
+        (base / ".staging-1").mkdir()
+        w.scan()
+        assert not w.events, f"a complete entry and a dot-named temp dir are not events: {w.events}"
+        (base / name).rename(base / ".aside")
+        make(base / name, record=good, library=True)
+        w.scan()
+        assert w.events["REPLACED"] == 1, f"a complete entry under a new inode is REPLACED: {w.events}"
+        (base / name / "lib.so").unlink()
+        w.scan()
+        assert w.events["VANISHED"] == 1 and w.events["TORN-LIBRARY"] == 1, f"a record without its library: {w.events}"
+        (base / "not-hex").mkdir()
+        make(base / ("c" * 64), record=None, library=True)
+        make(base / ("d" * 64), record="not json {", library=True)
+        w.scan()
+        assert w.events["UNRECORDED"] == 1 and w.events["TORN-RECORD"] == 1, f"unrecorded and torn records: {w.events}"
+        assert entry_state(base / ".aside") == "complete"
     print("cache-interop --selftest: OK")
 
 

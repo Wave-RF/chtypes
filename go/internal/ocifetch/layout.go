@@ -414,55 +414,90 @@ func (l *layout) listAllBlobDigests() []Digest {
 	return out
 }
 
-// writeVerifiedRecord creates a fresh unpacked directory for manifestDigest
-// by renaming unpackDir (already populated by unpackLibrary) into place,
-// then writes verified.json inside it. If the directory already exists with
-// a record a reader accepts (another fetch landed on the same manifest
-// digest first), unpackDir is discarded and the existing directory is left
-// untouched. If it exists WITHOUT an acceptable record (a foreign, torn or
+// writeVerifiedRecord writes verified.json into unpackDir (already populated
+// by unpackLibrary) and moves the directory into place as manifestDigest's
+// unpacked directory (installDir). If the destination already holds a record
+// a reader accepts (another fetch landed on the same manifest digest first),
+// unpackDir is discarded and the existing directory is left untouched. If it
+// holds an entry WITHOUT an acceptable record (a foreign, torn or
 // older-format one), the caller has just re-verified from the cache's own
-// blobs, so the stale directory is moved aside and replaced by the fresh one.
+// blobs, so that entry is moved aside and replaced. unpackDir is consumed
+// either way: it is never left behind, even on an error.
 func (l *layout) writeVerifiedRecord(manifestDigest Digest, unpackDir string, rec verifiedRecord) (dest string, alreadyInstalled bool, err error) {
 	dest = l.unpackedDir(manifestDigest)
 	if _, rerr := readVerifiedRecord(dest); rerr == nil {
 		_ = os.RemoveAll(unpackDir)
 		return dest, true, nil
 	}
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-		return "", false, err
-	}
 	out, err := encodeRecord(rec)
+	if err == nil {
+		err = os.MkdirAll(filepath.Dir(dest), 0o755)
+	}
+	if err == nil {
+		err = writeFileAtomic(unpackDir, filepath.Join(unpackDir, CacheVerifiedRecord), out)
+	}
 	if err != nil {
+		_ = os.RemoveAll(unpackDir)
 		return "", false, err
 	}
-	if err := writeFileAtomic(unpackDir, filepath.Join(unpackDir, CacheVerifiedRecord), out); err != nil {
-		return "", false, err
-	}
-	if _, statErr := os.Lstat(dest); statErr == nil {
-		stale, terr := os.MkdirTemp(filepath.Dir(dest), ".stale-*")
-		if terr != nil {
-			return "", false, terr
+	return installDir(unpackDir, dest)
+}
+
+// installDirAttempts bounds installDir's retries: each one follows another
+// process changing the destination under it, so a handful is plenty.
+const installDirAttempts = 8
+
+// installDir moves src, a complete directory carrying its verified.json, to
+// dest by rename, and never removes an entry another process may be using
+// (public issue #482). Several processes may install the same build into one
+// cache at once, and each must end up with a usable dest:
+//
+//   - The rename comes first. It fails while dest exists, so the first
+//     installer wins and every later one finds dest in place.
+//   - A dest that holds an acceptable record is kept, and src is discarded:
+//     the same content is already installed.
+//   - Only a dest WITHOUT an acceptable record (foreign, torn or older-format)
+//     is moved aside, and only into a fresh ".stale-*" directory beside it.
+//     If what was moved turns out to carry an acceptable record (another
+//     installer's rename landed between the read and the move), it is put
+//     back.
+//
+// It returns alreadyInstalled true when another process's install is the one
+// in place. src is consumed either way.
+func installDir(src, dest string) (string, bool, error) {
+	var lastErr error
+	for attempt := 0; attempt < installDirAttempts; attempt++ {
+		err := os.Rename(src, dest)
+		if err == nil {
+			return dest, false, nil
 		}
-		if rerr := os.Rename(dest, filepath.Join(stale, "old")); rerr != nil {
-			_ = os.RemoveAll(stale)
-			if _, rerr2 := readVerifiedRecord(dest); rerr2 == nil {
-				_ = os.RemoveAll(unpackDir)
-				return dest, true, nil
-			}
-			return "", false, rerr
-		}
-		defer func() { _ = os.RemoveAll(stale) }()
-	}
-	if err := os.Rename(unpackDir, dest); err != nil {
-		// Another fetch won the race between our move and our rename: its
-		// directory is now in place, and ours is redundant.
+		lastErr = err
 		if _, rerr := readVerifiedRecord(dest); rerr == nil {
-			_ = os.RemoveAll(unpackDir)
+			_ = os.RemoveAll(src)
 			return dest, true, nil
 		}
-		return "", false, err
+		if _, serr := os.Lstat(dest); serr != nil {
+			continue // whatever stood there went away: try the rename again
+		}
+		stale, terr := os.MkdirTemp(filepath.Dir(dest), ".stale-*")
+		if terr != nil {
+			lastErr = terr
+			break
+		}
+		aside := filepath.Join(stale, "old")
+		if merr := os.Rename(dest, aside); merr != nil {
+			_ = os.RemoveAll(stale)
+			continue // another process moved or replaced it: look again
+		}
+		if _, rerr := readVerifiedRecord(aside); rerr == nil && os.Rename(aside, dest) == nil {
+			_ = os.RemoveAll(stale)
+			_ = os.RemoveAll(src)
+			return dest, true, nil
+		}
+		_ = os.RemoveAll(stale)
 	}
-	return dest, false, nil
+	_ = os.RemoveAll(src)
+	return "", false, lastErr
 }
 
 // readVerifiedRecord reads one unpacked directory's verified.json. Any
@@ -496,7 +531,10 @@ func listUnpacked(dir string) ([]installedEntry, error) {
 	}
 	var out []installedEntry
 	for _, e := range entries {
-		if !e.IsDir() {
+		// Only <manifest-hex> names are entries: an installer's temporary
+		// directory beside them (unpack-*, .staging-*, .tmp-*, .stale-*) may
+		// already carry a record, and is renamed away a moment later.
+		if !e.IsDir() || !recordHexPattern.MatchString(e.Name()) {
 			continue
 		}
 		sub := filepath.Join(root, e.Name())

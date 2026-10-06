@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 	"testing"
 )
 
@@ -289,4 +292,102 @@ func TestWriteVerifiedRecordReplacesAnUnreadableRecord(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "manifest.json")); !os.IsNotExist(err) {
 		t.Fatalf("the stale directory's files should be gone")
 	}
+}
+
+// TestWriteVerifiedRecordConcurrentInstallsKeepTheFirst races many installers
+// of one build into one cache (public issue #482). Every one must succeed and
+// name the same directory, exactly one must be the install in place, and that
+// install must never be moved aside or replaced by a later racer: a process
+// may already be using it.
+func TestWriteVerifiedRecordConcurrentInstallsKeepTheFirst(t *testing.T) {
+	const racers = 16
+	for round := 0; round < 25; round++ {
+		l := newLayout(t.TempDir(), false)
+		if err := l.ensureSkeleton(); err != nil {
+			t.Fatal(err)
+		}
+		manifestDigest := Digest("sha256:" + hex64('a'))
+		parent := filepath.Dir(l.unpackedDir(manifestDigest))
+		if err := os.MkdirAll(parent, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		inodes := make(map[uint64]bool, racers)
+		dirs := make([]string, racers)
+		for i := range dirs {
+			d := filepath.Join(parent, "unpack-"+strconv.Itoa(i))
+			if err := os.Mkdir(d, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(d, "lib.so"), []byte("x"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			dirs[i] = d
+			inodes[inodeOf(t, d)] = true
+		}
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		type result struct {
+			dir     string
+			already bool
+			err     error
+		}
+		results := make([]result, racers)
+		for i := range dirs {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				<-start
+				dir, already, err := l.writeVerifiedRecord(manifestDigest, dirs[i], testRecord(manifestDigest))
+				results[i] = result{dir, already, err}
+			}(i)
+		}
+		close(start)
+		wg.Wait()
+		installed := 0
+		for i, r := range results {
+			if r.err != nil {
+				t.Fatalf("round %d racer %d: %v", round, i, r.err)
+			}
+			if r.dir != l.unpackedDir(manifestDigest) {
+				t.Fatalf("round %d racer %d named %s", round, i, r.dir)
+			}
+			if !r.already {
+				installed++
+			}
+		}
+		if installed != 1 {
+			t.Fatalf("round %d: %d racers report their own install in place, want exactly 1", round, installed)
+		}
+		final := l.unpackedDir(manifestDigest)
+		if !inodes[inodeOf(t, final)] {
+			t.Fatalf("round %d: the final entry is none of the racers' directories", round)
+		}
+		if _, err := readVerifiedRecord(final); err != nil {
+			t.Fatalf("round %d: final record: %v", round, err)
+		}
+		left, err := os.ReadDir(parent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(left) != 1 {
+			names := []string{}
+			for _, e := range left {
+				names = append(names, e.Name())
+			}
+			t.Fatalf("round %d: %v left under unpacked/sha256, want only the entry", round, names)
+		}
+	}
+}
+
+func inodeOf(t *testing.T, path string) uint64 {
+	t.Helper()
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		t.Skip("no inode on this platform")
+	}
+	return uint64(st.Ino)
 }

@@ -22,10 +22,10 @@
 //! and the spelling rules, are the fetch layer's; this crate orders and matches
 //! no versions itself.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use crate::error::{Error, Result};
+use crate::error::{Error, Refusal, Result};
 use crate::library::{Library, open_image, settle_failed_open};
 use crate::ocifetch::constants::ENV_AUTOFETCH_NAME;
 use crate::ocifetch::ensure::{self, Options, Resolved};
@@ -238,12 +238,38 @@ impl Registry {
         };
         // The adapter: the fetch layer's record to the loader's input. The
         // predicate goes across exactly as returned, never re-encoded.
-        open_image(
+        let library = open_image(
             &resolved.library_path.clone(),
             Some(&resolved.predicate.clone()),
             Some(resolved),
-        )
+        )?;
+        check_within_request(library.version(), library.path(), request)?;
+        Ok(library)
     }
+}
+
+/// The load-time assertion (docs/guides/fetch-v1.md section 9; public issue
+/// #481): the library opened for `request` must report, in its own
+/// `build_info`, a `clickhouse_version` within that request (equal to an exact
+/// request, within a line one), whatever the cache answered. Otherwise the
+/// open fails as [`Error::ArtifactCorrupt`] with reason
+/// `build_info_mismatch:clickhouse_version`, the code section 4 gives a signed
+/// version outside the request. A literal (non-numeric) tag names no version
+/// and is not checked. The image stays loaded for the requests it does answer.
+fn check_within_request(version: &str, path: &Path, request: &str) -> Result<()> {
+    let version_request = VersionRequest::parse(request)?;
+    if version_request.is_literal() || version_request.matches(version) {
+        return Ok(());
+    }
+    Err(Error::ArtifactCorrupt(Refusal {
+        reason: "build_info_mismatch:clickhouse_version".to_string(),
+        path: path.to_path_buf(),
+        want: Some(request.to_string()),
+        got: Some(version.to_string()),
+        detail: Some(format!(
+            "the library opened for ClickHouse {request} reports another version"
+        )),
+    }))
 }
 
 #[cfg(test)]
@@ -297,5 +323,23 @@ mod tests {
         };
         assert!(m.contains("25.8") && m.contains("linux-amd64"), "{m}");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_library_outside_its_request_is_refused_as_corrupt() {
+        let path = Path::new("/cache/unpacked/sha256/x/libchtypes.so");
+        for ok in ["26.8", "26.8.5", "26.8.5.1", "a-literal-tag"] {
+            assert!(check_within_request("26.8.5.1", path, ok).is_ok(), "{ok}");
+        }
+        for bad in ["26.3", "26.3.4.1", "26.8.5.2", "26.80", "26.8.15"] {
+            match check_within_request("26.8.5.1", path, bad) {
+                Err(Error::ArtifactCorrupt(r)) => {
+                    assert_eq!(r.reason, "build_info_mismatch:clickhouse_version");
+                    assert_eq!(r.want.as_deref(), Some(bad));
+                    assert_eq!(r.got.as_deref(), Some("26.8.5.1"));
+                }
+                other => panic!("{bad}: want ArtifactCorrupt, got {other:?}"),
+            }
+        }
     }
 }

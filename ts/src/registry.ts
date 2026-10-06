@@ -22,7 +22,7 @@
  */
 
 import os from 'node:os';
-import { openAbi1 } from './abi1/index.js';
+import { LoaderCorruptError, openAbi1 } from './abi1/index.js';
 import { usageError } from './abi1/index.js';
 import { type Library, libraryOf } from './library.js';
 import {
@@ -30,10 +30,12 @@ import {
   ensure,
   type FetchV1Options,
   hostPlatformKey,
+  isFilesystemError,
   listInstalled,
   type PlatformKey,
   type Resolved,
   resolveInstalled,
+  satisfiesRequest,
 } from './ocifetch/index.js';
 import { ENV_AUTOFETCH_NAME, SPELLING_REGEX } from './ocifetch/constants.gen.js';
 import { withEnvironment } from './env.js';
@@ -127,14 +129,17 @@ export class Registry {
     if (platform === undefined) {
       throw new ArtifactMissingError(`chtypes: no v1 artifact is published for this host (${os.platform()}-${os.arch()})`);
     }
-    let resolved = await resolveInstalled(request, platform, this.#fetch);
+    let resolved: Resolved | undefined;
+    try {
+      resolved = await resolveInstalled(request, platform, this.#fetch);
+      if (resolved === undefined && mayFetch) resolved = await ensure(request, this.#fetch);
+    } catch (err) {
+      throw typedFilesystemError(err);
+    }
     if (resolved === undefined) {
-      if (!mayFetch) {
-        throw new ArtifactMissingError(
-          `chtypes: ${request} (${platform}) is not installed. Fetch it first, or turn autofetch on (the autofetch option, or ${ENV_AUTOFETCH_NAME}=1)`,
-        );
-      }
-      resolved = await ensure(request, this.#fetch);
+      throw new ArtifactMissingError(
+        `chtypes: ${request} (${platform}) is not installed. Fetch it first, or turn autofetch on (the autofetch option, or ${ENV_AUTOFETCH_NAME}=1)`,
+      );
     }
     const setup = commitSetup();
     // The adapter: the predicate goes through exactly as the fetch layer returned it.
@@ -146,6 +151,28 @@ export class Registry {
       defaults: setup.defaults,
     });
     latchSetup();
-    return libraryOf(image, resolved);
+    const library = libraryOf(image, resolved);
+    // The load-time assertion (fetch-v1.md §9; public issue #481): the library's
+    // own build_info must report a version within the request, whatever the
+    // cache answered. The image stays loaded for the requests it does answer.
+    if (!satisfiesRequest(request, library.version)) {
+      throw new LoaderCorruptError({
+        reason: 'build_info_mismatch:clickhouse_version',
+        path: resolved.libraryPath,
+        want: request,
+        got: library.version,
+      });
+    }
+    return library;
   }
+}
+
+/**
+ * A filesystem failure in the fetch layer (an unwritable or full cache) as
+ * the `UsageError` Go's `fetchError` gives the same failure, never a raw Node
+ * error (public issue #482). Any other error passes through unchanged.
+ */
+function typedFilesystemError(err: unknown): unknown {
+  if (!isFilesystemError(err)) return err;
+  return usageError(`chtypes: the cache could not be read or written: ${err.message}`);
 }

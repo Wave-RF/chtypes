@@ -391,13 +391,19 @@ func (s *session) resolveAndInstall(ctx context.Context, ro resolvedOptions, l *
 	// Already installed: a fetch landed on this exact manifest digest
 	// before. Content at a given digest never changes, so nothing further
 	// needs checking — this also satisfies "zero layer requests" for the
-	// existing-install-noop case, since nothing past this point runs.
+	// existing-install-noop case, since nothing past this point runs. A
+	// NEWER build within the request, installed beside it, is still the
+	// answer (the monotonic check below, §9).
 	if rec, dir, ok := readInstalledRecord(l, manifestDigest); ok {
 		if err := l.writeBlob(desc.Digest, manifestBody); err != nil {
 			return nil, nil, err
 		}
 		if err := l.addIndexEntry(*desc, s.hookBeforeIndexRename); err != nil {
 			return nil, nil, err
+		}
+		if existing, found := newerAlreadyInstalled(l, platform.Key, req.Spelling, manifestDigest, rec.Version, rec.Build); found {
+			warnings := []string{monotonicWarning(existing, rec.Version, rec.Build)}
+			return recordToResolved(&existing.rec, existing.dir, platform.Key, req.Spelling, indexDigest, true, base, warnings), idx, nil
 		}
 		return recordToResolved(rec, dir, platform.Key, req.Spelling, indexDigest, true, base, nil), idx, nil
 	}
@@ -409,7 +415,8 @@ func (s *session) resolveAndInstall(ctx context.Context, ro resolvedOptions, l *
 
 	// Monotonicity (§6, "monotonic-warning"): "a HIGHER build is already
 	// installed than what the live registry now offers; the existing
-	// (newer) install is kept, with a warning." Checked as soon as the
+	// (newer) install is kept, with a warning." Only an install WITHIN the
+	// request counts (§9; public issue #481). Checked as soon as the
 	// candidate's own (signed) version/build are known, and before the
 	// layer is ever fetched — there is no point downloading and unpacking
 	// bytes this call is about to discard. Only covers the signed path:
@@ -419,10 +426,8 @@ func (s *session) resolveAndInstall(ctx context.Context, ro resolvedOptions, l *
 	if stmt != nil {
 		candidateVersion := stringPredicate(stmt.Statement.Predicate, "clickhouse_version")
 		candidateBuild := stringPredicate(stmt.Statement.Predicate, "build")
-		if existing, found := newerAlreadyInstalled(l, platform.Key, manifestDigest, candidateVersion, candidateBuild); found {
-			warnings = append(warnings, fmt.Sprintf(
-				"chtypes: a newer build is already installed locally (%s build %s, monotonic check) than the registry just resolved (%s build %s) — keeping the existing install",
-				existing.rec.Version, existing.rec.Build, candidateVersion, candidateBuild))
+		if existing, found := newerAlreadyInstalled(l, platform.Key, req.Spelling, manifestDigest, candidateVersion, candidateBuild); found {
+			warnings = append(warnings, monotonicWarning(existing, candidateVersion, candidateBuild))
 			// The candidate manifest is discarded, never installed, so no
 			// blob and no index entry is written for it — only the
 			// already-installed (newer) entry's own index entry, which is
@@ -610,32 +615,74 @@ func (s *session) libraryPathFor(ctx context.Context, bases []string, manifest *
 	return p, cfg, nil
 }
 
-// newerAlreadyInstalled reports whether l already has an installed entry,
-// other than excludeManifest, for platformKey whose (version, build) is
-// strictly newer than (version, build) — the monotonic-warning check (§6):
-// "a HIGHER build is already installed than what the live registry now
-// offers; the existing (newer) install is kept, with a warning." The
-// returned entry is the existing (newer) install itself, so the caller can
-// return it in place of whatever the registry just resolved.
-func newerAlreadyInstalled(l *layout, platformKey string, excludeManifest Digest, version, build string) (*installedEntry, bool) {
+// newerAlreadyInstalled returns the newest installed entry in l, other than
+// excludeManifest, for platformKey that lies WITHIN request and whose
+// (version, build) is strictly newer than (version, build) — the
+// monotonic-warning check (§6, §9): "a HIGHER build is already installed than
+// what the live registry now offers; the existing (newer) install is kept,
+// with a warning." The returned entry is the existing (newer) install itself,
+// so the caller can return it in place of whatever the registry just
+// resolved.
+//
+// The check is scoped to the request (public issue #481): an install of
+// another line never answers a line request, and an exact request is
+// answered only by that exact version, so for it only a newer BUILD of the
+// same version counts. A request that is not a version spelling (an
+// arbitrary tag) names no range, so nothing is kept for it.
+func newerAlreadyInstalled(l *layout, platformKey, request string, excludeManifest Digest, version, build string) (*installedEntry, bool) {
+	if !spellingRegex.MatchString(request) {
+		return nil, false
+	}
 	entries, err := listUnpacked(l.dir)
 	if err != nil {
 		return nil, false
 	}
+	var best *installedEntry
 	for i, e := range entries {
 		if e.rec.Platform != platformKey || e.rec.Digests.Manifest == excludeManifest {
 			continue
 		}
-		switch {
-		case e.rec.Version == version:
-			if e.rec.Build > build {
-				return &entries[i], true
-			}
-		case versionLess(version, e.rec.Version):
-			return &entries[i], true
+		if !versionWithin(request, e.rec.Version) {
+			continue
+		}
+		if !newerThan(e.rec.Version, e.rec.Build, version, build) {
+			continue
+		}
+		if best == nil || newerThan(e.rec.Version, e.rec.Build, best.rec.Version, best.rec.Build) {
+			best = &entries[i]
 		}
 	}
-	return nil, false
+	return best, best != nil
+}
+
+// monotonicWarning is the warning a kept newer install carries.
+func monotonicWarning(existing *installedEntry, offeredVersion, offeredBuild string) string {
+	return fmt.Sprintf(
+		"chtypes: a newer build is already installed locally (%s build %s, monotonic check) than the registry just resolved (%s build %s) — keeping the existing install",
+		existing.rec.Version, existing.rec.Build, offeredVersion, offeredBuild)
+}
+
+// newerThan reports whether (version, build) a is strictly newer than b:
+// a higher version, or the same version with a higher build (builds compare
+// as the fixed-width strings they are).
+func newerThan(aVersion, aBuild, bVersion, bBuild string) bool {
+	if aVersion == bVersion {
+		return aBuild > bBuild
+	}
+	return versionLess(bVersion, aVersion)
+}
+
+// SatisfiesRequest reports whether a library whose own clickhouse_version is
+// version answers request: equal to an exact (four-part) request, or within
+// a floating one. A request that is not a version spelling (an arbitrary tag)
+// names no version, so it constrains nothing and this returns true. The
+// loader's caller uses it to refuse a library outside its request, whatever
+// the cache did (public issue #481).
+func SatisfiesRequest(request, version string) bool {
+	if !spellingRegex.MatchString(request) {
+		return true
+	}
+	return versionWithin(request, version)
 }
 
 // readInstalledRecord reads the verified.json record for manifestDigest from
