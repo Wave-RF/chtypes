@@ -26,7 +26,12 @@ These are decided before a single column is parsed, independently of any bad-row
 - `unconsumed` lists the byte ranges the reader's error recovery skipped, and each row's `input_span` says which bytes the reader consumed for it.
 - `framing` has `bom_skipped`, `container` (`array`, `stream`, or none) and `header` (whether one was consumed, how many lines, and its names). `bom_skipped` and `header` can be **unknown**, which is never false and never empty: the vendored reader does not expose them for `TSV`, `TSVWithNames` and `Values`, while `CSV` and the two JSON formats fill both. Unknown is a nil pointer in Go, `None` in Python and Rust, and `null` in TypeScript.
 
-A caller that needs a contract over the body's records declines the body when `unconsumed` is non-empty, and never counts records itself.
+**`unconsumed` does not account for every record.** A skipped row's `input_span` can cover more than one input record, when the reader's recovery resumed past the end of the record that failed, so the verdicts can be fewer than the body's records while `unconsumed` is empty. A caller that needs every record accounted for has two options:
+
+- **The conservative rule:** decline the body when any row is skipped or `unconsumed` is non-empty.
+- **Count independently:** give each verdict its own answer (an ordinary skipped row is one refused record), and compare the number of verdicts with your own count of the body's records, declining the body when the verdicts are fewer.
+
+Whether a swallowed record can be masked by an extra record the reader opens, which would defeat the count, is being measured, and this page will say. A batch-level count of records without a verdict is planned (#478).
 
 ## What happens at the first bad row is a policy
 
