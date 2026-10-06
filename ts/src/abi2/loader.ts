@@ -1,25 +1,27 @@
 /**
- * The ABI v1 loader (plan §3, steps 1-7). Hand-written (the plan's "about 200
+ * The ABI v2 loader (plan §3, steps 1-7; the 2.0.0-dev binding, public issue #511). Hand-written (the plan's "about 200
  * lines per binding" FIRM piece); everything it reaches for — `rawDlopen`/
  * `rawDlsym`/`glibcVersionString` (`./libc.ts`), `defineRawFunctions`/
  * `rawCall` (`./raw.ts`), `DESCRIBED_SYMBOLS`/`SYMBOL`/`ABI_FINGERPRINT`/
  * `CROSS_CHECK` (`./decls.gen.ts`) — is generated or generic, so this file
  * never spells a `chs_` name itself.
  *
- * STEPS, IN ORDER (plan §3.2; `spec/abi-v1/sdk.json`'s `loader.refusals`
+ * STEPS, IN ORDER (plan §3.2; `spec/abi-v2/sdk.json`'s `loader.refusals`
  * names each reason):
  *
  *   1. glibc (Linux only; darwin skips it). BEFORE dlopen.
  *   2. `dlopen(path, RTLD_NOW | RTLD_LOCAL)`, through `./libc.ts` (plan
  *      §3.3(b): the real fix for ffi-rs's own `RTLD_LAZY` open).
  *   3. `chs_abi_version`: present (`dlsym`, plan §3.3(c)) and, once present,
- *      `=== 1` (a real call — only now safe through ffi-rs's own by-name
+ *      `=== ABI_VERSION` (2; a real call — only now safe through ffi-rs's own by-name
  *      `open`/`define`, plan §3.3(d), since step 2 already proved the image
  *      binds completely under `RTLD_NOW`).
  *   4. `chs_build_info`: present, parses (ASCII, no duplicate keys at any
  *      nesting depth, `schema === 1`), and its `abi_fingerprint` matches
- *      this binding's own compiled-in `ABI_FINGERPRINT` byte for byte.
- *   5. the nine `CROSS_CHECK` fields (`spec/abi-v1/sdk.json`) against
+ *      this binding's own compiled-in `ABI_FINGERPRINT` byte for byte. While
+ *      the description is unstable (`ABI_STABILITY`) the refusal carries rule
+ *      r6's exact dev message (`./errors.ts`, `devFingerprintMessage`).
+ *   5. the nine `CROSS_CHECK` fields (`spec/abi-v2/sdk.json`) against
  *      `LoadInput.predicate`.
  *   6. every OTHER described symbol, present (`dlsym` only — no call).
  *   7. `chs_initialize(zone)`, then `chs_set_defaults(defaults)` when there are
@@ -42,7 +44,7 @@ import { realpathSync, statSync } from 'node:fs';
 import type { JsExternal } from 'ffi-rs';
 import { type BuildInfo, decodeBuildInfo } from './buildinfo.js';
 import { Calls } from './calls.gen.js';
-import { ABI_FINGERPRINT, CROSS_CHECK, DESCRIBED_SYMBOLS, SYMBOL } from './decls.gen.js';
+import { ABI_FINGERPRINT, ABI_VERSION, CROSS_CHECK, DESCRIBED_SYMBOLS, SYMBOL } from './decls.gen.js';
 import { ArtifactIncompatibleError, LoaderCorruptError, UsageError, usageError } from './errors.js';
 import { compareDottedVersions, ffiOpen, glibcVersionString, lastDlError, rawDlopen, rawDlsym } from './libc.js';
 import { defineRawFunctions, type RawApi, rawCall } from './raw.js';
@@ -76,7 +78,7 @@ export interface LoadInput extends ImageSetup {
   readonly platform: string;
 }
 
-/** One opened, verified ABI v1 image: the resolved raw table, its typed call wrappers, and the decoded build info. */
+/** One opened, verified ABI v2 image: the resolved raw table, its typed call wrappers, and the decoded build info. */
 export class LoadedImage {
   readonly path: string;
   readonly raw: RawApi;
@@ -191,9 +193,9 @@ function checkCrossFields(path: string, buildInfo: BuildInfo, predicate: Predica
 function openAndCheck(path: string, key: string): { raw: RawApi; buildInfo: BuildInfo } {
   const osHandle = openImage(path); // step 2
 
-  // step 3: chs_abi_version present, then (through ffi-rs, now safe) === 1.
+  // step 3: chs_abi_version present, then (through ffi-rs, now safe) === ABI_VERSION.
   if (rawDlsym(osHandle, SYMBOL.ABI_VERSION) === null) {
-    refuseIncompatible(path, 'not_v1', '1', '(the generation handshake is not exported)');
+    refuseIncompatible(path, 'not_v1', String(ABI_VERSION), '(the generation handshake is not exported)');
   }
   ffiOpen(key, path); // plan §3.3(d): only now, after RTLD_NOW already bound the image.
   let raw = rawTables.get(key);
@@ -203,7 +205,7 @@ function openAndCheck(path: string, key: string): { raw: RawApi; buildInfo: Buil
   }
   const abiVersionCall = rawCall(raw, SYMBOL.ABI_VERSION, []);
   const abiVersion = abiVersionCall.outcome === 'value' ? Number(abiVersionCall.value) : Number.NaN;
-  if (abiVersion !== 1) refuseIncompatible(path, 'abi_version', '1', String(abiVersion));
+  if (abiVersion !== ABI_VERSION) refuseIncompatible(path, 'abi_version', String(ABI_VERSION), String(abiVersion));
 
   // step 4: the build info present, decoded (malformed is corrupt), fingerprint matches.
   if (rawDlsym(osHandle, SYMBOL.BUILD_INFO) === null) {
@@ -228,7 +230,7 @@ function openAndCheck(path: string, key: string): { raw: RawApi; buildInfo: Buil
 }
 
 /**
- * Load, verify and open one ABI v1 artifact (plan §3.2, steps 1-7). Returns
+ * Load, verify and open one ABI v2 artifact (plan §3.2, steps 1-7). Returns
  * the SAME `LoadedImage` for a path, a hardlink, a symlink or a second
  * spelling of an already-loaded image: steps 2-4, 6 and 7 run once per image.
  * An already-open image is still checked against every new signed statement a
@@ -236,7 +238,7 @@ function openAndCheck(path: string, key: string): { raw: RawApi; buildInfo: Buil
  * constant, which the first load already matched): a mismatch refuses that
  * request and leaves the image open for the requests it did match.
  */
-export function openAbi1(input: LoadInput): LoadedImage {
+export function openAbi2(input: LoadInput): LoadedImage {
   const path = input.libraryPath;
   const key = resolveImageKey(path);
   const cached = loadedByKey.get(key);

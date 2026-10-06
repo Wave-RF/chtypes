@@ -1,6 +1,6 @@
 /**
  * The generic, data-driven call engine over the typed table `defineRawFunctions`
- * builds for one opened ABI v1 image (plan §3.3(d) happens in `./loader.ts`,
+ * builds for one opened ABI v2 image (plan §3.3(d) happens in `./loader.ts`,
  * which calls `./libc.ts`'s `ffiOpen` then this file's `defineRawFunctions`).
  *
  * This is the "invoke by name" dispatcher the plan asks of this emitter
@@ -57,7 +57,7 @@ function scalarDataType(type: string | null): DataType {
     case 'u8ptr_const':
       return External;
     default:
-      throw new Error(`chtypes abi1: raw.ts does not know the ffi-rs type for scalar ${String(type)}`);
+      throw new Error(`chtypes abi2: raw.ts does not know the ffi-rs type for scalar ${String(type)}`);
   }
 }
 
@@ -74,7 +74,7 @@ function retDataType(spec: FunctionSpec): DataType {
     case 'scalar':
       return scalarDataType(spec.returns.type);
     default:
-      throw new Error(`chtypes abi1: unknown return kind ${spec.returns.kind}`);
+      throw new Error(`chtypes abi2: unknown return kind ${spec.returns.kind}`);
   }
 }
 
@@ -92,10 +92,10 @@ function paramDataTypes(p: ParamSpec): DataType[] {
       return [External];
     case 'out_scalar':
       // Reserved: no FIRM or provisional function uses it today
-      // (spec/abi-v1/abi.json); nothing to marshal yet.
-      throw new Error('chtypes abi1: out_scalar has no described use yet');
+      // (spec/abi-v2/abi.json); nothing to marshal yet.
+      throw new Error('chtypes abi2: out_scalar has no described use yet');
     default:
-      throw new Error(`chtypes abi1: unknown param kind ${p.kind}`);
+      throw new Error(`chtypes abi2: unknown param kind ${p.kind}`);
   }
 }
 
@@ -164,7 +164,7 @@ export const NULL_EXTERNAL: JsExternal = (() => {
   const p = readExternalSlot(slot);
   dropSlot(slot);
   if (!isNullPointer(p)) {
-    throw new Error('chtypes abi1: internal — the null External constant did not come back null');
+    throw new Error('chtypes abi2: internal — the null External constant did not come back null');
   }
   return p;
 })();
@@ -172,9 +172,9 @@ export const NULL_EXTERNAL: JsExternal = (() => {
 // --------------------------------------------------------------- buf reading
 
 function rawFn(raw: RawApi, chsName: string): RawFn {
-  if (FUNCTION_SPECS[chsName] === undefined) throw new Error(`chtypes abi1: ${chsName} is not a described symbol`);
+  if (FUNCTION_SPECS[chsName] === undefined) throw new Error(`chtypes abi2: ${chsName} is not a described symbol`);
   const fn = raw[chsName];
-  if (fn === undefined) throw new Error(`chtypes abi1: ${chsName} was not declared on this image`);
+  if (fn === undefined) throw new Error(`chtypes abi2: ${chsName} was not declared on this image`);
   return fn;
 }
 
@@ -244,10 +244,10 @@ function decodeError(raw: RawApi, status: number, errSlot: Slot): CallErrorField
  */
 export function rawCall(raw: RawApi, name: string, args: readonly unknown[]): RawCallResult {
   const spec = FUNCTION_SPECS[name];
-  if (spec === undefined) throw new Error(`chtypes abi1: no such described function ${name}`);
+  if (spec === undefined) throw new Error(`chtypes abi2: no such described function ${name}`);
   const inputs = inputParams(spec);
   if (inputs.length !== args.length) {
-    throw new Error(`chtypes abi1: ${name} takes ${inputs.length} input argument(s), got ${args.length}`);
+    throw new Error(`chtypes abi2: ${name} takes ${inputs.length} input argument(s), got ${args.length}`);
   }
   const paramsValue: unknown[] = [];
   const outSlots: { param: ParamSpec; slot: Slot }[] = [];
@@ -302,7 +302,7 @@ export function rawCall(raw: RawApi, name: string, args: readonly unknown[]): Ra
         }
         if (spec.returns.type === 'u8ptr_const') {
           throw new Error(
-            `chtypes abi1: ${name} returns a borrowed u8ptr_const (its length lives in a different ` +
+            `chtypes abi2: ${name} returns a borrowed u8ptr_const (its length lives in a different ` +
               'described call); call it directly through the raw table, not through rawCall',
           );
         }
@@ -312,7 +312,7 @@ export function rawCall(raw: RawApi, name: string, args: readonly unknown[]): Ra
       case 'handle':
         return { outcome: 'handle', handle: { kind: spec.returns.type as string, ptr: result as JsExternal } };
       default:
-        throw new Error(`chtypes abi1: unknown return kind ${spec.returns.kind}`);
+        throw new Error(`chtypes abi2: unknown return kind ${spec.returns.kind}`);
     }
   } finally {
     for (const { slot } of outSlots) dropSlot(slot);
@@ -326,7 +326,7 @@ export function asBuffer(bytes: Uint8Array): Buffer {
 
 /**
  * The outputs of a status call that came back OK; anything else throws the
- * class `spec/abi-v1/sdk.json`'s status table gives (`./errmap.gen.ts`). A
+ * class `spec/abi-v2/sdk.json`'s status table gives (`./errmap.gen.ts`). A
  * non-OK status with no error object is the library's bug, never a silent
  * success.
  */

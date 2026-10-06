@@ -1,15 +1,17 @@
 /**
- * The result types and their decoders (`docs/reference/bindings-v1.md` §5).
+ * The result types and their decoders (`docs/reference/bindings-v1.md` §5, under
+ * ABI v2's reader rules r2 and r3, `spec/abi-v2/docs.md`).
  *
  * Every field below is a field of the document the library returned, or the
  * bytes of an output buffer; nothing is computed here. The rules every
  * decoder follows:
  *
  *   1. Stock JSON only: `JSON.parse`, after a scan that refuses a duplicate
- *      key (`./abi1/strictjson.ts`). A duplicate key, a document that is not
+ *      key (`./abi2/strictjson.ts`). A duplicate key, a document that is not
  *      JSON, or a value of the wrong JSON type is an `InternalError` naming the
  *      document and the key.
- *   2. Absent is the default, and an unknown key is ignored.
+ *   2. Absent is the default, and an unknown key is ignored, at every object
+ *      level, `_b64` members included (rule r2).
  *   3. Names, and every data-derived string (a rendering, a type, SQL, a
  *      message, a partition, a setting name), are BYTES. A document carries one
  *      as `<key>` (a JSON string, when the bytes are valid UTF-8) or as
@@ -21,7 +23,11 @@
  *      String or FixedString value's raw bytes (rule 6), surfaced as `value`.
  *   4. A vocabulary fact (`Transform.lossy`, `Value.isStored`, a verdict's
  *      `answered`) is read from the generated vocabulary table, never from a
- *      list kept here.
+ *      list kept here. A vocabulary value the description does not list is
+ *      that vocabulary's unknown(n), kept verbatim for that field alone (rule
+ *      r3): it never fails the document, the row or the batch, and its facts
+ *      are its fallback's (an unknown outcome is never accepted, an unknown
+ *      verdict is never answered, an unknown source is not stored).
  *   5. Unknown is never false and never empty: `framing.bomSkipped` and
  *      `framing.header` are `null` when the document says `null`.
  */
@@ -34,12 +40,16 @@ import {
   type FilterOutcome,
   type Outcome,
   outcomeOf,
+  type Reason,
   reasonLossy,
+  reasonOf,
+  type Source,
   sourceIsStored,
+  sourceOf,
   type Verdict,
   verdictOf,
-} from './abi1/index.js';
-import { internalError, parseStrictJson } from './abi1/index.js';
+} from './abi2/index.js';
+import { internalError, parseStrictJson } from './abi2/index.js';
 
 type Obj = Record<string, unknown>;
 
@@ -375,9 +385,11 @@ function spanOf(doc: string, key: string, v: unknown): Span {
 
 function decodeValue(doc: string, v: unknown): Value {
   const o = asObject(doc, 'cols[]', v);
-  const source = strOr(doc, o, 'src', '');
+  // An unlisted src is its unknown(n): kept, never a failure (r3). An ABSENT
+  // src is no value at all, and stays a malformed entry.
+  if (o.src === undefined || o.src === null) throw internalError(`the ${doc} document: cols[].src: missing`);
+  const source: Source = sourceOf(strOr(doc, o, 'src', ''));
   const isStored = sourceIsStored(source);
-  if (isStored === undefined) throw internalError(`the ${doc} document: cols[].src: ${JSON.stringify(source)} is not a value of the source vocabulary`);
   const nullFlag = o.null;
   if (typeof nullFlag !== 'boolean') bad(doc, 'cols[].null', 'a boolean', nullFlag);
   return {
@@ -392,9 +404,9 @@ function decodeValue(doc: string, v: unknown): Value {
 
 function transformOf(doc: string, v: unknown): Transform {
   const o = asObject(doc, 'transformed[]', v);
-  const reason = strOr(doc, o, 'reason', '');
+  // An unlisted reason is its unknown(n), with its fallback's lossy fact (r3).
+  const reason: Reason = reasonOf(strOr(doc, o, 'reason', ''));
   const lossy = reasonLossy(reason);
-  if (lossy === undefined) throw internalError(`the ${doc} document: transformed[].reason: ${JSON.stringify(reason)} has no lossy fact`);
   return {
     column: nameOf(doc, o, 'column'),
     input: bytesOr(doc, o, 'input'),
@@ -411,9 +423,8 @@ function computedOf(doc: string, v: unknown): Computed {
 }
 
 function rowOf(doc: string, o: Obj): RowResult {
-  const rawOutcome = strOr(doc, o, 'outcome', '');
-  const outcome = outcomeOf(rawOutcome);
-  if (outcome === undefined) throw internalError(`the ${doc} document: outcome: ${JSON.stringify(rawOutcome)} is not an outcome`);
+  // An unlisted outcome is its unknown(n): kept, never accepted (r3).
+  const outcome = outcomeOf(strOr(doc, o, 'outcome', ''));
   const columns = listOf(doc, o, 'cols').map((c) => decodeValue(doc, c));
   const verdictRaw = optStr(doc, o, 'verdict');
   const verdict = verdictRaw === undefined ? undefined : verdictOf(verdictRaw);
@@ -469,9 +480,7 @@ function framingOf(doc: string, v: unknown): Framing {
 export function decodeBatch(bytes: Uint8Array, payload: Buffer | undefined): BatchResult {
   const doc = 'batch';
   const o = asObject(doc, '$', parseDoc(doc, bytes));
-  const rawOutcome = strOr(doc, o, 'outcome', '');
-  const outcome = batchOutcomeOf(rawOutcome);
-  if (outcome === undefined) throw internalError(`the ${doc} document: outcome: ${JSON.stringify(rawOutcome)} is not an outcome`);
+  const outcome = batchOutcomeOf(strOr(doc, o, 'outcome', ''));
   const spansRaw = o.row_spans;
   const engineRaw = o.engine_rows;
   return {
@@ -503,15 +512,10 @@ export function decodeBatch(bytes: Uint8Array, payload: Buffer | undefined): Bat
 export function decodeFilterResult(bytes: Uint8Array): FilterResult {
   const doc = 'filter_result';
   const o = asObject(doc, '$', parseDoc(doc, bytes));
-  const rawOutcome = strOr(doc, o, 'outcome', '');
-  const outcome = filterOutcomeOf(rawOutcome);
-  if (outcome === undefined) throw internalError(`the ${doc} document: outcome: ${JSON.stringify(rawOutcome)} is not an outcome`);
+  const outcome = filterOutcomeOf(strOr(doc, o, 'outcome', ''));
+  // One verdict per character; an unlisted one is its unknown(n), never an answer (r3).
   const verdicts: Verdict[] = [];
-  for (const ch of strOr(doc, o, 'verdicts', '')) {
-    const v = verdictOf(ch);
-    if (v === undefined) throw internalError(`the ${doc} document: verdicts: ${JSON.stringify(ch)} is not a verdict`);
-    verdicts.push(v);
-  }
+  for (const ch of strOr(doc, o, 'verdicts', '')) verdicts.push(verdictOf(ch));
   return {
     outcome,
     errCode: intOr(doc, o, 'code', 0),
@@ -535,11 +539,8 @@ export function decodeSchemaDescription(bytes: Uint8Array): SchemaDescription {
   return {
     columns: listOf(doc, o, 'columns').map((c) => {
       const co = asObject(doc, 'columns[]', c);
-      const kindRaw = strOr(doc, co, 'default_kind', '');
-      const defaultKind = defaultKindOf(kindRaw);
-      if (defaultKind === undefined) {
-        throw internalError(`the ${doc} document: columns[].default_kind: ${JSON.stringify(kindRaw)} is not a default kind`);
-      }
+      // An unlisted default_kind is its unknown(n): kept, never a failure (r3).
+      const defaultKind = defaultKindOf(strOr(doc, co, 'default_kind', ''));
       return { name: nameOf(doc, co, 'name'), type: bytesOr(doc, co, 'type'), defaultKind, defaultExpr: bytesOr(doc, co, 'default_expression') };
     }),
   };

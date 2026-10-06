@@ -24,6 +24,14 @@ import { ArtifactMissingError, type FetchV1ErrorCode } from '../../src/ocifetch/
 import { verifyAndInstallFromLocalBlobs } from '../../src/ocifetch/localverify.js';
 import { readLock, type LockFile } from '../../src/ocifetch/lock.js';
 import type { Clock, PlatformKey } from '../../src/ocifetch/types.js';
+import { channelName, useFetchV1ForTests } from '../../src/ocifetch/channel.js';
+
+// This file tests the v1 fetch contract that the ABI v2 dev channel narrows
+// (src/ocifetch/channel.ts): its fixtures name their own registry and key, and
+// write schema-1 records, abi-1 predicates and locks. The dev channel's own
+// rules (spec/abi-v2/docs.md r5, r6) are test/ocifetch/devchannel.test.ts and
+// test/cli-devchannel.test.ts.
+useFetchV1ForTests();
 
 const CONFORMANCE_DIR = process.env['CHTYPES_V1_CONFORMANCE'];
 const REPORT_PATH = process.env['CHTYPES_V1_REPORT'];
@@ -209,6 +217,10 @@ describe.skipIf(CONFORMANCE_DIR === undefined || CONFORMANCE_DIR === '')('v1 con
 
   beforeAll(async () => {
     if (CONFORMANCE_DIR === undefined || CONFORMANCE_DIR === '') return;
+    // The cases are the v1 fetch contract's specification; the 2.0.0-dev
+    // binding's dev channel narrows it, and its own rules are tested apart.
+    console.log(`fetch contract: ${channelName()} (the fetch-v1 cases' own; the dev channel this binding ships is test/ocifetch/devchannel.test.ts)`);
+    if (channelName() !== 'v1') throw new Error(`the fetch-v1 conformance cases must run under the v1 contract, not ${channelName()}`);
     const raw = await readFile(path.join(CONFORMANCE_DIR, 'cases.json'));
     casesSha256 = createHash('sha256').update(raw).digest('hex');
     caseFile = JSON.parse(raw.toString('utf8')) as CaseFile;

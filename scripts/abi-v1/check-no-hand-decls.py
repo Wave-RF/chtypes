@@ -89,7 +89,8 @@ TS_CHS = re.compile(r"\bchs_\w+")
 # layer once go speaks ABI v2 (spec/binding-majors.json).
 V1_DIRS = [bmajors.layer_dir(b, n) for b in bmajors.BINDINGS for n in abimodel.MAJORS] + [
     "python/tests/abi1",
-    "ts/test/abi1",
+    # The TS binding's ABI tests, at every major (ts/test/abi2 once ts speaks ABI v2).
+    *[f"ts/test/abi{n}" for n in abimodel.MAJORS],
 ]
 V1_GLOBS = [("rust/tests", "abi1_*.rs")]
 ALL_DIRS = ["go", "python/src", "python/tests", "ts/src", "ts/test", "rust/src", "rust/tests"]

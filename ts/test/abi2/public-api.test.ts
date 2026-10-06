@@ -1,9 +1,9 @@
 /**
- * The public API over the stub library (`$CHTYPES_ABI1_STUBS`): the typed
+ * The public API over the stub library (`$CHTYPES_ABI2_STUBS`): the typed
  * wrappers, the error table, the handle rules and the finalizers, end to end
  * through a real `dlopen`.
  *
- * Without `$CHTYPES_ABI1_STUBS` every case here SKIPS LOUDLY by name; it never
+ * Without `$CHTYPES_ABI2_STUBS` every case here SKIPS LOUDLY by name; it never
  * passes silently. The stub echoes its inputs and answers a forced status when
  * an input starts with `!S:<status name>:<code>:<name>:<message>`, so a
  * document is the stub's echo and an error is whichever one the test forces.
@@ -12,23 +12,25 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { HANDLE_INFO } from '../../src/abi1/decls.gen.js';
-import { type LoadedImage, openAbi1, type Predicate } from '../../src/abi1/loader.js';
+import { HANDLE_INFO } from '../../src/abi2/decls.gen.js';
+import { type LoadedImage, openAbi2, type Predicate } from '../../src/abi2/loader.js';
 import {
   CallError,
   ChtypesError,
   DocFlags,
   EXPORT_NONE,
   Format,
+  filterOutcomeKnown,
   InternalError,
+  outcomeKnown,
   SchemaError,
   Status,
   UnsupportedError,
   UsageError,
-} from '../../src/abi1/index.js';
+} from '../../src/abi2/index.js';
 import { type Library, libraryOf, openUnverified } from '../../src/library.js';
 
-const STUBS_DIR = process.env.CHTYPES_ABI1_STUBS;
+const STUBS_DIR = process.env.CHTYPES_ABI2_STUBS;
 const stubsAvailable = typeof STUBS_DIR === 'string' && STUBS_DIR.length > 0;
 
 interface StubVariant {
@@ -41,7 +43,7 @@ function openStub(variant: string): { image: LoadedImage; library: Library } {
   };
   const v = doc.variants[variant];
   if (v === undefined) throw new Error(`no stub variant ${variant}`);
-  const image = openAbi1({
+  const image = openAbi2({
     libraryPath: path.join(STUBS_DIR as string, `${variant}.so`),
     predicate: v.predicate,
     platform: `${v.predicate.os}-${v.predicate.arch}`,
@@ -88,7 +90,10 @@ describe.skipIf(!stubsAvailable)('the public API over the stub library', () => {
     expect(library.discoverColumns(Buffer.from('{}')).columns).toEqual([]);
     const schema = library.compileTable(CREATE);
     expect(schema.describe().columns).toEqual([]);
-    expect(schema.row(Format.JSONEachRow, BODY).outcome).toBe('unsupported');
+    // The stub's echo carries no outcome: rule r3 keeps it as unknown(''), never a fallback and never accepted.
+    const echoed = schema.row(Format.JSONEachRow, BODY).outcome;
+    expect(echoed).toBe('');
+    expect(outcomeKnown(echoed)).toBe(false);
     schema.close();
   });
 
@@ -146,8 +151,8 @@ describe.skipIf(!stubsAvailable)('the public API over the stub library', () => {
       expect(use).toThrow(/Schema was already closed/);
     }
     // A schema closed first leaves its filter and block working: they hold their own reference.
-    expect(filter.rows(Format.JSONEachRow, BODY).outcome).toBe('unsupported');
-    expect(filter.eval(block).outcome).toBe('unsupported');
+    expect(filterOutcomeKnown(filter.rows(Format.JSONEachRow, BODY).outcome)).toBe(false);
+    expect(filterOutcomeKnown(filter.eval(block).outcome)).toBe(false);
     block.close();
     expect(() => filter.eval(block)).toThrow(/Block was already closed/);
     filter.close();

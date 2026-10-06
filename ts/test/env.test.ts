@@ -7,10 +7,18 @@
 
 import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { UsageError } from '../src/abi1/errors.js';
+import { UsageError } from '../src/abi2/errors.js';
 import { withEnvironment } from '../src/env.js';
 import { RELEASE_KEYS } from '../src/ocifetch/constants.gen.js';
 import type { FetchV1Options } from '../src/ocifetch/index.js';
+import { useDevChannelForTests, useFetchV1ForTests } from '../src/ocifetch/channel.js';
+
+// This file tests the v1 fetch contract that the ABI v2 dev channel narrows
+// (src/ocifetch/channel.ts): its fixtures name their own registry and key, and
+// write schema-1 records, abi-1 predicates and locks. The dev channel's own
+// rules (spec/abi-v2/docs.md r5, r6) are test/ocifetch/devchannel.test.ts and
+// test/cli-devchannel.test.ts.
+useFetchV1ForTests();
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -54,5 +62,25 @@ describe('withEnvironment', () => {
     vi.stubEnv('CHTYPES_TRUSTED_KEYS', '');
     vi.stubEnv('CHTYPES_TARGET', 'windows-amd64');
     expect(() => withEnvironment({})).toThrow(UsageError);
+  });
+});
+
+describe('withEnvironment on the ABI v2 dev channel (rule r6: no override)', () => {
+  it('reads neither CHTYPES_TRUSTED_KEYS nor CHTYPES_ALLOW_UNSIGNED into options, and refuses no malformed key it ignores', () => {
+    const restore = useDevChannelForTests();
+    try {
+      vi.stubEnv('CHTYPES_TRUSTED_KEYS', RELEASE_KEYS[0].ed25519Hex);
+      vi.stubEnv('CHTYPES_ALLOW_UNSIGNED', '1');
+      vi.stubEnv('CHTYPES_DOWNLOAD_TOKEN', 'tok');
+      const out = withEnvironment<FetchV1Options>({});
+      expect(out.trustedKeys).toBeUndefined();
+      expect(out.allowUnsigned).toBeUndefined();
+      // Everything else is read as on the v1 contract.
+      expect(out.token).toBe('tok');
+      vi.stubEnv('CHTYPES_TRUSTED_KEYS', 'not-hex');
+      expect(() => withEnvironment({})).not.toThrow();
+    } finally {
+      restore();
+    }
   });
 });

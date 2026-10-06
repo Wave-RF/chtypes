@@ -1,8 +1,8 @@
 /**
- * The v1 error model (`docs/reference/bindings-v1.md` §4), over the fetch
+ * The error model (`docs/reference/bindings-v1.md` §4), over the fetch
  * layer's own error family.
  *
- * Two shapes (spec/abi-v1/sdk.json's two tables):
+ * Two shapes (spec/abi-v2/sdk.json's two tables):
  *
  *   - a CALL error: the five fields of the library's error object, read
  *     verbatim. `errorForStatus` in `./errmap.gen.ts` picks the class from the
@@ -23,6 +23,7 @@
  */
 
 import { ArtifactCorruptError, FetchV1Error } from '../ocifetch/index.js';
+import { ABI_STABILITY } from './decls.gen.js';
 import { Status } from './vocab.gen.js';
 
 /** The base of every call error. The fetch and loader errors live under `ArtifactError` instead; `isChtypesError` is true for all of them. */
@@ -137,7 +138,24 @@ function renderLoaderMessage(label: string, f: LoaderErrorFields): string {
   return `chtypes: ${f.path}: ${label}: ${f.reason}${detail}`;
 }
 
-/** A loader step 1-4 or 6 refusal: the artifact is not one this binding can speak to (wrong ABI generation, a different fingerprint, a missing symbol, an unresolvable link). */
+/**
+ * Rule r6's exact refusal of a library whose fingerprint is not this dev SDK's
+ * (`spec/abi-v2/docs.md`): `sdk` is this binding's own `ABI_FINGERPRINT`,
+ * `library` the library's, both full `sha256:` spellings.
+ */
+export function devFingerprintMessage(sdk: string, library: string): string {
+  return `this SDK speaks dev fingerprint ${sdk}; the library has ${library} — update your dev SDK`;
+}
+
+/** An incompatible-artifact refusal's message: rule r6's exact text for a fingerprint refusal while the description is unstable (a 2.0.0-dev SDK), the loader's own otherwise. */
+function incompatibleMessage(f: LoaderErrorFields): string {
+  if (f.reason === 'fingerprint' && ABI_STABILITY === 'unstable' && f.want !== undefined && f.got !== undefined) {
+    return devFingerprintMessage(f.want, f.got);
+  }
+  return renderLoaderMessage('incompatible artifact', f);
+}
+
+/** A loader step 1-4 or 6 refusal: the artifact is not one this binding can speak to (wrong ABI generation, a different fingerprint, a missing symbol, an unresolvable link). A fingerprint refusal by a 2.0.0-dev SDK carries rule r6's exact message. */
 export class ArtifactIncompatibleError extends FetchV1Error implements LoaderErrorFields {
   readonly reason: string;
   readonly path: string;
@@ -145,7 +163,7 @@ export class ArtifactIncompatibleError extends FetchV1Error implements LoaderErr
   readonly got: string | undefined;
 
   constructor(f: LoaderErrorFields) {
-    super('CHTYPES_ARTIFACT_INCOMPATIBLE', renderLoaderMessage('incompatible artifact', f));
+    super('CHTYPES_ARTIFACT_INCOMPATIBLE', incompatibleMessage(f));
     this.reason = f.reason;
     this.path = f.path;
     this.want = f.want;
