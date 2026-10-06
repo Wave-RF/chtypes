@@ -153,7 +153,12 @@ def abi() -> int:
 
 
 def _test_only(what: str) -> None:
-    if "_pytest" not in sys.modules:
+    # A seam opens only while pytest is RUNNING a test: pytest imported AND
+    # PYTEST_CURRENT_TEST set (pytest sets it for each test's setup, call and
+    # teardown, and unsets it between tests). pytest merely being importable,
+    # or imported by a production process, opens nothing; neither does the
+    # variable alone (anyone can export it). Go's equivalent is testing.Testing().
+    if "_pytest" not in sys.modules or not os.environ.get("PYTEST_CURRENT_TEST"):
         raise RuntimeError(
             f"chtypes._ocifetch: {what} is test-only; a 2.0.0-dev SDK has no override "
             "(spec/abi-v2/docs.md, rule r6)"
