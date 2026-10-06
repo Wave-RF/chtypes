@@ -29,7 +29,7 @@
     "env": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["cache", "token", "trusted_keys", "allow_unsigned", "autofetch", "target", "retired"],
+      "required": ["cache", "token", "trusted_keys", "allow_unsigned", "autofetch", "target", "strict_cache", "retired"],
       "properties": {
         "cache": {"type": "string"},
         "token": {"type": "string"},
@@ -37,6 +37,7 @@
         "allow_unsigned": {"type": "string"},
         "autofetch": {"type": "string"},
         "target": {"type": "string"},
+        "strict_cache": {"type": "string"},
         "retired": {"type": "array", "items": {"type": "string"}}
       }
     },
@@ -213,7 +214,8 @@
         "CHTYPES_ARTIFACT_MISSING", "CHTYPES_ARTIFACT_UNTRUSTED", "CHTYPES_ARTIFACT_CORRUPT",
         "CHTYPES_ARTIFACT_PINNED", "CHTYPES_ARTIFACT_UNPUBLISHED", "CHTYPES_SOURCE_UNREACHABLE",
         "CHTYPES_SOURCE_UNAUTHORIZED", "CHTYPES_SOURCE_FORBIDDEN", "CHTYPES_SOURCE_INCOMPATIBLE",
-        "CHTYPES_ARTIFACT_INCOMPATIBLE"
+        "CHTYPES_ARTIFACT_INCOMPATIBLE",
+        "CHTYPES_CACHE_UNUSABLE"
       ],
       "properties": {
         "CHTYPES_ARTIFACT_MISSING": {"type": "integer", "minimum": 1, "maximum": 255},
@@ -225,7 +227,8 @@
         "CHTYPES_SOURCE_UNAUTHORIZED": {"type": "integer", "minimum": 1, "maximum": 255},
         "CHTYPES_SOURCE_FORBIDDEN": {"type": "integer", "minimum": 1, "maximum": 255},
         "CHTYPES_SOURCE_INCOMPATIBLE": {"type": "integer", "minimum": 1, "maximum": 255},
-        "CHTYPES_ARTIFACT_INCOMPATIBLE": {"type": "integer", "minimum": 1, "maximum": 255}
+        "CHTYPES_ARTIFACT_INCOMPATIBLE": {"type": "integer", "minimum": 1, "maximum": 255},
+        "CHTYPES_CACHE_UNUSABLE": {"type": "integer", "minimum": 1, "maximum": 255}
       }
     }
   }

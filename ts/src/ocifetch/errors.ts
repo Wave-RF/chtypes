@@ -25,6 +25,8 @@ export const CODE_SOURCE_INCOMPATIBLE = 'CHTYPES_SOURCE_INCOMPATIBLE' satisfies 
  * §1.3).
  */
 export const CODE_ARTIFACT_INCOMPATIBLE = 'CHTYPES_ARTIFACT_INCOMPATIBLE' satisfies FetchV1ErrorCode;
+/** A cache directory or entry the fetch layer could not read or write, or one strict mode refuses (guide §1; public issue #486). */
+export const CODE_CACHE_UNUSABLE = 'CHTYPES_CACHE_UNUSABLE' satisfies FetchV1ErrorCode;
 
 /** Base of every error this module throws. */
 export class FetchV1Error extends Error {
@@ -109,6 +111,34 @@ export class SourceForbiddenError extends FetchV1Error {
 export class SourceIncompatibleError extends FetchV1Error {
   constructor(message: string, options?: { cause?: unknown }) {
     super(CODE_SOURCE_INCOMPATIBLE, message, options);
+  }
+}
+
+/** What a `CacheUnusableError` names: the exact path that failed, the reason, and the errno name when there is one. */
+export interface CacheFault {
+  readonly path: string;
+  /** `unreadable_root`, `not_a_directory`, `unreadable_entry`, `unacceptable_record`, `layout_0x` or `unwritable`. */
+  readonly reason: string;
+  /** The errno name (`EACCES`), or `undefined` when there is none. */
+  readonly osError?: string | undefined;
+}
+
+/**
+ * A cache directory or entry the fetch layer could not read or write, or one
+ * strict mode refuses: never "not installed", never the network's
+ * `SourceUnreachableError`, never a raw Node error (guide §1, the cache
+ * faults; public issue #486).
+ */
+export class CacheUnusableError extends FetchV1Error implements CacheFault {
+  readonly path: string;
+  readonly reason: string;
+  readonly osError: string | undefined;
+
+  constructor(message: string, fault: CacheFault, options?: { cause?: unknown }) {
+    super(CODE_CACHE_UNUSABLE, message, options);
+    this.path = fault.path;
+    this.reason = fault.reason;
+    this.osError = fault.osError;
   }
 }
 

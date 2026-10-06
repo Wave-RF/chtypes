@@ -145,6 +145,7 @@ def render_go(data: dict[str, Any], sha: str) -> str:
     lines.append(f"\tEnvAllowUnsignedName = {_go_string(env['allow_unsigned'])}")
     lines.append(f"\tEnvAutofetchName     = {_go_string(env['autofetch'])}")
     lines.append(f"\tEnvTargetName        = {_go_string(env['target'])}")
+    lines.append(f"\tEnvCacheStrictName   = {_go_string(env['strict_cache'])}")
     lines.append("")
     lines.append(f"\tSpellingRegex           = {_go_string(spelling['regex'])}")
     lines.append(f"\tSpellingRefuseHintRegex = {_go_string(spelling['refuse_hint_regex'])}")
@@ -356,6 +357,7 @@ def render_python(data: dict[str, Any], sha: str) -> str:
     lines.append(f"ENV_ALLOW_UNSIGNED_NAME: Final[str] = {_py_str(env['allow_unsigned'])}")
     lines.append(f"ENV_AUTOFETCH_NAME: Final[str] = {_py_str(env['autofetch'])}")
     lines.append(f"ENV_TARGET_NAME: Final[str] = {_py_str(env['target'])}")
+    lines.append(f"ENV_CACHE_STRICT_NAME: Final[str] = {_py_str(env['strict_cache'])}")
     env_retired = _py_tuple([_py_str(v) for v in env["retired"]])
     lines.append(f"ENV_RETIRED: Final[tuple[str, ...]] = {env_retired}")
     lines.append("")
@@ -504,6 +506,7 @@ def render_ts(data: dict[str, Any], sha: str) -> str:
     lines.append(f"export const ENV_ALLOW_UNSIGNED_NAME = {json.dumps(env['allow_unsigned'])} as const;")
     lines.append(f"export const ENV_AUTOFETCH_NAME = {json.dumps(env['autofetch'])} as const;")
     lines.append(f"export const ENV_TARGET_NAME = {json.dumps(env['target'])} as const;")
+    lines.append(f"export const ENV_CACHE_STRICT_NAME = {json.dumps(env['strict_cache'])} as const;")
     lines.append(f"export const ENV_RETIRED = {arr(env['retired'])} as const;")
     lines.append("")
     lines.append(f"export const SPELLING_REGEX = {json.dumps(spelling['regex'])} as const;")
@@ -647,6 +650,7 @@ def render_rust(data: dict[str, Any], sha: str) -> str:
     lines.append(f"pub const ENV_ALLOW_UNSIGNED_NAME: &str = {rs_str(env['allow_unsigned'])};")
     lines.append(f"pub const ENV_AUTOFETCH_NAME: &str = {rs_str(env['autofetch'])};")
     lines.append(f"pub const ENV_TARGET_NAME: &str = {rs_str(env['target'])};")
+    lines.append(f"pub const ENV_CACHE_STRICT_NAME: &str = {rs_str(env['strict_cache'])};")
     lines.append(f"pub const ENV_RETIRED: &[&str] = {rs_arr(env['retired'])};")
     lines.append("")
     lines.append(f"pub const SPELLING_REGEX: &str =\n    {rs_str(spelling['regex'])};")
@@ -857,8 +861,9 @@ def render_guide_block(data: dict[str, Any], sha: str) -> str:
     lines.append(
         "The six codes above the line in `spec/fetch-v1/constants.json` carry v0's own real, measured exit "
         "status (every binding's CLI agreed on 2026-10-01: the four \"verification failed\" codes all exit "
-        "1, `CHTYPES_ARTIFACT_UNPUBLISHED` exits 4, `CHTYPES_SOURCE_UNREACHABLE` exits 3). The four new "
-        "v1-only codes have no v0 precedent and are assigned here, decided by lane 0A:"
+        "1, `CHTYPES_ARTIFACT_UNPUBLISHED` exits 4, `CHTYPES_SOURCE_UNREACHABLE` exits 3). The new v1-only "
+        "codes have no v0 precedent and are assigned here: the first four by lane 0A, the last by public "
+        "issue #486:"
     )
     lines.append("")
     lines.append(
@@ -877,6 +882,12 @@ def render_guide_block(data: dict[str, Any], sha: str) -> str:
         "in one place while the ABI v1 design is still in flux. No v1 fetch-layer conformance case raises "
         "it — the fetch layer \"never dlopens, checks glibc, or reads `chs_*` symbols\" (§1.3 of the v1 "
         "fetch-layer plan)."
+    )
+    lines.append(
+        "- `CHTYPES_CACHE_UNUSABLE` — the fetch layer, a cache directory or entry it could not read or "
+        "write, or that strict mode refuses: it names the path and a reason (§1, the cache faults). It is "
+        "the one code for the local filesystem, never the network's `CHTYPES_SOURCE_UNREACHABLE`, so a "
+        "retry loop never retries a permission error."
     )
     lines.append("")
     lines.append(GUIDE_END)

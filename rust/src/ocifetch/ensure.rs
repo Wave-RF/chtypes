@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use super::constants;
 use super::dsse::{self, TrustedKey};
 use super::error::{Error, Result};
+use super::faults;
 use super::http::{AuthConfig, Client, Clock};
 use super::layout::{self, VerifiedRecord};
 use super::lock::{self, Lock, LockEntry};
@@ -81,6 +82,11 @@ pub struct Options {
     pub update: bool,
     /// Proceed, with a warning, when no bundle verifies.
     pub allow_unsigned: bool,
+    /// Strict mode (public issue #486): every fault of the cache and of an
+    /// existing system dir is `CHTYPES_CACHE_UNUSABLE`, never "not
+    /// installed", and never a fall-through to a system dir. `None` reads
+    /// `CHTYPES_CACHE_STRICT` (`1` is on), else off.
+    pub strict_cache: Option<bool>,
     /// The trust list: raw 32-byte ed25519 public keys as hex. Non-empty
     /// REPLACES the default (else `$CHTYPES_TRUSTED_KEYS`, else the release
     /// key); it never appends to it.
@@ -111,6 +117,7 @@ impl Default for Options {
             lock_write: false,
             update: false,
             allow_unsigned: false,
+            strict_cache: None,
             trusted_keys: None,
             token: None,
             clock: None,
@@ -124,6 +131,7 @@ struct Resources {
     platform: String,
     bases: Vec<String>,
     system_dirs: Vec<PathBuf>,
+    strict: bool,
     client: Client,
     auth: AuthConfig,
     trust: Vec<TrustedKey>,
@@ -150,9 +158,11 @@ pub fn configured_bases(options: &Options) -> Vec<String> {
     })
 }
 
+/// One call's shared state. It creates nothing: a lookup is read-only, and
+/// only a fetch makes the layout (`ensure`, past its offline branch;
+/// docs/guides/fetch-v1.md §6, public issue #486).
 fn resources(options: &mut Options) -> Result<Resources> {
     let root = layout::cache_root(options.cache_dir.as_deref())?;
-    layout::ensure_layout(&root)?;
     let platform = options
         .platform
         .clone()
@@ -185,6 +195,7 @@ fn resources(options: &mut Options) -> Result<Resources> {
         platform,
         bases,
         system_dirs: options.system_dirs.clone(),
+        strict: faults::strict_mode(options.strict_cache),
         client,
         auth,
         trust,
@@ -223,6 +234,12 @@ pub fn ensure(request: &str, mut options: Options) -> Result<Resolved> {
     if options.offline {
         return resolve_offline(&res, &version_request, request, &options, lock.as_ref());
     }
+    if res.strict {
+        // Strict: the cache is checked before anything is fetched into it.
+        probe(&res)?;
+    }
+    // A fetch, from here on: the layout is made now, never by a lookup.
+    layout::ensure_layout(&res.root)?;
 
     if options.frozen {
         let lock = lock.ok_or_else(|| {
@@ -657,6 +674,7 @@ fn resolve_offline(
     _options: &Options,
     lock: Option<&Lock>,
 ) -> Result<Resolved> {
+    let warnings = probe(res)?;
     if let Some(lock) = lock {
         if let Some(entry) = lock.entry(request, &res.platform) {
             let dir = layout::unpacked_dir(&res.root, &entry.manifest)?;
@@ -694,18 +712,70 @@ fn resolve_offline(
         &res.platform,
         &res.trust,
     )? {
-        Some((dir, record, source)) => Ok(record_to_resolved(
-            request,
-            &res.platform,
-            &dir,
-            record,
-            &source,
-            true,
-        )),
-        None => Err(Error::ArtifactMissing(format!(
-            "--offline: nothing installed satisfies {request} for {}",
-            res.platform
+        Some((dir, record, source)) => Ok(Resolved {
+            warnings,
+            ..record_to_resolved(request, &res.platform, &dir, record, &source, true)
+        }),
+        None => Err(Error::ArtifactMissing(with_notes(
+            &format!(
+                "--offline: nothing installed satisfies {request} for {}",
+                res.platform
+            ),
+            &notes_for(res),
         ))),
+    }
+}
+
+/// The cache and its system dirs, checked the way `res`'s mode asks: the
+/// default mode's warnings, or strict mode's `CHTYPES_CACHE_UNUSABLE`.
+fn probe(res: &Resources) -> Result<Vec<String>> {
+    probe_as(res, res.strict)
+}
+
+fn probe_as(res: &Resources, strict: bool) -> Result<Vec<String>> {
+    let roots: Vec<&Path> = std::iter::once(res.root.as_path())
+        .chain(res.system_dirs.iter().map(PathBuf::as_path))
+        .collect();
+    faults::probe_roots(&roots, strict)
+}
+
+/// Check the cache `options` names, and its system dirs, by the mode
+/// `options` asks for (public issue #486). `chtypes where --strict` is this
+/// check.
+pub fn probe_cache(mut options: Options) -> Result<Vec<String>> {
+    let res = resources(&mut options)?;
+    probe(&res)
+}
+
+/// What a `CHTYPES_ARTIFACT_MISSING` answer from the cache `options` names
+/// adds to its message, each a complete sentence: the 0.x hint when the cache
+/// is a 0.x registry directory (docs/guides/fetch-v1.md, "Upgrading from 0.x";
+/// public issue #486). The registry's own MISSING adds the same notes as the
+/// offline fetch's.
+pub fn missing_notes(options: &Options) -> Vec<String> {
+    let Ok(root) = layout::cache_root(options.cache_dir.as_deref()) else {
+        return Vec::new();
+    };
+    let roots: Vec<&Path> = std::iter::once(root.as_path())
+        .chain(options.system_dirs.iter().map(PathBuf::as_path))
+        .collect();
+    let mut notes = faults::probe_roots(&roots, false).unwrap_or_default();
+    notes.extend(layout::zero_x_hint(&root));
+    notes
+}
+
+fn notes_for(res: &Resources) -> Vec<String> {
+    let mut notes = probe_as(res, false).unwrap_or_default();
+    notes.extend(layout::zero_x_hint(&res.root));
+    notes
+}
+
+/// `message` with `notes`, each a complete sentence, appended.
+pub fn with_notes(message: &str, notes: &[String]) -> String {
+    if notes.is_empty() {
+        message.to_string()
+    } else {
+        format!("{message}. {}", notes.join(" "))
     }
 }
 
@@ -719,6 +789,7 @@ pub fn resolve_installed(
     let version_request = VersionRequest::parse(request)?;
     options.platform = Some(platform.to_string());
     let res = resources(&mut options)?;
+    let warnings = probe(&res)?;
     match find_installed(
         &res.root,
         &res.system_dirs,
@@ -726,14 +797,10 @@ pub fn resolve_installed(
         &res.platform,
         &res.trust,
     )? {
-        Some((dir, record, source)) => Ok(Some(record_to_resolved(
-            request,
-            &res.platform,
-            &dir,
-            record,
-            &source,
-            true,
-        ))),
+        Some((dir, record, source)) => Ok(Some(Resolved {
+            warnings,
+            ..record_to_resolved(request, &res.platform, &dir, record, &source, true)
+        })),
         None => Ok(None),
     }
 }
@@ -742,6 +809,7 @@ pub fn resolve_installed(
 /// system directories.
 pub fn list_installed(mut options: Options) -> Result<Vec<Resolved>> {
     let res = resources(&mut options)?;
+    let warnings = probe(&res)?;
     let mut out = Vec::new();
     for (dir, record) in layout::list_verified(&res.root)? {
         out.push(record_to_resolved(
@@ -766,16 +834,26 @@ pub fn list_installed(mut options: Options) -> Result<Vec<Resolved>> {
             ));
         }
     }
+    for r in &mut out {
+        r.warnings.clone_from(&warnings);
+    }
     Ok(out)
 }
 
 /// `verify_installed(options)`: re-hash every installed library against its
-/// own recorded `library_sha256`, with no network.
+/// own recorded `library_sha256`, with no network: the cache, then the system
+/// directories, the same roots [`list_installed`] reads (public issue #486).
 pub fn verify_installed(mut options: Options) -> Result<Vec<VerifyResult>> {
     let res = resources(&mut options)?;
+    probe(&res)?;
     let mut out = Vec::new();
     for (dir, record) in layout::list_verified(&res.root)? {
         out.push(verify_one_install(&dir, &record));
+    }
+    for sysdir in &res.system_dirs {
+        for (dir, record) in layout::list_verified(sysdir).unwrap_or_default() {
+            out.push(verify_one_install(&dir, &record));
+        }
     }
     Ok(out)
 }
@@ -1205,13 +1283,17 @@ fn install_preseeded(
     platform: &str,
     trust: &[TrustedKey],
 ) -> Result<Option<(PathBuf, VerifiedRecord)>> {
+    // An index.json that is missing, unreadable or not an index has nothing
+    // pre-seeded to offer, as in every binding: what could not be read is the
+    // cache-fault probe's to warn about, or in strict mode to refuse (public
+    // issue #486).
     let index_path = layout_root.join("index.json");
-    let bytes = match std::fs::read(&index_path) {
-        Ok(b) => b,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(e.into()),
+    let Ok(bytes) = std::fs::read(&index_path) else {
+        return Ok(None);
     };
-    let index: oci::Index = serde_json::from_slice(&bytes)?;
+    let Ok(index) = serde_json::from_slice::<oci::Index>(&bytes) else {
+        return Ok(None);
+    };
     let plat = constants::PLATFORMS
         .iter()
         .find(|p| p.key == platform)
@@ -1384,5 +1466,547 @@ fn record_to_resolved(
         source: source.to_string(),
         already_installed,
         warnings: Vec::new(),
+    }
+}
+
+/// Public issue #486, the behavior fixes: one root order, read-only lookups
+/// that create nothing, the 0.x hint, and modes that follow the umask. Every
+/// fault is made by a real write, never by a stubbed reader.
+#[cfg(test)]
+mod cache_roots_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn scratch(name: &str) -> PathBuf {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        std::env::temp_dir().join(format!(
+            "ocifetch-486-{name}-{}-{nanos:x}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ))
+    }
+
+    /// One record installed by hand under `root`, as any binding leaves it;
+    /// returns the entry directory.
+    fn write_record(root: &Path, version: &str, build: &str) -> PathBuf {
+        let library = format!("library {version} {build}");
+        let manifest = oci::sha256_hex(format!("{}{version}{build}", root.display()).as_bytes());
+        let record = VerifiedRecord {
+            platform: "linux-arm64".to_string(),
+            version: version.to_string(),
+            build: build.to_string(),
+            channel: None,
+            index_digest: None,
+            manifest_digest: format!("sha256:{manifest}"),
+            layer_digest: format!("sha256:{}", "c".repeat(64)),
+            bundle_digest: None,
+            bundle_manifest_digest: None,
+            signed_by: String::new(),
+            library: "lib.so".to_string(),
+            library_sha256: oci::sha256_hex(library.as_bytes()),
+            library_bytes: library.len() as u64,
+            predicate: serde_json::json!({"clickhouse_version": version, "build": build}),
+        };
+        let entry = root.join(constants::CACHE_UNPACKED_DIR).join(&manifest);
+        layout::write_atomic(&entry.join("lib.so"), library.as_bytes()).unwrap();
+        layout::write_atomic(
+            &entry.join(constants::CACHE_VERIFIED_RECORD),
+            &record.to_json_bytes().unwrap(),
+        )
+        .unwrap();
+        entry
+    }
+
+    fn options(cache: &Path, system_dirs: Vec<PathBuf>) -> Options {
+        Options {
+            platform: Some("linux-arm64".to_string()),
+            cache_dir: Some(cache.to_string_lossy().into_owned()),
+            system_dirs,
+            ..Options::default()
+        }
+    }
+
+    /// The cache and the system dirs are one search: the newest (version,
+    /// build) wins, a tie goes to the earlier root, and `list_installed` and
+    /// `verify_installed` read the same roots.
+    #[test]
+    fn resolve_list_and_verify_read_every_root_newest_first() {
+        for (cache_vb, sys_vb, system_wins) in [
+            (
+                ("26.8.1.1", "20260801.000001"),
+                ("26.8.2.1", "20260802.000001"),
+                true,
+            ),
+            (
+                ("26.8.1.1", "20260801.000001"),
+                ("26.8.1.1", "20260801.000002"),
+                true,
+            ),
+            (
+                ("26.8.2.1", "20260802.000001"),
+                ("26.8.1.1", "20260801.000001"),
+                false,
+            ),
+            (
+                ("26.8.1.1", "20260801.000001"),
+                ("26.8.1.1", "20260801.000001"),
+                false,
+            ),
+        ] {
+            let base = scratch("roots");
+            let (cache, sys) = (base.join("cache"), base.join("system"));
+            let cache_entry = write_record(&cache, cache_vb.0, cache_vb.1);
+            let sys_entry = write_record(&sys, sys_vb.0, sys_vb.1);
+            let got = resolve_installed("26.8", "linux-arm64", options(&cache, vec![sys.clone()]))
+                .unwrap()
+                .expect("a record answers 26.8");
+            let (want_dir, want_source) = if system_wins {
+                (sys_entry.clone(), format!("system:{}", sys.display()))
+            } else {
+                (cache_entry.clone(), "cache".to_string())
+            };
+            assert_eq!((&got.dir, &got.source), (&want_dir, &want_source));
+            let mut offline = options(&cache, vec![sys.clone()]);
+            offline.offline = true;
+            assert_eq!(ensure("26.8", offline).unwrap().dir, want_dir);
+            let listed: Vec<PathBuf> = list_installed(options(&cache, vec![sys.clone()]))
+                .unwrap()
+                .into_iter()
+                .map(|r| r.dir)
+                .collect();
+            assert_eq!(listed, vec![cache_entry.clone(), sys_entry.clone()]);
+            let verified: Vec<(PathBuf, bool)> =
+                verify_installed(options(&cache, vec![sys.clone()]))
+                    .unwrap()
+                    .into_iter()
+                    .map(|r| (r.dir, r.ok))
+                    .collect();
+            assert_eq!(verified, vec![(cache_entry, true), (sys_entry, true)]);
+            let _ = std::fs::remove_dir_all(&base);
+        }
+    }
+
+    /// Every path under `root` with its size, or `None` when `root` is absent.
+    fn tree_of(root: &Path) -> Option<Vec<(PathBuf, u64)>> {
+        fn walk(dir: &Path, out: &mut Vec<(PathBuf, u64)>) {
+            let mut entries: Vec<_> = std::fs::read_dir(dir)
+                .unwrap()
+                .map(|e| e.unwrap().path())
+                .collect();
+            entries.sort();
+            for p in entries {
+                let md = std::fs::symlink_metadata(&p).unwrap();
+                out.push((p.clone(), md.len()));
+                if md.is_dir() {
+                    walk(&p, out);
+                }
+            }
+        }
+        std::fs::symlink_metadata(root).ok()?;
+        let mut out = Vec::new();
+        walk(root, &mut out);
+        Some(out)
+    }
+
+    /// What a 0.x install left behind: `<minor>/manifest.json`, no `oci-layout`.
+    fn zero_x_registry(root: &Path) {
+        for (rel, body) in [
+            ("26.1/manifest.json", "{}"),
+            ("26.1/libchtypes.so", "0.x library"),
+            ("patches/26.1.3.4/manifest.json", "{}"),
+        ] {
+            layout::write_atomic(&root.join(rel), body.as_bytes()).unwrap();
+        }
+    }
+
+    /// `resolve_installed`, `list_installed`, `verify_installed` and an
+    /// offline `ensure` create nothing, whether the cache is missing or holds
+    /// a 0.x registry.
+    #[test]
+    fn read_only_lookups_create_nothing() {
+        let base = scratch("readonly");
+        let zero_x = base.join("zero-x");
+        zero_x_registry(&zero_x);
+        let no_system = base.join("no-such-system-dir");
+        for cache in [base.join("no-such-cache"), zero_x] {
+            let before = tree_of(&cache);
+            let opts = || options(&cache, vec![no_system.clone()]);
+            assert!(
+                resolve_installed("26.1", "linux-arm64", opts())
+                    .unwrap()
+                    .is_none()
+            );
+            assert!(list_installed(opts()).unwrap().is_empty());
+            assert!(verify_installed(opts()).unwrap().is_empty());
+            let mut offline = opts();
+            offline.offline = true;
+            assert!(matches!(
+                ensure("26.1", offline),
+                Err(Error::ArtifactMissing(_))
+            ));
+            assert_eq!(tree_of(&cache), before, "{} changed", cache.display());
+            assert!(tree_of(&no_system).is_none());
+        }
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A MISSING answer from a 0.x registry names it and the v1 root; a 1.x
+    /// cache without an `oci-layout` and an empty one carry no hint.
+    #[test]
+    fn missing_carries_the_zero_x_hint() {
+        let base = scratch("hint");
+        let zero_x = base.join("zero-x");
+        zero_x_registry(&zero_x);
+        let hint = format!(
+            "{} holds a 0.x registry (26.1/manifest.json); chtypes 1.x uses an OCI layout at \
+             ${{XDG_CACHE_HOME:-~/.cache}}/chtypes/v1",
+            zero_x.display()
+        );
+        let mut offline = options(&zero_x, Vec::new());
+        offline.offline = true;
+        match ensure("26.1", offline) {
+            Err(Error::ArtifactMissing(m)) => assert!(m.contains(&hint), "{m}"),
+            other => panic!("want ArtifactMissing, got {other:?}"),
+        }
+        let notes = missing_notes(&options(&zero_x, Vec::new()));
+        assert!(notes.len() == 1 && notes[0].starts_with(&hint), "{notes:?}");
+        let one_x = base.join("one-x");
+        write_record(&one_x, "26.8.1.1", "20260801.000001");
+        let empty = base.join("empty");
+        std::fs::create_dir_all(&empty).unwrap();
+        for cache in [one_x, empty, base.join("absent")] {
+            assert!(missing_notes(&options(&cache, Vec::new())).is_empty());
+        }
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Every directory and file an install creates has the mode a plain
+    /// `create_dir` and `fs::write` get in the same place: 0777 and 0666 less
+    /// the process umask, whatever it is (std cannot set the umask, so the
+    /// controls stand in for it). The controls must not be the temp APIs'
+    /// private 0700/0600, or the comparison could not tell the two apart.
+    #[test]
+    fn install_modes_follow_the_umask() {
+        let base = scratch("modes");
+        std::fs::create_dir_all(&base).unwrap();
+        let control_dir = base.join("control-dir");
+        std::fs::create_dir(&control_dir).unwrap();
+        std::fs::write(base.join("control-file"), b"x").unwrap();
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        let (want_dir, want_file) = (mode(&control_dir), mode(&base.join("control-file")));
+        assert!(
+            want_dir != 0o700 && want_file != 0o600,
+            "the umask is 077, so this test cannot discriminate; run it at umask 022"
+        );
+        let root = base.join("cache");
+        layout::ensure_layout(&root).unwrap();
+        let digest = format!("sha256:{}", "a".repeat(64));
+        layout::put_blob(&root, &digest, b"{}").unwrap();
+        layout::record_in_index(
+            &root,
+            &digest,
+            2,
+            constants::MEDIA_TYPE_MANIFEST,
+            None,
+            None,
+        )
+        .unwrap();
+        let entry = layout::install_unpacked(&root, &digest, |tmp| {
+            unpack::unpack_tar(&tar_of("lib.so", b"library"), tmp)?;
+            layout::write_atomic(&tmp.join(constants::CACHE_VERIFIED_RECORD), b"{}")
+        })
+        .unwrap();
+        let mut seen = 0;
+        for (p, _) in tree_of(&root).unwrap() {
+            let md = std::fs::symlink_metadata(&p).unwrap();
+            let want = if md.is_dir() { want_dir } else { want_file };
+            assert_eq!(mode(&p), want, "{}", p.display());
+            seen += 1;
+        }
+        assert!(seen >= 8 && entry.join("lib.so").exists(), "saw {seen}");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A one-file tar, as the layer carries the library.
+    fn tar_of(name: &str, body: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        {
+            let mut builder = tar::Builder::new(&mut out);
+            let mut header = tar::Header::new_gnu();
+            header.set_size(body.len() as u64);
+            header.set_mode(0o600);
+            header.set_entry_type(tar::EntryType::Regular);
+            builder.append_data(&mut header, name, body).unwrap();
+            builder.finish().unwrap();
+        }
+        out
+    }
+}
+
+/// Public issue #486: every cache fault, in the default mode (absent, plus a
+/// warning naming the path) and in strict mode (`CHTYPES_CACHE_UNUSABLE`
+/// naming the path and the reason, and no fall-through to a system dir), and
+/// the class of a failed write. Every fault is made by a real chmod or write,
+/// and each chmod is proved to have taken effect before the case runs.
+#[cfg(test)]
+mod cache_strict_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn scratch(name: &str) -> PathBuf {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        std::env::temp_dir().join(format!(
+            "ocifetch-486s-{name}-{}-{nanos:x}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ))
+    }
+
+    fn write_record(root: &Path, version: &str, build: &str) -> PathBuf {
+        let library = format!("library {version} {build}");
+        let manifest = oci::sha256_hex(format!("{}{version}{build}", root.display()).as_bytes());
+        let record = VerifiedRecord {
+            platform: "linux-arm64".to_string(),
+            version: version.to_string(),
+            build: build.to_string(),
+            channel: None,
+            index_digest: None,
+            manifest_digest: format!("sha256:{manifest}"),
+            layer_digest: format!("sha256:{}", "c".repeat(64)),
+            bundle_digest: None,
+            bundle_manifest_digest: None,
+            signed_by: String::new(),
+            library: "lib.so".to_string(),
+            library_sha256: oci::sha256_hex(library.as_bytes()),
+            library_bytes: library.len() as u64,
+            predicate: serde_json::json!({"clickhouse_version": version, "build": build}),
+        };
+        let entry = root.join(constants::CACHE_UNPACKED_DIR).join(&manifest);
+        layout::write_atomic(&entry.join("lib.so"), library.as_bytes()).unwrap();
+        layout::write_atomic(
+            &entry.join(constants::CACHE_VERIFIED_RECORD),
+            &record.to_json_bytes().unwrap(),
+        )
+        .unwrap();
+        entry
+    }
+
+    fn set_mode(p: &Path, mode: u32) {
+        std::fs::set_permissions(p, std::fs::Permissions::from_mode(mode)).unwrap();
+    }
+
+    /// The positive control: the chmod took effect for this process. `false`
+    /// when it did not (root ignores modes), and the case is skipped loudly.
+    fn denied(p: &Path) -> bool {
+        let refused = if std::fs::symlink_metadata(p).is_ok_and(|m| m.is_dir()) {
+            std::fs::read_dir(p).is_err()
+        } else {
+            std::fs::read(p).is_err()
+        };
+        if !refused {
+            eprintln!(
+                "SKIPPED (loudly): {} is readable after chmod 000; running as root?",
+                p.display()
+            );
+        }
+        refused
+    }
+
+    fn options(cache: &Path, system_dirs: Vec<PathBuf>, strict: bool) -> Options {
+        Options {
+            platform: Some("linux-arm64".to_string()),
+            cache_dir: Some(cache.to_string_lossy().into_owned()),
+            system_dirs,
+            strict_cache: Some(strict),
+            ..Options::default()
+        }
+    }
+
+    /// Applies one fault to a cache holding one good record at `entry`;
+    /// returns the path the error and the warning must name, or `None` when
+    /// the positive control failed.
+    fn apply(name: &str, cache: &Path, entry: &Path) -> Option<PathBuf> {
+        let chmod_000 = |p: &Path| {
+            set_mode(p, 0);
+            denied(p).then(|| p.to_path_buf())
+        };
+        match name {
+            "root-000" => chmod_000(cache),
+            "unpacked-000" => chmod_000(&cache.join(constants::CACHE_UNPACKED_DIR)),
+            "entry-000" => chmod_000(entry),
+            "record-000" => chmod_000(&entry.join(constants::CACHE_VERIFIED_RECORD)),
+            "record-garbage-noblobs" => {
+                let p = entry.join(constants::CACHE_VERIFIED_RECORD);
+                std::fs::write(&p, b"not json {").unwrap();
+                assert!(!cache.join("blobs").exists(), "positive control: no blobs");
+                Some(p)
+            }
+            "root-is-a-file" => {
+                std::fs::remove_dir_all(cache).unwrap();
+                std::fs::write(cache, b"not a cache").unwrap();
+                Some(cache.to_path_buf())
+            }
+            "layout-0x" => {
+                std::fs::remove_dir_all(cache).unwrap();
+                layout::write_atomic(&cache.join("26.1").join("manifest.json"), b"{}").unwrap();
+                Some(cache.to_path_buf())
+            }
+            other => panic!("unknown fault {other}"),
+        }
+    }
+
+    /// Undoes every chmod under `base` so it can be removed.
+    fn restore(base: &Path) {
+        fn walk(p: &Path) {
+            let is_dir = std::fs::symlink_metadata(p).is_ok_and(|m| m.is_dir());
+            set_mode(p, if is_dir { 0o755 } else { 0o644 });
+            if is_dir {
+                if let Ok(entries) = std::fs::read_dir(p) {
+                    for e in entries.flatten() {
+                        walk(&e.path());
+                    }
+                }
+            }
+        }
+        walk(base);
+        let _ = std::fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn every_cache_fault_in_both_modes() {
+        for (name, reason, warns) in [
+            ("root-000", "unreadable_root", true),
+            ("unpacked-000", "unreadable_root", true),
+            ("entry-000", "unreadable_entry", true),
+            ("record-000", "unreadable_entry", true),
+            ("record-garbage-noblobs", "unacceptable_record", false),
+            ("root-is-a-file", "not_a_directory", true),
+            ("layout-0x", "layout_0x", false),
+        ] {
+            for with_system in [false, true] {
+                let base = scratch(name);
+                let (cache, system) = (base.join("cache"), base.join("system"));
+                let entry = write_record(&cache, "26.8.1.1", "20260801.000001");
+                let sys_entry = write_record(&system, "26.8.1.1", "20260801.000001");
+                let Some(path) = apply(name, &cache, &entry) else {
+                    restore(&base);
+                    continue;
+                };
+                let warning = format!("{} could not be read (", path.display());
+                let systems = if with_system {
+                    vec![system.clone()]
+                } else {
+                    Vec::new()
+                };
+
+                // Default mode: absent, with a warning for K1/K2.
+                let got = resolve_installed(
+                    "26.8",
+                    "linux-arm64",
+                    options(&cache, systems.clone(), false),
+                )
+                .unwrap_or_else(|e| panic!("{name}: default resolve_installed = {e}"));
+                if with_system {
+                    let got = got.unwrap_or_else(|| panic!("{name}: nothing from the system dir"));
+                    assert_eq!(got.dir, sys_entry, "{name}");
+                    assert_eq!(
+                        got.warnings.join("\n").contains(&warning),
+                        warns,
+                        "{name}: {:?}",
+                        got.warnings
+                    );
+                } else {
+                    assert!(got.is_none(), "{name}: answered from a faulted cache");
+                }
+                let notes = missing_notes(&options(&cache, systems.clone(), false)).join("\n");
+                assert_eq!(notes.contains(&warning), warns, "{name}: {notes}");
+                list_installed(options(&cache, systems.clone(), false)).unwrap();
+                verify_installed(options(&cache, systems.clone(), false)).unwrap();
+
+                // Strict mode: CHTYPES_CACHE_UNUSABLE, with or without a system dir.
+                let mut offline = options(&cache, systems.clone(), true);
+                offline.offline = true;
+                let results: Vec<(&str, Error)> = vec![
+                    (
+                        "resolve_installed",
+                        resolve_installed(
+                            "26.8",
+                            "linux-arm64",
+                            options(&cache, systems.clone(), true),
+                        )
+                        .unwrap_err(),
+                    ),
+                    (
+                        "list_installed",
+                        list_installed(options(&cache, systems.clone(), true)).unwrap_err(),
+                    ),
+                    (
+                        "verify_installed",
+                        verify_installed(options(&cache, systems.clone(), true))
+                            .err()
+                            .expect("an error"),
+                    ),
+                    ("ensure(offline)", ensure("26.8", offline).unwrap_err()),
+                    (
+                        "probe_cache",
+                        probe_cache(options(&cache, systems.clone(), true)).unwrap_err(),
+                    ),
+                ];
+                for (call, err) in results {
+                    let Error::CacheUnusable(f) = &err else {
+                        panic!(
+                            "{name}, system {with_system}: {call} = {err}, want CHTYPES_CACHE_UNUSABLE"
+                        )
+                    };
+                    assert_eq!(
+                        (f.reason.as_str(), &f.path),
+                        (reason, &path),
+                        "{name}: {call}"
+                    );
+                    assert_eq!(f.os_error.is_some(), warns, "{name}: {call}");
+                    assert!(
+                        f.message.contains(&format!(
+                            "{} is unusable as a cache: {reason}",
+                            path.display()
+                        )),
+                        "{name}: {call}: {}",
+                        f.message
+                    );
+                    assert_eq!(err.exit_code(), Some(9));
+                }
+                restore(&base);
+            }
+        }
+    }
+
+    #[test]
+    fn a_failed_write_is_cache_unusable() {
+        let base = scratch("unwritable");
+        let cache = base.join("cache");
+        std::fs::create_dir_all(&cache).unwrap();
+        set_mode(&cache, 0o555);
+        if std::fs::create_dir(cache.join("probe")).is_ok() {
+            eprintln!("SKIPPED (loudly): a 0555 directory took a mkdir; running as root?");
+            restore(&base);
+            return;
+        }
+        let err = layout::ensure_layout(&cache).unwrap_err();
+        let Error::CacheUnusable(f) = &err else {
+            panic!("ensure_layout into a read-only cache = {err}")
+        };
+        assert_eq!(
+            (f.reason.as_str(), f.os_error.as_deref()),
+            ("unwritable", Some("EACCES"))
+        );
+        assert!(f.path.starts_with(&cache), "{}", f.path.display());
+        restore(&base);
     }
 }

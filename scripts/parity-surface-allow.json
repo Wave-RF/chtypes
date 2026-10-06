@@ -47,6 +47,14 @@
       "binding": "go",
       "kind": "extra",
       "names": [
+        "ArtifactError.OSError"
+      ],
+      "reason": "§4's 'a cache fault' bullet: a CHTYPES_CACHE_UNUSABLE (fetch-v1.md §1, the cache faults; public issue #486) carries the path, the reason and the errno name, which the doc names in prose and does not spell per language. Go keeps the path and the reason on ArtifactError's Path and Reason, which a loader refusal also uses."
+    },
+    {
+      "binding": "go",
+      "kind": "extra",
+      "names": [
         "ErrorCode",
         "ErrorCode.ExitCode",
         "ErrorCode.Sentinel",
@@ -59,7 +67,8 @@
         "CodeSourceForbidden",
         "CodeSourceIncompatible",
         "CodeSourceUnauthorized",
-        "CodeSourceUnreachable"
+        "CodeSourceUnreachable",
+        "CodeCacheUnusable"
       ],
       "issue": 500,
       "reason": "The typed values of ArtifactError.Code, which §4's Go column names (`*ArtifactError` with `Code` CHTYPES_…): one constant per code in spec/fetch-v1/constants.json, re-exported from the fetch layer, with the code's CLI exit status and sentinel. Python keeps the same codes as CODE_* constants (its own entry); §4 gives no spelling for them."
@@ -78,7 +87,8 @@
         "FetchOptions.Frozen",
         "FetchOptions.LockPath",
         "FetchOptions.LockWrite",
-        "FetchOptions.Update"
+        "FetchOptions.Update",
+        "FetchOptions.StrictCache"
       ],
       "reason": "§6: the fetch options carry everything fetch-v1.md configures (bases, cache directory, system directories, trusted keys, token, allow-unsigned, offline, frozen, the lock path) 'under the fetch module's own names', which the doc names in prose and does not spell per language. LockWrite and Update are the lock's write and update modes of fetch-v1.md §6."
     },
@@ -125,6 +135,7 @@
         "CODE_SOURCE_INCOMPATIBLE",
         "CODE_SOURCE_UNAUTHORIZED",
         "CODE_SOURCE_UNREACHABLE",
+        "CODE_CACHE_UNUSABLE",
         "ArtifactError.code",
         "ArtifactCorruptError.code",
         "ArtifactIncompatibleError.code",
@@ -135,7 +146,8 @@
         "SourceForbiddenError.code",
         "SourceIncompatibleError.code",
         "SourceUnauthorizedError.code",
-        "SourceUnreachableError.code"
+        "SourceUnreachableError.code",
+        "CacheUnusableError.code"
       ],
       "issue": 500,
       "reason": "The fetch codes of spec/fetch-v1/constants.json, and each artifact class's code: the attribute §4's Go column calls ArtifactError's `Code` (Go's own entry). §4's Python column names the classes only."
@@ -149,9 +161,20 @@
         "ArtifactError(want=)",
         "ArtifactError(got=)",
         "SourceUnreachableError(retryable=)",
-        "SourceUnreachableError(retry_after=)"
+        "SourceUnreachableError(retry_after=)",
+        "CacheUnusableError(path=)",
+        "CacheUnusableError(reason=)",
+        "CacheUnusableError(os_error=)"
       ],
       "reason": "Keyword-only constructor parameters of error classes the binding raises: they set §4's refusal fields (reason, path, want, got) and the fetch layer's retry hints. A caller catches these classes and does not construct them."
+    },
+    {
+      "binding": "python",
+      "kind": "extra",
+      "names": [
+        "CacheUnusableError.os_error"
+      ],
+      "reason": "§4's 'a cache fault' bullet: a CHTYPES_CACHE_UNUSABLE (fetch-v1.md §1, the cache faults; public issue #486) carries the path, the reason and the errno name, which the doc names in prose and does not spell per language. Python keeps the path and the reason on ArtifactError's path and reason, which a loader refusal also uses."
     },
     {
       "binding": "python",
@@ -177,7 +200,8 @@
         "FetchOptions.frozen",
         "FetchOptions.lock_path",
         "FetchOptions.lock_write",
-        "FetchOptions.update"
+        "FetchOptions.update",
+        "FetchOptions.strict_cache"
       ],
       "reason": "§6: the fetch options carry everything fetch-v1.md configures (bases, cache directory, system directories, trusted keys, token, allow-unsigned, offline, frozen, the lock path) 'under the fetch module's own names', which the doc names in prose and does not spell per language. lock_write and update are the lock's write and update modes of fetch-v1.md §6."
     },
@@ -302,6 +326,16 @@
       "binding": "rust",
       "kind": "extra",
       "names": [
+        "CacheFault.path",
+        "CacheFault.reason",
+        "CacheFault.os_error"
+      ],
+      "reason": "§4's 'a cache fault' bullet: a CHTYPES_CACHE_UNUSABLE (fetch-v1.md §1, the cache faults; public issue #486) carries the path, the reason and the errno name, which the doc names in prose and does not spell per language. Rust's variant holds them in its CacheFault struct, as Error::ArtifactCorrupt holds a Refusal."
+    },
+    {
+      "binding": "rust",
+      "kind": "extra",
+      "names": [
         "FetchOptions.bases",
         "FetchOptions.cache_dir",
         "FetchOptions.system_dirs",
@@ -312,7 +346,8 @@
         "FetchOptions.frozen",
         "FetchOptions.lock_path",
         "FetchOptions.lock_write",
-        "FetchOptions.update"
+        "FetchOptions.update",
+        "FetchOptions.strict_cache"
       ],
       "reason": "§6: the fetch options carry everything fetch-v1.md configures (bases, cache directory, system directories, trusted keys, token, allow-unsigned, offline, frozen, the lock path) 'under the fetch module's own names', which the doc names in prose and does not spell per language. lock_write and update are the lock's write and update modes of fetch-v1.md §6."
     },
@@ -400,6 +435,20 @@
       ],
       "issue": 500,
       "reason": "The fetch code (spec/fetch-v1/constants.json) and its CLI exit status: TypeScript's spelling of Go's ArtifactError.Code and ErrorCode.ExitCode, Python's `.code` and Rust's Error.code (their own entries). §4 gives no TypeScript spelling."
+    },
+    {
+      "binding": "ts",
+      "kind": "extra",
+      "names": [
+        "CacheUnusableError.path",
+        "CacheUnusableError.reason",
+        "CacheUnusableError.osError",
+        "CacheFault",
+        "CacheFault.path",
+        "CacheFault.reason",
+        "CacheFault.osError"
+      ],
+      "reason": "§4's 'a cache fault' bullet: a CHTYPES_CACHE_UNUSABLE (fetch-v1.md §1, the cache faults; public issue #486) carries the path, the reason and the errno name, which the doc names in prose and does not spell per language. TypeScript's class carries them as fields, and CacheFault is the shape of the three, as LoaderErrorFields is a refusal's."
     },
     {
       "binding": "ts",

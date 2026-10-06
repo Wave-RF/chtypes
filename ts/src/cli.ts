@@ -3,15 +3,15 @@
  * `chtypes`: the one CLI every SDK carries, over the v1 fetch layer
  * (`docs/guides/fetch-v1.md`), spelled identically in all four:
  *
- *   chtypes fetch <version>... | --all  [--frozen] [--offline] [--lock <file>] [--update]
+ *   chtypes fetch <version>... | --all  [--frozen] [--offline] [--lock <file>] [--update] [--strict]
  *   chtypes verify                      re-hash every installed library against its verified record
  *   chtypes list                        what is installed, and the versions the registry publishes
  *   chtypes where                       the v1 cache root
  *
  * Options per cli-common: `fetch` takes `--platform`, `--cache`, `--lock`, `--frozen`,
  * `--offline`, `--update`; `verify`, `list` and `where` take `--cache` (`list` also
- * `--offline`); `-h/--help` anywhere, `--version` at top level. The registry base
- * comes only from `CHTYPES_ARTIFACTS_URL`.
+ * `--offline`); every command takes `--strict`; `-h/--help` anywhere, `--version` at
+ * top level. The registry base comes only from `CHTYPES_ARTIFACTS_URL`.
  *
  * Exit statuses: 0 ok, 2 usage, and for every fetch error the status the
  * `errors` table of `spec/fetch-v1/constants.json` gives its code (generated
@@ -33,7 +33,9 @@ import { parseArgs } from 'node:util';
 import { isChtypesError, UsageError } from './abi1/index.js';
 import { withEnvironment } from './env.js';
 import { ERROR_EXIT_CODES } from './ocifetch/constants.gen.js';
+import { strictMode } from './ocifetch/faults.js';
 import {
+  ArtifactMissingError,
   ArtifactUnpublishedError,
   cacheRoot,
   ensure,
@@ -44,7 +46,9 @@ import {
   isPlatformKey,
   listInstalled,
   listTags,
+  missingNotes,
   type PlatformKey,
+  probeCache,
   verifyInstalled,
 } from './ocifetch/index.js';
 
@@ -64,10 +68,10 @@ export interface CliIo {
 
 const USAGE = `usage: chtypes <command> [options]
 
-  chtypes fetch <version>... | --all  [--frozen] [--offline] [--lock <file>] [--update]
-  chtypes verify
-  chtypes list
-  chtypes where
+  chtypes fetch <version>... | --all  [--frozen] [--offline] [--lock <file>] [--update] [--strict]
+  chtypes verify [--strict]
+  chtypes list [--strict]
+  chtypes where [--strict]
 
   <version>   a ClickHouse version: 26.8, 26.8.15 or 26.8.15.10 (no "v", no channel suffix)
   --all       every line (two-part version) the registry publishes for the platform
@@ -77,13 +81,14 @@ const USAGE = `usage: chtypes <command> [options]
   --update    re-resolve every request the lock holds and rewrite it (requires --lock; not with --frozen or --offline)
   --platform  <os>-<arch>: linux-amd64, linux-arm64 or darwin-arm64 (default: this host, or CHTYPES_TARGET)
   --cache     the cache root (default: CHTYPES_CACHE, else \${XDG_CACHE_HOME:-~/.cache}/chtypes/v1)
+  --strict    a cache that cannot be read is CHTYPES_CACHE_UNUSABLE, never not-installed (default: CHTYPES_CACHE_STRICT=1)
   -h, --help  this text;  --version  "chtypes <version>"
 
 the registry base comes only from CHTYPES_ARTIFACTS_URL (default: the public registry)
 
 exit status: 0 ok, 2 usage; a fetch error exits with its code's status in spec/fetch-v1/constants.json
 environment: CHTYPES_ARTIFACTS_URL, CHTYPES_CACHE, CHTYPES_DOWNLOAD_TOKEN, CHTYPES_TRUSTED_KEYS,
-             CHTYPES_ALLOW_UNSIGNED, CHTYPES_TARGET
+             CHTYPES_ALLOW_UNSIGNED, CHTYPES_TARGET, CHTYPES_CACHE_STRICT
 `;
 
 const defaultIo: CliIo = {
@@ -102,6 +107,7 @@ const CONFIG = {
     lock: { type: 'string' },
     platform: { type: 'string' },
     cache: { type: 'string' },
+    strict: { type: 'boolean' },
     help: { type: 'boolean', short: 'h' },
     version: { type: 'boolean' },
   },
@@ -159,7 +165,7 @@ export async function runCli(argv: readonly string[], io: CliIo = defaultIo): Pr
       case 'list':
         return await cmdList(rest, values, io);
       case 'where':
-        return cmdWhere(rest, values, io);
+        return await cmdWhere(rest, values, io);
       default:
         throw new CliUsageError(`unknown command ${JSON.stringify(command)}`);
     }
@@ -181,6 +187,7 @@ function fetchOptions(values: Values, forFetch: boolean): FetchV1Options {
     ...(values.cache !== undefined ? { cacheDir: values.cache } : {}),
     ...(values.platform !== undefined ? { platform: values.platform as PlatformKey } : {}),
     ...(lockPath !== undefined ? { lockPath } : {}),
+    ...(values.strict === true ? { strictCache: true } : {}),
     ...(forFetch
       ? {
           offline: values.offline === true,
@@ -249,7 +256,18 @@ async function cmdVerify(rest: readonly string[], values: Values, io: CliIo): Pr
   const options = fetchOptions(values, false);
   const root = cacheRoot(options.cacheDir);
   const results = await verifyInstalled(options);
-  if (results.length === 0) return EXIT_OK;
+  if (results.length === 0) {
+    // An empty pass must never look like a good one (public issue #486): say
+    // that nothing was verified, and why when the cache says why. In strict
+    // mode it is a failure, so a mounted cache can be health-checked.
+    io.stderr(`chtypes: verified 0 builds under ${root}\n`);
+    await sayNotes(io, options);
+    if (strictMode(options.strictCache)) {
+      throw new ArtifactMissingError(`chtypes: no build is installed under ${root}, and strict mode needs one`);
+    }
+    return EXIT_OK;
+  }
+  await sayNotes(io, options);
   let bad = 0;
   for (const r of results) {
     if (!r.ok) {
@@ -266,15 +284,24 @@ async function cmdList(rest: readonly string[], values: Values, io: CliIo): Prom
   const options = fetchOptions(values, false);
   const installed = await listInstalled(options);
   for (const r of installed) io.stdout(`installed ${r.version} ${r.platform} ${r.dir}\n`);
+  await sayNotes(io, options);
   if (values.offline) return EXIT_OK;
   for (const t of await listTags(options)) io.stdout(`published ${t} support unknown\n`);
   return EXIT_OK;
 }
 
-function cmdWhere(rest: readonly string[], values: Values, io: CliIo): number {
+async function cmdWhere(rest: readonly string[], values: Values, io: CliIo): Promise<number> {
   noArguments('where', rest);
-  io.stdout(`${cacheRoot(fetchOptions(values, false).cacheDir)}\n`);
+  const options = fetchOptions(values, false);
+  // Strict mode checks the root before naming it.
+  if (strictMode(options.strictCache)) await probeCache(options);
+  io.stdout(`${cacheRoot(options.cacheDir)}\n`);
   return EXIT_OK;
+}
+
+/** What the cache says about itself in the default mode: a warning per root or entry it could not read, and the 0.x hint. */
+async function sayNotes(io: CliIo, options: FetchV1Options): Promise<void> {
+  for (const note of await missingNotes(options)) io.stderr(`chtypes: ${note}\n`);
 }
 
 function noArguments(command: string, rest: readonly string[]): void {

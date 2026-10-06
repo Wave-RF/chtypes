@@ -2,10 +2,10 @@
 //! (`docs/guides/fetch-v1.md`), spelled identically in every SDK.
 //!
 //! ```text
-//! chtypes fetch <spelling>... | --all  [--platform <key>] [--cache <dir>] [--lock <file>] [--frozen] [--offline] [--update]
-//! chtypes verify [--cache <dir>]       re-verify the installed cache
-//! chtypes list [--cache <dir>] [--offline]   installed builds, and the published lines unless --offline
-//! chtypes where [--cache <dir>]        the v1 cache root
+//! chtypes fetch <spelling>... | --all  [--platform <key>] [--cache <dir>] [--lock <file>] [--frozen] [--offline] [--update] [--strict]
+//! chtypes verify [--cache <dir>] [--strict]       re-verify the installed cache
+//! chtypes list [--cache <dir>] [--offline] [--strict]   installed builds, and the published lines unless --offline
+//! chtypes where [--cache <dir>] [--strict]        the v1 cache root
 //! ```
 //!
 //! Progress and warnings go to stderr; results go to stdout. Exit statuses
@@ -32,11 +32,11 @@ const EXIT_USAGE: u8 = 2;
 const USAGE: &str = "\
 chtypes: fetch, verify and list ClickHouse artifacts for the chtypes SDKs
 
-  chtypes fetch <spelling>... [--platform <os-arch>] [--cache <dir>] [--lock <file>] [--frozen] [--offline] [--update]
-  chtypes fetch --all         [--platform <os-arch>] [--cache <dir>] [--lock <file>] [--frozen] [--offline] [--update]
-  chtypes verify [--cache <dir>]            re-verify the installed cache
-  chtypes list [--cache <dir>] [--offline]  installed builds; without --offline, published lines too
-  chtypes where [--cache <dir>]             the v1 cache root
+  chtypes fetch <spelling>... [--platform <os-arch>] [--cache <dir>] [--lock <file>] [--frozen] [--offline] [--update] [--strict]
+  chtypes fetch --all         [--platform <os-arch>] [--cache <dir>] [--lock <file>] [--frozen] [--offline] [--update] [--strict]
+  chtypes verify [--cache <dir>] [--strict]            re-verify the installed cache
+  chtypes list [--cache <dir>] [--offline] [--strict]  installed builds; without --offline, published lines too
+  chtypes where [--cache <dir>] [--strict]             the v1 cache root
   chtypes --version                         chtypes <version>
   chtypes -h | --help                       this text
 
@@ -46,9 +46,12 @@ the registry publishes. --lock writes the lock after a fetch; --frozen fetches
 exactly what the lock pins (default file chtypes.lock) and does no discovery;
 --offline reads the cache only; --update re-resolves every locked request and
 rewrites the lock (it requires --lock). `fetch` prints each installed directory.
+--strict (or CHTYPES_CACHE_STRICT=1): a cache that cannot be read is
+CHTYPES_CACHE_UNUSABLE, never not-installed.
 
 Environment: CHTYPES_ARTIFACTS_URL (the only base override), CHTYPES_CACHE,
-CHTYPES_DOWNLOAD_TOKEN, CHTYPES_TRUSTED_KEYS, CHTYPES_ALLOW_UNSIGNED.
+CHTYPES_DOWNLOAD_TOKEN, CHTYPES_TRUSTED_KEYS, CHTYPES_ALLOW_UNSIGNED,
+CHTYPES_CACHE_STRICT.
 ";
 
 /// A usage problem, reported on stderr with exit status 2.
@@ -65,6 +68,7 @@ struct Args {
     frozen: bool,
     offline: bool,
     update: bool,
+    strict: bool,
 }
 
 fn parse(argv: &[String]) -> Result<Args, Usage> {
@@ -80,6 +84,7 @@ fn parse(argv: &[String]) -> Result<Args, Usage> {
             "--frozen" => args.frozen = true,
             "--offline" => args.offline = true,
             "--update" => args.update = true,
+            "--strict" => args.strict = true,
             "--platform" | "--lock" | "--cache" => {
                 let value = it
                     .next()
@@ -114,6 +119,7 @@ fn options(args: &Args) -> Options {
         update: args.update,
         lock_write: args.lock.is_some() && !args.frozen,
         lock_path,
+        strict_cache: args.strict.then_some(true),
         ..Options::default()
     }
 }
@@ -264,8 +270,22 @@ fn cmd_verify(args: &Args) -> Result<u8, Usage> {
         Err(e) => return Ok(report(&e)),
     };
     if results.is_empty() {
+        // An empty pass must never look like a good one (public issue #486):
+        // say that nothing was verified, and why when the cache says why. In
+        // strict mode it is a failure, so a mounted cache can be health-checked.
+        let root = ocifetch::layout::cache_root(args.cache.as_deref())
+            .map(|r| r.display().to_string())
+            .unwrap_or_default();
+        eprintln!("chtypes: verified 0 builds under {root}");
+        print_notes(args);
+        if ocifetch::faults::strict_mode(options(args).strict_cache) {
+            return Ok(report(&Error::ArtifactMissing(format!(
+                "no build is installed under {root}, and strict mode needs one"
+            ))));
+        }
         return Ok(0);
     }
+    print_notes(args);
     let mut bad = 0usize;
     for r in &results {
         if !r.ok {
@@ -293,6 +313,7 @@ fn cmd_list(args: &Args) -> Result<u8, Usage> {
         }
         Err(e) => return Ok(report(&e)),
     }
+    print_notes(args);
     if args.offline {
         return Ok(0);
     }
@@ -312,11 +333,25 @@ fn cmd_where(args: &Args) -> Result<u8, Usage> {
     if !args.spellings.is_empty() || args.all {
         return Err(Usage("where takes no arguments".into()));
     }
+    if ocifetch::faults::strict_mode(options(args).strict_cache) {
+        // Strict mode checks the root before naming it.
+        if let Err(e) = ensure::probe_cache(options(args)) {
+            return Ok(report(&e));
+        }
+    }
     match ocifetch::layout::cache_root(args.cache.as_deref()) {
         Ok(root) => {
             println!("{}", root.display());
             Ok(0)
         }
         Err(e) => Ok(report(&e)),
+    }
+}
+
+/// What the cache says about itself in the default mode: a warning per root
+/// or entry it could not read, and the 0.x hint.
+fn print_notes(args: &Args) {
+    for note in ensure::missing_notes(&options(args)) {
+        eprintln!("chtypes: {note}");
     }
 }

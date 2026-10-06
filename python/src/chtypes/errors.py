@@ -28,6 +28,7 @@ __all__ = [
     "CODE_ARTIFACT_PINNED",
     "CODE_ARTIFACT_UNPUBLISHED",
     "CODE_ARTIFACT_UNTRUSTED",
+    "CODE_CACHE_UNUSABLE",
     "CODE_SOURCE_FORBIDDEN",
     "CODE_SOURCE_INCOMPATIBLE",
     "CODE_SOURCE_UNAUTHORIZED",
@@ -39,6 +40,7 @@ __all__ = [
     "ArtifactPinnedError",
     "ArtifactUnpublishedError",
     "ArtifactUntrustedError",
+    "CacheUnusableError",
     "CallError",
     "ChtypesError",
     "InternalError",
@@ -63,6 +65,7 @@ CODE_SOURCE_UNREACHABLE = "CHTYPES_SOURCE_UNREACHABLE"
 CODE_SOURCE_UNAUTHORIZED = "CHTYPES_SOURCE_UNAUTHORIZED"
 CODE_SOURCE_FORBIDDEN = "CHTYPES_SOURCE_FORBIDDEN"
 CODE_SOURCE_INCOMPATIBLE = "CHTYPES_SOURCE_INCOMPATIBLE"
+CODE_CACHE_UNUSABLE = "CHTYPES_CACHE_UNUSABLE"
 
 # `chs_status` value of CHS_INVALID_ARGUMENT. The binding's own misuse errors
 # carry it so a handler sees one shape whichever side caught the misuse. It is
@@ -253,3 +256,24 @@ class SourceIncompatibleError(ArtifactError):
     """The source served something this fetcher cannot read."""
 
     code = CODE_SOURCE_INCOMPATIBLE
+
+
+class CacheUnusableError(ArtifactError):
+    """A cache directory or entry the fetch layer could not read or write, or
+    one strict mode refuses: never "not installed", never the network's
+    `SourceUnreachableError`, never a raw `OSError`.
+
+    Attributes:
+        path: the exact path that failed.
+        reason: `unreadable_root`, `not_a_directory`, `unreadable_entry`,
+            `unacceptable_record`, `layout_0x` or `unwritable`.
+        os_error: the errno name (`"EACCES"`), or None when there is none.
+    """
+
+    code = CODE_CACHE_UNUSABLE
+
+    def __init__(
+        self, message: str = "", *, path: str, reason: str, os_error: str | None = None
+    ) -> None:
+        super().__init__(message, reason=reason, path=path)
+        self.os_error = os_error

@@ -12,7 +12,9 @@ package ocifetch
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -244,10 +246,10 @@ func (l *layout) ensureSkeleton() error {
 	if l.readOnly {
 		return fmt.Errorf("chtypes: %s is a read-only cache directory", l.dir)
 	}
-	if err := os.MkdirAll(filepath.Join(l.dir, "blobs", "sha256"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(l.dir, "blobs", "sha256"), dirMode); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Join(l.dir, UnpackedDirName()), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(l.dir, UnpackedDirName()), dirMode); err != nil {
 		return err
 	}
 	layoutFile := filepath.Join(l.dir, "oci-layout")
@@ -276,7 +278,7 @@ func (l *layout) writeBlob(d Digest, content []byte) error {
 	if _, err := os.Stat(dest); err == nil {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dest), dirMode); err != nil {
 		return err
 	}
 	return writeFileAtomic(filepath.Dir(dest), dest, content)
@@ -285,7 +287,7 @@ func (l *layout) writeBlob(d Digest, content []byte) error {
 // writeFileAtomic writes content to a temp file under dir, then renames it
 // onto dest, so a reader never observes a partially written file.
 func writeFileAtomic(dir, dest string, content []byte) error {
-	tmp, err := os.CreateTemp(dir, ".tmp-*")
+	tmp, err := createTempFile(dir, ".tmp-")
 	if err != nil {
 		return err
 	}
@@ -329,7 +331,7 @@ func (l *layout) addIndexEntry(desc Descriptor, beforeRename func()) error {
 			return err
 		}
 		out = append(out, '\n')
-		tmp, err := os.CreateTemp(l.dir, ".tmp-index-*")
+		tmp, err := createTempFile(l.dir, ".tmp-index-")
 		if err != nil {
 			return err
 		}
@@ -377,6 +379,48 @@ func mergeDescriptor(idx *ociLayoutIndex, desc Descriptor) {
 		}
 	}
 	idx.Manifests = append(idx.Manifests, desc)
+}
+
+// zeroXMinorPattern matches a 0.x registry directory's per-line entry, `26.8`.
+var zeroXMinorPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+$`)
+
+// zeroXShape names the `<minor>/manifest.json` a 0.x registry directory holds,
+// when dir has that shape: no oci-layout, no unpacked/, and at least one
+// `<minor>/manifest.json` (the first by name). A missing oci-layout alone is
+// not the shape (a Python-written 1.x cache has none), and a directory that
+// has unpacked/ is a 1.x cache whoever wrote it. It is "" for anything else,
+// including a directory that is missing or cannot be read.
+func zeroXShape(dir string) string {
+	for _, name := range []string{"oci-layout", "unpacked"} {
+		if _, err := os.Lstat(filepath.Join(dir, name)); !errors.Is(err, fs.ErrNotExist) {
+			return ""
+		}
+	}
+	entries, err := os.ReadDir(dir) // sorted by name
+	if err != nil {
+		return ""
+	}
+	for _, e := range entries {
+		if !e.IsDir() || !zeroXMinorPattern.MatchString(e.Name()) {
+			continue
+		}
+		if fi, err := os.Stat(filepath.Join(dir, e.Name(), "manifest.json")); err == nil && fi.Mode().IsRegular() {
+			return e.Name() + "/manifest.json"
+		}
+	}
+	return ""
+}
+
+// zeroXHint is the sentence a CHTYPES_ARTIFACT_MISSING answer from a cache with
+// the 0.x shape carries (docs/guides/fetch-v1.md, "Upgrading from 0.x"), or ""
+// when dir does not have it.
+func zeroXHint(dir string) string {
+	shape := zeroXShape(dir)
+	if shape == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s holds a 0.x registry (%s); chtypes 1.x uses an OCI layout at "+
+		"${XDG_CACHE_HOME:-~/.cache}/chtypes/v1 — point CHTYPES_CACHE at an empty or 1.x directory.", dir, shape)
 }
 
 // readIndexEntries lists every descriptor currently in index.json, for the
@@ -431,7 +475,7 @@ func (l *layout) writeVerifiedRecord(manifestDigest Digest, unpackDir string, re
 	}
 	out, err := encodeRecord(rec)
 	if err == nil {
-		err = os.MkdirAll(filepath.Dir(dest), 0o755)
+		err = os.MkdirAll(filepath.Dir(dest), dirMode)
 	}
 	if err == nil {
 		err = writeFileAtomic(unpackDir, filepath.Join(unpackDir, CacheVerifiedRecord), out)

@@ -41,6 +41,7 @@ from chtypes._ocifetch._errors import (
     SourceUnauthorizedError,
     SourceUnreachableError,
 )
+from chtypes._ocifetch._faults import probe_roots, unwritable
 from chtypes._ocifetch._goldens import GoldensCandidate, select_goldens, statement_revision
 from chtypes._ocifetch._http import (
     Clock,
@@ -62,6 +63,7 @@ from chtypes._ocifetch._layout import (
     unpacked_dir_for,
     update_index_json,
     write_verified_install,
+    zero_x_hint,
 )
 from chtypes._ocifetch._lock import Lock, LockPin, load_lock, new_lock, save_lock
 from chtypes._ocifetch._oci import (
@@ -90,8 +92,10 @@ __all__ = [
     "ensure",
     "fetch_signed",
     "list_installed",
+    "missing_notes",
     "resolve_installed",
     "verify_installed",
+    "with_notes",
 ]
 
 
@@ -132,6 +136,11 @@ class Options:
     lock_path: str | os.PathLike[str] | None = None
     lock_write: bool = False
     update: bool = False
+    # Strict mode (public issue #486): every fault of the cache and of an
+    # existing system dir is a `CacheUnusableError`, never "not installed",
+    # and never a fall-through to a system dir. None reads
+    # CHTYPES_CACHE_STRICT ("1" is on), else off.
+    strict_cache: bool | None = None
     clock: Clock = field(default_factory=Clock)
     retry: RetryPolicy = field(default_factory=RetryPolicy)
     # Test-only: installed before the cache's index.json atomic rename, to
@@ -156,6 +165,11 @@ class Options:
 
     def resolved_platform(self) -> str:
         return self.platform or detect_host_platform()
+
+    def resolved_strict(self) -> bool:
+        if self.strict_cache is not None:
+            return self.strict_cache
+        return os.environ.get(C.ENV_CACHE_STRICT_NAME) == "1"
 
 
 @dataclass(frozen=True)
@@ -959,15 +973,37 @@ def ensure(request: Request, options: Options) -> Resolved:
     if options.lock_path is not None and os.path.exists(options.lock_path):
         lock = load_lock(options.lock_path)
 
+    roots = search_roots(options.cache_dir, options.system_dirs)
+    try:
+        return _ensure(request, platform_key, options, lock, roots)
+    except OSError as e:
+        # A write the fetch layer needed that failed, under the cache: one
+        # class in every mode, never a raw OSError (public issue #486).
+        typed = unwritable(e, roots)
+        if typed is None:
+            raise
+        raise typed from e
+
+
+def _ensure(
+    request: Request, platform_key: str, options: Options, lock: Lock | None, roots: Sequence[Path]
+) -> Resolved:
     try:
         if options.offline:
             resolved = resolve_installed(request, platform_key, options)
             if resolved is None:
                 raise ArtifactMissingError(
-                    f"chtypes: no installed artifact for {request.spelling} "
-                    f"({platform_key}); offline"
+                    with_notes(
+                        f"chtypes: no installed artifact for {request.spelling} "
+                        f"({platform_key}); offline",
+                        missing_notes(options),
+                    )
                 )
             return resolved
+
+        if options.resolved_strict():
+            # Strict: the cache is checked before anything is fetched into it.
+            probe_roots(roots, strict=True)
 
         if options.frozen:
             return _ensure_frozen(request, platform_key, options, lock)
@@ -1121,6 +1157,27 @@ def _verify_preseeded_entries(roots: Sequence[Path], trusted_keys: tuple[Trusted
                 already_verified.add(digest)
 
 
+def missing_notes(options: Options) -> list[str]:
+    """What a CHTYPES_ARTIFACT_MISSING answer from the cache `options` names
+    adds to its message, each a complete sentence: the default mode's warning
+    for every unusable root or unreadable entry, then the 0.x hint when the
+    cache is a 0.x registry directory (docs/guides/fetch-v1.md §1 and
+    "Upgrading from 0.x"; public issue #486). The registry's own MISSING adds
+    the same notes as the offline fetch's, and the CLI's list and verify print
+    them."""
+    roots = search_roots(options.cache_dir, options.system_dirs)
+    notes = probe_roots(roots, strict=False)
+    hint = zero_x_hint(roots[0])
+    return [*notes, hint] if hint is not None else notes
+
+
+def with_notes(message: str, notes: Sequence[str]) -> str:
+    """`message` with `notes`, each a complete sentence, appended."""
+    if not notes:
+        return message
+    return f"{message}. {' '.join(notes)}"
+
+
 def resolve_installed(request: Request, platform: str, options: Options) -> Resolved | None:
     """Cache-only: never touches the network (docs/guides/fetch-v1.md "The seam").
 
@@ -1133,6 +1190,7 @@ def resolve_installed(request: Request, platform: str, options: Options) -> Reso
     was only ever pre-seeded (`oras copy --to-oci-layout`), never fetched.
     """
     roots = search_roots(options.cache_dir, options.system_dirs)
+    warnings = probe_roots(roots, options.resolved_strict())
     _verify_preseeded_entries(roots, options.resolved_trusted_keys())
     candidates = [
         (dir_path, record)
@@ -1150,6 +1208,7 @@ def resolve_installed(request: Request, platform: str, options: Options) -> Reso
         request_spelling=request.spelling,
         already_installed=True,
         source=_source_for_dir(dir_path, roots),
+        warnings=warnings,
     )
 
 
@@ -1157,6 +1216,7 @@ def list_installed(options: Options) -> list[Resolved]:
     """Every verified install across the cache and the read-only system
     directories, cache-only (docs/guides/fetch-v1.md "The seam")."""
     roots = search_roots(options.cache_dir, options.system_dirs)
+    warnings = probe_roots(roots, options.resolved_strict())
     return [
         _record_to_resolved(
             dir_path,
@@ -1164,6 +1224,7 @@ def list_installed(options: Options) -> list[Resolved]:
             request_spelling=record.version,
             already_installed=True,
             source=_source_for_dir(dir_path, roots),
+            warnings=warnings,
         )
         for dir_path, record in list_verified_records(roots)
     ]
@@ -1173,6 +1234,7 @@ def verify_installed(options: Options) -> list[VerifyResult]:
     """Re-hash every installed library's on-disk bytes against its own
     `verified.json` record, cache-only."""
     roots = search_roots(options.cache_dir, options.system_dirs)
+    probe_roots(roots, options.resolved_strict())
     out = []
     for dir_path, record in list_verified_records(roots):
         lib_path = dir_path / record.library

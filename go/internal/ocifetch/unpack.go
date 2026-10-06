@@ -41,7 +41,7 @@ type unpackResult struct {
 // half-unpacked directory is ever left where a later --offline read could
 // find it.
 func unpackLibrary(layerBytes []byte, parentDir, libraryRelPath string) (result *unpackResult, err error) {
-	tmp, err := os.MkdirTemp(parentDir, "unpack-*")
+	tmp, err := mkdirTemp(parentDir, "unpack-")
 	if err != nil {
 		return nil, fmt.Errorf("chtypes: creating a temp unpack directory: %w", err)
 	}
@@ -88,11 +88,11 @@ func unpackLibrary(layerBytes []byte, parentDir, libraryRelPath string) (result 
 		dest := filepath.Join(tmp, filepath.FromSlash(name))
 		switch hdr.Typeflag {
 		case tar.TypeDir:
-			if merr := os.MkdirAll(dest, 0o755); merr != nil {
+			if merr := os.MkdirAll(dest, dirMode); merr != nil {
 				return nil, merr
 			}
 		case tar.TypeReg:
-			if merr := os.MkdirAll(filepath.Dir(dest), 0o755); merr != nil {
+			if merr := os.MkdirAll(filepath.Dir(dest), dirMode); merr != nil {
 				return nil, merr
 			}
 			n, sum, werr := writeCapped(dest, tr, &total, MaxUnpackedBytes)
@@ -145,7 +145,7 @@ func normalizeTarName(name string) string {
 // passes MaxUnpackedBytes; tests pass a smaller cap to exercise this path
 // without writing gigabytes of data.
 func writeCapped(dest string, r io.Reader, total *int64, maxUnpacked int64) (int64, [32]byte, error) {
-	f, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	f, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_EXCL, fileMode)
 	if err != nil {
 		return 0, [32]byte{}, err
 	}

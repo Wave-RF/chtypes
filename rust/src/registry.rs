@@ -70,6 +70,11 @@ pub struct FetchOptions {
     pub trusted_keys: Option<Vec<String>>,
     /// An access token; `None` is `$CHTYPES_DOWNLOAD_TOKEN`.
     pub token: Option<String>,
+    /// Strict mode: every fault of the cache and of an existing system dir is
+    /// [`Error::CacheUnusable`] naming the path, never "not installed", and
+    /// never a fall-through to a system dir. `None` reads
+    /// `CHTYPES_CACHE_STRICT` (`1` is on), else off.
+    pub strict_cache: Option<bool>,
 }
 
 impl FetchOptions {
@@ -86,6 +91,7 @@ impl FetchOptions {
             lock_write: self.lock_write,
             update: self.update,
             allow_unsigned: self.allow_unsigned,
+            strict_cache: self.strict_cache,
             trusted_keys: self.trusted_keys.clone(),
             token: self.token.clone(),
             clock: None,
@@ -226,14 +232,18 @@ impl Registry {
                 ensure::ensure(request, self.fetch.to_options())?
             }
             None => {
-                return Err(Error::ArtifactMissing(format!(
+                let message = format!(
                     "nothing installed answers {request} for {platform}{}",
                     if self.autofetch {
                         ""
                     } else {
                         " (autofetch is off: set CHTYPES_AUTOFETCH=1 or RegistryOptions::autofetch)"
                     }
-                )));
+                );
+                // The fetch layer's own sentences about the cache (the 0.x
+                // hint), the same ones its offline fetch adds.
+                let notes = ensure::missing_notes(&self.fetch.to_options());
+                return Err(Error::ArtifactMissing(ensure::with_notes(&message, &notes)));
             }
         };
         // The adapter: the fetch layer's record to the loader's input. The
@@ -322,6 +332,81 @@ mod tests {
             panic!("want ArtifactMissing, got {err:?}")
         };
         assert!(m.contains("25.8") && m.contains("linux-amd64"), "{m}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The registry's own MISSING carries the fetch layer's 0.x hint, the same
+    /// sentence the offline fetch gives (public issue #486).
+    #[test]
+    fn a_missing_request_from_a_zero_x_registry_names_it() {
+        let dir = std::env::temp_dir().join(format!(
+            "chtypes_registry_zero_x_{}_{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(dir.join("26.1")).unwrap();
+        std::fs::write(dir.join("26.1").join("manifest.json"), b"{}").unwrap();
+        let r = Registry::new(RegistryOptions {
+            fetch: FetchOptions {
+                platform: Some("linux-amd64".to_string()),
+                cache_dir: Some(dir.to_string_lossy().into_owned()),
+                system_dirs: Some(Vec::new()),
+                ..Default::default()
+            },
+            autofetch: Some(false),
+            ..Default::default()
+        })
+        .unwrap();
+        let err = r.for_version("26.1").unwrap_err();
+        let Error::ArtifactMissing(m) = &err else {
+            panic!("want ArtifactMissing, got {err:?}")
+        };
+        let hint = format!(
+            "{} holds a 0.x registry (26.1/manifest.json); chtypes 1.x uses an OCI layout at",
+            dir.display()
+        );
+        assert!(m.contains(&hint), "{m}");
+        assert!(
+            !dir.join("oci-layout").exists(),
+            "a lookup wrote into the 0.x registry"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// With `strict_cache`, a 0.x registry is `Error::CacheUnusable` naming
+    /// the path and the reason, from `for_version` and `installed` alike
+    /// (public issue #486).
+    #[test]
+    fn a_strict_registry_refuses_a_zero_x_registry_as_cache_unusable() {
+        let dir = std::env::temp_dir().join(format!(
+            "chtypes_registry_strict_{}_{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(dir.join("26.1")).unwrap();
+        std::fs::write(dir.join("26.1").join("manifest.json"), b"{}").unwrap();
+        let r = Registry::new(RegistryOptions {
+            fetch: FetchOptions {
+                platform: Some("linux-amd64".to_string()),
+                cache_dir: Some(dir.to_string_lossy().into_owned()),
+                system_dirs: Some(Vec::new()),
+                strict_cache: Some(true),
+                ..Default::default()
+            },
+            autofetch: Some(false),
+            ..Default::default()
+        })
+        .unwrap();
+        let err = r.for_version("26.1").unwrap_err();
+        let Error::CacheUnusable(f) = &err else {
+            panic!("want CacheUnusable, got {err:?}")
+        };
+        assert_eq!(
+            (f.path.as_path(), f.reason.as_str(), f.os_error.as_deref()),
+            (dir.as_path(), "layout_0x", None)
+        );
+        assert_eq!(err.code(), Some("CHTYPES_CACHE_UNUSABLE"));
+        assert!(matches!(r.installed(), Err(Error::CacheUnusable(_))));
         let _ = std::fs::remove_dir_all(dir);
     }
 

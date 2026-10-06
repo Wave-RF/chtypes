@@ -5,7 +5,7 @@
  * does not own. Nothing here needs a library: a fetch that would need one is refused earlier.
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -93,11 +93,70 @@ describe('commands that touch no network', () => {
   it('verify and list --offline on an empty cache succeed and say nothing is installed', async () => {
     const verify = await run('verify', '--cache', cache);
     expect(verify.code).toBe(EXIT_OK);
-    expect(verify.out + verify.err).toBe('');
+    expect(verify.out).toBe('');
+    // An empty pass must never look like a good one (public issue #486).
+    expect(verify.err).toBe(`chtypes: verified 0 builds under ${path.resolve(cache)}\n`);
     const list = await run('list', '--offline', '--cache', cache);
     expect(list.code).toBe(EXIT_OK);
     expect(list.out).toBe('');
   });
+
+  it('verify and fetch --offline name a 0.x registry used as the cache, and write nothing into it (public issue #486)', async () => {
+    const zeroX = path.join(tmp, 'zero-x');
+    mkdirSync(path.join(zeroX, '26.1'), { recursive: true });
+    writeFileSync(path.join(zeroX, '26.1', 'manifest.json'), '{}');
+    const hint = `${zeroX} holds a 0.x registry (26.1/manifest.json); chtypes 1.x uses an OCI layout at `;
+    const verify = await run('verify', '--cache', zeroX);
+    expect(verify.code).toBe(EXIT_OK);
+    expect(verify.err).toContain(`verified 0 builds under ${zeroX}`);
+    expect(verify.err).toContain(hint);
+    const fetch = await run('fetch', '26.1', '--offline', '--platform', 'linux-arm64', '--cache', zeroX);
+    expect(fetch.code).toBe(ERROR_EXIT_CODES['CHTYPES_ARTIFACT_MISSING']);
+    expect(fetch.err).toContain(hint);
+    expect(existsSync(path.join(zeroX, 'oci-layout'))).toBe(false);
+  });
+
+  it('--strict makes every command\'s cache fault CHTYPES_CACHE_UNUSABLE and a verify of nothing CHTYPES_ARTIFACT_MISSING (public issue #486)', async () => {
+    const empty = path.join(tmp, 'empty');
+    mkdirSync(empty);
+    const verify = await run('verify', '--strict', '--cache', empty);
+    expect(verify.code).toBe(ERROR_EXIT_CODES['CHTYPES_ARTIFACT_MISSING']);
+    expect(verify.err).toContain('CHTYPES_ARTIFACT_MISSING');
+    vi.stubEnv('CHTYPES_CACHE_STRICT', '1');
+    expect((await run('verify', '--cache', empty)).code).toBe(ERROR_EXIT_CODES['CHTYPES_ARTIFACT_MISSING']);
+    vi.stubEnv('CHTYPES_CACHE_STRICT', '');
+    const where = await run('where', '--strict', '--cache', empty);
+    expect({ code: where.code, out: where.out }).toEqual({ code: EXIT_OK, out: `${path.resolve(empty)}\n` });
+    const zeroX = path.join(tmp, 'zero-x');
+    mkdirSync(path.join(zeroX, '26.1'), { recursive: true });
+    writeFileSync(path.join(zeroX, '26.1', 'manifest.json'), '{}');
+    for (const argv of [['where', '--strict'], ['list', '--offline', '--strict'], ['verify', '--strict'], ['fetch', '26.1', '--offline', '--platform', 'linux-arm64', '--strict']]) {
+      const r = await run(...argv, '--cache', zeroX);
+      expect({ argv, code: r.code, out: r.out }).toEqual({ argv, code: ERROR_EXIT_CODES['CHTYPES_CACHE_UNUSABLE'], out: '' });
+      expect(r.err).toContain(`${zeroX} is unusable as a cache: layout_0x`);
+      expect(r.err).toContain('CHTYPES_CACHE_UNUSABLE');
+    }
+  });
+
+  it.skipIf(typeof process.geteuid === 'function' && process.geteuid() === 0)(
+    'an unreadable cache is not installed with a warning by default, and CHTYPES_CACHE_UNUSABLE with --strict (public issue #486)',
+    async () => {
+      const locked = path.join(tmp, 'locked');
+      mkdirSync(path.join(locked, 'unpacked', 'sha256'), { recursive: true });
+      chmodSync(locked, 0);
+      try {
+        expect(() => readdirSync(locked)).toThrow(/EACCES/);
+        const lenient = await run('list', '--offline', '--cache', locked);
+        expect({ code: lenient.code, out: lenient.out }).toEqual({ code: EXIT_OK, out: '' });
+        expect(lenient.err).toContain(`${locked} could not be read (EACCES); treated as not installed. Set CHTYPES_CACHE_STRICT=1 to make this an error.`);
+        const strict = await run('list', '--offline', '--strict', '--cache', locked);
+        expect(strict.code).toBe(ERROR_EXIT_CODES['CHTYPES_CACHE_UNUSABLE']);
+        expect(strict.err).toContain(`${locked} is unusable as a cache: unreadable_root (EACCES)`);
+      } finally {
+        chmodSync(locked, 0o755);
+      }
+    },
+  );
 
   it('fetch --offline of something not installed exits with CHTYPES_ARTIFACT_MISSING\'s status', async () => {
     const r = await run('fetch', '26.8', '--offline', '--cache', cache);

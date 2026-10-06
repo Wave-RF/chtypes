@@ -2,10 +2,10 @@
 (docs/guides/fetch-v1.md).
 
     chtypes fetch <spelling>... | --all  [--platform <os-arch>] [--cache <dir>] [--lock <file>]
-                                         [--frozen] [--offline] [--update]
-    chtypes verify [--cache <dir>]       re-verify every installed build
-    chtypes list   [--cache <dir>] [--offline]
-    chtypes where  [--cache <dir>]       the cache root
+                                         [--frozen] [--offline] [--update] [--strict]
+    chtypes verify [--cache <dir>] [--strict]   re-verify every installed build
+    chtypes list   [--cache <dir>] [--offline] [--strict]
+    chtypes where  [--cache <dir>] [--strict]   the cache root
 
 A spelling is `26.8`, `26.8.15` or `26.8.15.10`. Exit statuses come from the
 `errors` table of spec/fetch-v1/constants.json (generated into the fetch layer
@@ -25,10 +25,11 @@ from collections.abc import Sequence
 from . import __version__ as chtypes_version
 from . import _ocifetch as fetch_layer
 from ._ocifetch import _constants as C
-from ._ocifetch._ensure import _translate_transport_error, detect_host_platform
-from ._ocifetch._errors import ArtifactCorruptError, FetchError
+from ._ocifetch._ensure import _translate_transport_error, detect_host_platform, missing_notes
+from ._ocifetch._errors import ArtifactCorruptError, ArtifactMissingError, FetchError
+from ._ocifetch._faults import probe_roots
 from ._ocifetch._http import FetchPolicy, RetryPolicy, TransportError, fetch_from_bases
-from ._ocifetch._layout import resolve_cache_root
+from ._ocifetch._layout import resolve_cache_root, search_roots
 from ._ocifetch._lock import load_lock
 from .errors import ChtypesError
 from .registry import FetchOptions
@@ -74,6 +75,12 @@ def build_parser() -> argparse.ArgumentParser:
     def cache_option(p: argparse.ArgumentParser) -> None:
         p.add_argument(
             "--cache", metavar="<dir>", help="the cache directory (default: CHTYPES_CACHE)"
+        )
+        p.add_argument(
+            "--strict",
+            action="store_true",
+            help="a cache that cannot be read is CHTYPES_CACHE_UNUSABLE, never not-installed "
+            "(default: CHTYPES_CACHE_STRICT=1)",
         )
 
     fetch = sub.add_parser(
@@ -151,6 +158,7 @@ def _options(args: argparse.Namespace, *, platform: str | None = None):
         lock_write = True
     fetch = FetchOptions(
         cache_dir=getattr(args, "cache", None),
+        strict_cache=True if getattr(args, "strict", False) else None,
         offline=getattr(args, "offline", False),
         frozen=getattr(args, "frozen", False),
         lock_path=lock_path,
@@ -225,8 +233,29 @@ def _cmd_fetch(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _say_notes(options) -> None:
+    """What the cache says about itself in the default mode: a warning per root
+    or entry it could not read, and the 0.x hint."""
+    for note in missing_notes(options):
+        _say(f"chtypes: {note}")
+
+
 def _cmd_verify(args: argparse.Namespace) -> int:
-    results = fetch_layer.verify_installed(FetchOptions(cache_dir=args.cache)._to_options())
+    options = _options(args)
+    results = fetch_layer.verify_installed(options)
+    if not results:
+        # An empty pass must never look like a good one (public issue #486):
+        # say that nothing was verified, and why when the cache says why. In
+        # strict mode it is a failure, so a mounted cache can be health-checked.
+        root = resolve_cache_root(args.cache)
+        _say(f"chtypes: verified 0 builds under {root}")
+        _say_notes(options)
+        if options.resolved_strict():
+            raise ArtifactMissingError(
+                f"chtypes: no build is installed under {root}, and strict mode needs one"
+            )
+        return EXIT_OK
+    _say_notes(options)
     failed = 0
     for r in results:
         if not r.ok:
@@ -239,10 +268,12 @@ def _cmd_verify(args: argparse.Namespace) -> int:
 
 
 def _cmd_list(args: argparse.Namespace) -> int:
-    options = FetchOptions(cache_dir=args.cache, offline=args.offline)._to_options()
+    options = _options(args)
     installed = fetch_layer.list_installed(options)
     for r in sorted(installed, key=lambda r: (r.version, r.platform)):
         sys.stdout.write(f"installed {r.version} {r.platform} {r.dir}\n")
+    sys.stdout.flush()
+    _say_notes(options)
     if not args.offline:
         for tag in _published_tags(options):
             sys.stdout.write(f"published {tag} support unknown\n")
@@ -251,6 +282,10 @@ def _cmd_list(args: argparse.Namespace) -> int:
 
 
 def _cmd_where(args: argparse.Namespace) -> int:
+    options = _options(args)
+    if options.resolved_strict():
+        # Strict mode checks the root before naming it.
+        probe_roots(search_roots(options.cache_dir, options.system_dirs), strict=True)
     sys.stdout.write(f"{resolve_cache_root(args.cache)}\n")
     return EXIT_OK
 

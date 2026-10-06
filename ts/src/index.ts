@@ -73,6 +73,8 @@ export {
   ArtifactPinnedError,
   ArtifactUnpublishedError,
   ArtifactUntrustedError,
+  type CacheFault,
+  CacheUnusableError,
   type Resolved,
   SourceForbiddenError,
   SourceIncompatibleError,

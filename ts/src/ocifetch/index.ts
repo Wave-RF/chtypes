@@ -9,7 +9,18 @@
 
 export { keyIdOfRawKey } from './dsse.js';
 export { cacheRoot, isFilesystemError } from './layout.js';
-export { ensure, fetchSigned, listInstalled, listTags, resolveInstalled, satisfiesRequest, verifyInstalled } from './ensure.js';
+export {
+  ensure,
+  fetchSigned,
+  listInstalled,
+  listTags,
+  missingNotes,
+  probeCache,
+  resolveInstalled,
+  satisfiesRequest,
+  verifyInstalled,
+  withNotes,
+} from './ensure.js';
 export type { FetchSignedResult } from './ensure.js';
 export {
   ArtifactCorruptError,
@@ -17,13 +28,14 @@ export {
   ArtifactPinnedError,
   ArtifactUnpublishedError,
   ArtifactUntrustedError,
+  CacheUnusableError,
   FetchV1Error,
   SourceForbiddenError,
   SourceIncompatibleError,
   SourceUnauthorizedError,
   SourceUnreachableError,
 } from './errors.js';
-export type { FetchV1ErrorCode } from './errors.js';
+export type { CacheFault, FetchV1ErrorCode } from './errors.js';
 export type {
   ArtifactPredicate,
   Clock,

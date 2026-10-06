@@ -164,6 +164,7 @@ const (
 	CodeSourceForbidden      = ocifetch.CodeSourceForbidden
 	CodeSourceIncompatible   = ocifetch.CodeSourceIncompatible
 	CodeArtifactIncompatible = ocifetch.CodeArtifactIncompatible
+	CodeCacheUnusable        = ocifetch.CodeCacheUnusable
 )
 
 // The sentinels, one per code: errors.Is(err, chtypes.ErrArtifactCorrupt) is
@@ -180,6 +181,7 @@ var (
 	ErrSourceForbidden      = ocifetch.ErrSourceForbidden
 	ErrSourceIncompatible   = ocifetch.ErrSourceIncompatible
 	ErrArtifactIncompatible = errors.New(string(CodeArtifactIncompatible))
+	ErrCacheUnusable        = ocifetch.ErrCacheUnusable
 )
 
 func sentinel(c ErrorCode) error {
@@ -205,11 +207,15 @@ type ArtifactError struct {
 	// Reason, Path, Want and Got describe a loader refusal: Reason is one of
 	// sdk.json's loader.refusals reasons, with ":<symbol>" or ":<field>"
 	// appended where it gives a suffix; Want and Got only where the refusal
-	// names both.
-	Reason string
-	Path   string
-	Want   string
-	Got    string
+	// names both. For CodeCacheUnusable, Path is the exact path that failed,
+	// Reason one of unreadable_root, not_a_directory, unreadable_entry,
+	// unacceptable_record, layout_0x and unwritable, and OSError the errno
+	// name ("EACCES") when there is one.
+	Reason  string
+	Path    string
+	Want    string
+	Got     string
+	OSError string
 	// Msg is the complete message.
 	Msg string
 	// Err is the underlying cause, when there is one.
@@ -233,7 +239,10 @@ func fetchError(err error) error {
 	}
 	var fe *ocifetch.FetchError
 	if errors.As(err, &fe) {
-		return &ArtifactError{Code: fe.Code, Request: fe.Request, Platform: fe.Platform, Source: fe.Source, Msg: fe.Msg, Err: fe}
+		return &ArtifactError{
+			Code: fe.Code, Request: fe.Request, Platform: fe.Platform, Source: fe.Source,
+			Path: fe.Path, Reason: fe.Reason, OSError: fe.OSError, Msg: fe.Msg, Err: fe,
+		}
 	}
 	return usageError("%s", err.Error())
 }

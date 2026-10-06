@@ -31,6 +31,8 @@ __all__ = [
     "search_roots",
     "unpacked_dir_for",
     "write_verified_install",
+    "zero_x_hint",
+    "zero_x_shape",
 ]
 
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
@@ -221,11 +223,34 @@ class VerifiedRecord:
         )
 
 
+# The modes a new file and a new directory are asked for; the process umask
+# alone takes bits away (docs/guides/fetch-v1.md §1, modes; public issue #486).
+# At the usual umask 022 a cache one uid writes is readable by every other uid,
+# and readable is never writable. `tempfile.mkstemp` (0600) is never used for a
+# file that is renamed into the cache: the private mode would survive the
+# rename, and another uid would read the cache as empty.
+_FILE_MODE = 0o666
+_TEMP_ATTEMPTS = 64
+
+
+def _create_temp_file(directory: Path, prefix: str) -> tuple[int, str]:
+    """A new file named `prefix` plus a random suffix in `directory`, opened
+    for writing, with mode 0666 less the umask: `(fd, path)`."""
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+    for _ in range(_TEMP_ATTEMPTS):
+        name = os.path.join(str(directory), prefix + os.urandom(6).hex())
+        try:
+            return os.open(name, flags, _FILE_MODE), name
+        except FileExistsError:
+            continue
+    raise FileExistsError(f"chtypes: no free temporary name for {prefix}* in {directory}")
+
+
 def _atomic_write(
     path: Path, data: bytes, *, before_rename: Callable[[], None] | None = None
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=".tmp-")
+    fd, tmp_name = _create_temp_file(path.parent, ".tmp-")
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
@@ -361,15 +386,80 @@ def list_verified_records(
     out: list[tuple[Path, VerifiedRecord]] = []
     for root in roots:
         unpacked_root = root / C.CACHE_UNPACKED_DIR
-        if not unpacked_root.is_dir():
+        # One answer on every Python: a root that cannot be listed reads as
+        # absent here (`Path.is_dir()` re-raised EACCES before 3.14 and hid it
+        # from 3.14), and the probe in `_faults` warns or, in strict mode,
+        # raises (public issue #486).
+        try:
+            with os.scandir(unpacked_root) as it:
+                names = sorted(e.name for e in it if _is_dir_entry(e))
+        except OSError:
             continue
-        for entry in sorted(unpacked_root.iterdir()):
-            if not entry.is_dir() or not _HEX64.match(entry.name):
+        for name in names:
+            if not _HEX64.match(name):
                 continue
+            entry = unpacked_root / name
             record = read_verified_record(entry)
             if record is not None:
                 out.append((entry, record))
     return out
+
+
+def _is_dir_entry(entry: os.DirEntry[str]) -> bool:
+    try:
+        return entry.is_dir(follow_symlinks=False)
+    except OSError:
+        return False
+
+
+_ZERO_X_MINOR = re.compile(r"^[0-9]+\.[0-9]+$")
+
+
+def zero_x_shape(root: Path) -> str | None:
+    """The `<minor>/manifest.json` a 0.x registry directory holds, when `root`
+    has that shape: no `oci-layout`, no `unpacked/`, and at least one
+    `<minor>/manifest.json` (the first by name). A missing `oci-layout` alone
+    is not the shape (this binding's own 1.x caches have none), and a
+    directory with `unpacked/` is a 1.x cache whoever wrote it. `None` for
+    anything else, including a directory that is missing or cannot be read."""
+    for name in ("oci-layout", "unpacked"):
+        try:
+            os.lstat(root / name)
+        except FileNotFoundError:
+            continue
+        except OSError:
+            return None
+        return None
+    try:
+        names = sorted(os.listdir(root))
+    except OSError:
+        return None
+    for name in names:
+        if not _ZERO_X_MINOR.match(name):
+            continue
+        try:
+            if not os.path.isdir(root / name) or os.path.islink(root / name):
+                continue
+            if os.path.isfile(root / name / "manifest.json") and not os.path.islink(
+                root / name / "manifest.json"
+            ):
+                return f"{name}/manifest.json"
+        except OSError:
+            continue
+    return None
+
+
+def zero_x_hint(root: Path) -> str | None:
+    """The sentence a CHTYPES_ARTIFACT_MISSING answer from a cache with the 0.x
+    shape carries (docs/guides/fetch-v1.md, "Upgrading from 0.x"), else
+    `None`."""
+    shape = zero_x_shape(root)
+    if shape is None:
+        return None
+    return (
+        f"{root} holds a 0.x registry ({shape}); chtypes 1.x uses an OCI layout at "
+        "${XDG_CACHE_HOME:-~/.cache}/chtypes/v1 — point CHTYPES_CACHE at an empty or 1.x directory."
+    )
 
 
 def _read_index_or_default(index_path: Path) -> dict:
@@ -408,7 +498,7 @@ def update_index_json(
         updated = mutate(base)
         data = json.dumps(updated, sort_keys=True).encode("utf-8")
         index_path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp_name = tempfile.mkstemp(dir=str(index_path.parent), prefix=".tmp-")
+        fd, tmp_name = _create_temp_file(index_path.parent, ".tmp-")
         try:
             with os.fdopen(fd, "wb") as f:
                 f.write(data)

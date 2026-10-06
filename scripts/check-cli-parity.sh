@@ -33,7 +33,10 @@ help-after-arguments list --offline -h
 version --version
 list-offline-empty list --offline --cache @EMPTY@
 verify-empty verify --cache @EMPTY@
+verify-empty-strict verify --strict --cache @EMPTY@
+list-offline-empty-strict list --offline --strict --cache @EMPTY@
 where where --cache @CACHE@
+where-strict where --strict --cache @CACHE@
 usage-no-arguments
 usage-unknown-command frobnicate
 usage-short-version -V
@@ -166,10 +169,11 @@ case "$1" in
     exit 0 ;;
   verify | list | where)
     cmd="$1"; shift
-    cache=""
+    cache=""; strict=0
     while [ $# -gt 0 ]; do
       case "$1" in
         --cache) cache="$2"; shift ;;
+        --strict) strict=1 ;;
         --offline) [ "$cmd" = list ] || bad ;;
         --platform) [ "$brk" = platform-accepted ] || bad; shift ;;
         *) bad ;;
@@ -177,6 +181,12 @@ case "$1" in
       shift
     done
     if [ "$cmd" = where ]; then echo "$cache"; fi
+    # A verify that verified nothing says so on stderr, and in strict mode
+    # fails as CHTYPES_ARTIFACT_MISSING (public issue #486).
+    if [ "$cmd" = verify ]; then
+      echo "chtypes: verified 0 builds under $cache" >&2
+      if [ "$strict" = 1 ]; then echo "chtypes: CHTYPES_ARTIFACT_MISSING" >&2; exit 1; fi
+    fi
     if [ "$cmd" = list ] && [ "$brk" = list-header ]; then echo "installed ($cache):"; fi
     exit 0 ;;
 esac

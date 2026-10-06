@@ -29,7 +29,7 @@ from . import _setup, errors
 from ._ocifetch import Options, Request, Resolved, ensure, list_installed, resolve_installed
 from ._ocifetch import _constants as _fetch_constants
 from ._ocifetch._dsse import TrustedKey
-from ._ocifetch._ensure import detect_host_platform
+from ._ocifetch._ensure import detect_host_platform, missing_notes, with_notes
 from ._ocifetch._errors import FetchError
 from ._ocifetch._oci import version_within_request
 from .library import Library, open_image
@@ -48,6 +48,7 @@ _FETCH_CLASSES: dict[str, type[errors.ArtifactError]] = {
     errors.CODE_SOURCE_UNAUTHORIZED: errors.SourceUnauthorizedError,
     errors.CODE_SOURCE_FORBIDDEN: errors.SourceForbiddenError,
     errors.CODE_SOURCE_INCOMPATIBLE: errors.SourceIncompatibleError,
+    errors.CODE_CACHE_UNUSABLE: errors.CacheUnusableError,
 }
 
 
@@ -76,6 +77,11 @@ class FetchOptions:
     lock_path: str | os.PathLike[str] | None = None
     lock_write: bool = False
     update: bool = False
+    # Strict mode (public issue #486): every fault of the cache and of an
+    # existing system dir is a `CacheUnusableError` naming the path, never
+    # "not installed", and never a fall-through to a system dir. None reads
+    # CHTYPES_CACHE_STRICT ("1" is on), else off.
+    strict_cache: bool | None = None
 
     def _to_options(self, platform: str | None = None) -> Options:
         token = self.token
@@ -97,6 +103,7 @@ class FetchOptions:
             lock_path=self.lock_path,
             lock_write=self.lock_write,
             update=self.update,
+            strict_cache=self.strict_cache,
         )
 
 
@@ -104,8 +111,15 @@ def _wrap(exc: FetchError) -> errors.ArtifactError:
     """The fetch layer's error as the public class of its code, one family with
     the loader's. The original stays as `__cause__`."""
     cls = _FETCH_CLASSES.get(exc.code, errors.ArtifactError)
-    if cls is errors.SourceUnreachableError:
-        wrapped: errors.ArtifactError = errors.SourceUnreachableError(
+    if cls is errors.CacheUnusableError:
+        wrapped: errors.ArtifactError = errors.CacheUnusableError(
+            str(exc),
+            path=getattr(exc, "path", ""),
+            reason=getattr(exc, "reason", ""),
+            os_error=getattr(exc, "os_error", None),
+        )
+    elif cls is errors.SourceUnreachableError:
+        wrapped = errors.SourceUnreachableError(
             str(exc),
             retryable=getattr(exc, "retryable", False),
             retry_after=getattr(exc, "retry_after", None),
@@ -201,8 +215,11 @@ class Registry:
             if resolved is None:
                 if not allow_fetch:
                     raise errors.ArtifactMissingError(
-                        f"chtypes: no installed artifact for {request} ({platform}); "
-                        "autofetch is off"
+                        with_notes(
+                            f"chtypes: no installed artifact for {request} ({platform}); "
+                            "autofetch is off",
+                            missing_notes(options),
+                        )
                     )
                 resolved = ensure(fetch_request, options)
         except FetchError as exc:

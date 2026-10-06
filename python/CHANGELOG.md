@@ -6,6 +6,18 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+### Added
+
+- Strict cache mode, and one error code for a cache that cannot be used (#486). The new code, `CHTYPES_CACHE_UNUSABLE` (exit status 9), names the path that failed, a reason (`unreadable_root`, `not_a_directory`, `unreadable_entry`, `unacceptable_record`, `layout_0x` or `unwritable`) and the errno name: Go `*ArtifactError` with `Code` `CodeCacheUnusable` and `Path`, `Reason` and `OSError` (`errors.Is(err, ErrCacheUnusable)`), Python `CacheUnusableError` (`path`, `reason`, `os_error`), TypeScript `CacheUnusableError` (`path`, `reason`, `osError`), Rust `Error::CacheUnusable(CacheFault)`. Strict mode is opt-in: Go `FetchOptions.StrictCache`, Python `FetchOptions(strict_cache=True)`, TypeScript `strictCache: true`, Rust `FetchOptions::strict_cache`, `CHTYPES_CACHE_STRICT=1`, or `--strict` on every CLI command. Under it, an unreadable cache root or entry, a record with nothing to re-verify from, or a 0.x layout is that error, never "not installed" and never a fall-through to a system directory; `chtypes where --strict` checks the root before printing it, and `chtypes verify --strict` that verified nothing exits 1. The default mode answers as before, and now warns once per path it could not read. The rules are `docs/guides/fetch-v1.md` section 1, "The cache faults", and the `v1-cache-interop` job holds all four bindings to one answer for every fault, in both modes.
+
+### Changed
+
+- A write the fetch layer needed under the cache that failed is now `CHTYPES_CACHE_UNUSABLE` with reason `unwritable`, in every mode (#486). Go raised a `*UsageError` (CLI exit 2), Python a raw `OSError` (CLI exit 1), TypeScript a `UsageError` (CLI exit 2) and Rust `CHTYPES_SOURCE_UNREACHABLE` (exit 3), which a retry loop would retry. A cache root that cannot be read is now "not installed" with a warning in every binding and on every Python: Python before 3.14 raised a raw `PermissionError` there, and Rust `CHTYPES_SOURCE_UNREACHABLE`; strict mode makes it the new error.
+
+### Fixed
+
+- A cache one uid writes is readable by another, the cache and the system directories are one search, and a lookup writes nothing (#486). Go created every cache directory 0700 and every file 0600, and Python wrote `verified.json` and `index.json` 0600, so a cache fetched by one uid (a CI user) read as empty to another (a container's nonroot user). Now all four create every directory and file with mode 0777 or 0666 less the process umask, so at umask 022 another uid can read the cache, and readable is never writable. Lookups read the system directories differently: Go answered from the first root with a match, and TypeScript never read a system directory's installs at all. Now all four answer with the newest build across the cache and every system directory, a tie going to the cache, and `list` and `verify` read the same roots. Go, TypeScript and Rust created the layout (`oci-layout`, `blobs/`, `unpacked/`) on a lookup, `fetch --offline` included; now a lookup creates nothing, so a read-only mount reads cleanly. A `chtypes verify` that verified no build now says so on stderr, `verified 0 builds under <root>`, where it printed nothing and exited 0. A miss from a cache that is a 0.x registry directory names it and the v1 root, in the CLI and the registry alike. No name or signature changes. The rules are `docs/guides/fetch-v1.md` sections 1 and 6; every binding runs the `root-order-*` conformance cases, and the `v1-cache-interop` job reads every binding's cache as another uid.
+
 ## [1.0.4] — 2026-10-06
 
 ### Fixed

@@ -694,7 +694,13 @@ jobs:
     # within its own line (public issue #481). Then 8 processes install one
     # build into one fresh cache at once, each binding alone and all four
     # mixed, with a watcher for torn, vanished or replaced entries (public
-    # issue #482). It fails if any cell fails, and prints the tables.
+    # issue #482). Then the read-only commands must create nothing, a cache
+    # one uid writes at umask 022 must be read by another uid, `nobody`
+    # through `sudo -n`, and every cache fault must get the same answer from
+    # every reader in the default mode and with --strict (public issue #486):
+    # the hosted runner has sudo, and the CLIs are installed under one
+    # world-readable prefix so `nobody` can run them. It fails if any cell
+    # fails, and prints the tables.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -716,27 +722,48 @@ jobs:
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
         with:
           toolchain: stable
+      # One world-readable prefix outside the runner's home, so the cross-uid
+      # rows can run the same four CLIs as `nobody`: Go and Rust as binaries,
+      # Python in a venv over a uv-managed interpreter installed inside the
+      # prefix, TypeScript as its built dist with its node_modules (pnpm's
+      # links are relative, so `cp -a` keeps them working).
       - name: build the four CLIs
+        env:
+          X: /tmp/cli-prefix
+          UV_PYTHON_INSTALL_DIR: /tmp/cli-prefix/python
         run: |
-          mkdir -p "$RUNNER_TEMP/bin"
-          (cd go && go build -o "$RUNNER_TEMP/bin/cli-go" ./cmd/chtypes)
-          (cd python && uv sync --locked)
-          printf '#!/usr/bin/env bash\nexec uv run --locked --project "%s/python" python -m chtypes "$@"\n' "$PWD" > "$RUNNER_TEMP/bin/cli-python"
+          mkdir -p "$X/bin" "$X/ts"
+          (cd go && go build -o "$X/bin/cli-go" ./cmd/chtypes)
+          uv venv --managed-python --python 3.13 "$X/py"
+          (cd python && UV_PROJECT_ENVIRONMENT="$X/py" uv sync --locked --no-dev --no-editable --link-mode copy)
+          printf '#!/usr/bin/env bash\nexec "%s/py/bin/python" -m chtypes "$@"\n' "$X" > "$X/bin/cli-python"
           (cd ts && pnpm install --frozen-lockfile && pnpm build)
-          printf '#!/usr/bin/env bash\nexec node "%s/ts/dist/cli.js" "$@"\n' "$PWD" > "$RUNNER_TEMP/bin/cli-ts"
+          cp -a ts/dist ts/node_modules ts/package.json "$X/ts/"
+          printf '#!/usr/bin/env bash\nexec "%s" "%s/ts/dist/cli.js" "$@"\n' "$(command -v node)" "$X" > "$X/bin/cli-ts"
           (cd rust && cargo build --locked --bin chtypes)
-          printf '#!/usr/bin/env bash\nexec "%s/rust/target/debug/chtypes" "$@"\n' "$PWD" > "$RUNNER_TEMP/bin/cli-rust"
-          chmod +x "$RUNNER_TEMP"/bin/cli-python "$RUNNER_TEMP"/bin/cli-ts "$RUNNER_TEMP"/bin/cli-rust
-          for b in go python ts rust; do "$RUNNER_TEMP/bin/cli-$b" --version; done
+          cp rust/target/debug/chtypes "$X/bin/cli-rust"
+          chmod -R a+rX "$X"
+          chmod a+x "$X"/bin/cli-*
+          for b in go python ts rust; do "$X/bin/cli-$b" --version; done
+          # The same four, as `nobody`: a CLI it cannot run would read as an empty cache.
+          for b in go python ts rust; do sudo -n -u nobody "$X/bin/cli-$b" --version; done
       - name: "selftest — the interop driver's own comparison and table logic"
         run: python3 scripts/fetch-v1/cache-interop.py --selftest
-      - name: "4 x 4: each binding writes a cache, every binding reads it; the 0.x rows; writer x reader x line (#481); concurrent installs (#482)"
+      # /opt/chtypes/v1 is one of the CLIs' default system dirs (spec/fetch-v1/constants.json);
+      # the fault rows fill it with a readable build to prove the default mode answers from it
+      # and strict mode never falls through to it, and leave it empty again.
+      - name: "4 x 4: each binding writes a cache, every binding reads it; the 0.x rows; writer x reader x line (#481); concurrent installs (#482); read-only commands, cross-uid reads and writer x reader x fault x mode (#486)"
+        env:
+          X: /tmp/cli-prefix
         run: |
+          sudo install -d -m 0755 -o "$(id -u)" -g "$(id -g)" /opt/chtypes/v1
           python3 scripts/fetch-v1/cache-interop.py \
-            --cli "go=$RUNNER_TEMP/bin/cli-go" \
-            --cli "python=$RUNNER_TEMP/bin/cli-python" \
-            --cli "ts=$RUNNER_TEMP/bin/cli-ts" \
-            --cli "rust=$RUNNER_TEMP/bin/cli-rust"
+            --cli "go=$X/bin/cli-go" \
+            --cli "python=$X/bin/cli-python" \
+            --cli "ts=$X/bin/cli-ts" \
+            --cli "rust=$X/bin/cli-rust" \
+            --other-user nobody \
+            --system-dir /opt/chtypes/v1
 
   v1-refcheck:
     name: "v1-refcheck — reference verifiers agree with the fixture verdicts (report only)"
