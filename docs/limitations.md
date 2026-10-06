@@ -112,6 +112,23 @@ A `CHECK` or a `PARTITION BY` over the same expression is refused with 153 here 
 
 Until then, do not rely on this library to refuse a row whose only failure is a skip index's or a projection's expression: the server can still refuse that INSERT.
 
+### A Date-valued TTL follows the call's session_timezone; a real server uses its own zone
+
+**Value divergence, on every supported line, only with a per-call `session_timezone`.** When a batch preview is called with a per-call `session_timezone` that differs from this library's zone (in 1.0 the process image zone stands in for the server's), a Date-valued TTL's expiry is computed at the CALL zone's midnight. That expiry is what the batch's storage transforms report as `ttl_expired` (a rows TTL) and `ttl_column_expired` (a column TTL). A real server computes it at its own zone's midnight, whatever the session.
+
+For example, with the server and this library both on UTC, `TTL toDate(ts) + 1`, and a per-call `session_timezone` of `Pacific/Kiritimati`:
+
+|               |                                                           |
+| ------------- | --------------------------------------------------------- |
+| this library  | reports 12 rows as expired, and 12 column values as reset |
+| a real server | keeps them                                                |
+
+Those are the rows whose expiry falls between the two zones' midnights. With no per-call `session_timezone`, or one equal to this library's zone, both sides agree.
+
+**Measured**: by the artifact producer, against the production 1.0 build `20261004.052404` and live servers on `26.3.38.2`, `26.7.19.5`, `26.8.15.10` and `26.9.8.3` (linux-amd64). The direction measured is this library dropping what the server keeps; the reverse is being measured. A library fix is in progress; this entry is removed on the 1.0.x release that ships it.
+
+Until then, for a table with a Date-valued TTL, either do not pass a per-call `session_timezone` that differs from this library's zone, or do not rely on `ttl_expired` and `ttl_column_expired` from such a call.
+
 ## Known gaps in 1.0
 
 Each item is a place where 1.0 does less than you might expect, or answers differently from a server. None of them returns a wrong answer without saying so, and every one is planned. Each entry says what happens, what to do today, and that a fix is planned.
