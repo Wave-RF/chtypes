@@ -15,11 +15,11 @@ Run by .github/workflows/policy-merge.yml, whose header says why the workflow
 exists and what it may touch; read that first.
 
 This file, and the workflow that runs it, used to be named regen-automerge —
-a pull request that only regenerated docs/support.md merged itself once `ci`
-passed. Issue #280 generalized it: ANY pull request merges itself once every
-condition below holds, not just a docs/support.md regeneration. The
-docs/support.md guard survives as condition 6, the one case this script still
-compares a file's actual bytes rather than just judging its path.
+a pull request that only regenerated the v0 support page merged itself once
+`ci` passed. Issue #280 generalized it: ANY pull request merges itself once
+every condition below holds, not just a regeneration. The support-page guard
+survived as condition 6 until that page was retired with v0 (#431); the
+number stays retired, so that 7 names the same condition everywhere.
 
 A pull request no longer merges directly. `enqueue` adds it to main's GitHub
 merge queue (the `enqueuePullRequest` GraphQL mutation) once every condition
@@ -34,16 +34,18 @@ something cannot be decided deterministically — a check fails, an issue needs
 filing, or a pull request touches a file whose correctness this tree cannot
 verify by rule alone (chtypes#280). Everything else is a mechanical decision a
 machine can make from data GitHub already has: the required checks' own
-verdicts, the diff's file list, and — for docs/support.md alone — a
-byte-for-byte regeneration.
+verdicts, the diff's file list, and — for the conditional classes below — a
+job log or a commit, read as data.
 
 ================================================================================
-THE SEVEN CONDITIONS
+THE CONDITIONS
 ================================================================================
 
 A pull request enqueues itself when ALL of these hold. Evaluated in this
 order; the first that fails is the one reported. A refusal is not an error:
-the pull request is left for a human and the exit status is 0.
+the pull request is left for a human and the exit status is 0. The numbers
+are the conditions' historical names; 6 (`bytes`, a byte-for-byte
+regeneration of the v0 support page) was retired with that page (#431).
 
   fork       (1) The head is a branch of THIS repository: the head repository
                  the ci run reports AND the pull request's own head repository.
@@ -73,14 +75,7 @@ the pull request is left for a human and the exit status is 0.
                  disagreeing signal anywhere in that chain (the author, the
                  commit shape, any dependency's own metadata, or the
                  manifest diff) counts as not proven, same fail-closed
-                 posture as a missing api-surface verdict; and for a
-                 fixture tree generated from a served, release-signed
-                 asset (the served-fixture entries, chtypes#344 —
-                 tests/fixtures/fetch/** today), the head's whole tree
-                 under it is byte-identical to a fresh extraction of that
-                 asset, fetched and verified by main's own scripts/fetch.sh
-                 under the release key (served_fixture_problems) — any
-                 error anywhere in that chain refuses. This is also
+                 posture as a missing api-surface verdict. This is also
                  what makes `checks` (next) mean anything: a pull_request run
                  of `ci` uses the pull request's own copy of `.github/` and
                  `scripts/`, which a pull request that edited either could
@@ -111,35 +106,14 @@ the pull request is left for a human and the exit status is 0.
                  conversation resolved, and the REST API cannot tell a
                  resolved thread from an open one, so any review comment
                  leaves the pull request for a human.
-  bytes      (6) ONLY when the pull request touches docs/support.md: it was
-                 MODIFIED (not added, deleted or renamed), and main's own
-                 scripts/support-matrix.sh, run against the live index OVER A
-                 SCRATCH COPY SEEDED WITH THE HEAD'S OWN BYTES — never main's
-                 checked-out copy (chtypes#316: main's hand-written prose
-                 used to collide with every prose-only edit on the head,
-                 because the old code regenerated from main's tree and
-                 compared that against the head) — reproduces the head's
-                 copy byte for byte. A pull request that does not touch
-                 docs/support.md skips this condition. This is necessarily a
-                 PRE-ENQUEUE check only — see ENQUEUE, NOT MERGE for why the
-                 old post-merge re-verification (the merge commit's
-                 docs/support.md still equals the regeneration) cannot run
-                 anymore.
 
-`gate` checks everything except the byte HALF of `bytes`, which needs the
-regeneration; `enqueue` regenerates only after every other condition already
-holds (regenerate_guarded_file, from the head's own bytes), so an ordinary
-pull request costs a handful of API reads before the gate ever reaches this
-one, and the gate itself never regenerates at all. `test-counts` has no such
-split — gather_test_counts reads every job log it needs (never a head file)
-up front, so `gate` checks it fully, at the API cost of up to five job-log
-reads per side, and only for a pull request that touches a test or fixture
-path. The api-surface verdicts are the same: one job-log read, only for a
-pull request that touches binding source and nothing unconditionally
-protected. So is the served-fixture proof: one trees-API read and one
-fetch.sh download, only for a pull request that touches a served fixture
-tree and nothing unconditionally protected. `enqueue` reads every fact again, checks all of them including the
-byte comparison, and enqueues with `expectedHeadOid=<head>` so GitHub itself
+`gate` and `enqueue` check the same conditions. gather_test_counts reads
+every job log `test-counts` needs (never a head file) up front, at the API
+cost of up to five job-log reads per side, and only for a pull request that
+touches a test or fixture path. The api-surface verdicts are the same: one
+job-log read, only for a pull request that touches binding source and
+nothing unconditionally protected. `enqueue` reads every fact again, checks
+all of them, and enqueues with `expectedHeadOid=<head>` so GitHub itself
 refuses if the head moved in between (reported as `stale`).
 
 ================================================================================
