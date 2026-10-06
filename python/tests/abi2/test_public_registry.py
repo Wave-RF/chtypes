@@ -4,6 +4,7 @@ verified, unpacked, adapted and loaded."""
 
 from __future__ import annotations
 
+import json
 import shutil
 
 import pytest
@@ -18,7 +19,7 @@ from chtypes import (
     UsageError,
     library,
 )
-from chtypes._abi1 import _loader
+from chtypes._abi2 import _loader
 
 from ._stub_tree import build_stub_tree
 
@@ -54,6 +55,20 @@ def test_for_version_fetches_verifies_adapts_and_loads(tree, tmp_path) -> None:
     assert registry.libraries() == (lib,)
     assert [r.version for r in registry.installed()] == [lib.version]
     assert lib.validate_type("UInt8")
+
+
+def test_the_dev_channel_installs_schema_2_records_under_the_v2_dev_subroot(tree, tmp_path) -> None:
+    """r5 and r6 through the public API: the predicate says abi 2, the record is
+    schema 2, and it lives under <cache_dir>/v2-dev, never <cache_dir> itself,
+    which a 1.x binding uses as its whole layout."""
+    registry = Registry(fetch=fetch_options(tree, tmp_path), autofetch=True)
+    resolved = registry.for_version(tree.predicate["clickhouse_minor"]).resolved
+    assert resolved.abi_generation == 2 and resolved.predicate["abi"] == 2
+    subroot = tmp_path / "cache" / "v2-dev"
+    assert resolved.dir.is_relative_to(subroot)
+    record = json.loads((resolved.dir / "verified.json").read_text(encoding="utf-8"))
+    assert record["schema"] == 2
+    assert not (tmp_path / "cache" / "unpacked").exists()
 
 
 def test_the_adapter_passes_the_predicate_verbatim_never_re_encoded(

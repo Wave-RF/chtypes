@@ -27,6 +27,7 @@ from pathlib import Path
 
 from . import _setup, errors
 from ._ocifetch import Options, Request, Resolved, ensure, list_installed, resolve_installed
+from ._ocifetch import _channel as _fetch_channel
 from ._ocifetch import _constants as _fetch_constants
 from ._ocifetch._dsse import TrustedKey
 from ._ocifetch._ensure import detect_host_platform, missing_notes, with_notes
@@ -62,8 +63,15 @@ class FetchOptions:
     The test hooks of the fetch layer (its clock, retry policy and
     pre-rename callback) are deliberately not here. A field left at its default
     falls back to the fetch layer's own defaults and environment
-    (`CHTYPES_ARTIFACTS_URL`, `CHTYPES_CACHE`, `CHTYPES_DOWNLOAD_TOKEN`,
-    `CHTYPES_ALLOW_UNSIGNED`).
+    (`CHTYPES_CACHE`, `CHTYPES_DOWNLOAD_TOKEN`).
+
+    2.0.0-dev (spec/abi-v2/docs.md, rules r5 and r6): this SDK fetches only from
+    the staging dev channel and trusts only its key. `bases`, `trusted_keys` and
+    `allow_unsigned`, and `CHTYPES_ARTIFACTS_URL`, `CHTYPES_TRUSTED_KEYS` and
+    `CHTYPES_ALLOW_UNSIGNED`, are ignored, each with one warning. `frozen`,
+    `lock_path`, `lock_write` and `update` are refused before any network call,
+    as a `UsageError`. A `cache_dir` (or `CHTYPES_CACHE`) is used through its
+    `v2-dev` subroot.
     """
 
     bases: Sequence[str] = ()
@@ -89,7 +97,12 @@ class FetchOptions:
             token = os.environ.get(_fetch_constants.ENV_TOKEN_NAME) or None
         allow_unsigned = self.allow_unsigned
         if allow_unsigned is None:
-            allow_unsigned = os.environ.get(_fetch_constants.ENV_ALLOW_UNSIGNED_NAME) == "1"
+            # The dev channel does not honor the variable (rule r6); the fetch
+            # layer names it, once, when it is set.
+            allow_unsigned = (
+                _fetch_channel.active().overridable
+                and os.environ.get(_fetch_constants.ENV_ALLOW_UNSIGNED_NAME) == "1"
+            )
         return Options(
             platform=platform,
             bases=tuple(self.bases),
@@ -166,8 +179,10 @@ class Registry:
 
     def installed(self) -> tuple[Resolved, ...]:
         """What is installed, from the fetch layer's own listing."""
+        options = self._fetch._to_options()
+        _refuse_pinning(options)
         try:
-            return tuple(list_installed(self._fetch._to_options()))
+            return tuple(list_installed(options))
         except FetchError as exc:
             raise _wrap(exc) from exc
 
@@ -195,6 +210,8 @@ class Registry:
                 fetch_request = Request(request)
             except ValueError as exc:
                 raise errors.misuse(str(exc)) from None
+            # So is a pinning request on the dev channel (rule r6).
+            _refuse_pinning(self._fetch._to_options())
             began = _setup.generation()
             try:
                 library = self._resolve_and_open(request, fetch_request, allow_fetch)
@@ -229,6 +246,16 @@ class Registry:
         library = open_image(str(Path(resolved.library_path)), resolved.predicate, resolved)
         _check_within_request(library, request)
         return library
+
+
+def _refuse_pinning(options: Options) -> None:
+    """The fetch layer's contract check, ahead of everything else: a 2.0.0-dev
+    SDK refuses a lock, frozen or update request as the caller's misuse, before
+    any network call, and names each ignored override once (rule r6)."""
+    try:
+        _fetch_channel.enforce(options)
+    except _fetch_channel.PinningRefusedError as exc:
+        raise errors.misuse(str(exc)) from None
 
 
 def _check_within_request(library: Library, request: str) -> None:

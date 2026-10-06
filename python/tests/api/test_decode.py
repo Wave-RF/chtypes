@@ -75,7 +75,9 @@ def test_a_row_decodes_one_to_one_with_names_and_values_as_bytes() -> None:
 
 def test_absent_is_the_default() -> None:
     row = decode_row_document(dumps({}))
-    assert row.outcome is Outcome.UNSUPPORTED  # the vocabulary's fallback
+    # An absent outcome is the empty spelling, which no vocabulary lists: its
+    # unknown(n) member (rule r3), never accepted and never the fallback itself.
+    assert row.outcome == "" and not row.outcome.known and row.outcome is not Outcome.ACCEPTED
     assert row.columns == () and row.verdict is None and row.input_span is None
     assert row.err_msg == b"" and row.partition_id is None
 
@@ -85,8 +87,7 @@ def test_absent_is_the_default() -> None:
     [
         {"cols": [{"null": False, "src": "input"}]},  # neither name nor name_b64
         {"cols": [{"name": "a", "name_b64": "YQ==", "null": False, "src": "input"}]},
-        {"cols": [{"name": "a", "null": False, "src": "no-such-source"}]},
-        {"cols": [{"name": "a", "null": False}]},  # no src: no is_stored fact
+        {"cols": [{"name": "a", "null": False}]},  # no src: no value at all
         {"cols": [{"name": "a", "null": "no", "src": "input"}]},
         {"cols": "x"},
         {"code": "7"},
@@ -102,6 +103,27 @@ def test_a_document_that_breaks_its_schema_is_an_internal_error(doc) -> None:
     with pytest.raises(InternalError) as info:
         decode_row_document(dumps(doc))
     assert info.value.status == 4 and info.value.ch_code == 0
+
+
+def test_an_unlisted_source_is_kept_never_a_failure() -> None:
+    """Rule r3: an unlisted `src` is its unknown(n), for that column alone; the
+    row decodes, and the column is not stored until the description says what an
+    unknown source reports."""
+    row = decode_row_document(
+        dumps(
+            {
+                "outcome": "accepted",
+                "cols": [
+                    {"name": "a", "null": False, "src": "no-such-source", "stored": "1"},
+                    {"name": "b", "null": False, "src": "input", "stored": "2"},
+                ],
+            }
+        )
+    )
+    assert row.outcome is Outcome.ACCEPTED
+    assert row.columns[0].source == "no-such-source" and row.columns[0].is_stored is False
+    assert row.columns[0].text == b"1" and row.columns[1].is_stored is True
+    assert [c.column for c in row.values] == [b"b"]
 
 
 def test_a_duplicate_key_is_an_internal_error_naming_it() -> None:
@@ -211,17 +233,15 @@ def test_a_filter_result_maps_verdicts_through_the_generated_vocabulary() -> Non
         )
     )
     assert res.outcome is FilterOutcome.OK
-    assert res.verdicts == (
-        Verdict.TRUE,
-        Verdict.FALSE,
-        Verdict.ERROR,
-        Verdict.DECLINE,
-        Verdict.DECLINE,
-    )
+    assert res.verdicts[:4] == (Verdict.TRUE, Verdict.FALSE, Verdict.ERROR, Verdict.DECLINE)
+    # r3: "?" is its unknown(n), kept, and never an answer (its fallback's fact).
+    assert res.verdicts[4] == "?" and not res.verdicts[4].known
+    assert res.verdicts[4] is not Verdict.DECLINE
     assert [v.answered for v in res.verdicts] == [True, True, False, False, False]
     assert res.errors[0].msg == b"\xffno" and res.errors[0].row == 2
     assert res.unsupported_settings == (b"s",)
-    assert decode_filter_result(dumps({"outcome": "weird"})).outcome is FilterOutcome.UNSUPPORTED
+    weird = decode_filter_result(dumps({"outcome": "weird"})).outcome
+    assert weird == "weird" and not weird.known and weird is not FilterOutcome.OK
 
 
 def test_schema_description_and_discovery_carry_names_as_bytes() -> None:
@@ -243,8 +263,12 @@ def test_schema_description_and_discovery_carry_names_as_bytes() -> None:
     assert desc.columns[0].default_kind is DefaultKind.NONE
     assert desc.columns[1].name == b"\xff" and desc.columns[1].type == b"Nullable(\xfe)"
     assert desc.columns[1].default_kind is DefaultKind.MATERIALIZED
-    with pytest.raises(InternalError, match="default_kind"):
-        decode_schema_description(dumps({"columns": [{"name": "a", "default_kind": "WHATEVER"}]}))
+    # r3: an unlisted default_kind is its unknown(n), kept for that column alone.
+    whatever = decode_schema_description(
+        dumps({"columns": [{"name": "a", "default_kind": "WHATEVER"}]})
+    ).columns[0]
+    assert whatever.default_kind == "WHATEVER" and not whatever.default_kind.known
+    assert whatever.name == b"a"
     disc = decode_discovery(
         dumps(
             {

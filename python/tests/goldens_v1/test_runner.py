@@ -22,8 +22,13 @@ INPUTS (the environment):
     CHTYPES_GOLDENS_REPORT          where the report is written
     CHTYPES_GOLDENS_DOCUMENT        where the document's exact bytes are written
 
-Without the first three the test SKIPS LOUDLY, by name, and exits 0: that is the
-only skip. The fetch runs in this process with the DEFAULT trust (the release key).
+Without the first three the test SKIPS LOUDLY, by name, and exits 0. The fetch runs
+in this process exactly as a user's process of this 2.0.0-dev SDK fetches: the ABI
+v2 dev channel, its staging base and its staging key only, whatever base
+CHTYPES_GOLDENS_REGISTRY_BASE names (spec/abi-v2/docs.md, rule r6; the base is
+ignored with a warning). A published build that carries no goldens referrer (the
+first v2-dev builds ship none) is the other skip, BY NAME and never a pass:
+"SKIPPED: no v2-dev goldens published yet", which the workflows read.
 
 LOCAL PROOF WITHOUT A RELEASE (the stub). Two more variables bypass the fetch, so
 the runner can be driven against `scripts/abi-v1/build-stubs.sh`'s library:
@@ -90,7 +95,7 @@ def _open_library(version: str):  # noqa: ANN202 - chtypes.Library
 def _case_record(api: Any, case: dict, setup_id: str, platform: str) -> dict:
     """Run one case's call sequence through the generated call layer and record it."""
     from chtypes import _decode
-    from chtypes._abi1 import _decls
+    from chtypes._abi2 import _decls
     from chtypes.errors import CallError
 
     record: dict[str, Any] = {"id": case["id"], "setup": setup_id}
@@ -234,13 +239,28 @@ def _fetch(base: str, version: str, platform_key: str, cache: Path) -> tuple[byt
     """Fetch the release, then the goldens document of its platform manifest, in
     process and under the default trust. `fetch_signed` takes the PLATFORM
     manifest's digest and does the referrer selection itself."""
-    from chtypes._ocifetch import Request, ensure, fetch_signed
+    import pytest
+
+    from chtypes._ocifetch import Request, _channel, ensure, fetch_signed
     from chtypes._ocifetch import _constants as C
+    from chtypes._ocifetch._errors import ArtifactUnpublishedError
     from chtypes.registry import FetchOptions
 
     options = FetchOptions(bases=(base,), cache_dir=cache)._to_options(platform_key)
     resolved = ensure(Request(version), options)
-    fetched = fetch_signed("", resolved.digests["manifest"], C.PREDICATE_TYPE_GOLDENS, options)
+    manifest = resolved.digests["manifest"]
+    try:
+        fetched = fetch_signed("", manifest, C.PREDICATE_TYPE_GOLDENS, options)
+    except ArtifactUnpublishedError as exc:
+        if _channel.channel_name() != "v2-dev":
+            raise
+        # The build is published (ensure above succeeded) and carries no goldens
+        # referrer. A skip BY NAME, never a pass: the workflows read this line.
+        pytest.skip(
+            f"SKIPPED: no v2-dev goldens published yet: {version} {platform_key} ({manifest}) "
+            f"has no goldens referrer on {_channel.DEV_CHANNEL_BASE}; the goldens did not run "
+            f"({exc})"
+        )
     return Path(fetched["path"]).read_bytes(), fetched
 
 

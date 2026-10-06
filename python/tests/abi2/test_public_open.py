@@ -20,7 +20,7 @@ from chtypes import (
     open_unverified,
     setup,
 )
-from chtypes._abi1 import _decls, _loader
+from chtypes._abi2 import _decls, _loader
 
 
 @pytest.fixture

@@ -18,6 +18,7 @@ import os
 import tempfile
 from dataclasses import dataclass, replace
 
+from chtypes._ocifetch import _channel
 from chtypes._ocifetch import _constants as C
 from chtypes._ocifetch._errors import ArtifactCorruptError, ArtifactPinnedError
 
@@ -86,9 +87,10 @@ class Lock:
                 f"`chtypes fetch --lock` to write a current one."
             )
         abi = doc.get("abi")
-        if abi != C.ABI_GENERATION:
+        want = _channel.abi()  # the active contract's (a dev SDK refuses every lock: rule r6)
+        if abi != want:
             raise ArtifactPinnedError(
-                f"chtypes: lock file is for ABI generation {abi!r}, not {C.ABI_GENERATION}. "
+                f"chtypes: lock file is for ABI generation {abi!r}, not {want}. "
                 f"Re-lock with `chtypes fetch --lock`."
             )
         platforms = doc.get("platforms")
@@ -122,7 +124,7 @@ class Lock:
 
 
 def new_lock(platforms: tuple[str, ...] = ()) -> Lock:
-    return Lock(schema=C.LOCK_SCHEMA, abi=C.ABI_GENERATION, platforms=platforms, requests={})
+    return Lock(schema=C.LOCK_SCHEMA, abi=_channel.abi(), platforms=platforms, requests={})
 
 
 def load_lock(path: str | os.PathLike[str]) -> Lock:

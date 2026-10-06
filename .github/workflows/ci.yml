@@ -38,8 +38,9 @@
 # each binding speaks (scripts/abi-v1/majors.py; absent on main: ABI v1 for
 # all). Each binding job prints "ABI major tested: N (spec/binding-majors.json@
 # <commit>)" to its log and step summary, and asserts N against the identity
-# compiled into the binding's generated layer (and, for Go, against the
-# constants its own test binary prints), never against the file's own value.
+# compiled into the binding's generated layer (and, for Go and Python, against
+# the constants their own tests print from the layer the binding actually
+# loads), never against the file's own value.
 name: ci
 
 # merge_group (checks_requested): the merge queue's own candidate combination
@@ -297,10 +298,13 @@ jobs:
           uv run ruff check src tests
           uv run ruff format --check src tests
           uv run python -c 'import chtypes; print("chtypes", chtypes.__version__)'
-      - name: the ABI major this job tests, derived and asserted against the python binding's compiled-in layer
+      - name: the ABI major this job tests, derived and asserted against the python binding's compiled-in identity
         run: |
           python3 scripts/abi-v1/majors.py announce python --what "suite, no artifacts"
           python3 scripts/abi-v1/majors.py assert-layer python
+          (cd python && uv run pytest -q -s tests/test_abi_identity.py) > "$RUNNER_TEMP/abi-identity.log"
+          cat "$RUNNER_TEMP/abi-identity.log"
+          python3 scripts/abi-v1/majors.py assert-identity python "$RUNNER_TEMP/abi-identity.log"
       - name: suite — the artifact tests skip by name, the rest runs
         run: scripts/check-suite.sh --no-artifacts python
       - name: CLI parity — this binding's chtypes command line matches the shared expectation

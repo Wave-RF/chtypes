@@ -1,11 +1,11 @@
-"""Runs every handshake/echo/status case in tests/fixtures/abi-v1/cases.json
-(spec/abi-v1/schema/cases.schema.json) through the generated invoke-by-name
-dispatcher (chtypes._abi1._decls.invoke_by_name), against the "ok" stub
-library, opened through the real hand-written loader (chtypes._abi1._loader)
+"""Runs every handshake/echo/status case in tests/fixtures/abi-v2/cases.json
+(spec/abi-v2/schema/cases.schema.json) through the generated invoke-by-name
+dispatcher (chtypes._abi2._decls.invoke_by_name), against the "ok" stub
+library, opened through the real hand-written loader (chtypes._abi2._loader)
 -- not a hand-built ctypes.CDLL -- so this suite exercises the loader and the
 dispatcher together, the same path a real artifact will take once core
 serves a v1 candidate (plan section 5.3). Loader-kind cases are
-python/tests/abi1/test_loader.py's.
+python/tests/abi2/test_loader.py's.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ import threading
 
 import pytest
 
-from chtypes._abi1 import _decls, _loader
+from chtypes._abi2 import _decls, _loader
 
 from .conftest import build_args, cases_of_kind, strip_ids, stub_path
 
