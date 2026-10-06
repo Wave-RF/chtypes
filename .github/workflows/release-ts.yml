@@ -42,12 +42,14 @@ defaults:
     shell: bash
 
 jobs:
-  publish:
+  # Every step a dry run needs, in a job with NO `environment:`: a dry run is
+  # dispatched from any branch and must never enter the `npm` deployment
+  # environment (npm's trusted publisher trusts that environment NAME, so only a
+  # real publish, from a tag, may carry it). Same split as main's release-ts.yml.
+  build:
     if: github.event_name != 'workflow_dispatch' || !inputs.verify_only
     runs-on: ubuntu-latest
-    environment: npm
     permissions:
-      id-token: write
       contents: read
     outputs:
       default: ${{ steps.record.outputs.default }}
@@ -125,8 +127,29 @@ jobs:
         run: |
           dist_tag="$(scripts/release-channel.sh get NPM_DIST_TAG)"
           cd ts && pnpm publish --dry-run --access public --no-git-checks --tag "$dist_tag"
+  # The only job with `environment:`. It runs for a real publish alone: a tag
+  # push, or a dispatch with dry_run=false (and not verify_only). It repeats the
+  # toolchain setup and build because a job cannot share a workspace; every
+  # check already passed in `build`.
+  publish:
+    needs: build
+    if: github.event_name == 'push' || (inputs.dry_run == false && !inputs.verify_only)
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: ts/package.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22.21"
+          registry-url: "https://registry.npmjs.org"
+      - run: cd ts && pnpm install --frozen-lockfile && pnpm build
       - name: publish, under the channel's dist-tag (never latest before the lock)
-        if: github.event_name == 'push' || !inputs.dry_run
         run: |
           dist_tag="$(scripts/release-channel.sh get NPM_DIST_TAG)"
           cd ts && pnpm publish --provenance --access public --no-git-checks --tag "$dist_tag"
@@ -139,8 +162,8 @@ jobs:
   # recorded version (its positive control). scripts/release-channel.sh
   # holds both, and its selftest plants every refusal.
   never-default:
-    needs: publish
-    if: ${{ !failure() && needs.publish.result == 'success' }}
+    needs: [build, publish]
+    if: ${{ !failure() && needs.build.result == 'success' && (needs.publish.result == 'success' || (needs.publish.result == 'skipped' && github.event_name == 'workflow_dispatch' && inputs.dry_run)) }}
     runs-on: ubuntu-latest
     timeout-minutes: 70
     permissions:
@@ -150,7 +173,7 @@ jobs:
       - name: npm still installs the recorded 1.x by default, and dist-tags.dev names this version (a dry run asserts it against npm as it is)
         env:
           TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
-          RECORDED: ${{ needs.publish.outputs.default }}
+          RECORDED: ${{ needs.build.outputs.default }}
           PHASE: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'twin' || 'after' }}
         run: |
           version="$(scripts/release-channel.sh tag ts "$TAG_NAME")"
@@ -180,8 +203,8 @@ jobs:
   # against the already-published version the `tag` input names. So the parser
   # of `chtypes list` and the whole sequence are exercised BEFORE a publish.
   verify:
-    needs: publish
-    if: ${{ !failure() && (needs.publish.result == 'success' || (needs.publish.result == 'skipped' && inputs.verify_only)) }}
+    needs: [build, publish]
+    if: ${{ !failure() && (needs.build.result == 'success' || (needs.build.result == 'skipped' && inputs.verify_only)) && (needs.publish.result == 'success' || needs.publish.result == 'skipped') && (github.event_name == 'push' || inputs.verify_only || inputs.dry_run || needs.publish.result == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
