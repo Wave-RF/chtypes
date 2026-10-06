@@ -88,3 +88,7 @@ export declare class ErrorCodeTable {
   name(code: number): string | undefined;
   all(): readonly ErrorCodeEntry[];
 }
+// Without this, every declaration in a declaration file that is a module is
+// exported, `declare class Handle` included (measured: api-extractor reported it
+// as an export).
+export {};
