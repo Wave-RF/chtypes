@@ -18,6 +18,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts"],
-  "exclude": ["src/fetch.ts"]
+  "include": ["src/**/*.ts"]
 }

@@ -830,7 +830,7 @@ def render_guide_block(data: dict[str, Any], sha: str) -> str:
     lines.append("")
     lines.append(
         f"Key id algorithm: `{data['trust']['keyid_algorithm']}` — the first 16 hex characters of "
-        "sha256 over the raw 32-byte public key (`go/chtypes/fetch_sign.go` `KeyID`, unchanged from v0)."
+        "sha256 over the raw 32-byte public key (`go/internal/ocifetch/dsse.go` `keyIDFor`, unchanged from v0)."
     )
     lines.append("")
     lines.append("## 7. The retry table")

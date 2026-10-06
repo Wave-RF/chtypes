@@ -240,15 +240,15 @@ design: over-protect rather than under-protect.
                           protected only while that binding's verdict is not
                           `changed=false`. An exported ADDITION is a change.
   the SECURITY CARVE-OUT  inside those trees but UNCONDITIONAL, whatever the
-                          verdict: go/chtypes/{fetch_sign,fetch,registry_path,
-                          multiversion,resolve}.go, python/src/chtypes/{_ed25519,
-                          fetch,_manifest,registry}.py, ts/src/{fetch,
-                          registry}.ts, rust/src/fetch/**, rust/src/digest.rs,
-                          rust/src/registry.rs — the fetch chain (the ed25519
-                          signature, each tarball's sha256, the lock pin, the
-                          trusted keys and the allow-unsigned switch) and the
-                          load-time checks (library_bytes on every load, the
-                          opt-in sha256 re-hash). Derived by VERIFICATION_NEEDLES
+                          verdict: python/src/chtypes/{_ed25519,registry}.py,
+                          ts/src/registry.ts, rust/src/registry.rs and each
+                          binding's v1 fetch layer (go/internal/ocifetch/**,
+                          python/src/chtypes/_ocifetch/**, ts/src/ocifetch/**,
+                          rust/src/ocifetch/**) — the embedded release key, the
+                          trust policy, the signed-statement check and the
+                          byte verification of every fetched library. (The v0
+                          fetch modules these entries once named were deleted
+                          with v0, public issue #431.) Derived by VERIFICATION_NEEDLES
                           (the primitives and trust anchors, never names a
                           re-export also carries), and `--check-carve-out`,
                           run by the required `abi` job, derives it again
@@ -288,14 +288,6 @@ design: over-protect rather than under-protect.
                           configure the required `ts` job's build and
                           typecheck steps (`tsc -p tsconfig.json` /
                           `tsc -p tsconfig.test.json` in ts/package.json)
-  tests/parity/manifest.json
-                          the cross-binding parity contract: each of the
-                          required `go`/`python`/`ts`/`rust` jobs' own parity
-                          test (parity_test.go, test_parity.py,
-                          parity.test.ts, parity.rs) reads and enforces it —
-                          declares what each binding must support, the same
-                          threat model as a config file that configures a
-                          check's rules
   tests/fixtures/fetch/** the fetch fixtures, CONDITIONAL since chtypes#344:
                           the refusal cases and expected.json, the outcome
                           every binding's fetch suite asserts for each. A
@@ -355,8 +347,7 @@ judge them, and `test-counts` catches a test removed or turned into a skip.
 Fixtures that decide an outcome by themselves are the exception
 (chtypes#344): tests/fixtures/fetch/** (conditional) and
 tests/fixtures/api-surface/** (unconditional), above. The whole of tests/**
-was inventoried for that: those two trees and tests/parity/manifest.json are
-everything under it, and only the fetch fixtures come from a served, signed
+was inventoried for that: those two trees are everything under it, and only the fetch fixtures come from a served, signed
 asset.
 
 SERVED FIXTURE TREES (chtypes#344, FAIL CLOSED by the lead's ruling). A
@@ -655,42 +646,16 @@ PROTECTED_GLOBS: tuple[ProtectedGlob, ...] = (
     # and `--check-carve-out` fails when a file the needles hit is not covered
     # here, or an entry here no longer exists — so this list cannot silently
     # go stale when code moves.
-    ProtectedGlob("go/chtypes/fetch_sign.go",
-                  "the embedded release public key and the ed25519 signature check", verification=True),
-    ProtectedGlob("go/chtypes/fetch.go",
-                  "the fetch chain: the signature-check call, every tarball's sha256 against SHA256SUMS, the lock "
-                  "pin, the trusted-keys and allow-unsigned options", verification=True),
-    ProtectedGlob("go/chtypes/registry_path.go",
-                  "names the CHTYPES_TRUSTED_KEYS and CHTYPES_ALLOW_UNSIGNED variables the trust policy reads",
-                  verification=True),
-    ProtectedGlob("go/chtypes/multiversion.go",
-                  "load-time verification: the library_bytes size check on every load and the "
-                  "WithVerifyChecksums sha256 re-hash", verification=True),
-    ProtectedGlob("go/chtypes/resolve.go",
-                  "exact-patch resolution's load path, which runs the same load-time verification",
-                  verification=True),
     ProtectedGlob("python/src/chtypes/_ed25519.py", "the ed25519 signature check itself", verification=True),
-    ProtectedGlob("python/src/chtypes/fetch.py",
-                  "the embedded release public key, the trust policy, and the fetch chain's signature and sha256 "
-                  "checks", verification=True),
-    ProtectedGlob("python/src/chtypes/_manifest.py",
-                  "load-time verification: check_library_bytes and verify_library's sha256 re-hash",
-                  verification=True),
     ProtectedGlob("python/src/chtypes/registry.py",
-                  "calls the load-time verification on every load (verify_hashes)", verification=True),
-    ProtectedGlob("ts/src/fetch.ts",
-                  "the embedded release public keys, the trust policy, and the fetch chain's signature and sha256 "
-                  "checks", verification=True),
+                  "the v1 registry adapter: hands the fetch layer's verified record (the signed predicate) to the "
+                  "loader unchanged", verification=True),
     ProtectedGlob("ts/src/registry.ts",
-                  "load-time verification: checkLibraryBytes on every load and the verifyChecksums sha256 re-hash",
-                  verification=True),
-    ProtectedGlob("rust/src/fetch/**",
-                  "the embedded release public key, the trust policy, the signature check, the sha256 checks and "
-                  "the lock pin", verification=True),
-    ProtectedGlob("rust/src/digest.rs", "the sha256 helper every checksum check hashes with", verification=True),
+                  "the v1 registry adapter: hands the fetch layer's verified record (the signed predicate) to the "
+                  "loader unchanged", verification=True),
     ProtectedGlob("rust/src/registry.rs",
-                  "load-time verification: the library_bytes size check and the verify_checksums sha256 re-hash",
-                  verification=True),
+                  "the v1 registry adapter: hands the fetch layer's verified record (the signed predicate) to the "
+                  "loader unchanged", verification=True),
     # The v1 fetch layer's own carve-out (same reasoning, same discipline):
     # each binding's new ocifetch module sits inside the already-CONDITIONAL
     # binding-source globs above (go/**/*.go, python/src/**, ts/src/**,
@@ -769,9 +734,6 @@ PROTECTED_GLOBS: tuple[ProtectedGlob, ...] = (
     ProtectedGlob("ts/tsconfig.json", "configures the required ts job's build step (tsc -p tsconfig.json)"),
     ProtectedGlob("ts/tsconfig.test.json",
                   "configures the required ts job's typecheck step (tsc -p tsconfig.test.json)"),
-    ProtectedGlob("tests/parity/manifest.json",
-                  "the cross-binding parity contract each of the required go/python/ts/rust jobs' own parity "
-                  "test reads and enforces — declares what every binding must support"),
     # Fixtures that carry their own outcomes (chtypes#344): a diff that edits
     # a refusal case AND the outcome the suites assert for it turns "fetch
     # refuses" into "fetch accepts" in all four bindings at once, with the
@@ -1037,11 +999,7 @@ def is_test_or_fixture_path(path: str) -> bool:
         served-fixture proof (chtypes#344) excuses still answers to this
         condition; tests/fixtures/api-surface/ is unconditionally protected,
         so it never reaches it.
-    `tests/parity/manifest.json` is deliberately NOT one of these: it is
-    already a PROTECTED_GLOBS entry (the cross-binding parity contract, a
-    threat this condition does not need to duplicate) — a pull request may
-    not touch it and merge itself at all, so `test-counts` never gets a
-    chance to look at it either way."""
+"""
     if path.startswith("go/") and path.endswith("_test.go"):
         return True
     return path.startswith(_TEST_PATH_PREFIXES)
@@ -3578,22 +3536,12 @@ def selftest() -> int:
     # present with a needle in it is clean; a needle in an uncovered file, a
     # carve-out entry that covers nothing, and a needle only in a comment are
     # each read the right way.
-    tree = {"go/chtypes/fetch_sign.go": 'import "crypto/ed25519"',
-            "go/chtypes/fetch.go": 'import "crypto/sha256"',
-            "go/chtypes/registry_path.go": 'envAllowUnsign = "CHTYPES_ALLOW_UNSIGNED"',
-            "go/chtypes/multiversion.go": "if err := checkLibraryBytes(path); err != nil {",
-            "go/chtypes/resolve.go": "if err := verifyArtifactLibrary(path); err != nil {",
-            "go/chtypes/transform.go": "package chtypes",
+    tree = {"go/chtypes/transform.go": "package chtypes",
             "python/src/chtypes/_ed25519.py": "import hashlib",
-            "python/src/chtypes/fetch.py": "from ._ed25519 import verify",
-            "python/src/chtypes/_manifest.py": "def verify_library(d):",
             "python/src/chtypes/registry.py": "check_library_bytes(entry, manifest)",
-            "ts/src/fetch.ts": "import { createHash } from 'node:crypto';",
             "ts/src/registry.ts": "verifyChecksum(libPath, manifest);",
-            "rust/src/fetch/trust.rs": "use ed25519_dalek::VerifyingKey;",
-            "rust/src/digest.rs": "use sha2::{Digest, Sha256};",
-            "rust/src/registry.rs": "let actual = crate::digest::sha256_file(&path);",
-            "rust/src/lib.rs": "pub mod fetch;",
+            "rust/src/registry.rs": "let actual = sha256_file(&path);",
+            "rust/src/lib.rs": "pub mod registry;",
             # The v1 fetch layer's carve-out (one representative file per
             # binding's ocifetch directory): each generated constants file
             # carries the embedded release key as a 64-hex literal, the
@@ -3610,10 +3558,10 @@ def selftest() -> int:
         failures.append("carve_out_problems: a 64-hex key literal in an uncovered TS file was not caught")
     if carve_out_problems({**tree, "go/chtypes/doc.go": '// we import "crypto/sha256" elsewhere'}):
         failures.append("carve_out_problems: a needle inside a comment only was read as verification code")
-    if not carve_out_problems({k: v for k, v in tree.items() if k != "go/chtypes/fetch_sign.go"}):
+    if not carve_out_problems({k: v for k, v in tree.items() if k != "python/src/chtypes/_ed25519.py"}):
         failures.append("carve_out_problems: a carve-out entry covering no file was not caught")
-    if not carve_out_problems({k: v for k, v in tree.items() if not k.startswith("rust/src/fetch/")}):
-        failures.append("carve_out_problems: rust/src/fetch/** covering no file was not caught")
+    if not carve_out_problems({k: v for k, v in tree.items() if not k.startswith("rust/src/ocifetch/")}):
+        failures.append("carve_out_problems: rust/src/ocifetch/** covering no file was not caught")
 
     # build_enqueue_plan — a pure function of facts already in hand, so
     # "enqueue is called with the judged head sha" and "dry run never calls
@@ -3883,10 +3831,10 @@ def selftest() -> int:
     if is_test_or_fixture_path("go/chtypes/client.go"):
         failures.append("is_test_or_fixture_path: a non-test go file was recognized as one")
     for p in ("python/tests/test_golden.py", "ts/test/golden.test.ts", "rust/tests/golden.rs",
-             "tests/fixtures/fetch/signed/index.json"):
+             "tests/fixtures/fetch-v1/cases.json"):
         if not is_test_or_fixture_path(p):
             failures.append(f"is_test_or_fixture_path: {p!r} was not recognized")
-    for p in ("python/src/chtypes/fetch.py", "tests/parity/manifest.json", "README.md"):
+    for p in ("python/src/chtypes/registry.py", "include/chtypes.h", "README.md"):
         if is_test_or_fixture_path(p):
             failures.append(f"is_test_or_fixture_path: {p!r} was wrongly recognized as a test/fixture path")
     if not touches_test_or_fixture_path([{"filename": "README.md", "status": "renamed",

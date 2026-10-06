@@ -130,8 +130,8 @@ jobs:
           fi
       - name: selftest — a hand-written chs_ declaration is caught in all four bindings, and generated files are exempt
         run: uv run --no-project --python 3.11 scripts/abi-v1/check-no-hand-decls.py --selftest
-      - name: no hand-written chs_ declaration or lookup in the v1 directories
-        run: uv run --no-project --python 3.11 scripts/abi-v1/check-no-hand-decls.py --scope v1
+      - name: no hand-written chs_ declaration or lookup anywhere in the tree
+        run: uv run --no-project --python 3.11 scripts/abi-v1/check-no-hand-decls.py --scope all
       - name: the header compiles as C11 and as C++20 (gcc and clang)
         run: |
           for c in gcc clang; do

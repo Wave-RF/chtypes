@@ -165,7 +165,7 @@ Generated from `spec/fetch-v1/constants.json` (sha256:`bf19d75118f2d10a1aac28e7e
 | ------------------------------------------------------------------ | ------------------ |
 | `fdb5f06a8d4c9918d049a5f1748fa2e3b3238c3f2000986d5bb9e31beff778fc` | `deb275922dbff76e` |
 
-Key id algorithm: `sha256-first16hex` — the first 16 hex characters of sha256 over the raw 32-byte public key (`go/chtypes/fetch_sign.go` `KeyID`, unchanged from v0).
+Key id algorithm: `sha256-first16hex` — the first 16 hex characters of sha256 over the raw 32-byte public key (`go/internal/ocifetch/dsse.go` `keyIDFor`, unchanged from v0).
 
 ## 7. The retry table
 

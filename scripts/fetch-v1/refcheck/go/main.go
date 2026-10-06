@@ -134,7 +134,7 @@ func resolvePlatformManifestDigest(fixturesDir, tree, tag, platformKey string) (
 	return "", fmt.Errorf("no platform %s in index for tag %s", platformKey, tag)
 }
 
-// keyID mirrors go/chtypes/fetch_sign.go's KeyID (the first 16 hex
+// keyID mirrors go/internal/ocifetch/dsse.go's keyIDFor (the first 16 hex
 // characters of sha256 over the raw public key) — see genfixtures'
 // sign.go for why that is this bundle format's `hint` value.
 func keyID(pub ed25519.PublicKey) string {
