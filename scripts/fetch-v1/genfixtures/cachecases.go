@@ -296,7 +296,71 @@ func buildCacheCases(fs *FileSet) []Case {
 		}
 	}
 
-	flushTrees(fs, tree, monoTree)
+	// --- request-scope-*: the monotonic check (keep a newer install rather
+	// than install an older one) is scoped to the REQUEST (docs/guides/
+	// fetch-v1.md §9, public issue #481). A line request is never answered
+	// by a build of another line, and never by a build OLDER than one already
+	// installed within that line; an exact request is answered only by that
+	// exact version. Every case here is ONLINE, so the registry resolves the
+	// request before the cache is consulted: the path a request takes when
+	// its own line has no install yet, which resolve_installed (correct
+	// already) never reaches. The tree serves two lines, 26.3 and 26.8. ------
+	scopeTree := NewTree("request-scope")
+	scopeArt := func(version, build, seed string) PlatformArtifact {
+		return buildPlatformArtifact(scopeTree, testKey, "linux-arm64", version, build, "lts", ArtifactOptions{LibraryContentSeed: seed})
+	}
+	scopeTag := func(art PlatformArtifact, tags ...string) {
+		idx := ImageIndex{SchemaVersion: 2, MediaType: ociIndexMediaType, Manifests: []Descriptor{platformDescriptor(art.ManifestDesc, "linux-arm64")}}
+		for _, tag := range tags {
+			scopeTree.PutManifest(tag, ociIndexMediaType, canonicalJSON(idx))
+		}
+	}
+	artLow := scopeArt("26.3.4.1", "20260304.000001", "scope-26.3-offered")
+	artHigh := scopeArt("26.8.5.1", "20260805.000001", "scope-26.8-offered")
+	artLowNewer := scopeArt("26.3.9.1", "20260309.000001", "scope-26.3-newer-installed")
+	scopeTag(artLow, "26.3", "26.3.4.1")
+	scopeTag(artHigh, "26.8", "26.8.5.1")
+	// artLowNewer is installed only, never offered: the registry's answer
+	// for 26.3 stays the older artLow.
+
+	layoutHigherLine := NewLayout("request-scope-higher-line")
+	copyArtifactIntoLayout(layoutHigherLine, scopeTree, artHigh, "26.8")
+	layoutHigherLine.SetInstalled(artHigh.ManifestDesc.Digest)
+	layoutNewerInLine := NewLayout("request-scope-newer-in-line")
+	copyArtifactIntoLayout(layoutNewerInLine, scopeTree, artLowNewer, "26.3")
+	layoutNewerInLine.SetInstalled(artLowNewer.ManifestDesc.Digest)
+	extraLayouts = append(extraLayouts, layoutHigherLine, layoutNewerInLine)
+
+	for _, r := range []struct {
+		id, cache, spelling string
+		want                PlatformArtifact
+		warning             string
+	}{
+		// A higher LINE is installed: it never answers a lower line, nor an
+		// exact lower build. The lower build is fetched and answered.
+		{"request-scope-lower-line", "request-scope-higher-line", "26.3", artLow, ""},
+		{"request-scope-lower-exact", "request-scope-higher-line", "26.3.4.1", artLow, ""},
+		// A newer build of the SAME line is installed: a line request keeps
+		// it, with the monotonic warning, rather than install the older one
+		// the registry offers; an exact request for the older version is
+		// still answered by exactly that version.
+		{"request-scope-newer-in-line", "request-scope-newer-in-line", "26.3", artLowNewer, "monotonic"},
+		{"request-scope-exact-in-line", "request-scope-newer-in-line", "26.3.4.1", artLow, ""},
+	} {
+		c := newCase(r.id, "request-scope", "file", "http")
+		c.Request.Spelling = r.spelling
+		c.Setup.Cache = r.cache
+		c.Expect.OK = true
+		c.Expect.Version = strp(r.want.Predicate.ClickHouseVersion)
+		c.Expect.Build = strp(r.want.Predicate.Build)
+		c.Expect.LibrarySHA256 = strp(r.want.Predicate.LibrarySHA256)
+		if r.warning != "" {
+			c.Expect.Warnings = []string{r.warning}
+		}
+		cases = append(cases, c)
+	}
+
+	flushTrees(fs, tree, monoTree, scopeTree)
 	for _, l := range extraLayouts {
 		l.Flush(fs)
 	}
