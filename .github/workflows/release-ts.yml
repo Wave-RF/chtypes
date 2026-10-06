@@ -55,7 +55,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # Before anything is installed or built: the channel's own selftest, then
       # the tag must be a release of this branch's channel.
-      - name: the tag is a release of this branch's channel (scripts/release-channel.sh, #511)
+      - name: "the tag is a release of this branch's channel (scripts/release-channel.sh, #511)"
         env:
           TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
         run: |

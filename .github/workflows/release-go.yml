@@ -59,7 +59,7 @@ jobs:
       # release of this branch's channel, and go/go.mod must declare the
       # channel's module path, ending in /v2. Until the Go dev binding renames
       # the module, this refuses every Go dry run, on purpose.
-      - name: the tag is a release of this branch's channel, and go/go.mod declares its /v2 module path (scripts/release-channel.sh, #511)
+      - name: "the tag is a release of this branch's channel, and go/go.mod declares its /v2 module path (scripts/release-channel.sh, #511)"
         run: |
           scripts/release-channel.sh --selftest
           scripts/release-channel.sh tag go "$TAG"
