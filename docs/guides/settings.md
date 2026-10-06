@@ -135,6 +135,8 @@ Three are **per-process**, settable only through the `defaults` of `setup`:
 | `chtypes_default_eval_wall_nanos`   | DEFAULT-expression wall-clock ceiling | 1 s     |
 | `chtypes_custom_settings_prefixes`  | mirror the server's own               | `SQL_`  |
 
+The functions a DEFAULT expression cannot use at all are listed, with the reason for each, in [`declined-functions.md`](../reference/declined-functions.md).
+
 **Sending a per-process key on a per-call map is a decline, never an admission.** It comes back in the result's `unsupported_settings`, and the row is promoted to the `unsupported` outcome (the library applies that promotion itself in 1.0; no binding does). Do not score such a row as agreement: chtypes did not answer it.
 
 ## Time zones are two things
