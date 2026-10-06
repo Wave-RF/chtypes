@@ -18,11 +18,12 @@ from chtypes import (
     DocFlags,
     Format,
     InternalError,
+    Outcome,
     SchemaError,
     UnsupportedError,
     UsageError,
 )
-from chtypes._abi1 import _decls
+from chtypes._abi2 import _decls
 
 CREATE = b"CREATE TABLE t (a UInt8) ENGINE = Memory"
 
@@ -97,8 +98,10 @@ def test_the_refusal_and_the_decline_are_peers_never_subtypes() -> None:
 
 
 def test_a_status_outside_the_closed_set_is_an_internal_error_naming_its_value() -> None:
-    with pytest.raises(InternalError, match="status 99"):
+    # Rule r3: the status is its unknown(n), and the call still fails.
+    with pytest.raises(InternalError, match=r"status unknown\(99\)") as info:
         _decls.Api._check(None, 99, None)  # type: ignore[arg-type]
+    assert info.value.status == 99
     _decls.Api._check(None, 0, None)  # type: ignore[arg-type]  # CHS_OK is no error
 
 
@@ -140,8 +143,10 @@ def test_rows_marshals_columns_filter_export_and_doc_flags(lib, monkeypatch) -> 
         )
         schema.rows(Format.CSV, bytearray(b"1\n"))
     assert isinstance(result, BatchResult)
-    # The stub's echo has no `outcome`, so the decoder's fallback answers.
-    assert result.outcome.value == "unsupported" and result.payload is not None
+    # The stub's echo has no `outcome`: the empty spelling, which no vocabulary
+    # lists, reads as its unknown(n) member, never as accepted (rule r3).
+    assert result.outcome == "" and not result.outcome.known and result.payload is not None
+    assert result.outcome is not Outcome.ACCEPTED
     (_, fmt, body, settings, columns, handle, export, flags), plain = calls
     assert fmt == 0 and body == b'{"a":1}\n' and settings is None
     assert json.loads(columns) == [{"name": "a"}, {"name_b64": "/w=="}]

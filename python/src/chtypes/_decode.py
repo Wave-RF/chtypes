@@ -5,10 +5,14 @@ Rules, each from that section:
 
 1. The stock `json` parser, and nothing hand-rolled. A bare `NaN` or `Infinity`
    (which RFC 8259 does not have, and the library never writes) is refused.
-2. Absent is the default; an unknown key is skipped.
+2. Absent is the default; an unknown key is skipped, at every object level
+   (ABI v2 rule r2, spec/abi-v2/docs.md).
 3. A duplicate key, or a value of the wrong JSON type, is an `InternalError`
    naming the document and the key.
-4. Nothing is computed: a vocabulary fact is read from the generated tables.
+4. Nothing is computed: a vocabulary fact is read from the generated tables. A
+   vocabulary value the description does not list is that vocabulary's
+   unknown(n), kept for that field alone (rule r3): it never fails the document,
+   the row or the batch.
 5. Names are bytes. A name is `<key>` (a JSON string) or `<key>_b64` (the standard
    base64 of the raw bytes), exactly one of the two; the decoder surfaces both as
    `bytes`. Every other data-derived string field accepts the same two spellings
@@ -24,7 +28,7 @@ import json
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from ._abi1._vocab import DefaultKind, FilterOutcome, Outcome, Reason, Source, Verdict
+from ._abi2._vocab import DefaultKind, FilterOutcome, Outcome, Reason, Source, Verdict
 from .errors import ArtifactCorruptError, internal
 from .results import (
     BatchResult,
@@ -273,20 +277,18 @@ def _spans(obj: Mapping[str, Any], key: str, where: str) -> tuple[Span, ...]:
 
 
 def _value(obj: dict[str, Any], where: str) -> Value:
+    # An unlisted src is its unknown(n): kept, never a failure (rule r3), and
+    # not stored until the description says what one reports. An ABSENT src is
+    # no value at all, and stays a malformed entry.
     source = obj.get("src")
     if not isinstance(source, str):
         raise _wrong(where, "src", "a string", source)
-    try:
-        stored = Source.is_stored(source)
-    except KeyError:
-        # The vocabulary has no fallback, so no is_stored fact can be read.
-        raise internal(f"{where}: unknown value source {source!r}") from None
     return Value(
         column=_name(obj, "name", where),
         text=_bytes(obj, "stored", where),
         null=_bool(obj, "null", where),
         source=source,
-        is_stored=stored,
+        is_stored=Source.is_stored(source),
         value=_opt_b64(obj, "value_b64", where),
     )
 
@@ -438,15 +440,11 @@ def decode_filter_result(raw: bytes) -> FilterResult:
 
 
 def _column(obj: dict[str, Any], where: str) -> Column:
-    kind = _text(obj, "default_kind", where)
-    try:
-        default_kind = DefaultKind.of(kind)
-    except ValueError:
-        raise internal(f"{where}: unknown default_kind {kind!r}") from None
+    # An unlisted default_kind is its unknown(n): kept, never a failure (rule r3).
     return Column(
         name=_name(obj, "name", where),
         type=_bytes(obj, "type", where),
-        default_kind=default_kind,
+        default_kind=DefaultKind.of(_text(obj, "default_kind", where)),
         default_expr=_bytes(obj, "default_expression", where),
     )
 

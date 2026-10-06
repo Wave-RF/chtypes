@@ -1,6 +1,6 @@
-"""Runs every "loader" case in tests/fixtures/abi-v1/cases.json
+"""Runs every "loader" case in tests/fixtures/abi-v2/cases.json
 (scripts/abi-v1/emit/_stubshared.py's variant plan, one per stub library)
-through the hand-written loader, chtypes._abi1._loader.open(), plus a few
+through the hand-written loader, chtypes._abi2._loader.open(), plus a few
 hand-written unit checks the generated cases cannot express: the two-phase
 Api constructor (plan section 2.2) and open_unverified()'s gating
 (plan section 3.1).
@@ -12,7 +12,7 @@ import platform
 
 import pytest
 
-from chtypes._abi1 import _decls, _errmap, _errors, _loader
+from chtypes._abi2 import _decls, _errmap, _errors, _loader
 
 from .conftest import cases_of_kind, stub_path
 

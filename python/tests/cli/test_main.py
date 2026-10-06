@@ -1,4 +1,4 @@
-"""The CLI over the v1 fetch layer: `python -m chtypes` / the `chtypes` script.
+"""The CLI over the v1 fetch contract: `python -m chtypes` / the `chtypes` script.
 
 Driven in-process through `main(argv)` against a hand-written `file://` tree,
 with the fetch layer's own environment (`CHTYPES_ARTIFACTS_URL`,
@@ -185,6 +185,8 @@ def _is_error(obj) -> bool:
 
 
 def test_python_dash_m_runs_the_same_cli(tmp_path) -> None:
+    # A child process: no test seam reaches it, so it speaks the dev channel,
+    # which reads an explicit cache through its v2-dev subroot (rule r5).
     result = subprocess.run(
         [sys.executable, "-m", "chtypes", "where"],
         capture_output=True,
@@ -193,7 +195,7 @@ def test_python_dash_m_runs_the_same_cli(tmp_path) -> None:
         timeout=60,
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == str(tmp_path / "c")
+    assert result.stdout.strip() == str(tmp_path / "c" / "v2-dev")
 
 
 def _zero_x_registry(root: Path) -> None:

@@ -1,15 +1,15 @@
-"""Fixtures for the ABI v1 conformance suite (plan PLAN-sdk-v1-ffi section
+"""Fixtures for the ABI v2 conformance suite (plan PLAN-sdk-v1-ffi section
 5.3, F-Py's conformance script scripts/abi-v1/conformance/python.sh).
 
 Every test here needs the stub libraries scripts/abi-v1/build-stubs.sh
-builds; without `$CHTYPES_ABI1_STUBS` it skips, loudly, by name -- the same
+builds; without `$CHTYPES_ABI2_STUBS` it skips, loudly, by name -- the same
 "no registry, no run" convention python/tests/conftest.py already documents
 for the fetch suite. `uv run pytest -q` with no stubs therefore shows every
 case in this directory SKIPPED, individually, never a collection error and
 never a silent zero-run.
 
 With stubs present, `pytest_sessionfinish` below also writes
-`$CHTYPES_ABI1_REPORT` (spec/abi-v1/schema/report.schema.json's shape) from
+`$CHTYPES_ABI2_REPORT` (spec/abi-v2/schema/report.schema.json's shape) from
 the pass/fail this session actually observed per case id -- the report is a
 BY-PRODUCT of running the real suite, never a second, independently
 maintained notion of "did it pass".
@@ -29,10 +29,11 @@ from typing import Any
 import pytest
 
 from chtypes import _setup, library
-from chtypes._abi1 import _decls
+from chtypes._abi2 import _decls
+from chtypes._ocifetch import _channel
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-CASES_PATH = REPO_ROOT / "tests" / "fixtures" / "abi-v1" / "cases.json"
+CASES_PATH = REPO_ROOT / "tests" / "fixtures" / "abi-v2" / "cases.json"
 SCRIPTS_ABI_V1 = REPO_ROOT / "scripts" / "abi-v1"
 
 # scripts/abi-v1 is a generator-only tree (never shipped with the installed
@@ -66,12 +67,12 @@ def cases_of_kind(*kinds: str) -> tuple[list[dict], list[str]]:
 
 @pytest.fixture(scope="session")
 def stubs_dir() -> Path:
-    env = os.environ.get("CHTYPES_ABI1_STUBS")
+    env = os.environ.get("CHTYPES_ABI2_STUBS")
     if not env:
-        pytest.skip("CHTYPES_ABI1_STUBS not set (scripts/abi-v1/build-stubs.sh --out DIR)")
+        pytest.skip("CHTYPES_ABI2_STUBS not set (scripts/abi-v1/build-stubs.sh --out DIR)")
     d = Path(env)
     if not d.is_dir():
-        pytest.skip(f"CHTYPES_ABI1_STUBS={env!r} is not a directory")
+        pytest.skip(f"CHTYPES_ABI2_STUBS={env!r} is not a directory")
     return d
 
 
@@ -143,7 +144,7 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo) -> None:
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:  # noqa: ARG001
-    report_path = os.environ.get("CHTYPES_ABI1_REPORT")
+    report_path = os.environ.get("CHTYPES_ABI2_REPORT")
     if not report_path or not _RESULTS:
         return
     results = [
@@ -153,7 +154,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:  # n
     doc = {
         "schema": 1,
         "binding": "python",
-        "toolchain": os.environ.get("CHTYPES_ABI1_TOOLCHAIN", platform.python_version()),
+        "toolchain": os.environ.get("CHTYPES_ABI2_TOOLCHAIN", platform.python_version()),
         "os": host_os_arch(),
         "cases_sha256": _parity.compute_cases_hash(_CASES_DOC),
         "results": results,
@@ -196,7 +197,7 @@ def build_arg(api: Any, a: dict, refs: dict[str, Any] | None = None) -> Any:
 def strip_ids(obj: Any) -> Any:
     """The stub's echo JSON tags every handle with a per-image serial `id`
     (`emit/stub.py`'s `chs_sb_handle_field`) that no case can predict
-    (`tests/fixtures/abi-v1/cases.json`'s own docstring); strip it, anywhere
+    (`tests/fixtures/abi-v2/cases.json`'s own docstring); strip it, anywhere
     it appears, before a structural comparison."""
     if isinstance(obj, dict):
         return {k: strip_ids(v) for k, v in obj.items() if k != "id"}
@@ -206,6 +207,22 @@ def strip_ids(obj: Any) -> Any:
 
 
 # ------------------------------------------------- public-API fixtures
+
+
+@pytest.fixture(autouse=True)
+def _dev_channel_with_overrides():
+    """The public API fetches under the ABI v2 dev channel (abi-2 predicates,
+    schema-2 records, the v2-dev cache, no pinning, and no override of the base
+    or the trust list). These tests reach a fixture registry signed with the
+    test key, so each runs under `allow_overrides_for_tests`: the dev channel
+    with exactly those overrides honored, and nothing else changed. A test of
+    the dev channel's own refusals switches to it exactly
+    (`use_dev_channel_for_tests`)."""
+    restore = _channel.allow_overrides_for_tests()
+    try:
+        yield
+    finally:
+        restore()
 
 
 @pytest.fixture

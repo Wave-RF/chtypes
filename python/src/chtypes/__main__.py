@@ -12,6 +12,15 @@ A spelling is `26.8`, `26.8.15` or `26.8.15.10`. Exit statuses come from the
 as `ERROR_EXIT_CODES`); a usage error exits 2 and success exits 0. Progress and
 diagnostics go to stderr; `fetch` prints one installed library path per line on
 stdout.
+
+2.0.0-dev: UNSTABLE, staging only, not for production. This CLI speaks the ABI
+v2 dev channel (spec/abi-v2/docs.md, rules r5 and r6): it fetches only from
+https://registry-staging.wavehouse.dev/chtypes/v2-dev and trusts only the
+staging key; CHTYPES_ARTIFACTS_URL, CHTYPES_TRUSTED_KEYS and
+CHTYPES_ALLOW_UNSIGNED are ignored, each with one warning; --lock, --frozen and
+--update are refused before any network call; its default cache is
+${XDG_CACHE_HOME:-~/.cache}/chtypes/v2-dev, and an explicit one (--cache,
+CHTYPES_CACHE) is used through its v2-dev subroot.
 """
 
 from __future__ import annotations
@@ -24,6 +33,7 @@ from collections.abc import Sequence
 
 from . import __version__ as chtypes_version
 from . import _ocifetch as fetch_layer
+from ._ocifetch import _channel
 from ._ocifetch import _constants as C
 from ._ocifetch._ensure import _translate_transport_error, detect_host_platform, missing_notes
 from ._ocifetch._errors import ArtifactCorruptError, ArtifactMissingError, FetchError
@@ -67,6 +77,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = _Parser(
         prog="chtypes",
         description="Fetch, verify and locate chtypes artifacts (docs/guides/fetch-v1.md).",
+        epilog=(
+            "2.0.0-dev: UNSTABLE, staging only, not for production. Fetches only from the staging "
+            "dev channel and trusts only its key; --lock, --frozen and --update are refused; "
+            "CHTYPES_ARTIFACTS_URL, CHTYPES_TRUSTED_KEYS and CHTYPES_ALLOW_UNSIGNED are ignored "
+            "(spec/abi-v2/docs.md, rule r6)."
+        ),
     )
     parser.add_argument("--version", action="version", version=f"chtypes {_display_version()}")
     sub = parser.add_subparsers(dest="command", metavar="<command>")
@@ -196,6 +212,10 @@ def _published_tags(options) -> list[str]:
 
 
 def _cmd_fetch(args: argparse.Namespace) -> int:
+    # A dev SDK pins nothing: the refusal comes before anything else, the
+    # network above all (rule r6).
+    if (args.lock or args.frozen or args.update) and not _channel.active().pinnable:
+        raise ValueError(f"chtypes: {_channel.PINNING_REFUSED}")
     if args.all and args.spellings:
         raise ValueError("chtypes: give spellings or --all, not both")
     if not args.all and not args.spellings and not args.update:
