@@ -6,7 +6,9 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
-## [1.0.2] — unreleased
+## [1.0.2] — 2026-10-06
+
+There is no 1.0.1 of this binding: 1.0.1 was a Go-only fix to that module's metadata. From 1.0.2 the four bindings release together again.
 
 ### Fixed
 
