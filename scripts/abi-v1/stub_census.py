@@ -36,6 +36,11 @@ import tempfile
 import xml.etree.ElementTree as ET
 
 STUB_ENV = "CHTYPES_ABI1_STUBS"
+# Each ABI major's stub directory variable (CHTYPES_ABI1_STUBS,
+# CHTYPES_ABI2_STUBS, ...): a binding reads the one of the major it speaks
+# (spec/binding-majors.json), and a skip naming any of them, with the stubs
+# set, is a stub-skip.
+STUB_ENV_RE = re.compile(r"CHTYPES_ABI\d+_STUBS")
 
 
 class Run:
@@ -156,7 +161,7 @@ def verdict(run, rc, require=()):
     problems = []
     for name, reason in run.skipped:
         out.append("    SKIP %s: %s" % (name, reason))
-        if STUB_ENV in reason or STUB_ENV in name:
+        if STUB_ENV_RE.search(reason) or STUB_ENV_RE.search(name):
             problems.append("stub-skip with the stubs set: %s" % name)
     for name in run.failed:
         out.append("    FAILED " + name)
@@ -223,6 +228,18 @@ def selftest():
     )
     c, l = verdict(parse_go(g), 0, req)
     check("a stub-skip with stubs set was accepted", c, l, True, "stub-skip with the stubs set")
+    # The same for an ABI v2 binding's own variable.
+    g = os.path.join(tmp, "stubskip2.json")
+    _gojson(
+        g,
+        base
+        + [
+            {"Action": "output", "Test": "TestStubB", "Package": "x/chtypes", "Output": "    s.go:1: SKIPPED: CHTYPES_ABI2_STUBS is not set\n"},
+            {"Action": "skip", "Test": "TestStubB", "Package": "x/chtypes"},
+        ],
+    )
+    c, l = verdict(parse_go(g), 0, req)
+    check("an ABI v2 stub-skip with stubs set was accepted", c, l, True, "stub-skip with the stubs set")
 
     # A skip for another named reason is reported, not failed.
     g = os.path.join(tmp, "othskip.json")

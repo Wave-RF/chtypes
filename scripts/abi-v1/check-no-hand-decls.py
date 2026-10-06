@@ -23,10 +23,11 @@ that hole. Each binding's rules are the shapes such a bypass must take:
 So the generated layer exposes its wrappers under names without the `chs_`
 prefix, and hand code calls those.
 
-WHAT IS EXEMPT. A file that is one of the paths gen.py's emitters produce
-(gen.produced_outputs()) AND whose first 512 bytes carry the generator's banner
-(scripts/abi-v1/emit/__init__.py's BANNER_RE, a real 64-hex fingerprint
-included). Membership is the first condition because `gen.py --check` skips
+WHAT IS EXEMPT. A file that is one of the paths gen.py's emitters produce for
+some ABI major (gen.produced_outputs(major=N)) AND whose first 512 bytes carry
+THAT major's banner (scripts/abi-v1/emit/__init__.py's banner_re(N), a real
+64-hex fingerprint included): gen.is_generated. A file of one major carrying
+another major's banner is not exempt. Membership is the first condition because `gen.py --check` skips
 build-output directories when it looks for a banner that no emitter produces, so
 the banner alone could be copied into a hand-written file under one of them. Full-line comments (and Python
 docstring lines) are dropped before matching, so prose that NAMES a symbol is
@@ -53,8 +54,10 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 sys.path.insert(0, str(HERE))
 
-from emit import BANNER_PREFIX, BANNER_RE  # noqa: E402
-from gen import produced_outputs  # noqa: E402
+import majors as bmajors  # noqa: E402
+import model as abimodel  # noqa: E402
+from emit import BANNER_PREFIX, banner_prefix  # noqa: E402
+from gen import is_generated, produced_by_major, produced_outputs  # noqa: E402
 
 EXT = {".go": "go", ".py": "python", ".ts": "ts", ".rs": "rust"}
 COMMENT = {"go": ("//", "/*", "*"), "python": ("#",), "ts": ("//", "/*", "*"), "rust": ("//", "/*", "*")}
@@ -81,13 +84,12 @@ RULES: dict[str, list[tuple[str, re.Pattern]]] = {
 TS_DEFINE = re.compile(r"\bdefine\s*\(")
 TS_CHS = re.compile(r"\bchs_\w+")
 
-V1_DIRS = [
-    "go/internal/abi1",
-    "python/src/chtypes/_abi1",
+# Every binding's generated-layer directory at every major the generator
+# knows (scripts/abi-v1/majors.py LAYER_DIRS): go/internal/abi2 holds the Go
+# layer once go speaks ABI v2 (spec/binding-majors.json).
+V1_DIRS = [bmajors.layer_dir(b, n) for b in bmajors.BINDINGS for n in abimodel.MAJORS] + [
     "python/tests/abi1",
-    "ts/src/abi1",
     "ts/test/abi1",
-    "rust/src/abi1",
 ]
 V1_GLOBS = [("rust/tests", "abi1_*.rs")]
 ALL_DIRS = ["go", "python/src", "python/tests", "ts/src", "ts/test", "rust/src", "rust/tests"]
@@ -122,9 +124,9 @@ def code_lines(binding: str, text: str) -> list[tuple[int, str]]:
     return out
 
 
-def problems_in(path: Path, rel: str, produced: frozenset[str] | None = None) -> list[str]:
+def problems_in(path: Path, rel: str, produced: dict[int, frozenset[str]] | None = None) -> list[str]:
     if produced is None:
-        produced = produced_outputs()
+        produced = produced_by_major()
     binding = EXT.get(path.suffix)
     if binding is None:
         return []
@@ -132,7 +134,7 @@ def problems_in(path: Path, rel: str, produced: frozenset[str] | None = None) ->
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return [f"{rel}: unreadable; a checker that cannot read a file must not pass it"]
-    if rel in produced and BANNER_RE.search(text[:512]):
+    if is_generated(rel, text, produced):
         return []
     found = []
     lines = code_lines(binding, text)
@@ -173,10 +175,10 @@ def files_in(root: Path, scope: str) -> tuple[list[tuple[Path, str]], list[str]]
     return files, absent
 
 
-def run(root: Path, scope: str, quiet: bool = False, produced: frozenset[str] | None = None) -> int:
+def run(root: Path, scope: str, quiet: bool = False, produced: dict[int, frozenset[str]] | None = None) -> int:
     files, absent = files_in(root, scope)
     if produced is None:
-        produced = produced_outputs()
+        produced = produced_by_major()
     found = []
     for p, rel in files:
         found += problems_in(p, rel, produced)
@@ -270,7 +272,20 @@ def selftest() -> int:
         built.write_text(gen.read_text().replace("func g()", "func b()"))
         # What the emitters produce, standing in for the real set (the real
         # outputs, so a real generated file stays exempt) plus the generated file above.
-        produced = produced_outputs() | {"go/internal/abi1/abi_gen.go"}
+        produced = {1: produced_outputs(major=1) | {"go/internal/abi1/abi_gen.go"}, 2: produced_outputs(major=2)}
+        # ABI v2's banner on ABI v2's own produced path is exempt; ABI v1's
+        # banner on that path, or v2's banner on a v1 path, is not.
+        v2_gen = root / "go/internal/abi2/abi_gen.go"
+        v2_gen.parent.mkdir(parents=True, exist_ok=True)
+        v2_gen.write_text(
+            f"// {banner_prefix(2)} (CHTYPES_FP) — DO NOT EDIT\npackage abi2\n\nfunc g() {{ C.chs_buf_len(nil) }}\n".replace(
+                "CHTYPES_FP", "CHS_ABI_FINGERPRINT " + fake
+            )
+        )
+        produced[2] = produced[2] | {"go/internal/abi2/abi_gen.go"}
+        v1_on_v2 = root / "go/internal/abi2/crossed_gen.go"
+        v1_on_v2.write_text(gen.read_text().replace("package abi1", "package abi2"))
+        produced[2] = produced[2] | {"go/internal/abi2/crossed_gen.go"}
 
         flagged = {}
         for scope in ("v1", "all"):
@@ -291,6 +306,10 @@ def selftest() -> int:
             fails.append("a file carrying only the banner's shape was exempted")
         if "go/internal/abi1/build/loader_gen.go" not in flagged["v1"]:
             fails.append("a hand-written file carrying the real banner under build/ was exempted or never walked")
+        if "go/internal/abi2/abi_gen.go" in flagged["v1"] or "go/internal/abi2/abi_gen.go" in flagged["all"]:
+            fails.append("ABI v2's generated file, carrying ABI v2's banner at an ABI v2 output path, was not exempt")
+        if "go/internal/abi2/crossed_gen.go" not in flagged["all"]:
+            fails.append("ABI v1's banner on an ABI v2 output path was exempted")
         # A produced path with its banner removed is an ordinary hand-written file.
         stripped = gen.read_text().split("\n", 1)[1]
         gen.write_text(stripped)
@@ -310,7 +329,7 @@ def selftest() -> int:
     if fails:
         return 1
     print(
-        "check-no-hand-decls: selftest ok: every rule fires in all four bindings, comments and generated files are exempt, a forged banner is not, and the scopes differ as documented"
+        "check-no-hand-decls: selftest ok: every rule fires in all four bindings, comments and generated files (ABI v1's and ABI v2's, each by its own banner) are exempt, a forged or crossed banner is not, and the scopes differ as documented"
     )
     return 0
 

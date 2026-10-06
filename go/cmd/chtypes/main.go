@@ -12,7 +12,7 @@
 //
 // Run it without installing anything:
 //
-//	go run github.com/wave-rf/chtypes/go/cmd/chtypes@latest fetch 26.8
+//	go run github.com/wave-rf/chtypes/go/v2/cmd/chtypes@latest fetch 26.8
 //
 // Progress and warnings go to stderr; `fetch` prints the installed directory
 // of each request alone on stdout, so `dir="$(chtypes fetch 26.8)"` composes.
@@ -20,11 +20,17 @@
 // in spec/fetch-v1/constants.json (docs/guides/fetch-v1.md section 8), read
 // from the generated table, never hard-coded here.
 //
-// Environment: CHTYPES_ARTIFACTS_URL (the bases, comma separated),
-// CHTYPES_CACHE (the cache root), CHTYPES_TRUSTED_KEYS (replaces the embedded
-// release key), CHTYPES_ALLOW_UNSIGNED=1 (skip verification, loudly),
-// CHTYPES_DOWNLOAD_TOKEN, CHTYPES_TARGET (the default --platform) and
-// CHTYPES_CACHE_STRICT=1 (--strict).
+// Environment: CHTYPES_CACHE (the cache: this 2.0.0-dev SDK uses its subroot
+// <CHTYPES_CACHE>/v2-dev), CHTYPES_DOWNLOAD_TOKEN, CHTYPES_TARGET (the default
+// --platform) and CHTYPES_CACHE_STRICT=1 (--strict).
+//
+// 2.0.0-dev: UNSTABLE, staging only, not for production. This CLI speaks the
+// ABI v2 dev channel (spec/abi-v2/docs.md, rules r5 and r6): it fetches only
+// from https://registry-staging.wavehouse.dev/chtypes/v2-dev and trusts only
+// the staging key; CHTYPES_ARTIFACTS_URL, CHTYPES_TRUSTED_KEYS and
+// CHTYPES_ALLOW_UNSIGNED are ignored, each with one warning; --lock, --frozen
+// and --update are refused before any network call; its default cache is
+// ${XDG_CACHE_HOME:-~/.cache}/chtypes/v2-dev.
 package main
 
 import (
@@ -39,7 +45,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/wave-rf/chtypes/go/internal/ocifetch"
+	"github.com/wave-rf/chtypes/go/v2/internal/ocifetch"
 )
 
 const usageText = `usage:
@@ -55,6 +61,10 @@ const usageText = `usage:
 
 --strict (or CHTYPES_CACHE_STRICT=1): a cache that cannot be read is CHTYPES_CACHE_UNUSABLE, never "not installed"
 exit statuses: 0 ok, 2 usage, otherwise the failure's own status (docs/guides/fetch-v1.md section 8)
+
+2.0.0-dev: UNSTABLE, staging only, not for production. Fetches only from the staging dev channel and
+trusts only its key; --lock, --frozen and --update are refused; CHTYPES_ARTIFACTS_URL,
+CHTYPES_TRUSTED_KEYS and CHTYPES_ALLOW_UNSIGNED are ignored (spec/abi-v2/docs.md, rule r6).
 `
 
 // usageError is exit 2.
@@ -243,6 +253,13 @@ func cmdFetch(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 	spellings, err := parseInterleaved(fs, args)
 	if err != nil {
 		return err
+	}
+	// A dev SDK pins nothing: the refusal comes before anything else, the
+	// network above all (rule r6).
+	if lock != "" || frozen || update {
+		if probe := (&ocifetch.Options{Frozen: frozen, LockPath: lock, Update: update}); ocifetch.PinningRefusedFor(probe) {
+			return &usageError{ocifetch.PinningRefused}
+		}
 	}
 	platform, err := cf.platformKey()
 	if err != nil {

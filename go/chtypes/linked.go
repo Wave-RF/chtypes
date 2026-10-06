@@ -2,7 +2,7 @@
 
 package chtypes
 
-import "github.com/wave-rf/chtypes/go/internal/abi1"
+import "github.com/wave-rf/chtypes/go/v2/internal/abi2"
 
 // OpenLinked opens the statically linked library: the same Library, over the
 // table the linked filler fills from the symbols the linker resolved. It runs
@@ -16,7 +16,7 @@ func OpenLinked() (l *Library, err error) {
 			failedOpen(gen)
 		}
 	}()
-	return openImage("linked", func(zone, defaults []byte) (*abi1.Table, error) {
-		return abi1.LoadLinked(abi1.OpenLinked(), zone, defaults)
+	return openImage("linked", func(zone, defaults []byte) (*abi2.Table, error) {
+		return abi2.LoadLinked(abi2.OpenLinked(), zone, defaults)
 	}, "<linked>", nil)
 }

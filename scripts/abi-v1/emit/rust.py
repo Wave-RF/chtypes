@@ -59,6 +59,8 @@ from model import BUF_HANDLE, ERROR_HANDLE, SCALARS, STATUS_ENUM
 
 from . import Output, banner, stub
 
+BINDING = "rust"  # runs for the major spec/binding-majors.json gives rust (emit/__init__.py)
+
 
 def _rustfmt(text: str) -> str:
     """Format generated Rust source with the `rustfmt` on PATH (it ships

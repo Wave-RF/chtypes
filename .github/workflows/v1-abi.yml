@@ -31,6 +31,17 @@ name: v1-abi
 # missing, the same "a checker nobody has seen fail is not a checker"
 # discipline as everywhere else in this repository.
 #
+# MAJORS (public issue #511). spec/binding-majors.json says which ABI major
+# each binding speaks at this commit (scripts/abi-v1/majors.py; absent on
+# main, where every binding speaks ABI v1). The context names stay v1's until
+# the lock, so every binding job DERIVES its major from that file, prints
+# "ABI major tested: N (spec/binding-majors.json@<commit>)" to its log and its
+# step summary, and asserts the major against what it actually loads: the stub
+# library it hands the binding (dlopen'd and asked), or the identity compiled
+# into the binding's generated layer, never the file's own value. The stubs
+# are built for every major a binding speaks (build-stubs.sh: abi-stubs/v<N>/),
+# and each conformance leg loads its binding's major's.
+#
 # Hosted runners, no secrets. Network is used only to install pinned tools.
 
 on:
@@ -74,6 +85,19 @@ jobs:
         run: uv run --no-project --python 3.11 scripts/abi-v1/gen.py --selftest
       - name: selftest — the stub census refuses a stub-skip with the stubs set, a missing required test, a zero-run and a skipped-whole-file
         run: python3 scripts/abi-v1/stub_census.py --selftest
+      # The major map (spec/binding-majors.json) and its assertion: a map
+      # missing a binding is refused, and a binding whose loaded library (a
+      # real dlopen of a compiled plant), printed identity or compiled layer
+      # answers another major than the map gives it is refused (a job on v2
+      # testing v1 after its binding converted), with positive controls.
+      - name: "selftest — the major map refuses a missing binding, and a library or layer of another major than the map's, with a positive control"
+        run: python3 scripts/abi-v1/majors.py --selftest
+      - name: "every binding's compiled-in ABI identity is the major spec/binding-majors.json gives it"
+        run: |
+          for b in go python ts rust; do
+            python3 scripts/abi-v1/majors.py announce "$b" --what "its generated layer"
+            python3 scripts/abi-v1/majors.py assert-layer "$b"
+          done
       - name: every generated file matches spec/abi-v1/ (gen.py --check)
         run: uv run --no-project --python 3.11 scripts/abi-v1/gen.py --check
       # The fingerprint is computed in exactly one place, scripts/abi-v1/jcs.py.
@@ -222,15 +246,17 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: "selftest — stubs.json paths are relative and resolve after a relocation"
+      - name: "selftest — stubs.json paths are relative and resolve after a relocation, and each major's ok stub answers that major"
         run: scripts/abi-v1/build-stubs.sh --selftest
-      - name: build the stub libraries and run the stub's handle-rule self-test
-        run: scripts/abi-v1/build-stubs.sh --out "$RUNNER_TEMP/abi-v1-stubs"
-      - name: upload the stub libraries and manifest for v1-abi-conformance
+      # Every major some binding speaks (spec/binding-majors.json), each into
+      # abi-stubs/v<N>/: both majors while the bindings convert.
+      - name: build the stub libraries of every major a binding speaks, and run the stub's handle-rule self-test
+        run: scripts/abi-v1/build-stubs.sh --out "$RUNNER_TEMP/abi-stubs"
+      - name: upload the stub libraries and manifests for v1-abi-conformance
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: v1-abi-stubs-${{ matrix.platform }}
-          path: ${{ runner.temp }}/abi-v1-stubs
+          path: ${{ runner.temp }}/abi-stubs
           retention-days: 7
 
   v1-abi-conformance:
@@ -264,7 +290,19 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: v1-abi-stubs-${{ matrix.os }}
-          path: ${{ runner.temp }}/abi1-stubs
+          path: ${{ runner.temp }}/abi-stubs
+      # The major this leg tests is the binding's, derived from
+      # spec/binding-majors.json, printed, and asserted against the stub the
+      # leg hands the binding (dlopen'd and asked for chs_abi_version() and its
+      # abi_fingerprint) and against the binding's compiled-in layer.
+      - name: the ABI major this leg tests, derived and asserted against the stub it loads
+        id: major
+        run: |
+          major="$(python3 scripts/abi-v1/majors.py get "${{ matrix.binding }}")"
+          python3 scripts/abi-v1/majors.py announce "${{ matrix.binding }}" --what "${{ matrix.toolchain }} ${{ matrix.os }}"
+          python3 scripts/abi-v1/majors.py assert-stubs "${{ matrix.binding }}" "$RUNNER_TEMP/abi-stubs/v$major"
+          python3 scripts/abi-v1/majors.py assert-layer "${{ matrix.binding }}"
+          echo "major=$major" >> "$GITHUB_OUTPUT"
 
       # Toolchain setup, one binding at a time, each gated so only the
       # matching leg pays for it. This lives HERE rather than in each
@@ -332,17 +370,16 @@ jobs:
       - name: run every ABI case through the binding against the stubs, and upload the report
         id: run
         env:
-          CHTYPES_ABI1_STUBS: ${{ runner.temp }}/abi1-stubs
-          CHTYPES_ABI1_REPORT: ${{ runner.temp }}/abi1-report-${{ matrix.binding }}-${{ matrix.toolchain }}-${{ matrix.os }}.json
-          CHTYPES_ABI1_TOOLCHAIN: ${{ matrix.toolchain }}
+          MAJOR: ${{ steps.major.outputs.major }}
+          REPORT: ${{ runner.temp }}/abi1-report-${{ matrix.binding }}-${{ matrix.toolchain }}-${{ matrix.os }}.json
         run: |
-          case "${{ matrix.binding }}" in
-            go) dir="go/internal/abi1" ;;
-            python) dir="python/src/chtypes/_abi1" ;;
-            ts) dir="ts/src/abi1" ;;
-            rust) dir="rust/src/abi1" ;;
-            *) echo "::error::v1-abi-conformance: unknown binding ${{ matrix.binding }}"; exit 1 ;;
-          esac
+          # The binding reads the variables of the major it speaks:
+          # CHTYPES_ABI<N>_STUBS, _REPORT and _TOOLCHAIN (a v2 binding reads
+          # nothing named for ABI v1).
+          export "CHTYPES_ABI${MAJOR}_STUBS=$RUNNER_TEMP/abi-stubs/v$MAJOR"
+          export "CHTYPES_ABI${MAJOR}_REPORT=$REPORT"
+          export "CHTYPES_ABI${MAJOR}_TOOLCHAIN=${{ matrix.toolchain }}"
+          dir="$(python3 scripts/abi-v1/majors.py layer-dir "${{ matrix.binding }}")"
           # No binding's v1 FFI lane has landed yet (F-Go/F-Py/F-TS/F-Rust, per
           # the lane plan). Until one adds "$dir", this leg skips LOUDLY by
           # name rather than failing or silently passing, exactly as every
@@ -354,14 +391,14 @@ jobs:
           fi
           # The lane that adds "$dir" also adds this script (never edits this
           # workflow): it can assume its toolchain is already on PATH (set up
-          # above) and CHTYPES_ABI1_STUBS/CHTYPES_ABI1_REPORT/
-          # CHTYPES_ABI1_TOOLCHAIN are exported. It should load its generated
+          # above) and CHTYPES_ABI<N>_STUBS/CHTYPES_ABI<N>_REPORT/
+          # CHTYPES_ABI<N>_TOOLCHAIN are exported. It should load its generated
           # invoke-by-name dispatcher and loader, point them at
-          # CHTYPES_ABI1_STUBS (stubs.json there has each variant's path and
+          # CHTYPES_ABI<N>_STUBS (stubs.json there has each variant's path and
           # predicate), run tests/fixtures/abi-v1/cases.json's cases, and
           # write a spec/abi-v1/schema/report.schema.json-shaped report to
-          # CHTYPES_ABI1_REPORT. Its own exit code is this step's exit code;
-          # the report is uploaded whenever CHTYPES_ABI1_REPORT exists
+          # CHTYPES_ABI<N>_REPORT. Its own exit code is this step's exit code;
+          # the report is uploaded whenever CHTYPES_ABI<N>_REPORT exists
           # afterward, pass or fail, so a partial report from a failing run
           # is still visible to a human reading the artifact.
           script="scripts/abi-v1/conformance/${{ matrix.binding }}.sh"
@@ -387,7 +424,7 @@ jobs:
           else
             rc=$?
           fi
-          if [ -f "$CHTYPES_ABI1_REPORT" ]; then
+          if [ -f "$REPORT" ]; then
             echo "report=true" >> "$GITHUB_OUTPUT"
           else
             echo "report=false" >> "$GITHUB_OUTPUT"
@@ -423,6 +460,15 @@ jobs:
       # against include/chtypes.h, no artifact (plan §2.4's v1 successor
       # of check-linked-build.sh), under scripts/abi-v1 and named for this
       # job (below: check-${check}.sh).
+      # The linked path is Go's: the major is go's (spec/binding-majors.json),
+      # its header is that major's, and the generated ABI v2 linked_gen.go
+      # refuses at compile time any header whose CHS_ABI_VERSION is not 2
+      # (the selftest below hands it ABI v1's and requires that refusal).
+      - name: the ABI major this job tests, derived, and the header it type-checks against
+        run: |
+          python3 scripts/abi-v1/majors.py announce go --what "linked mode"
+          python3 scripts/abi-v1/majors.py assert-layer go
+          python3 scripts/lib/provenance.py --header "$(python3 scripts/abi-v1/majors.py header go)"
       - name: "selftest — the linked-mode check's own fixtures, once it exists"
         run: |
           check="linked"
@@ -463,6 +509,10 @@ jobs:
       # workflow): `cargo clippy`/`fmt --check`/`test` with `--features
       # abi-v1`, default-feature output byte-unchanged; under scripts/abi-v1
       # and named for this job, the same way as v1-abi-linked's script above.
+      - name: the ABI major this job tests, derived and asserted against the rust binding's compiled-in layer
+        run: |
+          python3 scripts/abi-v1/majors.py announce rust --what "clippy, fmt, test"
+          python3 scripts/abi-v1/majors.py assert-layer rust
       - name: "selftest — the clippy/fmt/test check's own fixtures, once it exists"
         run: |
           check="rust"
@@ -527,5 +577,9 @@ jobs:
           fi
       - name: selftest — MISSING, FAILED, EXTRA and STALE each refuse, and 0-enrolled is green, on a fabricated tree
         run: uv run --no-project --python 3.11 scripts/abi-v1/parity.py --selftest
-      - name: every enrolled binding has a passing report per leg, for the same cases
-        run: uv run --no-project --python 3.11 scripts/abi-v1/parity.py --reports-dir "$RUNNER_TEMP/abi1-reports"
+      - name: every enrolled binding has a passing report per leg, for the same cases of its own major
+        run: |
+          for b in go python ts rust; do
+            python3 scripts/abi-v1/majors.py announce "$b" --what "parity"
+          done
+          uv run --no-project --python 3.11 scripts/abi-v1/parity.py --reports-dir "$RUNNER_TEMP/abi1-reports"

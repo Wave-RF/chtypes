@@ -35,7 +35,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/wave-rf/chtypes/go/chtypes"
+	"github.com/wave-rf/chtypes/go/v2/chtypes"
 )
 
 // ---------------------------------------------------------------- the tenant

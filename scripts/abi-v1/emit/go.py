@@ -57,6 +57,18 @@ GENERATED (plan §2.2's Go/Go-linked/Go-invoke/error-map rows):
                                    (go/internal/abi1/conformance_test.go) is
                                    the only caller.
 
+ABI v2 (`MAJORS`, run for the one major spec/binding-majors.json gives go).
+The same five files, under go/internal/abi2 in package abi2: ABI v1's text
+with every major-specific spelling moved by `_MAJOR_SPELLINGS` (the package,
+the directory, the C identifiers and include guard, the description and case
+paths, the linked header's -I), each of which must occur, so a renamed
+spelling fails generation instead of leaking a v1 name into v2. Two things
+are v2's own: abi_gen.go carries ChsAbiStability (the description's
+`stability`; the loader's fingerprint message depends on it, rule r6), and
+linked_gen.go refuses at compile time to type-check against any header whose
+CHS_ABI_VERSION is not 2. ABI v1's outputs are produced by the untouched v1
+path, byte for byte as before.
+
 WHY GOFMT-CLEAN BY CONSTRUCTION, NOT BY RUNNING gofmt. An emitter's output may
 depend on nothing but the model (no clock, no environment, no network, no
 randomness — emit/__init__.py's contract), and which gofmt binary happens to
@@ -86,11 +98,78 @@ from model import BUF_HANDLE, ERROR_HANDLE, SCALARS, STATUS_ENUM
 
 from . import Output, banner
 
+BINDING = "go"  # runs for the ONE major spec/binding-majors.json gives go (emit/__init__.py)
+MAJORS = (1, 2)
+
 ABI1_TABLE_H = "go/internal/abi1/abi1_table.h"
 ABI_GEN = "go/internal/abi1/abi_gen.go"
 LINKED_GEN = "go/internal/abi1/linked_gen.go"
 ERRMAP_GEN = "go/internal/abi1/errmap_gen.go"
 INVOKE_GEN = "go/internal/abi1/invoke_gen_test.go"
+
+
+def paths(major: int) -> tuple[str, str, str, str, str]:
+    """(table header, abi_gen, linked_gen, errmap_gen, invoke_gen_test) for one major."""
+    v1 = (ABI1_TABLE_H, ABI_GEN, LINKED_GEN, ERRMAP_GEN, INVOKE_GEN)
+    if major == 1:
+        return v1
+    return tuple(_respell(p, major) for p in v1)  # type: ignore[return-value]
+
+
+# Every spelling of ABI v1's Go layer that names its major, in the order they
+# are applied. Each must occur in the v1 text at least once (a spelling that
+# moved in the v1 path would otherwise silently stop being moved).
+_MAJOR_SPELLINGS = (
+    ("chtypes_abi1_", "chtypes_abi{n}_"),
+    ("CHTYPES_ABI1_TABLE_H", "CHTYPES_ABI{n}_TABLE_H"),
+    ("abi1_table.h", "abi{n}_table.h"),
+    ("go/internal/abi1", "go/internal/abi{n}"),
+    ("package abi1", "package abi{n}"),
+    ("spec/abi-v1/", "spec/abi-v{n}/"),
+    ("tests/fixtures/abi-v1/", "tests/fixtures/abi-v{n}/"),
+    ("ABI v1 image", "ABI v{n} image"),
+    ("every v1 document", "every v{n} document"),
+    ("-I${SRCDIR}/../../../include\n", "-I${SRCDIR}/../../../include/v{n}\n"),
+    ("this repository's own include/chtypes.h", "this repository's own include/v{n}/chtypes.h"),
+)
+
+
+def _respell(text: str, major: int) -> str:
+    for old, new in _MAJOR_SPELLINGS:
+        text = text.replace(old, new.replace("{n}", str(major)))
+    return text
+
+
+def _respell_all(texts: list[str], major: int) -> list[str]:
+    joined = "\0".join(texts)
+    missing = [old for old, _ in _MAJOR_SPELLINGS if old not in joined]
+    if missing:
+        raise ValueError(f"emit/go.py: ABI v1's Go layer no longer spells {missing}; update _MAJOR_SPELLINGS")
+    return [_respell(x, major) for x in texts]
+
+
+def _v2_additions(major: int, stability: str | None, abi_gen: str, linked_gen: str) -> tuple[str, str]:
+    """What ABI v2's layer carries beyond the respelled v1 text."""
+    anchor = "const ChsAbiFingerprint = "
+    i = abi_gen.index(anchor)
+    j = abi_gen.index("\n", i) + 1
+    stability_const = (
+        "\n// ChsAbiStability is the description's stability: \"unstable\" while this generation\n"
+        "// is being designed, so ChsAbiFingerprint moves with every change, and \"locked\"\n"
+        "// after (spec/abi-v{n}/docs.md, rule r6). A dev SDK refuses any other fingerprint\n"
+        "// with the dev message.\n"
+        "const ChsAbiStability = {s}\n"
+    ).format(n=major, s=_go_str(stability or ""))
+    abi_gen = abi_gen[:j] + stability_const + abi_gen[j:]
+    include = '#include "chtypes.h"\n'
+    k = linked_gen.index(include) + len(include)
+    pin = (
+        f"#if !defined(CHS_ABI_VERSION) || CHS_ABI_VERSION != {major}\n"
+        f'#error "go/internal/abi{major} is ABI v{major}: its -I must reach include/v{major}/chtypes.h"\n'
+        "#endif\n"
+    )
+    linked_gen = linked_gen[:k] + pin + linked_gen[k:]
+    return abi_gen, linked_gen
 
 TAB = "\t"
 
@@ -1130,10 +1209,17 @@ def _check_names(model) -> None:
 
 def outputs(model) -> list[Output]:
     _check_names(model)
-    return [
-        Output(ABI1_TABLE_H, content=render_table_header(model)),
-        Output(ABI_GEN, content=render_abi_gen(model)),
-        Output(LINKED_GEN, content=render_linked_gen(model)),
-        Output(ERRMAP_GEN, content=render_errmap_gen(model)),
-        Output(INVOKE_GEN, content=render_invoke_gen(model)),
+    texts = [
+        render_table_header(model),
+        render_abi_gen(model),
+        render_linked_gen(model),
+        render_errmap_gen(model),
+        render_invoke_gen(model),
     ]
+    if model.major != 1:
+        # The banner (first line of each) is the model's own and already
+        # names the major; respelling never touches it (it carries none of
+        # _MAJOR_SPELLINGS' v1 spellings: "scripts/abi-v1/gen.py --major 2").
+        texts = _respell_all(texts, model.major)
+        texts[1], texts[2] = _v2_additions(model.major, model.stability, texts[1], texts[2])
+    return [Output(path, content=text) for path, text in zip(paths(model.major), texts, strict=True)]

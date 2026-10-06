@@ -3,10 +3,20 @@
 # variant plan, plus the predicate each one is meant to be checked against,
 # then compile and run stubtest.c (the D2 self-test) against the "ok" build.
 #
-#     scripts/abi-v1/build-stubs.sh --out DIR
-#     scripts/abi-v1/build-stubs.sh --selftest
+#     scripts/abi-v1/build-stubs.sh --out DIR               every major a binding speaks, into DIR/v<N>/
+#     scripts/abi-v1/build-stubs.sh --out DIR --major N     ABI v<N> only, into DIR itself
+#     scripts/abi-v1/build-stubs.sh --selftest              the relocation proof, for every major a binding speaks
 #
-# DIR ends up holding:
+# MAJORS. spec/binding-majors.json (scripts/abi-v1/majors.py) says which ABI
+# major each binding speaks; while the bindings convert to ABI v2 one at a
+# time (public issue #511) the four speak two majors, and each conformance leg
+# loads the stubs of ITS binding's major. So without --major this builds the
+# stubs of every major some binding speaks, each from its own description
+# (gen.py --major N --render stub) against its own header (include/chtypes.h
+# for ABI v1, include/v<N>/chtypes.h after), into DIR/v<N>/. With --major N it
+# builds that one major into DIR, the layout below.
+#
+# DIR (or DIR/v<N>/) ends up holding:
 #   DIR/src/stub.c          the rendered C source (gen.py --render stub)
 #   DIR/src/predicate.json  the rendered predicate template (__OS__/__ARCH__ placeholders)
 #   DIR/<variant>.so        one shared library per emit/_stubshared.py plan(model) entry
@@ -42,12 +52,22 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 CC="${CC:-cc}"
 
+# The majors spec/binding-majors.json gives the four bindings, ascending.
+spoken_majors() {
+    python3 - "$ROOT" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1] + "/scripts/abi-v1")
+import majors
+print(" ".join(str(n) for n in majors.load().spoken()))
+PY
+}
+
 main_build() {
-    local OUT="$1"
+    local OUT="$1" MAJOR="${2:-1}"
     mkdir -p "$OUT/src"
 
-    echo "build-stubs.sh: rendering stub.c and predicate.json"
-    python3 "$HERE/gen.py" --render stub --out "$OUT/src"
+    echo "build-stubs.sh: ABI v$MAJOR: rendering stub.c and predicate.json"
+    python3 "$HERE/gen.py" --major "$MAJOR" --render stub --out "$OUT/src"
 
     # This host's OS/ARCH, spelled exactly as emit/stub.py's generated
     # `#if defined(__linux__)` / `#if defined(__aarch64__)` branches pick at
@@ -87,6 +107,7 @@ with open(dst, "w") as f:
 PY
 
     local INCLUDE_DIR="$ROOT/include"
+    [ "$MAJOR" = "1" ] || INCLUDE_DIR="$ROOT/include/v$MAJOR"
     local MARKER_PATH="$OUT/ctor-marker.marker"
     rm -f "$MARKER_PATH"
 
@@ -155,7 +176,7 @@ with open(pred_file) as f:
     predicate = json.load(f)
 print(json.dumps({"name": name, "path": path, "predicate": predicate, "reason": reason}))
 PY
-    done < <(python3 "$HERE/emit/_stubshared.py" --list-variants)
+    done < <(python3 "$HERE/emit/_stubshared.py" --list-variants --major "$MAJOR")
 
     python3 - "$STUBS_JSON_ROWS" "$OUT/stubs.json" <<'PY'
 import json, sys
@@ -174,7 +195,7 @@ with open(out_path, "w") as f:
 PY
     rm -f "$STUBS_JSON_ROWS"
 
-    echo "build-stubs.sh: built $built stub libraries into $OUT (manifest: $OUT/stubs.json)"
+    echo "build-stubs.sh: ABI v$MAJOR: built $built stub libraries into $OUT (manifest: $OUT/stubs.json)"
 
     echo "build-stubs.sh: compiling and running the D2 self-test (stubtest.c)"
     "$CC" -std=c11 -Wall -Wextra -pthread -I "$INCLUDE_DIR" "$HERE/stubtest.c" -o "$OUT/stubtest"
@@ -182,10 +203,17 @@ PY
 }
 
 selftest() {
-    local a b
+    local major
+    for major in $(spoken_majors); do
+        selftest_major "$major"
+    done
+}
+
+selftest_major() {
+    local a b MAJOR="$1"
     a="$(mktemp -d)"
-    echo "build-stubs.sh --selftest: building into $a"
-    main_build "$a" >&2
+    echo "build-stubs.sh --selftest: ABI v$MAJOR: building into $a"
+    main_build "$a" "$MAJOR" >&2
 
     echo "build-stubs.sh --selftest: every stubs.json path must be relative"
     python3 - "$a/stubs.json" <<'PY'
@@ -219,8 +247,20 @@ if missing:
 PY
     "$b/stubtest" "$b"
 
+    # The stubs are this major's: the ok library answers its own generation.
+    python3 - "$b/stubs.json" "$b" "$MAJOR" <<'PY'
+import ctypes, json, os, sys
+stubs_json, base, major = sys.argv[1], sys.argv[2], int(sys.argv[3])
+ok = os.path.join(base, json.load(open(stubs_json))["variants"]["ok"]["path"])
+lib = ctypes.CDLL(ok, mode=os.RTLD_NOW | os.RTLD_LOCAL)
+fn = getattr(lib, "chs_abi_version")
+fn.restype = ctypes.c_int32
+if fn() != major:
+    sys.exit(f"build-stubs.sh --selftest: FAIL: the ABI v{major} ok stub answers chs_abi_version() = {fn()}")
+PY
+
     rm -rf "$a" "$(dirname "$b")"
-    echo "build-stubs.sh --selftest: ok: stubs.json paths are relative, resolve after relocation, and the D2 self-test still passes from the relocated directory"
+    echo "build-stubs.sh --selftest: ABI v$MAJOR: ok: stubs.json paths are relative, resolve after relocation, the D2 self-test still passes from the relocated directory, and the ok stub answers ABI v$MAJOR"
 }
 
 if [ "${1:-}" = "--selftest" ]; then
@@ -229,14 +269,23 @@ if [ "${1:-}" = "--selftest" ]; then
 fi
 
 OUT=""
+ONE_MAJOR=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --out) OUT="$2"; shift 2 ;;
+        --major) ONE_MAJOR="$2"; shift 2 ;;
         *) echo "build-stubs.sh: unknown argument $1" >&2; exit 2 ;;
     esac
 done
 if [ -z "$OUT" ]; then
-    echo "usage: build-stubs.sh --out DIR | build-stubs.sh --selftest" >&2
+    echo "usage: build-stubs.sh --out DIR [--major N] | build-stubs.sh --selftest" >&2
     exit 2
 fi
-main_build "$OUT"
+if [ -n "$ONE_MAJOR" ]; then
+    main_build "$OUT" "$ONE_MAJOR"
+    exit 0
+fi
+for major in $(spoken_majors); do
+    main_build "$OUT/v$major" "$major"
+done
+echo "build-stubs.sh: built the stubs of ABI v$(spoken_majors | sed 's/ /, v/g') (spec/binding-majors.json) under $OUT/v<N>/"

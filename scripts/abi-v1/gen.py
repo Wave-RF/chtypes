@@ -80,6 +80,7 @@ sys.path.insert(0, str(HERE))
 
 import emit  # noqa: E402
 import jcs  # noqa: E402
+import majors as bmajors  # noqa: E402
 import model as abimodel  # noqa: E402
 from emit.header import ProseError  # noqa: E402
 
@@ -99,11 +100,27 @@ def command(major: int) -> str:
     return "scripts/abi-v1/gen.py" if major == 1 else f"scripts/abi-v1/gen.py --major {major}"
 
 
+def binding_majors(root: Path) -> bmajors.Majors:
+    """spec/binding-majors.json at `root` (scripts/abi-v1/majors.py): which
+    major each binding's emitter runs for."""
+    try:
+        return bmajors.load(root)
+    except bmajors.MajorsError as e:
+        raise abimodel.ModelError(str(e).split("\n")) from None
+
+
+def discover(root: Path, major: int) -> list:
+    try:
+        return emit.discover(major, binding_majors(root))
+    except emit.MajorsMismatch as e:
+        raise abimodel.ModelError([str(e)]) from None
+
+
 def build(root: Path, major: int = 1) -> tuple[abimodel.Model, list[emit.Output]]:
     model = abimodel.load(root, major)
     outs: list[emit.Output] = []
     seen: dict[str, str] = {}
-    for mod in emit.discover(major):
+    for mod in discover(root, major):
         for o in mod.outputs(model):
             key = f"{o.path}#{o.block}" if o.block else o.path
             if key in seen:
@@ -158,6 +175,20 @@ def produced_outputs(root: Path = ROOT, major: int = 1) -> frozenset[str]:
     """
     _, outs = build(root, major)
     return frozenset(o.path for o in outs if o.content is not None)
+
+
+def produced_by_major(root: Path = ROOT) -> dict[int, frozenset[str]]:
+    """produced_outputs() for every major the generator knows: what the
+    source checks exempt, per major."""
+    return {m: produced_outputs(root, m) for m in abimodel.MAJORS}
+
+
+def is_generated(rel: str, text: str, produced: dict[int, frozenset[str]]) -> bool:
+    """Whether `rel` is a generated file: a path some major's emitters produce
+    AND, in its first 512 bytes, THAT major's real banner. A file another
+    major produces, or carrying another major's banner, is not exempt."""
+    head = text[:512]
+    return any(rel in paths and emit.banner_re(m).search(head) for m, paths in produced.items())
 
 
 def banner_files(root: Path, major: int = 1) -> list[str]:
@@ -277,7 +308,7 @@ def render(root: Path, emitter: str, out: Path, major: int = 1) -> list[str]:
     if not re.fullmatch(r"[a-z][a-z0-9_]*", emitter):
         raise ValueError(f"{emitter!r} is not an emitter module name")
     model = abimodel.load(root, major)
-    mod = {m.__name__.rsplit(".", 1)[-1]: m for m in emit.discover(major)}.get(emitter)
+    mod = {m.__name__.rsplit(".", 1)[-1]: m for m in discover(root, major)}.get(emitter)
     if mod is None:
         if major != 1 and (HERE / "emit" / f"{emitter}.py").is_file():
             raise ValueError(f"emit/{emitter}.py does not generate for ABI v{major} (its MAJORS)")
@@ -543,7 +574,7 @@ def _selftest_byte_strings(model: abimodel.Model) -> list[str]:
 
 
 def _copy_inputs(src: Path, dst: Path, outs: list[emit.Output], extra: tuple[str, ...] = ()) -> None:
-    paths = {"spec/abi-v1", "scripts/abi-v1", PMC, *extra} | {o.path for o in outs}
+    paths = {"spec/abi-v1", "scripts/abi-v1", PMC, bmajors.MAP, *extra} | {o.path for o in outs}
     for rel in sorted(paths):
         s, d = src / rel, dst / rel
         if s.is_dir():
@@ -867,6 +898,7 @@ def _selftest_v2() -> list[str]:
     v2_paths = sorted({o.path for o in outs2})
     v2 = abimodel.spec(2)
     abi, schema, sdk, docs = v2.abi_json, v2.abi_schema, v2.sdk_json, v2.docs_md
+    go_major = binding_majors(ROOT)["go"]
     with tempfile.TemporaryDirectory(prefix="abi-v2-selftest-") as tmp:
         pristine = Path(tmp) / "pristine"
         _copy_inputs(ROOT, pristine, outs1 + outs2, extra=(v2.dir,))
@@ -1008,6 +1040,42 @@ def _selftest_v2() -> list[str]:
             "(r4) compares against generation 1's published codes",
         )
 
+        # spec/binding-majors.json decides which major a binding's emitter runs
+        # for, and --check agrees with it in both directions.
+        def set_map(**over):
+            def mutate(w: Path) -> None:
+                doc = {"go": 2, "python": 1, "ts": 1, "rust": 1}
+                doc.update(over)
+                (w / bmajors.MAP).write_text(json.dumps({k: v for k, v in doc.items() if v is not None}) + "\n")
+
+            return mutate
+
+        flipped = 1 if go_major == 2 else 2
+        plant(
+            f"the map moves go to ABI v{flipped} without regenerating: ABI v{flipped} misses its Go layer",
+            set_map(go=flipped),
+            "missing; run",
+            (("--major", str(flipped), "--check"),) if flipped != 1 else (("--check",),),
+        )
+        plant(
+            f"the map moves go to ABI v{flipped} without regenerating: ABI v{go_major}'s Go layer is stale",
+            set_map(go=flipped),
+            "stale",
+            (("--major", str(go_major), "--check"),) if go_major != 1 else (("--check",),),
+        )
+        plant(
+            "the map moves go and both majors regenerate: both agree again",
+            set_map(go=flipped),
+            None,
+            (("--write",), ("--major", "2", "--write"), ("--check",), ("--major", "2", "--check")),
+        )
+        plant(
+            "the map gives python a major its emitter does not generate for",
+            set_map(python=2),
+            "spec/binding-majors.json says python speaks ABI v2, but emit/python.py generates only for",
+        )
+        plant("the map leaves a binding out", set_map(rust=None), "missing binding 'rust'")
+
         # Locking drops the UNSTABLE notes, and the outputs follow the description.
         def lock(w: Path) -> None:
             _json_edit(w / abi, lambda d: d.update(stability="locked"))
@@ -1047,7 +1115,9 @@ def selftest() -> int:
         "gen.py --selftest: ok: RFC 8785 vectors and refusals, the schema validator, --write deterministic, "
         "the byte_strings rule, and every planted drift, schema, JCS, D1.3, tombstone, docs, prose, marker, thread-class, "
         "byte-field, needle and stale case refused; and ABI v2 beside it: neither major touches the other's outputs, "
-        "and every generation-2 rule (abi == major, stability, the Rules section, r2, r3, r4) refused"
+        "and every generation-2 rule (abi == major, stability, the Rules section, r2, r3, r4) refused; and "
+        "spec/binding-majors.json: a binding moved without regenerating is caught in both majors, a binding given a "
+        "major its emitter lacks and a map missing a binding are refused, and regenerating both makes them agree"
     )
     return 0
 

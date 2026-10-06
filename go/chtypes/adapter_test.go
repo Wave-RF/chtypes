@@ -27,7 +27,7 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 
-	"github.com/wave-rf/chtypes/go/internal/ocifetch"
+	"github.com/wave-rf/chtypes/go/v2/internal/ocifetch"
 )
 
 func repoRootDir(t *testing.T) string {
@@ -205,6 +205,21 @@ func stubPredicate(t *testing.T, lib []byte, libName string) (map[string]any, st
 	return pred, pred["os"].(string) + "-" + pred["arch"].(string)
 }
 
+// cacheRoot is where the fetch layer reads the explicit cache `cache`: under
+// the ABI v2 dev channel its subroot <cache>/v2-dev (spec/abi-v2/docs.md,
+// rule r5), asked of the fetch layer itself rather than spelled here.
+func cacheRoot(t *testing.T, cache string) string {
+	t.Helper()
+	root, err := ocifetch.CacheRoot(&ocifetch.Options{CacheDir: cache})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if root != filepath.Join(cache, ocifetch.DevCacheDir) {
+		t.Fatalf("the fetch layer reads the explicit cache %s at %s, not its v2-dev subroot (rule r5)", cache, root)
+	}
+	return root
+}
+
 func hostLibName() string {
 	if runtime.GOOS == "darwin" {
 		return "libchtypes.dylib"
@@ -224,7 +239,7 @@ func TestRegistryOverTheRealFetchDerivation(t *testing.T) {
 		t.Skipf("SKIPPED: this host (%s-%s) is not one of the v1 platforms; the adapter case did not run", runtime.GOOS, runtime.GOARCH)
 	}
 	cache := t.TempDir()
-	writeSignedLayout(t, cache, "26.8", hostLibName(), platformKey, lib, pred)
+	writeSignedLayout(t, cacheRoot(t, cache), "26.8", hostLibName(), platformKey, lib, pred)
 	_, trusted := loadTestKey(t)
 
 	reg, err := NewRegistry(WithFetchOptions(FetchOptions{
@@ -307,7 +322,7 @@ func TestRegistryStep5DisagreementIsCorrupt(t *testing.T) {
 	}
 	pred["core_commit"] = "dddddddddddddddddddddddddddddddddddddddd"
 	cache := t.TempDir()
-	writeSignedLayout(t, cache, "26.8", hostLibName(), platformKey, lib, pred)
+	writeSignedLayout(t, cacheRoot(t, cache), "26.8", hostLibName(), platformKey, lib, pred)
 	_, trusted := loadTestKey(t)
 	reg, err := NewRegistry(WithFetchOptions(FetchOptions{CacheDir: cache, SystemDirs: []string{t.TempDir()}, TrustedKeys: []string{trusted}, Offline: true}))
 	if err != nil {
@@ -334,7 +349,7 @@ func TestRegistryUntrustedWithoutTheTestKey(t *testing.T) {
 		t.Skipf("SKIPPED: this host (%s-%s) is not the stub's platform", runtime.GOOS, runtime.GOARCH)
 	}
 	cache := t.TempDir()
-	writeSignedLayout(t, cache, "26.8", hostLibName(), platformKey, lib, pred)
+	writeSignedLayout(t, cacheRoot(t, cache), "26.8", hostLibName(), platformKey, lib, pred)
 	reg, err := NewRegistry(WithFetchOptions(FetchOptions{CacheDir: cache, SystemDirs: []string{t.TempDir()}, Offline: true}))
 	if err != nil {
 		t.Fatal(err)
@@ -346,4 +361,39 @@ func TestRegistryUntrustedWithoutTheTestKey(t *testing.T) {
 	// The same layout opened with the key trusted (the control above) works,
 	// so this refusal is the trust decision and not a malformed layout.
 	t.Logf("refused by default trust: %v", err)
+}
+
+// TestRegistryHonorsNoTrustOverride: under the dev channel exactly as a
+// non-test binary speaks it (no test seam), the TrustedKeys option naming the
+// test key is IGNORED, with one warning, so the layout the control above opens
+// is refused as untrusted (spec/abi-v2/docs.md, rule r6: no override).
+func TestRegistryHonorsNoTrustOverride(t *testing.T) {
+	resetSetup(t)
+	stubDir(t)
+	lib, err := os.ReadFile(stubFile(t, "ok"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pred, platformKey := stubPredicate(t, lib, hostLibName())
+	if platformKey != runtime.GOOS+"-"+runtime.GOARCH {
+		t.Skipf("SKIPPED: this host (%s-%s) is not the stub's platform", runtime.GOOS, runtime.GOARCH)
+	}
+	cache := t.TempDir()
+	writeSignedLayout(t, cacheRoot(t, cache), "26.8", hostLibName(), platformKey, lib, pred)
+	_, trusted := loadTestKey(t)
+	t.Cleanup(ocifetch.UseDevChannelForTests())
+	reg, err := NewRegistry(WithFetchOptions(FetchOptions{CacheDir: cache, SystemDirs: []string{t.TempDir()}, TrustedKeys: []string{trusted}, Offline: true}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.For("26.8"); err == nil {
+		t.Fatal("the dev channel honored the TrustedKeys option: a 2.0.0-dev SDK trusts only the staging key")
+	}
+	warned := false
+	for _, s := range ocifetch.IgnoredSettingsWarned() {
+		warned = warned || s == "the TrustedKeys option"
+	}
+	if !warned {
+		t.Errorf("the ignored TrustedKeys option was not warned about: %v", ocifetch.IgnoredSettingsWarned())
+	}
 }

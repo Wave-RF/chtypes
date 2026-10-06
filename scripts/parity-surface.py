@@ -115,7 +115,12 @@ FETCH_DOC = ROOT / "docs" / "guides" / "fetch-v1.md"
 ALLOWLIST = ROOT / "scripts" / "parity-surface-allow.json"
 FIXTURES = ROOT / "tests" / "fixtures" / "parity-surface"
 GO_LISTER = ROOT / "scripts" / "parity-surface-go.go"
-GO_PACKAGE = "github.com/wave-rf/chtypes/go/chtypes"
+# The public package under the module path go/go.mod declares (github.com/
+# wave-rf/chtypes/go on main, .../go/v2 for the ABI v2 dev binding), read from
+# the manifest rather than spelled here.
+GO_PACKAGE = next(
+    line.split()[1] for line in (ROOT / "go" / "go.mod").read_text(encoding="utf-8").splitlines() if line.startswith("module ")
+) + "/chtypes"
 
 
 def _load_api_surface():

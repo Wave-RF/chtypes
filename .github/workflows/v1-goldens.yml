@@ -17,6 +17,14 @@ name: v1-goldens
 # docs/guides/goldens-v1.md. The paths below are the table runner lanes land
 # their files at; changing one is a change to that contract.
 #
+# MAJORS (public issue #511). A binding at ABI v2 (spec/binding-majors.json)
+# fetches only from the staging dev channel under the staging key (spec/abi-v2/
+# docs.md r6), whatever registry_base says: its goldens are the v2-dev
+# release's referrers, signed with the dev key, and are judged against their
+# own document, apart from the ABI v1 bindings'. The first v2-dev builds carry
+# no goldens: such a leg SKIPS BY NAME ("no v2-dev goldens published yet"),
+# shown as skipped in the verdict, never counted as a pass.
+#
 # Hosted runners, no secrets.
 
 on:
@@ -119,13 +127,30 @@ jobs:
             ts) (cd ts && pnpm install --frozen-lockfile) ;;
             rust) (cd rust && cargo fetch --locked) ;;
           esac
+      - name: the ABI major this leg tests, derived and asserted against the binding's compiled-in layer
+        run: |
+          python3 scripts/abi-v1/majors.py announce "${{ matrix.binding }}" --what "goldens"
+          python3 scripts/abi-v1/majors.py assert-layer "${{ matrix.binding }}"
       - name: run the runner (fetch the release and the goldens with the binding's own fetch layer, execute, record)
         env:
           RUNNER_CMD: ${{ steps.runner.outputs.cmd }}
           RUNNER_PATH: ${{ steps.runner.outputs.path }}
-        run: bash -c "$RUNNER_CMD"
-      - name: the runner wrote both files it owes
         run: |
+          set -o pipefail
+          bash -c "$RUNNER_CMD" 2>&1 | tee "$RUNNER_TEMP/runner.log"
+          # A runner that found no v2-dev goldens skipped BY NAME: record it
+          # for the verdict, loudly, never as a pass.
+          if grep -q "SKIPPED: no v2-dev goldens published yet" "$RUNNER_TEMP/runner.log"; then
+            grep -m1 -o "SKIPPED: no v2-dev goldens published yet.*" "$RUNNER_TEMP/runner.log" > "$RUNNER_TEMP/goldens-skip-${{ matrix.binding }}.txt"
+            echo "::warning title=v1-goldens (${{ matrix.binding }})::$(cat "$RUNNER_TEMP/goldens-skip-${{ matrix.binding }}.txt")"
+            echo "**${{ matrix.binding }}: $(cat "$RUNNER_TEMP/goldens-skip-${{ matrix.binding }}.txt")**" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: the runner wrote both files it owes (or skipped by name for want of v2-dev goldens)
+        run: |
+          if [ -f "$RUNNER_TEMP/goldens-skip-${{ matrix.binding }}.txt" ]; then
+            echo "${{ matrix.binding }}: no report: $(cat "$RUNNER_TEMP/goldens-skip-${{ matrix.binding }}.txt")"
+            exit 0
+          fi
           for f in "$CHTYPES_GOLDENS_REPORT" "$CHTYPES_GOLDENS_DOCUMENT"; do
             [ -s "$f" ] || { echo "::error::the runner did not write $f"; exit 1; }
           done
@@ -136,6 +161,7 @@ jobs:
           path: |
             ${{ runner.temp }}/goldens-report-${{ matrix.binding }}.json
             ${{ runner.temp }}/goldens-document-${{ matrix.binding }}.json
+            ${{ runner.temp }}/goldens-skip-${{ matrix.binding }}.txt
           if-no-files-found: ignore
 
   v1-goldens-verdict:
@@ -159,25 +185,40 @@ jobs:
           pattern: "goldens-*"
           path: ${{ runner.temp }}/goldens
           merge-multiple: true
-      - name: verdict (the document is validated against spec/goldens/v1/schema.json first; all four bindings required)
+      # One comparator per ABI major (spec/binding-majors.json): the bindings of
+      # a major run one release and one document. Every binding of a major is
+      # required, except one that skipped BY NAME for want of v2-dev goldens,
+      # which the verdict lists as skipped.
+      - name: verdict (the document is validated against spec/goldens/v1/schema.json first; every binding of each major required)
         run: |
           d="$RUNNER_TEMP/goldens"
-          doc=
-          for f in "$d"/goldens-document-*.json; do
-            [ -f "$f" ] && { doc="$f"; break; }
+          rc=0
+          : > "$RUNNER_TEMP/verdict.txt"
+          for major in $(python3 -c 'import sys; sys.path.insert(0, "scripts/abi-v1"); import majors; print(" ".join(map(str, majors.load().spoken())))'); do
+            group=() reports=() doc=
+            for b in go python ts rust; do
+              [ "$(python3 scripts/abi-v1/majors.py get "$b")" = "$major" ] || continue
+              if [ -f "$d/goldens-skip-$b.txt" ]; then
+                echo "ABI v$major: $b SKIPPED by name, not a pass: $(cat "$d/goldens-skip-$b.txt")" | tee -a "$RUNNER_TEMP/verdict.txt"
+                continue
+              fi
+              group+=("$b")
+              [ -f "$d/goldens-report-$b.json" ] && reports+=(--report "$d/goldens-report-$b.json")
+              [ -z "$doc" ] && [ -f "$d/goldens-document-$b.json" ] && doc="$d/goldens-document-$b.json"
+            done
+            [ "${#group[@]}" -gt 0 ] || continue
+            if [ -z "$doc" ]; then
+              echo "::error::ABI v$major: no runner uploaded a goldens document (${group[*]}); every leg failed before fetching"
+              rc=1
+              continue
+            fi
+            set +e
+            uv run --no-project --python 3.11 --with 'jsonschema==4.23.0' scripts/goldens-v1/compare.py \
+              --goldens "$doc" "${reports[@]}" --require-bindings "$(IFS=,; echo "${group[*]}")" --schema-validate | tee -a "$RUNNER_TEMP/verdict.txt"
+            r="${PIPESTATUS[0]}"
+            set -e
+            [ "$r" = 0 ] || rc="$r"
           done
-          if [ -z "$doc" ]; then
-            echo "::error::no runner uploaded a goldens document; no binding has a runner yet or every leg failed before fetching"
-            exit 1
-          fi
-          reports=()
-          for b in go python ts rust; do
-            [ -f "$d/goldens-report-$b.json" ] && reports+=(--report "$d/goldens-report-$b.json")
-          done
-          set +e
-          uv run --no-project --python 3.11 --with 'jsonschema==4.23.0' scripts/goldens-v1/compare.py \
-            --goldens "$doc" "${reports[@]}" --require-bindings go,python,ts,rust --schema-validate | tee "$RUNNER_TEMP/verdict.txt"
-          rc="${PIPESTATUS[0]}"
           {
             echo '### v1 goldens'
             echo

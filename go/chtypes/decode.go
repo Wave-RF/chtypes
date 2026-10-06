@@ -3,9 +3,12 @@ package chtypes
 // decode.go — the document decoders (bindings-v1.md section 5). Each document
 // is parsed once by the strict JSON reader the loader already uses (stock
 // encoding/json, refusing a duplicate key at any depth), then read field by
-// field. Absent is the default and an unknown key is ignored; a value of the
-// wrong JSON type, a duplicate key, or a name carried both ways or neither is
-// an *InternalError naming the document and the key. Nothing is computed.
+// field. Absent is the default and an unknown key is ignored at every level
+// (ABI v2 rule r2); a value of the wrong JSON type, a duplicate key, or a name
+// carried both ways or neither is an *InternalError naming the document and
+// the key. A vocabulary value the description does not list is that
+// vocabulary's unknown(n), kept for that field alone (rule r3): it never fails
+// the document, the row or the batch. Nothing is computed.
 
 import (
 	"encoding/base64"
@@ -14,7 +17,7 @@ import (
 	"math"
 	"strconv"
 
-	"github.com/wave-rf/chtypes/go/internal/abi1"
+	"github.com/wave-rf/chtypes/go/v2/internal/abi2"
 )
 
 const b64Suffix = "_b64"
@@ -33,7 +36,7 @@ func (r *reader) fail(path, format string, args ...any) {
 }
 
 func parseDocument(doc string, raw []byte) (any, error) {
-	v, err := abi1.DecodeStrictJSON(raw)
+	v, err := abi2.DecodeStrictJSON(raw)
 	if err != nil {
 		return nil, internalError("the %s document does not decode: %v", doc, err)
 	}
@@ -376,11 +379,13 @@ func (r *reader) row(m map[string]any, path string) RowResult {
 			if cm == nil {
 				break
 			}
-			src := Source(r.text(cm, "src", p))
-			if r.err == nil && !src.known() {
-				r.fail(p+".src", "%q is not a value_src value", string(src))
+			// An unlisted src is its unknown(n): kept, never a failure (r3).
+			// An ABSENT src is no value at all, and stays a malformed entry.
+			if r.err == nil && cm["src"] == nil {
+				r.fail(p+".src", "missing")
 				break
 			}
+			src := Source(r.text(cm, "src", p))
 			v := Value{
 				Column:   r.name(cm, "name", p),
 				Text:     r.bytes(cm, "stored", p),
@@ -591,11 +596,8 @@ func decodeSchemaDescription(raw []byte) (SchemaDescription, error) {
 			if cm == nil {
 				break
 			}
+			// An unlisted default_kind is its unknown(n): kept, never a failure (r3).
 			kind := DefaultKind(r.text(cm, "default_kind", p))
-			if r.err == nil && !kind.known() {
-				r.fail(p+".default_kind", "%q is not a default_kind value", string(kind))
-				break
-			}
 			res.Columns = append(res.Columns, Column{
 				Name:        r.name(cm, "name", p),
 				Type:        r.bytes(cm, "type", p),

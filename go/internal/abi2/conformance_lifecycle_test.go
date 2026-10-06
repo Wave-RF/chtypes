@@ -1,11 +1,11 @@
 // conformance_lifecycle_test.go: the hand-written runner for the "lifecycle"
-// and "concurrent" case kinds (spec/abi-v1/schema/cases.schema.json). The
+// and "concurrent" case kinds (spec/abi-v2/schema/cases.schema.json). The
 // generated invoke() mints a fresh handle for every handle argument, which is
 // exactly what these two kinds must not do (a `ref` names a handle an earlier
 // step bound; a concurrent case mints each handle once and shares it), so
 // this runner resolves handle arguments itself and calls the generated
 // *Table call wrappers directly. It holds no symbol lookup and no table.
-package abi1
+package abi2
 
 import (
 	"fmt"

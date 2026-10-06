@@ -121,11 +121,27 @@ run_binding() {
   transcript "$scratch/work"
 }
 
+# expected_for <binding> <scratch>: the expectation file for one binding. A
+# binding that speaks ABI v2 (spec/binding-majors.json, scripts/abi-v1/majors.py)
+# reads an explicit cache through its v2-dev subroot (spec/abi-v2/docs.md, rule
+# r5, a MUST), so its `where` names <DIR>/v2-dev; every other row is shared.
+expected_for() {
+  local binding="$1" scratch="$2" major=1
+  case "$binding" in go | python | ts | rust) major="$(python3 "$root/scripts/abi-v1/majors.py" get "$binding")" ;; esac
+  if [ "$major" = "1" ]; then
+    printf '%s\n' "$expected"
+    return
+  fi
+  sed -E 's#^(where(-strict)? [|] exit=0 [|] stderr=empty [|] stdout=)<DIR>[|]$#\1<DIR>/v2-dev|#' "$expected" >"$scratch/expected-$binding.txt"
+  printf '%s\n' "$scratch/expected-$binding.txt"
+}
+
 compare() { # compare <binding> <scratch>
-  local binding="$1" scratch="$2" got="$2/transcript-$1.txt"
+  local binding="$1" scratch="$2" got="$2/transcript-$1.txt" want
+  want="$(expected_for "$binding" "$scratch")"
   run_binding "$binding" "$scratch" >"$got"
-  if diff -u "$expected" "$got" >"$scratch/diff-$binding.txt"; then
-    echo "check-cli-parity: $binding matches scripts/cli-parity/expected.txt ($(wc -l <"$got" | tr -d ' ') cases)"
+  if diff -u "$want" "$got" >"$scratch/diff-$binding.txt"; then
+    echo "check-cli-parity: $binding matches scripts/cli-parity/expected.txt$([ "$want" = "$expected" ] || echo " with its ABI v2 where rows (<DIR>/v2-dev)") ($(wc -l <"$got" | tr -d ' ') cases)"
     return 0
   fi
   echo "check-cli-parity: $binding DIFFERS from scripts/cli-parity/expected.txt:" >&2
