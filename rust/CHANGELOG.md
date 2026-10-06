@@ -6,6 +6,8 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-10-06
+
 ### Added
 
 - `EngineCell` is re-exported from the crate root (#498). It is the type `BatchResult::engine_rows` holds, and was public in its module but unreachable by name, so a caller can now write `chtypes::EngineCell` in a signature or a match. Additive.
@@ -14,9 +16,11 @@ The four bindings in this repository are released together and give one answer, 
 ### Changed
 
 - A write the fetch layer needed under the cache that failed is now `CHTYPES_CACHE_UNUSABLE` with reason `unwritable`, in every mode (#486). Go raised a `*UsageError` (CLI exit 2), Python a raw `OSError` (CLI exit 1), TypeScript a `UsageError` (CLI exit 2) and Rust `CHTYPES_SOURCE_UNREACHABLE` (exit 3), which a retry loop would retry. A cache root that cannot be read is now "not installed" with a warning in every binding and on every Python: Python before 3.14 raised a raw `PermissionError` there, and Rust `CHTYPES_SOURCE_UNREACHABLE`; strict mode makes it the new error.
+- Rust's default mode now treats an unreadable record, entry or `index.json` under the cache as absent, with a warning, where it used to report `CHTYPES_SOURCE_UNREACHABLE` (#486). Strict mode makes it `CHTYPES_CACHE_UNUSABLE` in all four.
 
 ### Fixed
 
+- Concurrent installs of one library into one cache could fail, rarely, and more often on a coarse clock, because two processes could draw the same temporary name (#482). In 1.0.x this surfaced as `CHTYPES_SOURCE_UNREACHABLE` (`io error: No such file or directory`). Under a forced collision with a large library, a process could also report success while the installed library was torn, and `chtypes verify` or a later load, which re-hashes the library, then failed. Temporary and aside names now carry the process id and random bytes and are created exclusively, so a name another process holds is never reused, and a replaced entry is moved into a fresh `.stale-*` directory, as in the other three bindings. Go, Python and TypeScript already drew random names and are unchanged. No name or signature changes.
 - A cache one uid writes is readable by another, the cache and the system directories are one search, and a lookup writes nothing (#486). Go created every cache directory 0700 and every file 0600, and Python wrote `verified.json` and `index.json` 0600, so a cache fetched by one uid (a CI user) read as empty to another (a container's nonroot user). Now all four create every directory and file with mode 0777 or 0666 less the process umask, so at umask 022 another uid can read the cache, and readable is never writable. Lookups read the system directories differently: Go answered from the first root with a match, and TypeScript never read a system directory's installs at all. Now all four answer with the newest build across the cache and every system directory, a tie going to the cache, and `list` and `verify` read the same roots. Go, TypeScript and Rust created the layout (`oci-layout`, `blobs/`, `unpacked/`) on a lookup, `fetch --offline` included; now a lookup creates nothing, so a read-only mount reads cleanly. A `chtypes verify` that verified no build now says so on stderr, `verified 0 builds under <root>`, where it printed nothing and exited 0. A miss from a cache that is a 0.x registry directory names it and the v1 root, in the CLI and the registry alike. No name or signature changes. The rules are `docs/guides/fetch-v1.md` sections 1 and 6; every binding runs the `root-order-*` conformance cases, and the `v1-cache-interop` job reads every binding's cache as another uid.
 
 ## [1.0.4] — 2026-10-06
