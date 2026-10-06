@@ -13,16 +13,13 @@ export class ArtifactError extends ChtypesError {
 }
 
 // @public
-export class ArtifactIncompatibleError extends ArtifactError {
-}
+export class ArtifactIncompatibleError extends ArtifactError {}
 
 // @public
-export class ArtifactMissingError extends ArtifactError {
-}
+export class ArtifactMissingError extends ArtifactError {}
 
 // @public
-export class ArtifactPinnedError extends ArtifactError {
-}
+export class ArtifactPinnedError extends ArtifactError {}
 
 // @public
 export interface BatchResult {
@@ -50,8 +47,7 @@ export class CallError extends ChtypesError {
 }
 
 // @public
-export class ChtypesError extends Error {
-}
+export class ChtypesError extends Error {}
 
 // @public
 export interface CompileOptions {
@@ -96,7 +92,7 @@ export interface Framing {
 }
 
 // @public
-class Handle {
+export class Handle {
     //
     [Symbol.dispose](): void;
     //
@@ -150,12 +146,10 @@ export interface RowError {
 // Warning: (ae-forgotten-export) The symbol "Handle" needs to be exported by the entry point index.d.ts
 //
 // @public
-export class Schema extends Handle {
-}
+export class Schema extends Handle {}
 
 // @public
-export class SchemaError extends CallError {
-}
+export class SchemaError extends CallError {}
 
 // @public
 export type Settings = Readonly<Record<string, string>>;
@@ -188,5 +182,7 @@ export type Verdict = (typeof Verdict)[keyof typeof Verdict];
 
 // @public
 export function verdictAnswered(value: string): boolean | undefined;
+
+// (No @packageDocumentation comment for this package)
 
 ```

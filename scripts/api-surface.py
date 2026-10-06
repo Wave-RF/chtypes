@@ -336,7 +336,8 @@ _UNFOLLOWED = re.compile(r'Unable to follow symbol for "([A-Za-z_$][\w$]*)"')
 _MAX_SHIMS = 40
 
 
-def api_extractor_report(ctx: Ctx, project: Path, entry: Path, types: list[str], label: str) -> list[str]:
+def api_extractor_report(ctx: Ctx, project: Path, entry: Path, types: list[str], label: str,
+                         mark_forgotten: bool = False) -> list[str]:
     out_dir, tmp_dir = ctx.scratch("ts", label, "report"), ctx.scratch("ts", label, "temp")
     # Every generated file sits beside the project's package.json: api-extractor
     # finds that from the config file's own folder (measured: from anywhere
@@ -364,7 +365,15 @@ def api_extractor_report(ctx: Ctx, project: Path, entry: Path, types: list[str],
             "tsdocMetadata": {"enabled": False},
             "messages": {
                 "compilerMessageReporting": {"default": {"logLevel": "warning"}},
-                "extractorMessageReporting": {"default": {"logLevel": "none", "addToApiReportFile": False}},
+                "extractorMessageReporting": {
+                    "default": {"logLevel": "none", "addToApiReportFile": False},
+                    # scripts/parity-surface.py only: a forgotten export is
+                    # printed like an exported one, and this warning line is
+                    # what tells the two apart. Off here, so this job's
+                    # reports are unchanged.
+                    **({"ae-forgotten-export": {"logLevel": "none", "addToApiReportFile": True}}
+                       if mark_forgotten else {}),
+                },
                 "tsdocMessageReporting": {"default": {"logLevel": "none"}},
             },
         }

@@ -782,6 +782,13 @@ def parse_doc(text: str, delegated: list[str] | None = None, label: str = "bindi
                 for span, _, _ in spans_of(part):
                     if "{" in span:
                         read_span(span, Ctx(lang, where, known_f), exp)
+        elif b.h2.startswith("6."):
+            # §6 names each language's fetch-option type in prose:
+            # "Go `FetchOptions` (…), Python `FetchOptions`, …".
+            for m in re.finditer(r"\b(Go|Python|TypeScript|Rust) `([A-Z]\w+)`", b.text):
+                lang = LANGUAGE_COLUMNS[m.group(1)]
+                if m.group(2) not in BUILTINS[lang]:
+                    exp.add(lang, m.group(2), where)
         elif b.h2.startswith("4.") and b.kind == "item":
             parse_error_item(b, where, exp, known_f)
         elif b.h2.startswith("5."):
@@ -1185,8 +1192,12 @@ TS_MEMBER = re.compile(r"^(\[[^\]]+\]|[A-Za-z_$][\w$]*|\"[^\"]+\"|'[^']+')\s*(\?
 def parse_api_report(text: str) -> dict[str, str]:
     """An api-extractor report: every exported declaration, and the public
     members of each (a class's, an interface's, a const object's, an enum's).
-    A class extending one the entry point does not export (a "forgotten
-    export") also lists that base's members, which is how a caller sees them."""
+    A "forgotten export" (a declaration an export refers to but the entry
+    point does not export) is printed like an exported one; the
+    ae-forgotten-export warning ts_report asks api-extractor to keep in the
+    report names it, so it is not a name. A class extending one also lists
+    that base's members, which is how a caller sees them."""
+    forgotten = set(re.findall(r'\(ae-forgotten-export\) The symbol "([^"]+)"', text))
     body = text
     if "```ts" in text:
         body = text.split("```ts", 1)[1].rsplit("```", 1)[0]
@@ -1202,7 +1213,8 @@ def parse_api_report(text: str) -> dict[str, str]:
         if depth == 0:
             m = TS_DECL.match(s)
             if m:
-                is_exported, kind, name, rest = bool(m.group(1)), m.group(2), m.group(3), m.group(4)
+                kind, name, rest = m.group(2), m.group(3), m.group(4)
+                is_exported = bool(m.group(1)) and name not in forgotten
                 exported[name] = exported.get(name, False) or is_exported
                 if is_exported and (name not in out or out[name] == "type"):
                     out[name] = kind
@@ -1607,11 +1619,13 @@ def ts_report(ctx, ts_dir: Path, *, fixture: bool) -> str:
         ts_dir, copy, dirs_exist_ok=True, ignore=shutil.ignore_patterns("node_modules", "dist", "api-extractor.*")
     )
     if fixture:
-        lines = AS.api_extractor_report(ctx, copy, copy / "index.d.ts", [], "parity-fixture")
+        lines = AS.api_extractor_report(ctx, copy, copy / "index.d.ts", [], "parity-fixture", mark_forgotten=True)
     else:
         AS.run(["pnpm", "install", "--frozen-lockfile", "--ignore-scripts"], cwd=copy)
         AS.ts_build(ctx, copy, copy)
-        lines = AS.api_extractor_report(ctx, copy, copy / "dist" / "index.d.ts", ["node"], "parity")
+        lines = AS.api_extractor_report(
+            ctx, copy, copy / "dist" / "index.d.ts", ["node"], "parity", mark_forgotten=True
+        )
     return "\n".join(lines) + "\n"
 
 
@@ -1770,6 +1784,12 @@ def selftest() -> int:
                 "parser read too little"
             )
 
+    if "Handle" in surfaces["ts"] or "Schema.close" not in surfaces["ts"]:
+        failures.append(
+            "ts: a forgotten export (Handle) read as a public name, or its members did not reach the "
+            "exported class that extends it (Schema)"
+        )
+
     # Each binding, each direction: planted drift must fail, for its own reason.
     for b in BINDINGS:
         for how, kind in (("missing", "missing"), ("spelling", "spelling"), ("extra", "undocumented")):
@@ -1869,6 +1889,7 @@ def selftest() -> int:
             "ErrorCodeTable.all",
         ],
         "ts": [
+            "FetchOptions",
             "setup",
             "SetupOptions.timezone",
             "Registry.open",
@@ -1882,6 +1903,7 @@ def selftest() -> int:
             "BuildInfo.inputsSha256",
         ],
         "rust": [
+            "FetchOptions",
             "setup",
             "Registry.new",
             "Library.open_unverified",
