@@ -9,7 +9,7 @@ process split runs twice). The shared comparator then judges the report: it must
 PASS, and a report with one planted wrong byte must FAIL.
 
 Like every test in this directory it skips loudly by name without
-`$CHTYPES_ABI1_STUBS`, and runs in the `v1-abi-conformance` leg, which runs this
+`$CHTYPES_ABI2_STUBS`, and runs in the `v1-abi-conformance` leg, which runs this
 directory.
 """
 
@@ -39,9 +39,23 @@ def _runner_module():
     return module
 
 
-def _compare(report: Path) -> subprocess.CompletedProcess[str]:
+def _stub_document(stubs_manifest: dict, tmp_path: Path) -> Path:
+    """`STUB_DOCUMENT` with its `abi` and `abi_fingerprint` taken from the "ok"
+    stub's predicate in stubs.json (rendered from the description the stub is
+    built from), so an UNSTABLE description's moving fingerprint never needs a
+    hand edit here; the comparator then checks it against the identity the
+    loaded stub reports."""
+    predicate = stubs_manifest["variants"]["ok"]["predicate"]
+    doc = json.loads(STUB_DOCUMENT.read_bytes())
+    doc["abi"], doc["abi_fingerprint"] = predicate["abi"], predicate["abi_fingerprint"]
+    path = tmp_path / "stub-goldens.json"
+    path.write_text(json.dumps(doc, indent=1), encoding="utf-8")
+    return path
+
+
+def _compare(document: Path, report: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, str(COMPARE), "--goldens", str(STUB_DOCUMENT), "--report", str(report)],
+        [sys.executable, str(COMPARE), "--goldens", str(document), "--report", str(report)],
         capture_output=True,
         text=True,
         timeout=120,
@@ -54,7 +68,8 @@ def test_the_runner_over_the_stub_passes_the_comparator_and_a_planted_byte_fails
     monkeypatch.setenv(
         "CHTYPES_GOLDENS_LIBRARY", stub_path(stubs_dir, stubs_manifest["variants"]["ok"])
     )
-    monkeypatch.setenv("CHTYPES_GOLDENS_DOCUMENT_IN", str(STUB_DOCUMENT))
+    document_in = _stub_document(stubs_manifest, tmp_path)
+    monkeypatch.setenv("CHTYPES_GOLDENS_DOCUMENT_IN", str(document_in))
     monkeypatch.setenv("CHTYPES_GOLDENS_REPORT", str(tmp_path / "report.json"))
     monkeypatch.setenv("CHTYPES_GOLDENS_DOCUMENT", str(tmp_path / "document.json"))
     for name in (
@@ -67,9 +82,9 @@ def test_the_runner_over_the_stub_passes_the_comparator_and_a_planted_byte_fails
     _runner_module().test_goldens_v1_runner(tmp_path)
 
     # The document written out is the exact bytes that went in.
-    assert (tmp_path / "document.json").read_bytes() == STUB_DOCUMENT.read_bytes()
+    assert (tmp_path / "document.json").read_bytes() == document_in.read_bytes()
     report = tmp_path / "report.json"
-    ok = _compare(report)
+    ok = _compare(document_in, report)
     assert ok.returncode == 0, ok.stdout + ok.stderr
     assert "PASS" in ok.stdout
 
@@ -80,6 +95,6 @@ def test_the_runner_over_the_stub_passes_the_comparator_and_a_planted_byte_fails
     case["document_b64"] = base64.b64encode(bytes(document)).decode("ascii")
     bad = tmp_path / "planted.json"
     bad.write_text(json.dumps(planted), encoding="utf-8")
-    refused = _compare(bad)
+    refused = _compare(document_in, bad)
     assert refused.returncode != 0, refused.stdout
     assert "stub-row-text" in refused.stdout

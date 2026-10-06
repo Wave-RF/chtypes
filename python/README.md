@@ -1,5 +1,7 @@
 # chtypes — Python SDK
 
+> **2.0.0-dev: UNSTABLE, staging only, not for production.** This is the ABI v2 development binding (public issue #511). It speaks ABI v2's unstable description, pins its dev fingerprint and refuses a library with any other ("update your dev SDK"). It fetches only from the staging dev channel (`https://registry-staging.wavehouse.dev/chtypes/v2-dev`) and trusts only the staging key; `CHTYPES_ARTIFACTS_URL`, `CHTYPES_TRUSTED_KEYS` and `CHTYPES_ALLOW_UNSIGNED`, and the `bases`, `trusted_keys` and `allow_unsigned` fetch options, are ignored, each with one warning; `--lock`, `--frozen` and `--update`, and the `frozen`, `lock_path`, `lock_write` and `update` options, are refused, because a dev build is replaceable and a superseded one expires after 14 days. Its cache is `${XDG_CACHE_HOME:-~/.cache}/chtypes/v2-dev`, or `<CHTYPES_CACHE>/v2-dev` under an explicit cache, which no 1.x SDK reads. Every vocabulary keeps a value it does not list as its `unknown(n)` member (`Outcome("x")`, whose `known` is `False`) instead of failing the document. The rules are r1 to r6 of [`docs/reference/abi-v2.md`](../docs/reference/abi-v2.md). For production, use the 1.x package: `pip install "chtypes<2"`.
+
 **If this row were inserted into this table on this ClickHouse version, what would happen?** chtypes answers with ClickHouse's own code: the real C++ type machinery, vendored per release into a native library behind the frozen `chs_*` C ABI and reached here through stdlib `ctypes`. Nothing semantic is reimplemented, so _"what does ClickHouse do with `256` into a `UInt8`?"_ is answered by ClickHouse rather than by a model of it. One peer binding among `{go, python, ts, rust}` — no language is privileged, and all four give one answer.
 
 Pure ctypes: no compiler, no build step. The only dependency is a zstd decompressor for the artifact layer, which is the standard library's own from Python 3.14 and the `backports.zstd` package before that.
@@ -9,8 +11,10 @@ Pure ctypes: no compiler, no build step. The only dependency is a zstd decompres
 Two things: this package, and at least one **artifact** — the per-version native library it `dlopen`s at runtime. The registry fetches the artifact on first use when autofetch is on (`Registry(autofetch=True)` or `CHTYPES_AUTOFETCH=1`), after verifying its signature and every byte against the signed statement; with autofetch off it answers only from what is already installed.
 
 ```sh
-uv add chtypes            # or: pip install chtypes
+uv add "chtypes>=2.0.0.dev0"            # or: pip install "chtypes>=2.0.0.dev0"
 ```
+
+`uv add chtypes` and `pip install chtypes` never select a pre-release on their own: the specifier names a dev version, which is what allows one.
 
 ## Quickstart
 

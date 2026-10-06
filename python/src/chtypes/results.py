@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ._abi1._vocab import DefaultKind, FilterOutcome, Outcome, Verdict
+from ._abi2._vocab import DefaultKind, FilterOutcome, Outcome, Verdict
 
 __all__ = [
     "BatchResult",

@@ -20,6 +20,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from chtypes._ocifetch import _channel
 from chtypes._ocifetch import _constants as C
 
 __all__ = [
@@ -49,14 +50,19 @@ def _expand_template(template: str) -> str:
 
 
 def resolve_cache_root(cache_dir: str | os.PathLike[str] | None = None) -> Path:
-    """`CHTYPES_CACHE` (or an explicit override) names the layout directory
-    ITSELF, not a parent `chtypes/` to append to (constants: `cache.root_template`)."""
-    if cache_dir is not None:
-        return Path(cache_dir)
-    env = os.environ.get(C.ENV_CACHE_NAME)
-    if env:
-        return Path(env)
-    return Path(_expand_template(C.CACHE_ROOT_TEMPLATE))
+    """`CHTYPES_CACHE` (or an explicit override) names the cache directory
+    ITSELF, not a parent `chtypes/` to append to (constants: `cache.root_template`).
+
+    The active fetch contract decides the rest (_channel.py): under the dev
+    channel an explicit cache is used through its subroot `<cache>/v2-dev`,
+    never as a whole layout, which a 1.x binding uses (rule r5, a MUST), and
+    the default root is `${XDG_CACHE_HOME:-~/.cache}/chtypes/v2-dev`."""
+    channel = _channel.active()
+    explicit = cache_dir if cache_dir is not None else (os.environ.get(C.ENV_CACHE_NAME) or None)
+    if explicit is not None:
+        root = Path(explicit)
+        return root / channel.subroot if channel.subroot else root
+    return Path(_expand_template(C.CACHE_ROOT_TEMPLATE)).parent / channel.root_leaf
 
 
 def cache_root(cache_dir: str | os.PathLike[str] | None = None) -> Path:
@@ -71,7 +77,7 @@ def search_roots(
     (layout-v2 spec §0 "cache": "Read-only system directories are searched
     after it"). `system_dirs` replaces the default list when given (an empty
     sequence means none); `None` keeps the generated default."""
-    dirs = C.SYSTEM_CACHE_DIRS if system_dirs is None else system_dirs
+    dirs = _channel.active().system_dirs if system_dirs is None else system_dirs
     return (resolve_cache_root(cache_dir), *(Path(d) for d in dirs))
 
 
@@ -124,7 +130,9 @@ class VerifiedRecord:
 
     def to_json(self) -> dict:
         return {
-            "schema": 1,
+            # 1 under the v1 contract; 2 on the dev channel, so no 1.x reader
+            # ever reads the record (rule r5).
+            "schema": _channel.active().record_schema,
             "platform": self.platform,
             "version": self.version,
             "channel": self.channel,
@@ -145,8 +153,10 @@ class VerifiedRecord:
 
     @classmethod
     def from_json(cls, doc: object) -> VerifiedRecord:
-        """Accept exactly the canonical schema-1 record; anything else is a
-        `ValueError`, which every caller treats as an ABSENT record."""
+        """Accept exactly the canonical record of the active contract's schema (1
+        for v1; 2 on the dev channel, rule r5, so neither reads the other's);
+        anything else is a `ValueError`, which every caller treats as an ABSENT
+        record."""
         if not isinstance(doc, dict):
             raise ValueError("verified.json is not an object")
         for key in _REQUIRED:
@@ -159,8 +169,9 @@ class VerifiedRecord:
             if key not in digests:
                 raise ValueError(f"verified.json: missing digests member {key!r}")
         schema = doc["schema"]
-        if type(schema) is not int or schema != 1:
-            raise ValueError("verified.json: schema is not 1")
+        want = _channel.active().record_schema
+        if type(schema) is not int or schema != want:
+            raise ValueError(f"verified.json: schema is not {want}")
 
         def text(name: str, nullable: bool = False) -> str | None:
             v = doc[name]

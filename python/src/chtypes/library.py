@@ -18,8 +18,8 @@ from pathlib import Path
 from types import TracebackType
 
 from . import _decode, _setup
-from ._abi1 import _decls, _loader
-from ._abi1._vocab import EXPORT_NONE, DocFlags, Format
+from ._abi2 import _decls, _loader
+from ._abi2._vocab import EXPORT_NONE, DocFlags, Format
 from ._guard import CloseGuard
 from ._input import (
     BytesIn,

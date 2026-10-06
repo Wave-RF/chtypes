@@ -116,6 +116,8 @@ from gen import is_generated, produced_by_major, produced_outputs  # noqa: E402
 # The Go layer's directory at the major spec/binding-majors.json gives go
 # (go/internal/abi2 on the `v2` branch; scripts/abi-v1/majors.py).
 GO_LAYER = bmajors.layer_dir("go", bmajors.load().by_binding["go"])
+# The Python layer's, likewise (python/src/chtypes/_abi2 once python speaks ABI v2).
+PY_LAYER = bmajors.layer_dir("python", bmajors.load().by_binding["python"])
 # The TS layer's directory at the major the map gives ts (ts/src/abi2 on `v2`).
 TS_LAYER = bmajors.layer_dir("ts", bmajors.load().by_binding["ts"])
 
@@ -140,7 +142,7 @@ SKIP_DIRS = {
 DECL_SOURCES = (
     ("go", f"{GO_LAYER}/abi_gen.go", r'dlsym\(\s*h\s*,\s*"{sym}"\s*\)'),
     ("go-linked", f"{GO_LAYER}/linked_gen.go", r"&{sym}\s*;"),
-    ("python", "python/src/chtypes/_abi1/_decls.py", r'_add\(\s*"{sym}"'),
+    ("python", f"{PY_LAYER}/_decls.py", r'_add\(\s*"{sym}"'),
     ("ts", f"{TS_LAYER}/decls.gen.ts", r'"{sym}"\s*:\s*\{{'),
     ("rust", "rust/src/abi1/decls.rs", r'concat!\(\s*"{sym}"'),
 )
@@ -484,7 +486,7 @@ def check(root: str, produced: dict[int, frozenset[str]] | None = None) -> tuple
     # most plausibly grow in.
     anchors = (
         f"{GO_LAYER}/loader.go",
-        "python/src/chtypes/_abi1/_loader.py",
+        f"{PY_LAYER}/_loader.py",
         f"{TS_LAYER}/loader.ts",
         "rust/src/abi1/loader.rs",
     )
@@ -554,7 +556,7 @@ GENERATED_STATUS_TABLE = (
 # a find edits a GENERATED declaration file, whose text is fixed by
 # spec/abi-v1/abi.json.
 GO_PLANT = "go/internal/abi1/zz_planted.go"
-PY_PLANT = "python/src/chtypes/_abi1/_planted.py"
+PY_PLANT = f"{PY_LAYER}/_planted.py"
 TS_PLANT = "ts/src/abi1/planted.ts"
 RS_PLANT = "rust/src/abi1/planted.rs"
 
@@ -642,10 +644,10 @@ PLANTS = (
     ),
     (
         "python declaration dropped",
-        "python/src/chtypes/_abi1/_decls.py",
+        f"{PY_LAYER}/_decls.py",
         '    "chs_error_codes",\n    "status",',
         '    "chs_absent_symbol",\n    "status",',
-        "python: python/src/chtypes/_abi1/_decls.py does not declare chs_error_codes",
+        f"python: {PY_LAYER}/_decls.py does not declare chs_error_codes",
     ),
     (
         "ts declaration dropped",

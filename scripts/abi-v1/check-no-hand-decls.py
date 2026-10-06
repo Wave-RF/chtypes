@@ -88,7 +88,7 @@ TS_CHS = re.compile(r"\bchs_\w+")
 # knows (scripts/abi-v1/majors.py LAYER_DIRS): go/internal/abi2 holds the Go
 # layer once go speaks ABI v2 (spec/binding-majors.json).
 V1_DIRS = [bmajors.layer_dir(b, n) for b in bmajors.BINDINGS for n in abimodel.MAJORS] + [
-    "python/tests/abi1",
+    *[f"python/tests/abi{n}" for n in abimodel.MAJORS],
     # The TS binding's ABI tests, at every major (ts/test/abi2 once ts speaks ABI v2).
     *[f"ts/test/abi{n}" for n in abimodel.MAJORS],
 ]
