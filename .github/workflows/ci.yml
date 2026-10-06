@@ -471,6 +471,14 @@ jobs:
         run: scripts/parity-surface.py --selftest
       - name: each tool's fixture proof, then every binding's real surface against the doc
         run: scripts/parity-surface.py run --tools "$HOME/.cache/chtypes/api-surface" --save "$RUNNER_TEMP/parity-surface"
+      # An allowlist entry that hides a real gap cites its public issue; this
+      # fails once that issue is closed, so the entry goes with the fix. Reads
+      # the issue state through gh with the job's own token.
+      - name: allowlist issues — no entry cites a closed issue
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/parity-surface.py --check-issues
       # The four surfaces as read, for a reviewer checking an allowlist entry.
       # continue-on-error for the same reason as the go job's upload above.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -10,6 +10,8 @@
                                                       CI: the fixture proofs, then each binding's real surface
                                                       against the doc
     scripts/parity-surface.py expected [BINDING]      print the names the doc gives, for a reviewer
+    scripts/parity-surface.py --check-issues          fail when an allowlist entry's `issue` is closed: the fix
+                                                      landed, so the entry should go (needs `gh` and GH_TOKEN)
 
 Run by ci.yml's non-blocking `parity-surface` job. It is the gate public
 issue #436 asks for: "No public-API change merges in any binding until this
@@ -70,7 +72,10 @@ WHAT FAILS, per binding:
 The allowlist, scripts/parity-surface-allow.json, carries every deliberate
 difference, one entry per binding and kind, each with its written reason. An
 entry that matches nothing is stale and fails too, so the allowlist cannot
-outlive the difference it explains.
+outlive the difference it explains. An entry that hides a real gap, not a
+deliberate difference, also carries `issue`, the public issue the fix waits on;
+`--check-issues` fails once that issue is closed, so the entry is removed (or
+the issue reopened or re-cited) instead of lingering.
 
 SELFTEST FIRST. --selftest reads tests/fixtures/parity-surface/: a miniature
 doc in the real doc's table shapes, a miniature description, a fixture
@@ -83,17 +88,21 @@ runs each real tool on the fixture package and requires its output to read
 exactly as the recording, so the selftest's inputs are what the tools print.
 
 Exit status: 0 when every binding read and matched; 1 for a finding, a tool
-error, a failed proof or a failed selftest; 2 for a usage error.
+error, a failed proof or a failed selftest (and, for --check-issues, a closed
+issue); 2 for a usage error (and, for --check-issues, an API failure).
 """
 
 from __future__ import annotations
 
+import contextlib
 import fnmatch
 import importlib.util
+import io
 import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass, field
@@ -1357,6 +1366,7 @@ class Entry:
     doc: str = ""
     as_: str = ""
     used: set[str] = field(default_factory=set)
+    issue: int | None = None  # the public issue a real gap waits on; None for a deliberate difference
 
 
 def load_allowlist(path: Path) -> tuple[list[Entry], list[str]]:
@@ -1378,18 +1388,91 @@ def load_allowlist(path: Path) -> tuple[list[Entry], list[str]]:
         if len(reason) < 30 or reason.upper().startswith(("TODO", "TBD", "FIXME")):
             problems.append(f"{where} ({binding} {kind}): every entry needs a written reason, not {reason!r}")
             continue
+        issue = e.get("issue")
+        if "issue" in e and (not isinstance(issue, int) or isinstance(issue, bool) or issue < 1):
+            problems.append(f"{where} ({binding} {kind}): `issue` is a positive issue number, not {issue!r}")
+            continue
         if kind == "spelling":
             if not e.get("doc") or not e.get("as"):
                 problems.append(f"{where}: a spelling entry names the doc's spelling (`doc`) and the binding's (`as`)")
                 continue
-            entries.append(Entry(binding, kind, [], reason, e["doc"], e["as"]))
+            entries.append(Entry(binding, kind, [], reason, e["doc"], e["as"], issue=issue))
         else:
             names = e.get("names") or []
             if not names or not all(isinstance(n, str) and n for n in names):
                 problems.append(f"{where}: an {kind} entry lists the names it covers (`names`)")
                 continue
-            entries.append(Entry(binding, kind, list(names), reason))
+            entries.append(Entry(binding, kind, list(names), reason, issue=issue))
     return entries, problems
+
+
+def issue_state(repo: str, number: int) -> str:
+    """The state (`open` or `closed`) of a public issue, from the GitHub API
+    through `gh` (which reads GH_TOKEN). Raises RuntimeError when it cannot."""
+    try:
+        out = subprocess.run(
+            ["gh", "api", f"repos/{repo}/issues/{number}", "--jq", ".state"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as e:
+        raise RuntimeError(f"gh could not run: {e}") from e
+    state = out.stdout.strip().lower()
+    if out.returncode != 0 or state not in ("open", "closed"):
+        raise RuntimeError(
+            f"gh api repos/{repo}/issues/{number} exit {out.returncode}: {(out.stderr or out.stdout).strip()[:200]}"
+        )
+    return state
+
+
+def entry_label(e: Entry) -> str:
+    return f"{e.binding} {e.kind} {e.doc if e.kind == 'spelling' else ', '.join(e.names[:3])}"
+
+
+def check_issues(allow: list[Entry], repo: str, lookup=issue_state) -> tuple[list[str], list[str]]:
+    """(closed, errors): the entries whose `issue` is closed, and the lookups
+    that failed. One lookup per distinct issue."""
+    states: dict[int, str] = {}
+    closed: list[str] = []
+    errors: list[str] = []
+    for e in allow:
+        if e.issue is None:
+            continue
+        if e.issue not in states:
+            try:
+                states[e.issue] = lookup(repo, e.issue)
+            except RuntimeError as err:
+                states[e.issue] = "error"
+                errors.append(f"#{e.issue}: {err}")
+        if states[e.issue] == "closed":
+            closed.append(
+                f"allowlist entry [{entry_label(e)}] cites {repo}#{e.issue}, which is closed: "
+                "the fix landed; remove the entry, or reopen/re-cite the issue"
+            )
+    return closed, errors
+
+
+def cmd_check_issues(path: Path = ALLOWLIST, lookup=issue_state) -> int:
+    allow, problems = load_allowlist(path)
+    for p in problems:
+        print(f"parity-surface: allowlist: {p}", file=sys.stderr)
+    if problems:
+        return 1
+    repo = os.environ.get("GITHUB_REPOSITORY") or "Wave-RF/chtypes"
+    closed, errors = check_issues(allow, repo, lookup)
+    for e in errors:
+        print(f"parity-surface: --check-issues: cannot read {e}", file=sys.stderr)
+    if errors:
+        return 2
+    for c in closed:
+        print(f"parity-surface: {c}", file=sys.stderr)
+    cited = sorted({e.issue for e in allow if e.issue})
+    if closed:
+        return 1
+    print(f"parity-surface: --check-issues ok - {len(cited)} cited issue(s) in {repo} are open: {cited}")
+    return 0
 
 
 # ---------------------------------------------------------------- compare
@@ -1698,7 +1781,7 @@ def fixture_inputs() -> tuple[Expected, list[Entry], dict, list[str]]:
 
 
 def fresh(allow: list[Entry]) -> list[Entry]:
-    return [Entry(e.binding, e.kind, list(e.names), e.reason, e.doc, e.as_) for e in allow]
+    return [Entry(e.binding, e.kind, list(e.names), e.reason, e.doc, e.as_, issue=e.issue) for e in allow]
 
 
 def prove(ctx, binding: str) -> list[str]:
@@ -1848,6 +1931,57 @@ def selftest() -> int:
     if not any(f.binding == "ts" for f in compare(exp, surfaces, without, description).findings):
         failures.append("ts: removing its allowlisted spelling difference did not fail")
 
+    # The allowlist's `issue` field and --check-issues, offline: the lookup is injected.
+    row = '{"binding": "go", "kind": "extra", "names": ["X"], "reason": "%s", "issue": %s}'
+    why = "a reason long enough to be accepted here"
+    for bad_issue in ("0", "-3", '"12"', "1.5", "true", "null"):
+        if not load_allowlist_text('{"entries": [' + row % (why, bad_issue) + "]}")[1]:
+            failures.append(f"an allowlist `issue` of {bad_issue} was accepted")
+    got, none = load_allowlist_text(
+        '{"entries": [' + row % (why, "42") + ", " + (row % (why, "7")).replace(', "issue": 7', "") + "]}"
+    )
+    if none or [e.issue for e in got] != [42, None]:
+        failures.append("an allowlist `issue` was not read, or an entry without one was not left without")
+    spelling = '{"binding": "ts", "kind": "spelling", "doc": "A.b", "as": "aB", "reason": "%s", "issue": 9}' % why
+    if [e.issue for e in load_allowlist_text('{"entries": [' + spelling + "]}")[0]] != [9]:
+        failures.append("a spelling entry's `issue` was not read")
+    entries = got + fresh(allow)
+
+    def fake(states: dict[int, str]):
+        def look(_repo: str, n: int) -> str:
+            if n not in states:
+                raise RuntimeError(f"HTTP 404 for issue {n}")
+            return states[n]
+
+        return look
+
+    closed, errs = check_issues(entries, "o/r", fake({42: "closed"}))
+    if errs or len(closed) != 1 or "#42" not in closed[0] or "go extra X" not in closed[0]:
+        failures.append(f"--check-issues did not flag exactly the entry citing a closed issue: {closed} {errs}")
+    closed, errs = check_issues(entries, "o/r", fake({42: "open"}))
+    if closed or errs:
+        failures.append(f"--check-issues flagged an entry citing an open issue: {closed} {errs}")
+    closed, errs = check_issues(entries, "o/r", fake({}))
+    if not errs:
+        failures.append("--check-issues passed silently when the issue lookup failed")
+    asked: list[int] = []
+    check_issues(
+        [Entry("go", "extra", ["A"], why, issue=5), Entry("go", "extra", ["B"], why, issue=5)],
+        "o/r",
+        lambda _r, n: asked.append(n) or "open",
+    )
+    if asked != [5]:
+        failures.append("--check-issues asked twice for one issue")
+    # The exit codes, through the command itself: a closed issue is 1, an API failure is 2.
+    with tempfile.TemporaryDirectory() as tmp:
+        fixture = Path(tmp) / "allow.json"
+        fixture.write_text('{"entries": [' + row % (why, "42") + "]}", encoding="utf-8")
+        for states, want in (({42: "closed"}, 1), ({42: "open"}, 0), ({}, 2)):
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                code = cmd_check_issues(fixture, fake(states))
+            if code != want:
+                failures.append(f"--check-issues did not exit {want} for {states}")
+
     # The parser's pieces, on the shapes the real doc uses.
     if python_kwonly("format: Format, body: bytes, *, settings=None, doc_flags: DocFlags = DocFlags.ALL") != [
         "settings",
@@ -1957,7 +2091,8 @@ def selftest() -> int:
         "parity-surface: selftest ok — the green fixtures pass in all four bindings; a planted missing name, "
         "different spelling and undocumented name each fail in each binding, for their own reason and in that "
         "binding only; a forbidden name, a vocabulary member removed, a stale allowlist entry, an entry without a "
-        "reason and a removed spelling entry each fail; the real doc yields names from every section the parser "
+        "reason and a removed spelling entry each fail; a bad `issue`, a closed cited issue and a failed issue "
+        "lookup each fail (--check-issues, offline); the real doc yields names from every section the parser "
         "reads"
     )
     return 0
@@ -2095,6 +2230,8 @@ def cmd_expected(only: tuple[str, ...]) -> int:
 def main(argv: list[str]) -> int:
     if argv == ["--selftest"]:
         return selftest()
+    if argv == ["--check-issues"]:
+        return cmd_check_issues()
     if argv[:1] == ["griffe-surface"] and len(argv) == 3:
         print(json.dumps(griffe_surface(argv[1], argv[2]), indent=1))
         return 0

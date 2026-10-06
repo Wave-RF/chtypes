@@ -2,7 +2,8 @@
   "_comment": [
     "Every deliberate difference between a binding's public names and docs/reference/bindings-v1.md, each with its written reason. Read by scripts/parity-surface.py (the parity gate, public issue #436); CONTRIBUTING.md's 'Changing a public name' says when an entry belongs here and when the doc or the bindings should change instead.",
     "kind 'extra': public names the doc does not give (globs allowed, in the binding's own spelling: Owner.member, Owner.method(kw=) for a Python keyword-only parameter). kind 'missing': names the doc gives that the binding lacks (the doc's spelling). kind 'spelling': the doc's name `doc` that the binding spells `as`.",
-    "An entry, or a name in one, that matches nothing fails the gate as stale: remove it with the difference it explained."
+    "An entry, or a name in one, that matches nothing fails the gate as stale: remove it with the difference it explained.",
+    "An entry that hides a real gap, not a deliberate difference, carries `issue`: the public issue its fix waits on. `parity-surface.py --check-issues` fails once that issue is closed."
   ],
   "entries": [
     {
@@ -86,7 +87,8 @@
         "FetchOptions.ConnectTimeout",
         "FetchOptions.IdleReadTimeout"
       ],
-      "reason": "Go-only: the fetch layer's connect and idle-read timeouts (spec/fetch-v1/constants.json `timeouts`), settable on Go's FetchOptions alone. Principle 2 says this convenience belongs in all four or in none; it is carried here as found, not changed, because removing a published field is a breaking change."
+      "reason": "Go-only: the fetch layer's connect and idle-read timeouts (spec/fetch-v1/constants.json `timeouts`), settable on Go's FetchOptions alone. Principle 2 says this convenience belongs in all four or in none; it is carried here as found, not changed, because removing a published field is a breaking change.",
+      "issue": 500
     },
     {
       "binding": "python",
@@ -155,7 +157,8 @@
         "SourceUnreachableError.retryable",
         "SourceUnreachableError.retry_after"
       ],
-      "reason": "The fetch layer's retry hints on an unreachable source (fetch-v1.md §7, the retry table): whether a retry may help, and the server's Retry-After. §4 names the class, not its fields."
+      "reason": "The fetch layer's retry hints on an unreachable source (fetch-v1.md §7, the retry table): whether a retry may help, and the server's Retry-After. §4 names the class, not its fields.",
+      "issue": 500
     },
     {
       "binding": "python",
@@ -183,7 +186,8 @@
         "TrustedKey.keyid",
         "TrustedKey.public_key"
       ],
-      "reason": "Python's trusted keys are TrustedKey records (key id and raw public key) where Go's FetchOptions.TrustedKeys takes hex strings: a shape difference inside §6's 'trusted keys', carried as found. Changing either is a breaking change."
+      "reason": "Python's trusted keys are TrustedKey records (key id and raw public key) where Go's FetchOptions.TrustedKeys takes hex strings: a shape difference inside §6's 'trusted keys', carried as found. Changing either is a breaking change.",
+      "issue": 500
     },
     {
       "binding": "python",
@@ -203,7 +207,8 @@
         "errors.internal",
         "errors.misuse"
       ],
-      "reason": "Found by this gate: the binding's own constructors for InternalError and UsageError, listed in chtypes.errors.__all__ and so public through the submodule, though the package does not re-export them and the doc gives neither. Dropping them from __all__ is a public-API change for its own pull request; carried here until then."
+      "reason": "Found by this gate: the binding's own constructors for InternalError and UsageError, listed in chtypes.errors.__all__ and so public through the submodule, though the package does not re-export them and the doc gives neither. Dropping them from __all__ is a public-API change for its own pull request; carried here until then.",
+      "issue": 499
     },
     {
       "binding": "rust",
@@ -212,7 +217,8 @@
         "EngineCell",
         "EngineCell.*"
       ],
-      "reason": "Found by this gate: rust/src/result.rs declares `pub struct EngineCell`, and BatchResult.engine_rows holds it, but lib.rs does not re-export it, so a caller cannot name chtypes::EngineCell (cargo-public-api lists no path to it). Re-exporting it is a public-API addition for its own pull request; carried here until then."
+      "reason": "Found by this gate: rust/src/result.rs declares `pub struct EngineCell`, and BatchResult.engine_rows holds it, but lib.rs does not re-export it, so a caller cannot name chtypes::EngineCell (cargo-public-api lists no path to it). Re-exporting it is a public-API addition for its own pull request; carried here until then.",
+      "issue": 498
     },
     {
       "binding": "rust",
@@ -321,35 +327,40 @@
       "names": [
         "FetchOptions.platform"
       ],
-      "reason": "Rust-only: the platform to fetch for, where the other bindings fetch for the host. Principle 2 says this belongs in all four or in none; it is carried here as found, not changed, because removing a published field is a breaking change."
+      "reason": "Rust-only: the platform to fetch for, where the other bindings fetch for the host. Principle 2 says this belongs in all four or in none; it is carried here as found, not changed, because removing a published field is a breaking change.",
+      "issue": 500
     },
     {
       "binding": "ts",
       "kind": "spelling",
       "doc": "Format.chName",
       "as": "formatChName",
-      "reason": "§3's vocabularies are const objects in TypeScript (`Format.JSONEachRow` is a number, not an object), which cannot carry a member, so each fact is a free function named for its vocabulary (the 1.0 comparison, #435). Generated from the description by scripts/abi-v1/gen.py; a rename is a breaking change."
+      "reason": "§3's vocabularies are const objects in TypeScript (`Format.JSONEachRow` is a number, not an object), which cannot carry a member, so each fact is a free function named for its vocabulary (the 1.0 comparison, #435). Generated from the description by scripts/abi-v1/gen.py; a rename is a breaking change.",
+      "issue": 500
     },
     {
       "binding": "ts",
       "kind": "spelling",
       "doc": "Reason.lossy",
       "as": "reasonLossy",
-      "reason": "§3's vocabularies are const objects in TypeScript (`Format.JSONEachRow` is a number, not an object), which cannot carry a member, so each fact is a free function named for its vocabulary (the 1.0 comparison, #435). Generated from the description by scripts/abi-v1/gen.py; a rename is a breaking change."
+      "reason": "§3's vocabularies are const objects in TypeScript (`Format.JSONEachRow` is a number, not an object), which cannot carry a member, so each fact is a free function named for its vocabulary (the 1.0 comparison, #435). Generated from the description by scripts/abi-v1/gen.py; a rename is a breaking change.",
+      "issue": 500
     },
     {
       "binding": "ts",
       "kind": "spelling",
       "doc": "Source.isStored",
       "as": "sourceIsStored",
-      "reason": "§3's vocabularies are const objects in TypeScript (`Format.JSONEachRow` is a number, not an object), which cannot carry a member, so each fact is a free function named for its vocabulary (the 1.0 comparison, #435). Generated from the description by scripts/abi-v1/gen.py; a rename is a breaking change."
+      "reason": "§3's vocabularies are const objects in TypeScript (`Format.JSONEachRow` is a number, not an object), which cannot carry a member, so each fact is a free function named for its vocabulary (the 1.0 comparison, #435). Generated from the description by scripts/abi-v1/gen.py; a rename is a breaking change.",
+      "issue": 500
     },
     {
       "binding": "ts",
       "kind": "spelling",
       "doc": "Verdict.answered",
       "as": "verdictAnswered",
-      "reason": "§3's vocabularies are const objects in TypeScript (`Format.JSONEachRow` is a number, not an object), which cannot carry a member, so each fact is a free function named for its vocabulary (the 1.0 comparison, #435). Generated from the description by scripts/abi-v1/gen.py; a rename is a breaking change."
+      "reason": "§3's vocabularies are const objects in TypeScript (`Format.JSONEachRow` is a number, not an object), which cannot carry a member, so each fact is a free function named for its vocabulary (the 1.0 comparison, #435). Generated from the description by scripts/abi-v1/gen.py; a rename is a breaking change.",
+      "issue": 500
     },
     {
       "binding": "ts",
@@ -360,7 +371,8 @@
         "ArtifactError.want",
         "ArtifactError.got"
       ],
-      "reason": "TypeScript keeps a loader refusal's fields (§4: reason, path, want, got) on the classes a refusal raises, ArtifactIncompatibleError and LoaderCorruptError (both implement LoaderErrorFields; their own entry), not on the ArtifactError base the fetch layer's errors share, which carries the code. §4 names the carrier for Go (*ArtifactError) and Rust (Refusal) only; the gate reads Go's for TypeScript and Python, and Python's base does carry them."
+      "reason": "TypeScript keeps a loader refusal's fields (§4: reason, path, want, got) on the classes a refusal raises, ArtifactIncompatibleError and LoaderCorruptError (both implement LoaderErrorFields; their own entry), not on the ArtifactError base the fetch layer's errors share, which carries the code. §4 names the carrier for Go (*ArtifactError) and Rust (Refusal) only; the gate reads Go's for TypeScript and Python, and Python's base does carry them.",
+      "issue": 500
     },
     {
       "binding": "ts",
@@ -381,7 +393,8 @@
         "LoaderErrorFields.want",
         "LoaderErrorFields.got"
       ],
-      "reason": "Where TypeScript keeps §4's refusal fields (see its `missing` entry for ArtifactError): LoaderCorruptError is the loader's corrupt refusal, a subclass of ArtifactCorruptError so that catching ArtifactCorruptError still catches both (§4's one family); TypeScript-only, noted in the 1.0 comparison (#435). LoaderErrorFields is the interface both refusal classes implement."
+      "reason": "Where TypeScript keeps §4's refusal fields (see its `missing` entry for ArtifactError): LoaderCorruptError is the loader's corrupt refusal, a subclass of ArtifactCorruptError so that catching ArtifactCorruptError still catches both (§4's one family); TypeScript-only, noted in the 1.0 comparison (#435). LoaderErrorFields is the interface both refusal classes implement.",
+      "issue": 500
     },
     {
       "binding": "ts",
@@ -415,7 +428,8 @@
         "BatchOutcome.Rejected",
         "BatchOutcome.Unsupported"
       ],
-      "reason": "The description's batch_outcome vocabulary on its own, generated by scripts/abi-v1/gen.py and exported by TypeScript alone; §3 folds row_outcome and batch_outcome into one Outcome, which TypeScript also exports. TypeScript-only, carried as found: removing an export is a breaking change."
+      "reason": "The description's batch_outcome vocabulary on its own, generated by scripts/abi-v1/gen.py and exported by TypeScript alone; §3 folds row_outcome and batch_outcome into one Outcome, which TypeScript also exports. TypeScript-only, carried as found: removing an export is a breaking change.",
+      "issue": 500
     },
     {
       "binding": "ts",
@@ -425,7 +439,8 @@
         "DiscoverQueryParam.Database",
         "DiscoverQueryParam.Table"
       ],
-      "reason": "The description's discover_query_param vocabulary (the discovery query's two parameters, which §5 names in prose), generated by scripts/abi-v1/gen.py and exported by TypeScript alone. TypeScript-only, carried as found: removing an export is a breaking change."
+      "reason": "The description's discover_query_param vocabulary (the discovery query's two parameters, which §5 names in prose), generated by scripts/abi-v1/gen.py and exported by TypeScript alone. TypeScript-only, carried as found: removing an export is a breaking change.",
+      "issue": 500
     },
     {
       "binding": "ts",
@@ -449,7 +464,8 @@
       "names": [
         "SourceUnreachableError.retryAfterRefused"
       ],
-      "reason": "The fetch layer's retry hint on an unreachable source (fetch-v1.md §7, the retry table): the Retry-After the client refused to wait for. Python carries retryable and retry_after instead (its own entry): the two bindings differ here, carried as found."
+      "reason": "The fetch layer's retry hint on an unreachable source (fetch-v1.md §7, the retry table): the Retry-After the client refused to wait for. Python carries retryable and retry_after instead (its own entry): the two bindings differ here, carried as found.",
+      "issue": 500
     },
     {
       "binding": "ts",
@@ -457,7 +473,8 @@
       "names": [
         "isChtypesError"
       ],
-      "reason": "True for any error the package throws on purpose. TypeScript's ArtifactError (the fetch layer's error class, re-exported) does not extend ChtypesError, so one guard covers the call errors and the artifact errors together; Python's ArtifactError is a ChtypesError, Go has no base and Rust has one Error enum, so none of them needs it. TypeScript-only, carried as found."
+      "reason": "True for any error the package throws on purpose. TypeScript's ArtifactError (the fetch layer's error class, re-exported) does not extend ChtypesError, so one guard covers the call errors and the artifact errors together; Python's ArtifactError is a ChtypesError, Go has no base and Rust has one Error enum, so none of them needs it. TypeScript-only, carried as found.",
+      "issue": 487
     }
   ]
 }
