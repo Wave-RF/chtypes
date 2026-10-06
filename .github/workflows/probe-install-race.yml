@@ -21,31 +21,20 @@ defaults:
 
 jobs:
   stress:
-    name: "stress ${{ matrix.name }} ${{ matrix.layer }} ${{ matrix.mode }} ${{ matrix.shard }}"
-    runs-on: ubuntu-latest
+    name: "stress ${{ matrix.runner }} ${{ matrix.name }} ${{ matrix.layer }} ${{ matrix.mode }}"
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { name: "fix", commit: f6440ff5a2b19074d7a825cb3bdf0484a86efd9d, layer: small, mode: natural, rounds: "rust=400,go=50,python=50,ts=50", build: all, control: false, shard: "" }
-          - { name: "fix", commit: f6440ff5a2b19074d7a825cb3bdf0484a86efd9d, layer: large, mode: natural, rounds: "rust=150,go=30,python=30,ts=30", build: all, control: false, shard: "" }
-          - { name: "1.0.4", commit: 38ceadc19011b3212b93c0e6052b1452ff48998f, layer: small, mode: natural, rounds: "rust=600", build: rust, control: false, shard: "a" }
-          - { name: "1.0.4", commit: 38ceadc19011b3212b93c0e6052b1452ff48998f, layer: small, mode: natural, rounds: "rust=600", build: rust, control: false, shard: "b" }
-          - { name: "1.1.0", commit: d15083fa6aa7d0ff59b69cc2c216494506e52289, layer: small, mode: natural, rounds: "rust=600", build: rust, control: false, shard: "a" }
-          - { name: "1.1.0", commit: d15083fa6aa7d0ff59b69cc2c216494506e52289, layer: small, mode: natural, rounds: "rust=600", build: rust, control: false, shard: "b" }
-          - { name: "fix", commit: f6440ff5a2b19074d7a825cb3bdf0484a86efd9d, layer: small, mode: natural, rounds: "rust=600", build: rust, control: false, shard: "a" }
-          - { name: "fix", commit: f6440ff5a2b19074d7a825cb3bdf0484a86efd9d, layer: small, mode: natural, rounds: "rust=600", build: rust, control: false, shard: "b" }
-          - { name: "1.0.4", commit: 38ceadc19011b3212b93c0e6052b1452ff48998f, layer: small, mode: coarse, rounds: "rust=150", build: rust, control: false, shard: "" }
-          - { name: "1.0.4", commit: 38ceadc19011b3212b93c0e6052b1452ff48998f, layer: large, mode: coarse, rounds: "rust=60", build: rust, control: false, shard: "" }
-          - { name: "1.1.0", commit: d15083fa6aa7d0ff59b69cc2c216494506e52289, layer: small, mode: coarse, rounds: "rust=150", build: rust, control: false, shard: "" }
-          - { name: "1.1.0", commit: d15083fa6aa7d0ff59b69cc2c216494506e52289, layer: large, mode: coarse, rounds: "rust=60", build: rust, control: false, shard: "" }
-          - { name: "1.0.4", commit: 38ceadc19011b3212b93c0e6052b1452ff48998f, layer: small, mode: collide, rounds: "rust=50", build: rust, control: true, shard: "" }
-          - { name: "1.0.4", commit: 38ceadc19011b3212b93c0e6052b1452ff48998f, layer: large, mode: collide, rounds: "rust=25", build: rust, control: true, shard: "" }
-          - { name: "1.1.0", commit: d15083fa6aa7d0ff59b69cc2c216494506e52289, layer: small, mode: collide, rounds: "rust=50", build: rust, control: true, shard: "" }
-          - { name: "1.1.0", commit: d15083fa6aa7d0ff59b69cc2c216494506e52289, layer: large, mode: collide, rounds: "rust=25", build: rust, control: true, shard: "" }
-          - { name: "fix", commit: f6440ff5a2b19074d7a825cb3bdf0484a86efd9d, layer: small, mode: collide, rounds: "rust=50", build: rust, control: false, shard: "" }
-          - { name: "fix", commit: f6440ff5a2b19074d7a825cb3bdf0484a86efd9d, layer: large, mode: collide, rounds: "rust=25", build: rust, control: false, shard: "" }
+          - { runner: ubuntu-latest, name: "fix", commit: e661922bff9e7cf85332a236455f1e1a173fa30a, layer: small, mode: coarse-shim, rounds: "rust=150", build: rust }
+          - { runner: ubuntu-latest, name: "fix", commit: e661922bff9e7cf85332a236455f1e1a173fa30a, layer: large, mode: coarse-shim, rounds: "rust=60", build: rust }
+          - { runner: ubuntu-latest, name: "1.1.0", commit: d15083fa6aa7d0ff59b69cc2c216494506e52289, layer: small, mode: coarse-shim, rounds: "rust=150", build: rust }
+          - { runner: macos-latest, name: "1.1.0", commit: d15083fa6aa7d0ff59b69cc2c216494506e52289, layer: small, mode: natural, rounds: "rust=150,go=25,python=25,ts=25", build: all }
+          - { runner: macos-latest, name: "fix", commit: e661922bff9e7cf85332a236455f1e1a173fa30a, layer: small, mode: natural, rounds: "rust=150,go=25,python=25,ts=25", build: all }
+          - { runner: macos-latest, name: "1.1.0", commit: d15083fa6aa7d0ff59b69cc2c216494506e52289, layer: small, mode: coarse-shim, rounds: "rust=100", build: rust }
+          - { runner: macos-latest, name: "fix", commit: e661922bff9e7cf85332a236455f1e1a173fa30a, layer: small, mode: coarse-shim, rounds: "rust=100", build: rust }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -72,10 +61,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
         with:
           toolchain: stable
-      - name: "the probe's env-gated suffix modes (coarse and collide legs only)"
-        if: matrix.mode != 'natural'
-        run: python3 scripts/fetch-v1/probe/patch-suffix.py target/rust/src/ocifetch/layout.rs
-      - name: build the CLIs from the target commit
+      - name: build the CLIs from the target commit (unmodified)
         env:
           BUILD: ${{ matrix.build }}
         run: |
@@ -96,15 +82,32 @@ jobs:
           (cd target && git log -1 --format='target %H %s')
       - name: the clock the names are made from
         run: |
-          echo "clocksource: $(cat /sys/devices/system/clocksource/clocksource0/current_clocksource) (available: $(cat /sys/devices/system/clocksource/clocksource0/available_clocksource))"
-          nproc
+          if [ -r /sys/devices/system/clocksource/clocksource0/current_clocksource ]; then
+            echo "clocksource: $(cat /sys/devices/system/clocksource/clocksource0/current_clocksource)"
+          fi
+          echo "cpus: $(getconf _NPROCESSORS_ONLN)"
           python3 - <<'EOF'
           import time
           vals = [time.time_ns() for _ in range(300000)]
           deltas = sorted({b - a for a, b in zip(vals, vals[1:]) if b != a})
           print("CLOCK_REALTIME smallest nonzero steps (ns):", deltas[:8])
           print("distinct readings:", len(set(vals)), "of", len(vals), "consecutive reads")
+          print("readings that are whole microseconds:", sum(v % 1000 == 0 for v in vals), "of", len(vals))
           EOF
+      - name: "the coarse-clock shim (100 us), and proof it takes effect"
+        if: matrix.mode == 'coarse-shim'
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then
+            clang -dynamiclib -O2 -Wall -o "$RUNNER_TEMP/coarse-clock.so" scripts/fetch-v1/probe/coarse-clock.c
+            var=DYLD_INSERT_LIBRARIES
+          else
+            gcc -shared -fPIC -O2 -Wall -o "$RUNNER_TEMP/coarse-clock.so" scripts/fetch-v1/probe/coarse-clock.c -ldl
+            var=LD_PRELOAD
+          fi
+          cc -O2 -Wall -o "$RUNNER_TEMP/clockcheck" scripts/fetch-v1/probe/clockcheck.c
+          if "$RUNNER_TEMP/clockcheck"; then echo "the plain clock already reads coarse: the control cannot discriminate" >&2; exit 1; fi
+          env "$var=$RUNNER_TEMP/coarse-clock.so" PROBE_COARSE_NS=100000 "$RUNNER_TEMP/clockcheck"
+          echo "SHIM_VAR=$var" >> "$GITHUB_ENV"
       - name: a large library (32 MiB) for the large-layer leg
         if: matrix.layer == 'large'
         run: |
@@ -113,77 +116,25 @@ jobs:
       - name: stress
         env:
           MODE: ${{ matrix.mode }}
-          CONTROL: ${{ matrix.control }}
           BUILD: ${{ matrix.build }}
           ROUNDS: ${{ matrix.rounds }}
-          LABEL: "${{ matrix.name }} (${{ matrix.commit }}) ${{ matrix.layer }} layer, ${{ matrix.mode }} ${{ matrix.shard }}"
-          OUT: "out/stress-${{ matrix.name }}-${{ matrix.layer }}-${{ matrix.mode }}${{ matrix.shard }}.json"
+          LABEL: "${{ matrix.runner }} ${{ matrix.name }} (${{ matrix.commit }}) ${{ matrix.layer }} layer, ${{ matrix.mode }}"
+          OUT: "out/stress-${{ matrix.runner }}-${{ matrix.name }}-${{ matrix.layer }}-${{ matrix.mode }}.json"
         run: |
           X="$RUNNER_TEMP/cli"
           mkdir -p out
           case "$MODE" in
             natural) rust="$X/bin/cli-rust" ;;
-            coarse) rust="env PROBE_CLOCK_STEP_NS=100000 $X/bin/cli-rust" ;;
-            collide) rust="env PROBE_COLLIDE_SUFFIX=probe-collide $X/bin/cli-rust" ;;
+            coarse-shim) rust="env $SHIM_VAR=$RUNNER_TEMP/coarse-clock.so PROBE_COARSE_NS=100000 $X/bin/cli-rust" ;;
             *) echo "unknown mode $MODE" >&2; exit 2 ;;
           esac
           args=(--cli "rust=$rust")
           if [ "$BUILD" = all ]; then
             args+=(--cli "go=$X/bin/cli-go" --cli "python=$X/bin/cli-python" --cli "ts=$X/bin/cli-ts")
           fi
-          if [ "$CONTROL" = true ]; then args+=(--control); fi
           python3 scripts/fetch-v1/probe-install-race.py "${args[@]}" --rounds "$ROUNDS" --label "$LABEL" --json "$OUT"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
-          name: probe-${{ matrix.name }}-${{ matrix.layer }}-${{ matrix.mode }}${{ matrix.shard }}
+          name: probe-${{ matrix.runner }}-${{ matrix.name }}-${{ matrix.layer }}-${{ matrix.mode }}
           path: out/
-
-  regression-tests:
-    name: "unit tests: ${{ matrix.name }}"
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { name: "1.1.0 with the seam (the four new tests must FAIL)", commit: d15083fa6aa7d0ff59b69cc2c216494506e52289, seam: true }
-          - { name: "fix head (every test must pass)", commit: f6440ff5a2b19074d7a825cb3bdf0484a86efd9d, seam: false }
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ matrix.commit }}
-          path: target
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
-        with:
-          toolchain: stable
-      - name: the 1.1.0 layout.rs with only a test seam and the four new tests
-        if: matrix.seam
-        run: cp scripts/fetch-v1/probe/layout-1.1.0-with-seam.rs target/rust/src/ocifetch/layout.rs
-      - name: cargo test, the layout module
-        env:
-          SEAM: ${{ matrix.seam }}
-        run: |
-          set +e
-          (cd target/rust && cargo test --locked --lib ocifetch::layout::tests 2>&1) | tee test.log
-          set -e
-          python3 - <<'EOF'
-          import os, re, sys
-          log = open("test.log", encoding="utf-8").read()
-          results = dict(re.findall(r"^test ocifetch::layout::tests::(\w+) \.\.\. (ok|FAILED)$", log, re.M))
-          new = {
-              "temporary_names_carry_the_process_id_and_differ",
-              "a_temporary_directory_another_installer_holds_is_never_shared",
-              "a_temporary_file_another_writer_holds_is_never_shared",
-              "an_aside_name_another_installer_holds_is_never_reused",
-          }
-          print("results:", results)
-          missing = new - set(results)
-          failed = {t for t, r in results.items() if r == "FAILED"}
-          want_failed = new if os.environ["SEAM"] == "true" else set()
-          if missing or failed != want_failed or len(results) < 9:
-              print(f"UNEXPECTED: missing {sorted(missing)}, failed {sorted(failed)}, wanted failed {sorted(want_failed)}", file=sys.stderr)
-              sys.exit(1)
-          print(f"as expected: {len(results)} tests ran, failed exactly {sorted(failed)}")
-          EOF
