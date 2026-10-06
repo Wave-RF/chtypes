@@ -348,12 +348,13 @@ fn ensure_online(
 
     let already = is_fully_installed(&layout::unpacked_dir(&res.root, &descriptor.digest)?)?;
 
-    // Monotonicity (docs/guides/fetch-v1.md §6, `monotonic-warning`): a
-    // HIGHER build already installed than what the source now offers is
-    // kept, with a warning. Decided as soon as the candidate's own signed
-    // version/build are known and before its layer is fetched — there is no
-    // point downloading bytes this call is about to discard.
-    if !already && signed {
+    // Monotonicity (docs/guides/fetch-v1.md §9, `monotonic-warning`): a
+    // HIGHER build within the request, already installed, is kept in place
+    // of what the source now offers, with a warning, whether or not the
+    // offered build is installed too. Decided as soon as the candidate's own
+    // signed version/build are known and before its layer is fetched — there
+    // is no point downloading bytes this call is about to discard.
+    if signed {
         if let Some((dir, record)) =
             newer_installed(res, version_request, &descriptor.digest, &predicate)?
         {

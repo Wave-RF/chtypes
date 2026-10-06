@@ -689,8 +689,12 @@ jobs:
     # is how the examples job found Rust refusing a record Go had written, on a
     # cache all four tours share. This job runs the four real CLIs against the
     # loopback fixture server: each binding writes a cache, all four read it
-    # (4 x 4), and a 0.x cache directory must never crash any of them. It fails
-    # if any pair fails, and prints the table.
+    # (4 x 4), and a 0.x cache directory must never crash any of them. Then two
+    # lines in one cache, writer x reader x line: every request is answered
+    # within its own line (public issue #481). Then 8 processes install one
+    # build into one fresh cache at once, each binding alone and all four
+    # mixed, with a watcher for torn, vanished or replaced entries (public
+    # issue #482). It fails if any cell fails, and prints the tables.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -726,7 +730,7 @@ jobs:
           for b in go python ts rust; do "$RUNNER_TEMP/bin/cli-$b" --version; done
       - name: "selftest — the interop driver's own comparison and table logic"
         run: python3 scripts/fetch-v1/cache-interop.py --selftest
-      - name: "4 x 4: each binding writes a cache, every binding reads it; then the 0.x rows"
+      - name: "4 x 4: each binding writes a cache, every binding reads it; the 0.x rows; writer x reader x line (#481); concurrent installs (#482)"
         run: |
           python3 scripts/fetch-v1/cache-interop.py \
             --cli "go=$RUNNER_TEMP/bin/cli-go" \

@@ -16,12 +16,15 @@
  */
 
 import { randomBytes } from 'node:crypto';
-import { mkdir, readdir, readFile, rename, rm, unlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, readFile, rename, rm, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { CACHE_UNPACKED_DIR, CACHE_VERIFIED_RECORD, ENV_CACHE_NAME, PLATFORMS, SYSTEM_CACHE_DIRS } from './constants.gen.js';
 import { ArtifactCorruptError } from './errors.js';
 import type { ArtifactPredicate } from './types.js';
+
+/** An entry under `unpacked/sha256/`: its manifest's digest, 64 lowercase hex. */
+const ENTRY_NAME = /^[0-9a-f]{64}$/;
 
 /** `CHTYPES_CACHE`, else `${XDG_CACHE_HOME:-~/.cache}/chtypes/v1` — the layout root itself, not a parent of it. */
 export function cacheRoot(explicitCacheDir?: string): string {
@@ -397,6 +400,11 @@ export async function listVerified(root: string): Promise<readonly { readonly di
   }
   const out: { dir: string; record: VerifiedRecord }[] = [];
   for (const name of names) {
+    // Only <manifest-hex> names are entries: an installer's temporary
+    // directory beside them (.staging-*, .stale-*, another binding's
+    // unpack-* or .tmp-*) may already carry a record, and is renamed away a
+    // moment later.
+    if (!ENTRY_NAME.test(name)) continue;
     const dir = path.join(base, name);
     const record = await readVerifiedRecord(dir);
     if (record !== undefined) out.push({ dir, record });
@@ -413,15 +421,88 @@ export async function freshStagingDir(root: string): Promise<string> {
   return dir;
 }
 
-/** Renames a staged, fully-verified unpack into its final content-addressed home; removes the staging dir on any failure. */
-export async function commitStaging(stagingDir: string, finalDir: string): Promise<void> {
+/** The bounded retries of `commitStaging`: each follows another process changing the entry under it. */
+const COMMIT_ATTEMPTS = 8;
+
+/**
+ * Moves a staged, fully verified unpack (its `verified.json` already
+ * written) into its final content-addressed home by rename, and never
+ * removes an entry another process may be using (public issue #482). It is
+ * the same rule Go, Python and Rust follow, so several processes of any
+ * binding can install one build into one cache at once:
+ *
+ * - The rename comes first. It fails while the entry exists, so the first
+ *   installer wins and every later one finds the entry in place.
+ * - An entry that holds an acceptable record is kept, and the staging
+ *   directory is discarded: the same content is already installed.
+ * - Only an entry WITHOUT an acceptable record (foreign, torn or older
+ *   format; the caller has just re-verified from the blobs) is moved aside,
+ *   into a fresh `.stale-*` directory beside it, and replaced. If what was
+ *   moved turns out to carry an acceptable record (another installer's
+ *   rename landed in between), it is put back.
+ *
+ * Returns true when another process's install is the one in place. The
+ * staging directory is consumed either way. A filesystem failure is thrown
+ * as it came; the public layer types it (`isFilesystemError`).
+ */
+export async function commitStaging(stagingDir: string, finalDir: string): Promise<boolean> {
+  let lastErr: unknown;
   try {
-    await rm(finalDir, { recursive: true, force: true });
-    await rename(stagingDir, finalDir);
-  } catch (err) {
+    if ((await readVerifiedRecord(finalDir)) !== undefined) return true;
+    for (let attempt = 0; attempt < COMMIT_ATTEMPTS; attempt++) {
+      try {
+        await rename(stagingDir, finalDir);
+        return false;
+      } catch (err) {
+        lastErr = err;
+      }
+      if ((await readVerifiedRecord(finalDir)) !== undefined) return true;
+      if (!(await pathExists(finalDir))) continue; // what stood there went away: try the rename again
+      const stale = await mkdtemp(path.join(path.dirname(finalDir), '.stale-'));
+      const aside = path.join(stale, 'old');
+      try {
+        await rename(finalDir, aside);
+      } catch {
+        await rm(stale, { recursive: true, force: true }).catch(() => {});
+        continue; // another process moved or replaced it: look again
+      }
+      if ((await readVerifiedRecord(aside)) !== undefined) {
+        try {
+          await rename(aside, finalDir);
+          await rm(stale, { recursive: true, force: true }).catch(() => {});
+          return true;
+        } catch {
+          // The entry was re-occupied meanwhile: look again.
+        }
+      }
+      await rm(stale, { recursive: true, force: true }).catch(() => {});
+    }
+    throw lastErr;
+  } finally {
     await rm(stagingDir, { recursive: true, force: true }).catch(() => {});
-    throw err;
   }
+}
+
+async function pathExists(p: string): Promise<boolean> {
+  try {
+    await lstat(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A failure of the filesystem itself (`EACCES`, `ENOSPC`, `EROFS`,
+ * `ENOTEMPTY`, ...), as Node raises it: an `Error` with a string `code` and
+ * a `syscall`. Never one of this module's own errors.
+ */
+export function isFilesystemError(err: unknown): err is NodeJS.ErrnoException {
+  return (
+    err instanceof Error &&
+    typeof (err as NodeJS.ErrnoException).code === 'string' &&
+    typeof (err as NodeJS.ErrnoException).syscall === 'string'
+  );
 }
 
 export async function removeStaging(stagingDir: string): Promise<void> {

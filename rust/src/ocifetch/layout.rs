@@ -281,13 +281,14 @@ pub fn read_verified(dir: &Path) -> Result<Option<VerifiedRecord>> {
 }
 
 /// Install one unpacked artifact atomically: `build` populates a fresh temp
-/// directory (unpack the tar, write `verified.json`), which is then renamed
-/// into place. If the final directory already carries an acceptable record
-/// (another process won the race, or this exact build was already
-/// installed), the temp directory is discarded and the existing one is left
-/// untouched. If it exists WITHOUT one (a foreign, torn or older-format
-/// record), the caller has just re-verified from the cache's own blobs, so
-/// the stale directory is moved aside and replaced.
+/// directory (unpack the tar, write `verified.json`), which [`install_dir`]
+/// then moves into place. If the final directory already carries an
+/// acceptable record (another process won the race, or this exact build was
+/// already installed), the temp directory is discarded and the existing one
+/// is left untouched. If it exists WITHOUT one (a foreign, torn or
+/// older-format record), the caller has just re-verified from the cache's
+/// own blobs, so the stale directory is moved aside and replaced. The temp
+/// directory is consumed either way.
 pub fn install_unpacked(
     root: &Path,
     manifest_digest: &str,
@@ -303,39 +304,74 @@ pub fn install_unpacked(
     std::fs::create_dir_all(parent)?;
     let tmp = parent.join(format!(".tmp-{}", unique_suffix()));
     std::fs::create_dir_all(&tmp)?;
-    let result = build(&tmp);
-    if let Err(e) = result {
-        let _ = std::fs::remove_dir_all(&tmp);
-        return Err(e);
-    }
-    let mut stale: Option<PathBuf> = None;
-    if std::fs::symlink_metadata(&final_dir).is_ok() {
+    let result = build(&tmp).and_then(|()| install_dir(&tmp, &final_dir));
+    // Gone already after a successful rename; removed here otherwise.
+    let _ = std::fs::remove_dir_all(&tmp);
+    result.map(|_| final_dir)
+}
+
+/// `install_dir`'s bounded retries: each follows another process changing
+/// the destination under it, so a handful is plenty.
+const INSTALL_ATTEMPTS: usize = 8;
+
+/// Move `src`, a complete directory carrying its `verified.json`, to `dest`
+/// by rename, and never remove an entry another process may be using (public
+/// issue #482). Several processes of any binding may install the same build
+/// into one cache at once, and each must end up with a usable `dest`; Go,
+/// Python and TypeScript follow the same rule:
+///
+/// - The rename comes first. It fails while `dest` exists (POSIX refuses to
+///   rename a directory onto a non-empty one), so the first installer wins
+///   and every later one finds `dest` in place.
+/// - A `dest` that holds an acceptable record is kept: the same content is
+///   already installed.
+/// - Only a `dest` WITHOUT an acceptable record (foreign, torn or older
+///   format) is moved aside, to a fresh `.stale-*` name beside it, and
+///   replaced. If what was moved turns out to carry an acceptable record
+///   (another installer's rename landed in between), it is put back.
+///
+/// Returns true when another process's install is the one in place.
+fn install_dir(src: &Path, dest: &Path) -> Result<bool> {
+    let parent = dest
+        .parent()
+        .ok_or_else(|| Error::InvalidInput("unpacked dir has no parent".to_string()))?;
+    let mut last: Option<std::io::Error> = None;
+    for _ in 0..INSTALL_ATTEMPTS {
+        match std::fs::rename(src, dest) {
+            Ok(()) => return Ok(false),
+            Err(e) => last = Some(e),
+        }
+        if read_verified(dest)?.is_some() {
+            return Ok(true);
+        }
+        if std::fs::symlink_metadata(dest).is_err() {
+            continue; // what stood there went away: try the rename again
+        }
         let aside = parent.join(format!(".stale-{}", unique_suffix()));
-        if let Err(e) = std::fs::rename(&final_dir, &aside) {
-            let _ = std::fs::remove_dir_all(&tmp);
-            if read_verified(&final_dir)?.is_some() {
-                return Ok(final_dir);
-            }
-            return Err(e.into());
+        if std::fs::rename(dest, &aside).is_err() {
+            continue; // another process moved or replaced it: look again
         }
-        stale = Some(aside);
+        if read_verified(&aside)?.is_some() && std::fs::rename(&aside, dest).is_ok() {
+            return Ok(true);
+        }
+        let _ = std::fs::remove_dir_all(&aside);
     }
-    let outcome = match std::fs::rename(&tmp, &final_dir) {
-        Ok(()) => Ok(final_dir.clone()),
-        Err(_) if read_verified(&final_dir)?.is_some() => {
-            // Another process installed the same content first.
-            let _ = std::fs::remove_dir_all(&tmp);
-            Ok(final_dir.clone())
-        }
-        Err(e) => {
-            let _ = std::fs::remove_dir_all(&tmp);
-            Err(e.into())
-        }
-    };
-    if let Some(aside) = stale {
-        let _ = std::fs::remove_dir_all(aside);
-    }
-    outcome
+    Err(match last {
+        Some(e) => e.into(),
+        None => Error::InvalidInput(format!("could not install {}", dest.display())),
+    })
+}
+
+/// An entry under `unpacked/sha256/`: its manifest digest's 64 lowercase hex.
+/// An installer's temporary directory beside the entries (`.tmp-*`,
+/// `.stale-*`, another binding's `unpack-*` or `.staging-*`) may already carry
+/// a record, and is renamed away a moment later, so it is never listed.
+fn is_entry_name(name: &std::ffi::OsStr) -> bool {
+    name.to_str().is_some_and(|n| {
+        n.len() == 64
+            && n.bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    })
 }
 
 /// List every verified record under `root`'s `unpacked/` tree (used by
@@ -351,7 +387,7 @@ pub fn list_verified(root: &Path) -> Result<Vec<(PathBuf, VerifiedRecord)>> {
     };
     for entry in entries {
         let entry = entry?;
-        if !entry.file_type()?.is_dir() {
+        if !entry.file_type()?.is_dir() || !is_entry_name(&entry.file_name()) {
             continue;
         }
         if let Some(record) = read_verified(&entry.path())? {
@@ -561,6 +597,58 @@ mod tests {
         .unwrap();
         assert!(read_verified(&dir).unwrap().is_some());
         assert!(!dir.join("manifest.json").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Many installers of one build into one cache at once (public issue
+    /// #482): every one succeeds and names the same entry, and nothing but
+    /// the entry is left under `unpacked/sha256/`.
+    #[test]
+    fn concurrent_installs_all_succeed_and_leave_one_entry() {
+        let digest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let record = sample_record().to_json_bytes().unwrap();
+        for _ in 0..10 {
+            let root = std::env::temp_dir().join(format!("ocifetch-race-test-{}", unique_suffix()));
+            let barrier = std::sync::Barrier::new(16);
+            let results: Vec<Result<PathBuf>> = std::thread::scope(|scope| {
+                let handles: Vec<_> = (0..16)
+                    .map(|_| {
+                        scope.spawn(|| {
+                            barrier.wait();
+                            install_unpacked(&root, digest, |tmp| {
+                                write_atomic(&tmp.join("libchtypes.so"), b"abc")?;
+                                write_atomic(&tmp.join("verified.json"), &record)
+                            })
+                        })
+                    })
+                    .collect();
+                handles.into_iter().map(|h| h.join().unwrap()).collect()
+            });
+            let want = unpacked_dir(&root, digest).unwrap();
+            for r in results {
+                assert_eq!(r.unwrap(), want);
+            }
+            assert!(read_verified(&want).unwrap().is_some());
+            let left: Vec<_> = std::fs::read_dir(want.parent().unwrap())
+                .unwrap()
+                .map(|e| e.unwrap().file_name())
+                .collect();
+            assert_eq!(left, vec![std::ffi::OsString::from("a".repeat(64))]);
+            let _ = std::fs::remove_dir_all(&root);
+        }
+    }
+
+    #[test]
+    fn only_manifest_hex_names_are_listed() {
+        let root = std::env::temp_dir().join(format!("ocifetch-list-test-{}", unique_suffix()));
+        let record = sample_record().to_json_bytes().unwrap();
+        for name in [".tmp-1".to_string(), "unpack-2".to_string(), "b".repeat(64)] {
+            let dir = root.join(constants::CACHE_UNPACKED_DIR).join(name);
+            write_atomic(&dir.join("verified.json"), &record).unwrap();
+        }
+        let listed = list_verified(&root).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert!(listed[0].0.ends_with("b".repeat(64)));
         let _ = std::fs::remove_dir_all(&root);
     }
 }

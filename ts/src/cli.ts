@@ -40,6 +40,7 @@ import {
   FetchV1Error,
   type FetchV1Options,
   hostPlatformKey,
+  isFilesystemError,
   isPlatformKey,
   listInstalled,
   listTags,
@@ -297,6 +298,12 @@ function report(err: unknown, io: CliIo): number {
   if (isChtypesError(err)) {
     io.stderr(`${err.message}\n`);
     return EXIT_OTHER;
+  }
+  if (isFilesystemError(err)) {
+    // An unwritable or full cache: the usage status, as the Go CLI gives it,
+    // never a raw Node error and stack (public issue #482).
+    io.stderr(`chtypes: the cache could not be read or written: ${err.message}\n`);
+    return EXIT_USAGE;
   }
   io.stderr(`chtypes: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}\n`);
   return EXIT_OTHER;

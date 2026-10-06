@@ -216,3 +216,51 @@ def test_write_verified_install_replaces_an_unreadable_record(tmp_path: Path) ->
     assert read_verified_record(dest) == record
     assert (dest / "libchtypes.so").read_bytes() == b"fresh"
     assert not (dest / "manifest.json").exists()
+
+
+def _install_racer(barrier, root, record, temp, results, i) -> None:  # noqa: ANN001
+    barrier.wait()
+    try:
+        results[i] = write_verified_install(
+            root, record.manifest, record, unpacked_tmp_dir=str(temp)
+        )
+    except Exception as exc:  # noqa: BLE001 - the test reports it
+        results[i] = exc
+
+
+def test_concurrent_installs_keep_one_entry_and_all_succeed(tmp_path: Path) -> None:
+    """Many installers of one build into one cache at once (public issue
+    #482): every one succeeds and names the same entry, the entry in place is
+    one of theirs, and nothing is left beside it."""
+    import os
+    import threading
+
+    record = _record()
+    racers = 16
+    for round_ in range(10):
+        root = tmp_path / f"round-{round_}"
+        temps = []
+        for i in range(racers):
+            t = root / "tmp" / f"unpack-{i}"
+            t.mkdir(parents=True)
+            (t / "libchtypes.so").write_bytes(b"fake lib")
+            temps.append(t)
+        inodes = {os.stat(t).st_ino for t in temps}
+        barrier = threading.Barrier(racers)
+        results: list[object] = [None] * racers
+        threads = [
+            threading.Thread(
+                target=_install_racer, args=(barrier, root, record, temps[i], results, i)
+            )
+            for i in range(racers)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        dest = unpacked_dir_for(root, "a" * 64)
+        assert results == [dest] * racers, results
+        assert os.stat(dest).st_ino in inodes
+        assert read_verified_record(dest) == record
+        assert sorted(p.name for p in (root / C.CACHE_UNPACKED_DIR).iterdir()) == ["a" * 64]
+        assert not any(t.exists() for t in temps)
