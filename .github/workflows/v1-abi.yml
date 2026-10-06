@@ -250,9 +250,8 @@ jobs:
       - name: the MSRV from rust/Cargo.toml (so a future bump needs no workflow edit)
         if: matrix.binding == 'rust' && matrix.toolchain == 'msrv'
         id: msrv
-        # The same pattern scripts/support-matrix.sh already reads
-        # rust/Cargo.toml with, restated here rather than shared, since a
-        # workflow step cannot import that script's Python helper.
+        # A fixed pattern over rust/Cargo.toml's own `rust-version` line; a
+        # missing or reshaped line fails the step rather than guessing.
         run: |
           v="$(grep -oE '^rust-version[[:space:]]*=[[:space:]]*"[0-9]+\.[0-9]+"' rust/Cargo.toml | grep -oE '[0-9]+\.[0-9]+')"
           if [ -z "$v" ]; then

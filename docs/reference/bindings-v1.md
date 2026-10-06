@@ -1,6 +1,6 @@
 # The v1 binding API: one shape in four languages
 
-> **Status: in progress, on the `v1` branch only.** `main` still ships 0.5.x against [`bindings.md`](bindings.md), which stays the contract for that line. This page is the public API every binding builds over the ABI v1 C layer ([`abi-v1.md`](abi-v1.md)) and the v1 fetch layer ([`fetch-v1.md`](../guides/fetch-v1.md)). It is the build list for the four binding lanes that replace the v0 public API on this branch, and it replaces `bindings.md` at the switch.
+> **Status: in progress, on the `v1` branch only.** `main` still ships 0.5.x against the 0.x binding contract, which stays the contract for that line and is kept in its release history. This page is the public API every binding builds over the ABI v1 C layer ([`abi-v1.md`](abi-v1.md)) and the v1 fetch layer ([`fetch-v1.md`](../guides/fetch-v1.md)). It is the build list for the four binding lanes that replace the v0 public API on this branch, and it replaces the 0.x binding contract at the switch.
 
 ## 1. Scope and principles
 
@@ -107,7 +107,7 @@ One row per public operation. `request` is a version spelling under [`fetch-v1.m
 
 ### The call options
 
-One entry point per operation, with its optional inputs spelled in the language's own idiom, as `bindings.md` §One compile function already rules: Go functional options, Python keyword-only arguments, a TypeScript options object, and a Rust options struct with `Default` (or a positional slice where the call has only that one optional input).
+One entry point per operation, with its optional inputs spelled in the language's own idiom, as the 0.x binding contract's "One compile function" already ruled: Go functional options, Python keyword-only arguments, a TypeScript options object, and a Rust options struct with `Default` (or a positional slice where the call has only that one optional input).
 
 | option                 | C parameter                                  | applies to                                                                                                                                   | Go                                                                                                                                                                | Python              | TypeScript        | Rust                                            |
 | ---------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- | ----------------- | ----------------------------------------------- |
@@ -470,7 +470,7 @@ One conformance case per binding drives the real derivation, as the v1 FFI plan'
 
 ### What the public API does not wire
 
-`fetch_signed` (goldens and fixtures) and `verify_installed` stay the fetch module's own surface, used by the test harnesses and the CLIs. The CLIs, the `examples/` tours and `fetch.sh`'s retirement belong to the switch, not to this page.
+`fetch_signed` (goldens and fixtures) and `verify_installed` stay the fetch module's own surface, used by the test harnesses and the CLIs. The CLIs, the `examples/` tours and the 0.x shell fetcher's retirement belong to the switch, not to this page.
 
 ## 7. What v0 API is deleted, and why
 
@@ -505,7 +505,7 @@ Each row deletes the v0 surface in all four bindings, citing the item of the v1 
 | Python-only conveniences: `registry[request]`, and result-type helpers beyond field access such as `RowResult.accepted()`, `poisoned()`, `lossy_transforms()` and `value(column)`                                                                                                                                                                            | four bindings, one answer: a convenience exists in all four or in none, and these are one-line filters over §5's fields                                                                                               | `for_version` and the fields                                                           |
 | Go's package-level linked API (`ValidateType(v, …)`, `CompileDDL`, `BuiltVersion`, the linked `Schema`, `Filter` and `Block`) and `linked_abi_check.go`                                                                                                                                                                                                      | §4.2, Go only: one code path over two table fillers                                                                                                                                                                   | `OpenLinked()`                                                                         |
 
-The v0 fetch modules, their CLIs and `fetch.sh` are not in this table: they are the switch lane's deletion, in the v1 fetch plan's §2.4, not the binding lanes'.
+The v0 fetch modules, their CLIs and the 0.x shell fetcher are not in this table: they are the switch lane's deletion, in the v1 fetch plan's §2.4, not the binding lanes'.
 
 ## 8. The questions this page raised, and how each was settled
 

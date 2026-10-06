@@ -7,12 +7,12 @@ WHY THIS EXISTS. A checker nobody has seen fail is not a checker — the house
 rule scripts/lint-public.sh, scripts/lint-spelling.sh and every other
 selftest-first gate in this repository already follow. Three scripts kept the
 letter of that rule (each has a `--selftest` mode, each passes it locally) and
-broke its spirit: scripts/check-suite.sh, scripts/lib/provenance.py and
-scripts/published-lines.sh all declared a `--selftest` that no workflow step
-ever ran, so a regression in any of the three would have shipped silently.
-scripts/index-diff.sh was in the identical state until #267 wired it in, and
-the first CI run of it found a latent SIGPIPE race that had never shown
-locally — proof this class of gap is real, not hypothetical.
+broke its spirit: scripts/check-suite.sh, scripts/lib/provenance.py and a
+since-retired v0 channel script all declared a `--selftest` that no workflow
+step ever ran, so a regression in any of the three would have shipped
+silently. Another since-retired v0 script was in the identical state until
+#267 wired it in, and the first CI run of it found a latent SIGPIPE race that
+had never shown locally — proof this class of gap is real, not hypothetical.
 
 This script closes the gap generally rather than for those three scripts by
 name: it finds every script that DECLARES a `--selftest` mode (a real argument
@@ -34,11 +34,10 @@ constantly in comments, docstrings and usage lines that declare nothing. Every
 form below is the exact shape an existing script in this tree uses today
 (confirmed by reading each one; see the PR that added this file):
 
-  .sh   `if [ "${1:-}" = "--selftest" ]; then`   (the majority: abi-channel.sh,
+  .sh   `if [ "${1:-}" = "--selftest" ]; then`   (the majority:
         check-standalone.sh, check-suite.sh,
-        lint-cited-paths.sh, lint-public.sh, published-lines.sh)
-        or a `case` arm spelled exactly `--selftest)` (index-diff.sh,
-        lint-spelling.sh)
+        lint-cited-paths.sh, lint-public.sh)
+        or a `case` arm spelled exactly `--selftest)` (lint-spelling.sh)
   .py   `argparse`'s `.add_argument("--selftest", ...)` (one-line or spread
         across several, as sweep-public-mentions.py does — matched with `\s`,
         which spans newlines) — or a hand-rolled argv check:

@@ -89,8 +89,7 @@ still audit it; it just does not fail the run. Useful for a human's own
 check, but again: not a gate, because nothing here can run on a schedule
 against future comments by itself.
 
-Requires `gh`, authenticated (scripts/fetch.sh already assumes the same
-tool is on PATH, as a fallback download path).
+Requires `gh` on PATH, authenticated.
 """
 from __future__ import annotations
 

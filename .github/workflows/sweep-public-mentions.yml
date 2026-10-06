@@ -15,9 +15,9 @@
 # The script's own header states monthly is reasonable for this
 # repository's comment volume, so that is the cadence below.
 #
-# WHY NON-BLOCKING. Same reasoning the `docs` job in ci.yml already
-# establishes for its own out-of-band signal (read its comment there before
-# changing this one) — this job reports on the state of every issue and PR
+# WHY NON-BLOCKING. The same reasoning as ci.yml's non-blocking `security`
+# job, an out-of-band signal (the v0 `docs` job, retired with v0, was the
+# first) — this job reports on the state of every issue and PR
 # ever posted to the repository, not on the diff of one commit, so a fresh
 # needle hit posted by anyone at any time must never redden main on
 # somebody else's commit. Concretely: this workflow is not `on:
@@ -25,8 +25,8 @@
 # the first place; `continue-on-error: true` on the job additionally means
 # a run with findings still shows red in ITS OWN log (nobody has to trust a
 # summary line instead of the real signal) without that red reaching the
-# commit's overall status. Same shape and reasoning as `docs`, not a new
-# pattern.
+# commit's overall status. Same shape and reasoning as `security`, not a
+# new pattern.
 #
 # PERMISSIONS. scripts/sweep-public-mentions.py reads exactly three `gh api`
 # endpoints: repos/{repo}/issues, repos/{repo}/issues/comments and
@@ -78,7 +78,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # NON-BLOCKING, on purpose — see this file's own header above, same
-    # reasoning as the `docs` job in ci.yml. This job reports; it never gates
+    # reasoning as the `security` job in ci.yml. This job reports; it never gates
     # a pull request and it is not a required check.
     continue-on-error: true
     steps:

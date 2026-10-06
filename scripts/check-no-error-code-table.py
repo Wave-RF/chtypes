@@ -70,7 +70,7 @@ RULE B — no code -> name table shape.
   is TABLE_MIN pairs, each starting within RUN_GAP tokens of the previous one.
   That catches a table of names nobody listed in KNOWN_NAMES, which Rule A
   cannot. `CHTYPES_*` literals are exempt: they are this repository's own
-  artifact-error vocabulary (docs/guides/fetch.md §6), never a ClickHouse name.
+  artifact-error vocabulary (docs/guides/fetch-v1.md §8), never a ClickHouse name.
 
 RULE C — every binding DECLARES chs_error_codes.
 
