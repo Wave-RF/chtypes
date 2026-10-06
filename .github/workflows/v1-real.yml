@@ -15,6 +15,13 @@ name: v1-real
 # (the default) the goldens jobs below also run, per binding x platform, and
 # the goldens verdict gates on the wire kind. Dispatch-only; hosted runners,
 # no secrets.
+#
+# MAJORS (public issue #511). A binding at ABI v2 (spec/binding-majors.json)
+# fetches only from the staging dev channel, whatever registry_base says
+# (spec/abi-v2/docs.md r6); its fingerprint is include/v2/chtypes.h's, and its
+# goldens are judged apart from the ABI v1 bindings'. With no v2-dev goldens
+# published yet, its goldens leg SKIPS BY NAME and the verdict lists it as
+# skipped, never as a pass.
 
 on:
   workflow_dispatch:
@@ -187,8 +194,10 @@ jobs:
         id: fingerprint
         continue-on-error: true
         run: |
-          want=$(sed -n 's/^#define CHS_ABI_FINGERPRINT "\(.*\)"$/\1/p' include/chtypes.h)
-          [ -n "$want" ] || { echo "::error::no CHS_ABI_FINGERPRINT in include/chtypes.h"; exit 1; }
+          header="$(python3 scripts/abi-v1/majors.py header "${{ matrix.binding }}")"
+          python3 scripts/abi-v1/majors.py announce "${{ matrix.binding }}" --what "real host, ${{ matrix.platform }}"
+          want=$(sed -n 's/^#define CHS_ABI_FINGERPRINT "\(.*\)"$/\1/p' "$header")
+          [ -n "$want" ] || { echo "::error::no CHS_ABI_FINGERPRINT in $header"; exit 1; }
           echo "header: $want"
           echo "--- what the tour printed about the library (section 1)"
           command grep -iE 'library reports|^ *build|built for|fingerprint|signed by|opened from|loaded from|^ *path' "$LOGS/tour.log" | head -12 || true
@@ -349,15 +358,27 @@ jobs:
           set -e
           cat "$RUNNER_TEMP/runner.log"
           python3 - "$rc" <<'PY'
-          import os, sys
+          import os, re, sys
           rc = int(sys.argv[1])
           log = open(os.environ["RUNNER_TEMP"] + "/runner.log", errors="replace").read()
+          m = re.search(r"SKIPPED: no v2-dev goldens published yet.*", log)
+          if rc == 0 and m:
+              # A skip BY NAME (an ABI v2 binding, no v2-dev goldens yet): recorded
+              # for the verdict, which lists it as skipped, never as a pass.
+              os.makedirs(os.environ["RUNNER_TEMP"] + "/gout", exist_ok=True)
+              open(os.environ["RUNNER_TEMP"] + "/gout/goldens-skip.txt", "w").write(m.group(0) + "\n")
+              print("::warning title=no v2-dev goldens::" + m.group(0))
+              sys.exit(0)
           if rc != 0 and "UNPUBLISHED" in log:
               print("::error title=no goldens attached::the registry answered UNPUBLISHED for the goldens referrer of this release; no goldens are attached to it, so there is nothing to judge")
           sys.exit(1 if rc != 0 else 0)
           PY
       - name: the runner wrote both files it owes
         run: |
+          if [ -f "$RUNNER_TEMP/gout/goldens-skip.txt" ]; then
+            echo "${{ matrix.binding }}: no report: $(cat "$RUNNER_TEMP/gout/goldens-skip.txt")"
+            exit 0
+          fi
           for f in "$CHTYPES_GOLDENS_REPORT" "$CHTYPES_GOLDENS_DOCUMENT"; do
             [ -s "$f" ] || { echo "::error::the runner did not write $f"; exit 1; }
           done
@@ -394,19 +415,32 @@ jobs:
             echo
             echo "The gate is the wire kind. The full result, every kind, is printed below it and is never hidden."
           } >> "$GITHUB_STEP_SUMMARY"
+          majors="$(python3 -c 'import sys; sys.path.insert(0, "scripts/abi-v1"); import majors; print(" ".join(map(str, majors.load().spoken())))')"
           for p in linux-amd64 linux-arm64 darwin-arm64; do
-            doc=$(ls "$d"/goldens-go-"$p"/goldens-document-go.json 2>/dev/null || true)
-            reports=()
+          for major in $majors; do
+            # One comparator per ABI major: the bindings of a major share a
+            # release and its document; one that skipped BY NAME for want of
+            # v2-dev goldens is listed, never counted.
+            group=() reports=() doc=
             for b in go python ts rust; do
+              [ "$(python3 scripts/abi-v1/majors.py get "$b")" = "$major" ] || continue
+              if [ -f "$d/goldens-$b-$p/goldens-skip.txt" ]; then
+                echo "$p ABI v$major: $b SKIPPED by name, not a pass: $(cat "$d/goldens-$b-$p/goldens-skip.txt")" | tee -a "$GITHUB_STEP_SUMMARY"
+                continue
+              fi
+              group+=("$b")
               [ -f "$d/goldens-$b-$p/goldens-report-$b.json" ] && reports+=(--report "$d/goldens-$b-$p/goldens-report-$b.json")
+              [ -z "$doc" ] && [ -f "$d/goldens-$b-$p/goldens-document-$b.json" ] && doc="$d/goldens-$b-$p/goldens-document-$b.json"
             done
+            [ "${#group[@]}" -gt 0 ] || continue
+            required="$(IFS=,; echo "${group[*]}")"
             {
               echo
-              echo "#### $p"
+              echo "#### $p, ABI v$major ($required)"
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
             if [ -z "$doc" ]; then
-              echo "no goldens document for $p: the go leg did not fetch one (no goldens attached, or the leg failed before fetching)" | tee -a "$GITHUB_STEP_SUMMARY"
+              echo "no goldens document for $p, ABI v$major: no leg of $required fetched one (no goldens attached, or the legs failed before fetching)" | tee -a "$GITHUB_STEP_SUMMARY"
               echo '```' >> "$GITHUB_STEP_SUMMARY"
               echo "::error::$p: no goldens document"
               gate=1
@@ -415,16 +449,17 @@ jobs:
             set +e
             echo "--- all kinds (informational)" | tee -a "$GITHUB_STEP_SUMMARY"
             uv run --no-project --python 3.11 --with 'jsonschema==4.23.0' scripts/goldens-v1/compare.py \
-              --goldens "$doc" "${reports[@]}" --require-bindings go,python,ts,rust --schema-validate 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+              --goldens "$doc" "${reports[@]}" --require-bindings "$required" --schema-validate 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
             echo "--- the gate: wire" | tee -a "$GITHUB_STEP_SUMMARY"
             uv run --no-project --python 3.11 --with 'jsonschema==4.23.0' scripts/goldens-v1/compare.py \
-              --goldens "$doc" "${reports[@]}" --require-bindings go,python,ts,rust --schema-validate --kinds wire 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+              --goldens "$doc" "${reports[@]}" --require-bindings "$required" --schema-validate --kinds wire 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
             rc="${PIPESTATUS[0]}"
             set -e
             echo '```' >> "$GITHUB_STEP_SUMMARY"
             if [ "$rc" -ne 0 ]; then
-              echo "::error::$p: the wire kind is not green"
+              echo "::error::$p ABI v$major: the wire kind is not green"
               gate=1
             fi
+          done
           done
           exit "$gate"

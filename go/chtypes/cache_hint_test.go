@@ -6,12 +6,17 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/wave-rf/chtypes/go/v2/internal/ocifetch"
 )
 
 // TestMissingFromAZeroXRegistryNamesIt: the registry's own MISSING carries the
 // fetch layer's 0.x hint, the same sentence the offline fetch gives (public
 // issue #486).
 func TestMissingFromAZeroXRegistryNamesIt(t *testing.T) {
+	// The 0.x upgrade hint is the v1 contract's: a dev SDK reads an explicit
+	// cache through its v2-dev subroot, where no 0.x registry sits.
+	t.Cleanup(ocifetch.UseFetchV1ForTests())
 	zeroX := filepath.Join(t.TempDir(), "zero-x")
 	if err := os.MkdirAll(filepath.Join(zeroX, "26.1"), 0o755); err != nil {
 		t.Fatal(err)
@@ -36,6 +41,9 @@ func TestMissingFromAZeroXRegistryNamesIt(t *testing.T) {
 // the path and the reason, and errors.Is matches ErrCacheUnusable (public
 // issue #486).
 func TestStrictCacheIsTheCacheUnusableClass(t *testing.T) {
+	// The 0.x upgrade hint is the v1 contract's: a dev SDK reads an explicit
+	// cache through its v2-dev subroot, where no 0.x registry sits.
+	t.Cleanup(ocifetch.UseFetchV1ForTests())
 	zeroX := filepath.Join(t.TempDir(), "zero-x")
 	if err := os.MkdirAll(filepath.Join(zeroX, "26.1"), 0o755); err != nil {
 		t.Fatal(err)

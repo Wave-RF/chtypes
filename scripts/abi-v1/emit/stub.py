@@ -97,6 +97,11 @@ from model import BUF_HANDLE, ERROR_HANDLE, STATUS_ENUM
 
 from . import _stubshared
 
+# Every major some binding speaks (emit/__init__.py, SHARED): each major's
+# conformance runners need their own cases and stubs.
+MAJORS = (1, 2)
+SHARED = True
+
 HEAD_BYTES = _stubshared.HEAD_BYTES
 
 
@@ -611,6 +616,52 @@ static uint8_t *chs_stub_concat(const uint8_t *p, size_t n, const char *suffix, 
 '''
 
 
+def _reader_rule_build_info_formats(model) -> str:
+    """Generation 2's r2/r3 build_info shapes: unknown members
+    (CHS_STUB_R2_MEMBERS) and an unlisted value in every capabilities list
+    (CHS_STUB_R3_CAPABILITIES). Empty for ABI v1. Each is a printf format whose
+    four conversions are the same as CHS_STUB_BUILD_INFO_FMT's."""
+    if model.abi < 2:
+        return ""
+    import json
+
+    def c_line(text: str) -> str:
+        return '    "' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+    head = [
+        '{"schema":1,"abi":%d,"abi_fingerprint":"%s","clickhouse_version":"26.8.15.10",',
+        '"channel":"lts","clickhouse_minor":"26.8","clickhouse_commit":"' + "a" * 40 + '",',
+        '"core_commit":"' + "b" * 40 + '","build":"20261001.000000","inputs_sha256":"' + "c" * 64 + '",',
+        '"os":"%s","arch":"%s","toolchain":{"cc":"stub"},',
+    ]
+    r3 = head + ['"capabilities":' + json.dumps(_stubshared.R3_CAPABILITIES, separators=(",", ":")) + "}"]
+    r2 = head + [
+        '"capabilities":{"input_formats":["JSONEachRow"],"export_formats":["JSONEachRow"],"doc_flags":["values"],',
+        '"features":["default_generators","x_future_feature"],"x_future":1,"x_future_obj":{"a":[1]}},',
+        '"x_future":1,"x_future_obj":{"a":[1,{"b":null}]},"x_future_null":null}',
+    ]
+    for lines in (r2, r3):
+        json.loads("".join(lines).replace("%d", "2").replace("%s", "x"))  # each is one JSON object
+    return (
+        "/* r3 (generation 2): an unlisted value in every capabilities list (CHS_STUB_R3_CAPABILITIES). */\n"
+        "#define CHS_STUB_BUILD_INFO_FMT_R3 \\\n" + " \\\n".join(c_line(x) for x in r3) + "\n\n"
+        "/* r2 (generation 2): members no description names, at the top level and inside\n"
+        "   capabilities (CHS_STUB_R2_MEMBERS). */\n"
+        "#define CHS_STUB_BUILD_INFO_FMT_R2 \\\n" + " \\\n".join(c_line(x) for x in r2) + "\n\n"
+    )
+
+
+def _reader_rule_build_info_calls(model, fp_ok: str) -> str:
+    if model.abi < 2:
+        return ""
+    return (
+        "#  elif defined(CHS_STUB_R2_MEMBERS)\n"
+        f"    snprintf(buf, sizeof buf, CHS_STUB_BUILD_INFO_FMT_R2, {model.abi}, {fp_ok}, CHS_STUB_OS, CHS_STUB_ARCH);\n"
+        "#  elif defined(CHS_STUB_R3_CAPABILITIES)\n"
+        f"    snprintf(buf, sizeof buf, CHS_STUB_BUILD_INFO_FMT_R3, {model.abi}, {fp_ok}, CHS_STUB_OS, CHS_STUB_ARCH);\n"
+    )
+
+
 def _build_info_section(model) -> str:
     """chs_build_info()'s four variant bodies, keyed by CHS_STUB_BUILD_INFO_MODE
     (0 = normal, 1 = NULL, 2 = malformed JSON, 3 = a duplicate key,
@@ -649,8 +700,8 @@ def _build_info_section(model) -> str:
     "\\"capabilities\\":{{\\"input_formats\\":[\\"JSONEachRow\\"],\\"export_formats\\":[\\"JSONEachRow\\"],\\"doc_flags\\":[\\"values\\"]," \\
     "\\"features\\":[\\"default_generators\\"]}}}}"
 
-{model.function("chs_build_info").prototype().rstrip(";")} {{
-    static char buf[768];
+{_reader_rule_build_info_formats(model)}{model.function("chs_build_info").prototype().rstrip(";")} {{
+    static char buf[{768 if model.abi < 2 else 2048}];
     static int ready = 0;
     if (ready) return buf;
 #if defined(CHS_STUB_BUILD_INFO_MODE) && CHS_STUB_BUILD_INFO_MODE == 1
@@ -664,7 +715,7 @@ def _build_info_section(model) -> str:
 #else
 #  if defined(CHS_STUB_FINGERPRINT_OTHER)
     snprintf(buf, sizeof buf, CHS_STUB_BUILD_INFO_FMT, {model.abi}, {fp_other}, CHS_STUB_OS, CHS_STUB_ARCH);
-#  else
+{_reader_rule_build_info_calls(model, fp_ok)}#  else
     snprintf(buf, sizeof buf, CHS_STUB_BUILD_INFO_FMT, {model.abi}, {fp_ok}, CHS_STUB_OS, CHS_STUB_ARCH);
 #  endif
 #endif
@@ -1065,6 +1116,130 @@ def _fill_outputs(model, fn) -> list[str]:
     return lines
 
 
+def _doc_out(fn):
+    """The one required `document:<kind>` chs_buf output of fn, and every
+    other chs_buf output, or (None, [])."""
+    outs = [q for q in fn.params if q.kind == "out_handle" and q.type == BUF_HANDLE]
+    docs = [q for q in outs if q.content and q.content.startswith("document:")]
+    if len(docs) != 1:
+        return None, []
+    return docs[0], [q for q in outs if q is not docs[0]]
+
+
+def _answer_doc(out, others, doc_expr: str) -> list[str]:
+    """Fill `out` with the C string `doc_expr`, and every other chs_buf output
+    a caller asked for with _stubshared.R2_EXPORT; then succeed."""
+    lines = [
+        f"        if ({out.name} == NULL) {{",
+        *_c_fixed_error("CHS_INVALID_ARGUMENT", f"{out.name}: required", indent="            "),
+        "        }",
+    ]
+    for q in others:
+        lines += [
+            f"        if ({q.name} != NULL) {{",
+            f"            static const char rule_export[] = {_c_bytes_lit(_stubshared.R2_EXPORT)};",
+            "            chs_sb xb; chs_sb_init(&xb);",
+            "            chs_sb_cat(&xb, rule_export);",
+            f"            *{q.name} = chs_stub_finish_buf(&xb);",
+            "        }",
+        ]
+    lines += [
+        "        chs_sb sb; chs_sb_init(&sb);",
+        f"        chs_sb_cat(&sb, {doc_expr});",
+        f"        *{out.name} = chs_stub_finish_buf(&sb);",
+        "        chs_stub_set_err(err, NULL);",
+        "        return CHS_OK;",
+    ]
+    return lines
+
+
+def _r2_members(model, fn) -> list[str]:
+    """Generation 2, rule r2: under CHS_STUB_R2_MEMBERS a call whose required
+    output is a document of a kind in _stubshared.R2_DOCS answers that
+    document (members no description names, at every level) instead of its
+    echo, after the input checks and the status injection."""
+    if model.abi < 2:
+        return []
+    import json
+
+    out, others = _doc_out(fn)
+    if out is None:
+        return []
+    doc = _stubshared.R2_DOCS.get(out.content[len("document:") :])
+    if doc is None:
+        return []
+    text = json.dumps(doc, separators=(",", ":"), ensure_ascii=True)
+    return [
+        "#if defined(CHS_STUB_R2_MEMBERS)",
+        "    {",
+        f"        static const char rule_doc[] = {_c_str(text)};",
+        *_answer_doc(out, others, "rule_doc"),
+        "    }",
+        "#endif",
+    ]
+
+
+def _r3_values(model, fn) -> list[str]:
+    """Generation 2, rule r3: under CHS_STUB_R3_VALUES, see
+    _stubshared.R3_MUTATIONS. Emitted after the input checks and the status
+    injection."""
+    if model.abi < 2:
+        return []
+    import json
+
+    first_bytes = next((p for p in fn.params if p.kind == "bytes_in"), None)
+    if fn.name == "chs_type_validate":
+        n = _stubshared.R3_UNKNOWN_STATUS
+        msg = "r3: a status outside the closed set"
+        return [
+            "#if defined(CHS_STUB_R3_VALUES)",
+            f'    if ({first_bytes.name}_len == 3 && memcmp({first_bytes.name}, "!U:", 3) == 0) {{',
+            f"        chs_stub_set_err(err, chs_stub_make_error((chs_status) {n}, 0, \"\", 0, {_c_str(msg)}, {len(msg)}));",
+            f"        return (chs_status) {n};",
+            "    }",
+            "#endif",
+        ]
+    if fn.name == "chs_schema_create":
+        b = first_bytes.name
+        return [
+            "#if defined(CHS_STUB_R3_VALUES)",
+            "    chs_stub_r3_create_len = 0;",
+            f"    if ({b}_len > 3 && {b}_len - 3 <= sizeof chs_stub_r3_create && memcmp({b}, \"!E:\", 3) == 0) {{",
+            f"        memcpy(chs_stub_r3_create, {b} + 3, {b}_len - 3);",
+            f"        chs_stub_r3_create_len = {b}_len - 3;",
+            "    }",
+            "#endif",
+        ]
+    out, others = _doc_out(fn)
+    if out is None:
+        return []
+    kind = out.content[len("document:") :]
+    base = _stubshared.R3_BASE.get(kind)
+    if base is None:
+        return []
+    muts = [(mid, _stubshared.r3_doc(mid)) for mid, (k, _, _) in _stubshared.R3_MUTATIONS.items() if k == kind]
+    if first_bytes is not None:
+        key_check = f'{first_bytes.name}_len > 3 && memcmp({first_bytes.name}, "!E:", 3) == 0'
+        key_ptr, key_len = f"{first_bytes.name} + 3", f"{first_bytes.name}_len - 3"
+    else:
+        key_check = "chs_stub_r3_create_len > 0"
+        key_ptr, key_len = "(const uint8_t *) chs_stub_r3_create", "chs_stub_r3_create_len"
+    lines = [
+        "#if defined(CHS_STUB_R3_VALUES)",
+        "    {",
+        f"        const char *rule_doc = {_c_str(json.dumps(base, separators=(',', ':')))};",
+        f"        if ({key_check}) {{",
+        f"            const uint8_t *k = {key_ptr}; size_t kn = {key_len};",
+    ]
+    for mid, doc in muts:
+        lines += [
+            f"            if (kn == {len(mid)} && memcmp(k, {_c_str(mid)}, {len(mid)}) == 0)",
+            f"                rule_doc = {_c_str(json.dumps(doc, separators=(',', ':')))};",
+        ]
+    lines += ["        }", *_answer_doc(out, others, "rule_doc"), "    }", "#endif"]
+    return lines
+
+
 def _gen_generic(model, fn) -> str:
     sig = fn.prototype().rstrip(";")
     body = [sig + " {"]
@@ -1079,6 +1254,8 @@ def _gen_generic(model, fn) -> str:
     body += _image_zone(fn)
     body += _zone_probe(fn)
     body += _document_mode(model, fn)
+    body += _r2_members(model, fn)
+    body += _r3_values(model, fn)
     body += _fill_outputs(model, fn)
     err_param = next((p for p in fn.params if p.kind == "out_error"), None)
     if err_param is not None:
@@ -1126,6 +1303,11 @@ def _special(model) -> dict[str, str]:
             '        if (i) chs_sb_cat(&sb, ",");',
             '        chs_sb_fmt(&sb, "\\"%s\\":%lld", CHS_STUB_KIND_NAMES[i], (long long) atomic_load(&chs_stub_live[i]));',
             "    }",
+            *(
+                ["#if defined(CHS_STUB_R2_MEMBERS)", '    chs_sb_cat(&sb, ",\\"x_future\\":0");', "#endif"]
+                if model.abi >= 2
+                else []
+            ),
             '    chs_sb_cat(&sb, "}");',
             "    *out = chs_stub_finish_buf(&sb);",
             "    chs_stub_set_err(err, NULL);",
@@ -1253,6 +1435,14 @@ def render_stub_c(model) -> str:
             body_by_name[fn.name] = _gen_generic(model, fn)
 
     out = parts
+    if model.abi >= 2:
+        out.append(
+            "\n/* Generation 2, rule r3: the mutation chs_schema_describe answers (CHS_STUB_R3_VALUES). */\n"
+            "#if defined(CHS_STUB_R3_VALUES)\n"
+            "static char chs_stub_r3_create[128];\n"
+            "static size_t chs_stub_r3_create_len = 0;\n"
+            "#endif\n"
+        )
     out.append("\n/* ----------------------------------------------------------- functions */\n")
     out.append(
         "/* chs_build_info is defined above (inside its own omit guard, alongside its\n"

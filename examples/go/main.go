@@ -41,7 +41,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/wave-rf/chtypes/go/chtypes"
+	"github.com/wave-rf/chtypes/go/v2/chtypes"
 )
 
 // ---------------------------------------------------------------- the fixture
@@ -154,7 +154,7 @@ func main() {
 // refusal for a version that is not installed, never a nearest-version
 // fallback.
 // C API: chs_build_info (read once by the loader), after the load steps of
-// docs/reference/abi-v1.md.
+// docs/reference/abi-v2.md.
 // ---------------------------------------------------------------------------
 func section1() (*chtypes.Registry, *chtypes.Library) {
 	section(1, "Open a library and read its build info")

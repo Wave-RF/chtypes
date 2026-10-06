@@ -24,6 +24,15 @@ spec/abi-v1/schema/report.schema.json (one per v1-abi-conformance matrix
 leg, downloaded as CI artifacts in the real workflow). Without it, this
 treats zero reports as present, which only passes when nothing is enrolled.
 
+MAJORS. spec/binding-majors.json (scripts/abi-v1/majors.py) says which ABI
+major each binding speaks. A binding is held to ITS major's cases
+(tests/fixtures/abi-v<N>/cases.json) and enrolled under ITS major's directory
+(spec/abi-v<N>/enrolled/<binding>), and its reports are read against that
+major's report schema. A binding enrolled under a major the map does not give
+it is refused (ENROLLED-ELSEWHERE): on the `v2` branch, go's enrollment moved
+to spec/abi-v2/enrolled/go with its conversion, and a stale one under abi-v1
+would require reports no leg produces any more.
+
 PER-OS CASES. A case may carry `os` ("linux" or "darwin"). Each leg is expected
 to report exactly the cases whose `os` is absent or whose report `os`
 (linux-amd64, linux-arm64, darwin-arm64) starts with that value plus "-".
@@ -61,10 +70,28 @@ sys.path.insert(0, str(HERE))
 
 import model as abimodel  # noqa: E402
 
+import majors as bmajors  # noqa: E402
+
 CASES_PATH = "tests/fixtures/abi-v1/cases.json"
 CASES_SCHEMA = "spec/abi-v1/schema/cases.schema.json"
 REPORT_SCHEMA = "spec/abi-v1/schema/report.schema.json"
 ENROLLED_DIR = "spec/abi-v1/enrolled"
+
+
+def cases_path(major: int) -> str:
+    return f"tests/fixtures/abi-v{major}/cases.json"
+
+
+def cases_schema(major: int) -> str:
+    return f"spec/abi-v{major}/schema/cases.schema.json"
+
+
+def report_schema(major: int) -> str:
+    return f"spec/abi-v{major}/schema/report.schema.json"
+
+
+def enrolled_dir(major: int) -> str:
+    return f"spec/abi-v{major}/enrolled"
 # cases.json's per-case `os` vocabulary ("linux", "darwin") onto a report's
 # `os` ("<os>-<arch>": linux-amd64, linux-arm64, darwin-arm64): a case with
 # os X applies to every report whose os starts with "X-". A case with no `os`
@@ -99,15 +126,16 @@ def compute_cases_hash(cases_doc: dict) -> str:
     ).hexdigest()
 
 
-def load_cases(root: Path) -> tuple[dict, set[str], str]:
-    cases_schema = _validate_schema_file(root, CASES_SCHEMA)
-    doc = _read_json(root / CASES_PATH)
-    errs = abimodel.validate(doc, cases_schema)
+def load_cases(root: Path, major: int = 1) -> tuple[dict, set[str], str]:
+    path = cases_path(major)
+    schema = _validate_schema_file(root, cases_schema(major))
+    doc = _read_json(root / path)
+    errs = abimodel.validate(doc, schema)
     if errs:
-        raise SystemExit("\n".join(f"{CASES_PATH}: {e}" for e in errs))
+        raise SystemExit("\n".join(f"{path}: {e}" for e in errs))
     ids = {c["id"] for c in doc["cases"]}
     if len(ids) != len(doc["cases"]):
-        raise SystemExit(f"{CASES_PATH}: duplicate case ids")
+        raise SystemExit(f"{path}: duplicate case ids")
     return doc, ids, compute_cases_hash(doc)
 
 
@@ -127,9 +155,9 @@ def expected_for_leg(cases_ids: set[str], case_os: dict[str, str], report_os: st
     return out
 
 
-def load_enrolled(root: Path) -> dict[str, dict]:
+def load_enrolled(root: Path, major: int = 1) -> dict[str, dict]:
     out: dict[str, dict] = {}
-    d = root / ENROLLED_DIR
+    d = root / enrolled_dir(major)
     for name in BINDINGS:
         p = d / name
         if not p.is_file():
@@ -162,6 +190,7 @@ def check(
     cases_hash: str,
     reports: list[dict],
     case_os: dict[str, str] | None = None,
+    cases_label: str = CASES_PATH,
 ) -> tuple[list[str], int]:
     """Return (problems, enrolled_count). An empty `problems` list is green —
     vacuously if enrolled_count is 0."""
@@ -205,7 +234,7 @@ def check(
             if r["cases_sha256"] != cases_hash:
                 problems.append(
                     f"STALE: {leg}: report cases_sha256 {r['cases_sha256']} != current {cases_hash} "
-                    f"({CASES_PATH} changed since this report was generated)"
+                    f"({cases_label} changed since this report was generated)"
                 )
                 continue
             result_ids = {res["id"] for res in r["results"]}
@@ -213,7 +242,7 @@ def check(
             extra = result_ids - expected
             if extra:
                 problems.append(
-                    f"EXTRA: {leg}: report names case(s) not expected on this leg (absent from {CASES_PATH} "
+                    f"EXTRA: {leg}: report names case(s) not expected on this leg (absent from {cases_label} "
                     f"or for another os): {sorted(extra)}"
                 )
             missing_cases = expected - result_ids
@@ -226,24 +255,56 @@ def check(
 
 
 def run(root: Path, reports_dir: Path | None) -> int:
-    report_schema = _validate_schema_file(root, REPORT_SCHEMA)
-    cases_doc, cases_ids, cases_hash = load_cases(root)
-    enrolled = load_enrolled(root)
-    reports = load_reports(reports_dir, report_schema)
-    problems, n = check(enrolled, cases_ids, cases_hash, reports, case_os_map(cases_doc))
-    if n == 0:
+    try:
+        m = bmajors.load(root)
+    except bmajors.MajorsError as e:
+        print(f"v1-abi-parity: {e}", file=sys.stderr)
+        return 1
+    problems: list[str] = []
+    total = 0
+    summary: list[str] = []
+    raw = []
+    if reports_dir is not None and reports_dir.is_dir():
+        raw = [(p, _read_json(p)) for p in sorted(reports_dir.glob("*.json"))]
+    for major in abimodel.MAJORS:
+        if not (root / enrolled_dir(major)).is_dir() and major not in m.spoken():
+            continue
+        enrolled = load_enrolled(root, major)
+        for b in sorted(enrolled):
+            if m[b] != major:
+                problems.append(
+                    f"ENROLLED-ELSEWHERE: {b} is enrolled under {enrolled_dir(major)}/ but {bmajors.MAP} says "
+                    f"{b} speaks ABI v{m[b]}: move its enrollment to {enrolled_dir(m[b])}/"
+                )
+        enrolled = {b: v for b, v in enrolled.items() if m[b] == major}
+        if not enrolled:
+            continue
+        cases_doc, cases_ids, cases_hash = load_cases(root, major)
+        schema = _validate_schema_file(root, report_schema(major))
+        reports = []
+        for p, doc in raw:
+            if doc.get("binding") not in enrolled:
+                continue
+            errs = abimodel.validate(doc, schema)
+            if errs:
+                raise SystemExit("\n".join(f"{p}: {e}" for e in errs))
+            reports.append(doc)
+        found, n = check(enrolled, cases_ids, cases_hash, reports, case_os_map(cases_doc), cases_path(major))
+        problems += [f"ABI v{major}: {x}" for x in found]
+        total += n
+        summary.append(f"ABI v{major}: {', '.join(sorted(enrolled))} against {len(cases_ids)} cases")
+    if total == 0 and not problems:
         print(
-            "v1-abi-parity: 0 ENROLLED bindings — vacuously green. No binding lane has landed yet "
-            f"(spec/abi-v1/enrolled/ holds only .gitkeep); {len(cases_ids)} cases are described in {CASES_PATH} "
-            "waiting for the first one."
+            "v1-abi-parity: 0 ENROLLED bindings — vacuously green. No binding is enrolled under any "
+            "spec/abi-v<N>/enrolled/ the map gives it."
         )
         return 0
     for p in problems:
         print(f"v1-abi-parity: {p}", file=sys.stderr)
     if problems:
-        print(f"v1-abi-parity: {len(problems)} problem(s) across {n} enrolled binding(s)", file=sys.stderr)
+        print(f"v1-abi-parity: {len(problems)} problem(s) across {total} enrolled binding(s)", file=sys.stderr)
         return 1
-    print(f"v1-abi-parity: ok: {n} enrolled binding(s), {len(cases_ids)} cases, every required leg passes")
+    print(f"v1-abi-parity: ok: {total} enrolled binding(s), every required leg passes ({'; '.join(summary)})")
     return 0
 
 
@@ -285,6 +346,7 @@ def selftest() -> int:
         root = Path(tmp)
         for rel in (
             "spec/abi-v1",
+            "spec/abi-v2",
             "scripts/abi-v1",
             "scripts/policy-merge-check.py",
         ):
@@ -312,10 +374,14 @@ def selftest() -> int:
         # enroll(), never the live tree's own state.
         import shutil
 
-        enrolled_dir = root / ENROLLED_DIR
-        if enrolled_dir.is_dir():
-            shutil.rmtree(enrolled_dir)
-        enrolled_dir.mkdir(parents=True)
+        for major in abimodel.MAJORS:
+            d = root / enrolled_dir(major)
+            if d.is_dir():
+                shutil.rmtree(d)
+            d.mkdir(parents=True)
+        # Every binding at ABI v1 for the v1 cases below; the map is planted
+        # per case from here on, never read from the live tree.
+        _write(root / bmajors.MAP, {"go": 1, "python": 1, "ts": 1, "rust": 1})
 
         cases = _fake_cases()
         _write(root / CASES_PATH, cases)
@@ -411,6 +477,31 @@ def selftest() -> int:
         enroll([{"toolchain": "go.mod", "os": "linux-amd64"}])
         if run(root, reports_dir_with()) == 0:
             fails.append("run(): a MISSING leg did not exit nonzero")
+        if run(root, reports_dir_with(_good_report(cases_hash))) != 0:
+            fails.append("run(): a clean go report against the ABI v1 cases was refused with go at ABI v1")
+
+        # MAJORS. go speaks ABI v2: its enrollment, cases and reports are v2's.
+        v2_cases = _fake_cases()
+        v2_cases["cases"].append({"id": "c.v2", "kind": "echo", "fn": "chs_c", "args": [], "expect": {"status": "CHS_OK"}})
+        _write(root / cases_path(2), v2_cases)
+        v2_hash = compute_cases_hash(v2_cases)
+        _write(root / bmajors.MAP, {"go": 2, "python": 1, "ts": 1, "rust": 1})
+        # go still enrolled under abi-v1 while the map says 2: refused.
+        if run(root, reports_dir_with(_good_report(cases_hash))) == 0:
+            fails.append("run(): go enrolled under spec/abi-v1/enrolled with the map at go:2 was accepted")
+        (root / ENROLLED_DIR / "go").unlink()
+        _write(root / enrolled_dir(2) / "go", {"required_legs": [{"toolchain": "go.mod", "os": "linux-amd64"}]})
+        v2_report = _good_report(v2_hash)
+        v2_report["results"].append({"id": "c.v2", "pass": True})
+        if run(root, reports_dir_with(v2_report)) != 0:
+            fails.append("run(): a clean go report against the ABI v2 cases was refused with go at ABI v2")
+        # A go report run against ABI v1's cases (a job that tested v1 after
+        # go converted) is STALE against v2's.
+        if run(root, reports_dir_with(_good_report(cases_hash))) == 0:
+            fails.append("run(): a go report against ABI v1's cases was accepted with go at ABI v2")
+        _write(root / bmajors.MAP, {"go": 2, "python": 1, "ts": 1})
+        if run(root, reports_dir_with(v2_report)) == 0:
+            fails.append("run(): a map missing a binding was accepted")
 
     for f in fails:
         print(f"parity.py --selftest: FAIL {f}", file=sys.stderr)
@@ -418,7 +509,8 @@ def selftest() -> int:
         return 1
     print(
         "parity.py --selftest: ok: vacuous-0-enrolled is green, a clean report passes, and MISSING/FAILED/EXTRA/"
-        "STALE each refuse, and per-os cases are expected only on their own leg (omitted = ok, absent match = MISSING, present mismatch = EXTRA)"
+        "STALE each refuse, and per-os cases are expected only on their own leg (omitted = ok, absent match = MISSING, present mismatch = EXTRA); "
+        "and per major: go at ABI v2 is held to v2's cases and enrollment, a v1 report or a stale v1 enrollment is refused, and a map missing a binding is refused"
     )
     return 0
 

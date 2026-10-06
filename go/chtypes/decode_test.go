@@ -7,7 +7,7 @@ import (
 )
 
 // The decoders are driven with documents written by hand in the shape of
-// spec/abi-v1/docs: what they prove is the decoding rules of bindings-v1.md
+// spec/abi-v2/docs: what they prove is the decoding rules of bindings-v1.md
 // section 5 (names as bytes whichever way they arrive, unknown as nil, vocab
 // facts read from the generated tables, duplicate keys refused), not the
 // library's behavior.
@@ -134,7 +134,6 @@ func TestDecodeRowRefusals(t *testing.T) {
 		"name, bad base64":               `{"cols": [{"name_b64": "!!", "src": "input"}]}`,
 		"wrong type":                     `{"code": "7x"}`,
 		"cols not an array":              `{"cols": {"name": "a"}}`,
-		"source not in the list":         `{"cols": [{"name": "a", "src": "no_such_source"}]}`,
 		"source absent":                  `{"cols": [{"name": "a"}]}`,
 		"not an object":                  `[1]`,
 		"not JSON":                       `{`,
@@ -234,17 +233,21 @@ func TestDecodeBatchBigIntegerAsString(t *testing.T) {
 	}
 }
 
-func TestUnknownOutcomesReadAsFallback(t *testing.T) {
+// ABI v2 rule r3: an unlisted outcome or verdict is kept as its unknown(n),
+// never replaced by its fallback, and the fallback's fail-closed reading
+// stays: an unknown outcome is never accepted, an unknown verdict never
+// answered.
+func TestUnknownOutcomesAreKeptAndFailClosed(t *testing.T) {
 	b, err := decodeBatch([]byte(`{"outcome":"something_new"}`), nil)
-	if err != nil || b.Outcome != Unsupported {
-		t.Errorf("an unknown batch outcome = %q, %v, want the description's fallback", b.Outcome, err)
+	if err != nil || b.Outcome != "something_new" || b.Outcome.Known() || b.Outcome == Accepted {
+		t.Errorf("an unknown batch outcome = %q, %v, want it kept as unknown(n)", b.Outcome, err)
 	}
 	f, err := decodeFilterResult([]byte(`{"outcome":"something_new","verdicts":"tfedx"}`))
-	if err != nil || f.Outcome != FilterUnsupported {
+	if err != nil || f.Outcome != "something_new" || f.Outcome.Known() || f.Outcome == FilterOK {
 		t.Errorf("an unknown filter outcome = %q, %v", f.Outcome, err)
 	}
-	if len(f.Verdicts) != 5 || f.Verdicts[4] != VerdictDecline {
-		t.Errorf("Verdicts = %q: an unknown verdict reads as its fallback", f.Verdicts)
+	if len(f.Verdicts) != 5 || f.Verdicts[4] != "x" || f.Verdicts[4].Known() {
+		t.Errorf("Verdicts = %q: an unknown verdict is kept as unknown(n)", f.Verdicts)
 	}
 	want := []bool{true, true, false, false, false}
 	for i, v := range f.Verdicts {
@@ -285,8 +288,12 @@ func TestDecodeSchemaDescriptionAndDiscovery(t *testing.T) {
 		d.Columns[1].Name != "\xff" || d.Columns[1].DefaultKind != KindNone {
 		t.Errorf("description = %+v", d)
 	}
-	if _, err := decodeSchemaDescription([]byte(`{"columns":[{"name":"a","default_kind":"BOGUS"}]}`)); err == nil {
-		t.Error("a default_kind the description does not list must be refused: it has no fallback")
+	// ABI v2 rule r3: a default_kind the description does not list is its
+	// unknown(n), kept for that column, and never fails the document.
+	if u, err := decodeSchemaDescription([]byte(`{"columns":[{"name":"a","default_kind":"BOGUS"},{"name":"b","default_kind":"ALIAS"}]}`)); err != nil ||
+		len(u.Columns) != 2 || u.Columns[0].DefaultKind != "BOGUS" || u.Columns[0].DefaultKind.Known() ||
+		u.Columns[1].DefaultKind != KindAlias {
+		t.Errorf("an unlisted default_kind = %+v, %v: want it kept as unknown(n), the next column decoded", u, err)
 	}
 	dc, err := decodeDiscovery([]byte(`{"columns":[{"name":"a","declaration":"` + "`a` UInt8" + `"}]}`))
 	if err != nil || len(dc.Columns) != 1 || dc.Columns[0].Declaration != "`a` UInt8" {

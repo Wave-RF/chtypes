@@ -1,7 +1,7 @@
 // take.go: the one way hand-written code reads a generated call's chs_buf.
 // It is plain Go over the generated BufData and BufLen (never a symbol of its
 // own), so check-no-hand-decls has nothing to object to.
-package abi1
+package abi2
 
 import "unsafe"
 

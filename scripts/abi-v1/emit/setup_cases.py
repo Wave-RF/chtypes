@@ -76,7 +76,17 @@ import json
 
 from . import Output, _stubshared, banner
 
+# Every major some binding speaks (emit/__init__.py, SHARED): each major's
+# conformance runners need their own cases and stubs.
+MAJORS = (1, 2)
+SHARED = True
+
 PATH = "tests/fixtures/abi-v1/setup-cases.json"
+
+
+def path(major: int) -> str:
+    """Each major's own file: tests/fixtures/abi-v<major>/setup-cases.json."""
+    return f"tests/fixtures/abi-v{major}/setup-cases.json"
 
 # A good zone, and a second, different one: any spelling the stub accepts.
 GOOD_ZONE = "Europe/Berlin"
@@ -213,4 +223,4 @@ def render(model) -> str:
 
 
 def outputs(model) -> list[Output]:
-    return [Output(PATH, content=render(model))]
+    return [Output(path(model.major), content=render(model))]

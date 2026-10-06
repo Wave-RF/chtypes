@@ -27,6 +27,19 @@ identifiers cannot be derived from a single letter and are NAMED in
 `_VERDICT_NAMES`: that table is naming, never a vocabulary, and the emitter
 refuses a verdict value it has no name for.
 
+ABI V2 (rule r3, spec/abi-v2/docs.md): every vocabulary type above is its raw
+representation (an int32 or a string), so a value the description does not
+list IS that vocabulary's unknown(n) member: it carries the raw value, and
+every type gains `Known()`, false for exactly those values. A reader keeps the
+value and goes on decoding; it never fails the document, and a fallback
+(outcomes, verdicts, reasons) no longer replaces the value: it only names whose
+facts unknown(n) reports, so an unknown outcome is never Accepted and an unknown
+verdict is never Answered. Status.String() spells an unlisted status
+"unknown(<n>)". discover_query_param gains its type (DiscoverQueryParam), and
+`describedVocabulary` (unexported, for the r3 tests) builds a value of any
+described enum from a raw spelling, so a test reaches every enum the
+description defines without a hand-kept list. ABI v1's file is unchanged.
+
 GOFMT-CLEAN BY CONSTRUCTION, like emit/go.py: every declaration is a separate
 single-statement const, no struct and no map literal is written, and a switch's
 case labels are never aligned by gofmt, so no tabwriter alignment arises.
@@ -35,6 +48,9 @@ case labels are never aligned by gofmt, so no tabwriter alignment arises.
 from __future__ import annotations
 
 from . import Output, banner
+
+BINDING = "go"  # runs for the ONE major spec/binding-majors.json gives go (emit/__init__.py)
+MAJORS = (1, 2)
 
 VOCAB_GEN = "go/chtypes/vocab_gen.go"
 
@@ -70,6 +86,23 @@ def _doc(text: str) -> list[str]:
     return [f"// {line}" if line else "//" for line in text.splitlines()]
 
 
+def _known_method(type_name: str, idents: list[str], what: str, recv: str = "x") -> list[str]:
+    """ABI v2: `func (x T) Known() bool`, true for exactly the described values (r3)."""
+    out = _doc(
+        f"Known reports whether the description lists the {what}. A value it does not list is the\n"
+        "vocabulary's unknown(n) member, carrying the raw value (rule r3): a reader keeps it and decodes on."
+    )
+    out.append(f"func ({recv} {type_name}) Known() bool {{")
+    out.append(f"{TAB}switch {recv} {{")
+    out.append(f"{TAB}case " + ", ".join(idents) + ":")
+    out.append(f"{TAB}{TAB}return true")
+    out.append(f"{TAB}}}")
+    out.append(f"{TAB}return false")
+    out.append("}")
+    out.append("")
+    return out
+
+
 def _status(model) -> list[str]:
     enum = model.enums["chs_status"]
     out: list[str] = []
@@ -84,16 +117,24 @@ def _status(model) -> list[str]:
         out += _doc(f"{ident} is {v.name}.")
         out.append(f"const {ident} Status = {v.value}")
         out.append("")
-    out += _doc("String is the chs_status constant's own name (CHS_REJECTED, ...), or CHS_STATUS_<n> for a value the description does not list.")
+    if model.major >= 2:
+        out += _doc("String is the chs_status constant's own name (CHS_REJECTED, ...), or unknown(<n>) for a value the description does not list (rule r3).")
+    else:
+        out += _doc("String is the chs_status constant's own name (CHS_REJECTED, ...), or CHS_STATUS_<n> for a value the description does not list.")
     out.append("func (s Status) String() string {")
     out.append(f"{TAB}switch s {{")
     for v in enum.values:
         out.append(f"{TAB}case Status{_pascal(v.name[len('CHS_'):])}:")
         out.append(f"{TAB}{TAB}return {_q(v.name)}")
     out.append(f"{TAB}}}")
-    out.append(f'{TAB}return "CHS_STATUS_" + strconv.Itoa(int(s))')
+    if model.major >= 2:
+        out.append(f'{TAB}return "unknown(" + strconv.Itoa(int(s)) + ")"')
+    else:
+        out.append(f'{TAB}return "CHS_STATUS_" + strconv.Itoa(int(s))')
     out.append("}")
     out.append("")
+    if model.major >= 2:
+        out += _known_method("Status", [f"Status{_pascal(v.name[len('CHS_'):])}" for v in enum.values], "status", "s")
     out += _doc("statusOfName reads a chs_status constant's name back into a Status.")
     out.append("func statusOfName(name string) (Status, bool) {")
     out.append(f"{TAB}switch name {{")
@@ -126,6 +167,8 @@ def _format(model) -> list[str]:
             out += _doc("ExportNone is CHS_EXPORT_NONE: no export was asked for.")
             out.append(f"const ExportNone Format = {const.value}")
             out.append("")
+    if model.major >= 2:
+        out += _known_method("Format", [v.fields["ch_name"] for v in enum.values], "format", "f")
     out += _doc("CHName is ClickHouse's own name for the format, the enum's ch_name field.")
     out.append("func (f Format) CHName() string {")
     out.append(f"{TAB}switch f {{")
@@ -232,6 +275,8 @@ def _reason(model) -> list[str]:
         "lossy",
         enum.fallback,
     )
+    if model.major >= 2:
+        out += _known_method("Reason", [i for i, _ in values], "reason")
     return out
 
 
@@ -246,11 +291,20 @@ def _source(model) -> list[str]:
     out += _bool_method(
         "Source",
         "IsStored",
-        "IsStored is the description's own is_stored fact for the source: whether the value is stored.",
+        "IsStored is the description's own is_stored fact for the source: whether the value is stored."
+        + (
+            "\nThe description does not yet say what an unknown(n) source reports (rule r3, \"Facts without a\n"
+            "fallback\"); until it does, IsStored is false for one."
+            if model.major >= 2
+            else ""
+        ),
         enum,
         "is_stored",
         None,
     )
+    if model.major >= 2:
+        out += _known_method("Source", [i for i, _ in values], "source")
+        return out
     out += _doc("known reports whether the description lists the source; the vocabulary has no fallback.")
     out.append("func (x Source) known() bool {")
     out.append(f"{TAB}switch x {{")
@@ -277,6 +331,16 @@ def _outcome(model) -> list[str]:
         "A batch never carries Skipped. The spelling is the description's.",
         values,
     )
+    if model.major >= 2:
+        out += _known_method("Outcome", [i for i, _ in values], "outcome")
+        for enum, fn in ((row, "parseRowOutcome"), (batch, "parseBatchOutcome")):
+            out += _doc(
+                f"{fn} reads a {enum.name} value. One the description does not list is kept as its unknown(n)\n"
+                f"(rule r3); the fallback, {_q(enum.fallback)}, only says how it is answered: never as accepted."
+            )
+            out.append(f"func {fn}(s string) Outcome {{ return Outcome(s) }}")
+            out.append("")
+        return out
     for enum, fn in ((row, "parseRowOutcome"), (batch, "parseBatchOutcome")):
         out += _doc(f"{fn} reads a {enum.name} value; one the description does not list reads as its fallback, {_q(enum.fallback)}.")
         out.append(f"func {fn}(s string) Outcome {{")
@@ -298,6 +362,15 @@ def _filter_outcome(model) -> list[str]:
         "FilterOutcome is filter_outcome: the outcome of a filter evaluation. The spelling is the description's.",
         values,
     )
+    if model.major >= 2:
+        out += _known_method("FilterOutcome", [i for i, _ in values], "filter outcome")
+        out += _doc(
+            "parseFilterOutcome reads a filter_outcome value. One the description does not list is kept as its\n"
+            f"unknown(n) (rule r3); the fallback, {_q(enum.fallback)}, only says how it is answered: never as ok."
+        )
+        out.append("func parseFilterOutcome(s string) FilterOutcome { return FilterOutcome(s) }")
+        out.append("")
+        return out
     out += _doc(f"parseFilterOutcome reads a filter_outcome value; one the description does not list reads as its fallback, {_q(enum.fallback)}.")
     out.append("func parseFilterOutcome(s string) FilterOutcome {")
     out.append(f"{TAB}switch FilterOutcome(s) {{")
@@ -327,6 +400,15 @@ def _verdict(model) -> list[str]:
         "answered",
         enum.fallback,
     )
+    if model.major >= 2:
+        out += _known_method("Verdict", [i for i, _ in values], "verdict")
+        out += _doc(
+            "parseVerdict reads one verdict character. One the description does not list is kept as its\n"
+            f"unknown(n) (rule r3), and Answered reports its fallback's fact ({_q(enum.fallback)}): never an answer."
+        )
+        out.append("func parseVerdict(s string) Verdict { return Verdict(s) }")
+        out.append("")
+        return out
     out += _doc(f"parseVerdict reads one verdict character; one the description does not list reads as its fallback, {_q(enum.fallback)}.")
     out.append("func parseVerdict(s string) Verdict {")
     out.append(f"{TAB}switch Verdict(s) {{")
@@ -348,6 +430,9 @@ def _default_kind(model) -> list[str]:
         "KindNone is the empty value.",
         values,
     )
+    if model.major >= 2:
+        out += _known_method("DefaultKind", [i for i, _ in values], "kind")
+        return out
     out += _doc("known reports whether the description lists the kind; the vocabulary has no fallback.")
     out.append("func (x DefaultKind) known() bool {")
     out.append(f"{TAB}switch x {{")
@@ -360,9 +445,79 @@ def _default_kind(model) -> list[str]:
     return out
 
 
+def _discover_query_param(model) -> list[str]:
+    """ABI v2: discover_query_param's type (r3: every enum has its unknown(n))."""
+    enum = model.enums["discover_query_param"]
+    values = [(f"QueryParam{_pascal(v.value)}", v.value) for v in enum.values]
+    out = _string_type(
+        "DiscoverQueryParam",
+        "DiscoverQueryParam is discover_query_param: a query parameter of the SQL DiscoverQuery returns,\n"
+        "which the caller binds when it runs the query. The spelling is the description's.",
+        values,
+    )
+    out += _known_method("DiscoverQueryParam", [i for i, _ in values], "parameter")
+    return out
+
+
+# Each described enum's Go type, and how a raw spelling becomes one, for
+# describedVocabulary (ABI v2). A described enum missing here fails generation.
+_GO_VOCAB = {
+    "chs_status": ("Status", "int"),
+    "chs_format": ("Format", "int"),
+    "transform_reason": ("Reason", "string"),
+    "value_src": ("Source", "string"),
+    "row_outcome": ("Outcome", "string"),
+    "batch_outcome": ("Outcome", "string"),
+    "filter_outcome": ("FilterOutcome", "string"),
+    "filter_verdict": ("Verdict", "string"),
+    "discover_query_param": ("DiscoverQueryParam", "string"),
+    "default_kind": ("DefaultKind", "string"),
+}
+
+
+def _described(model) -> list[str]:
+    """ABI v2: describedVocabulary, the r3 tests' way to reach every enum the
+    description defines, generated from it so no list is kept by hand."""
+    names = list(model.enums)
+    missing = [n for n in names if n not in _GO_VOCAB]
+    if missing:
+        raise VocabError(f"go_vocab.py: enum(s) {missing} have no Go type; teach emit/go_vocab.py about them")
+    out: list[str] = []
+    out += _doc("describedVocabularyNames is every enum the description defines, in its own order.")
+    out.append("func describedVocabularyNames() []string {")
+    out.append(f"{TAB}return []string{{" + ", ".join(_q(n) for n in names) + "}")
+    out.append("}")
+    out.append("")
+    out += _doc(
+        "describedVocabulary builds the value of the enum `name` whose raw spelling is raw (an integer for an\n"
+        "int32 enum), and reports its Known() and its raw spelling read back. ok is false for a name the\n"
+        "description does not define."
+    )
+    out.append("func describedVocabulary(name, raw string) (known bool, back string, ok bool) {")
+    out.append(f"{TAB}switch name {{")
+    for n in names:
+        go_type, kind = _GO_VOCAB[n]
+        out.append(f"{TAB}case {_q(n)}:")
+        if kind == "int":
+            out.append(f"{TAB}{TAB}i, err := strconv.ParseInt(raw, 10, 32)")
+            out.append(f"{TAB}{TAB}if err != nil {{")
+            out.append(f'{TAB}{TAB}{TAB}return false, "", false')
+            out.append(f"{TAB}{TAB}}}")
+            out.append(f"{TAB}{TAB}v := {go_type}(i)")
+            out.append(f"{TAB}{TAB}return v.Known(), strconv.FormatInt(int64(v), 10), true")
+        else:
+            out.append(f"{TAB}{TAB}v := {go_type}(raw)")
+            out.append(f"{TAB}{TAB}return v.Known(), string(v), true")
+    out.append(f"{TAB}}}")
+    out.append(f'{TAB}return false, "", false')
+    out.append("}")
+    out.append("")
+    return out
+
+
 def render_vocab_gen(model) -> str:
     out = [f"// {banner(model)}", "", "package chtypes", "", 'import "strconv"', ""]
-    for part in (
+    parts = [
         _status,
         _format,
         _doc_flags,
@@ -372,7 +527,10 @@ def render_vocab_gen(model) -> str:
         _filter_outcome,
         _verdict,
         _default_kind,
-    ):
+    ]
+    if model.major >= 2:
+        parts += [_discover_query_param, _described]
+    for part in parts:
         out += part(model)
     while out and out[-1] == "":
         out.pop()

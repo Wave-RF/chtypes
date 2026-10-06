@@ -55,8 +55,10 @@ command -v python3 >/dev/null 2>&1 || die "python3 is not on PATH; the census ca
 SRC="$ROOT/go"
 [ -d "$SRC/chtypes" ] || die "no Go SDK at $SRC"
 
-# Say which ABI this binding was built against (scripts/lib/provenance.py).
-python3 "$SCRIPTS/lib/provenance.py" --header "$ROOT/include/chtypes.h"
+# Say which ABI this binding was built against (scripts/lib/provenance.py):
+# the header of the major spec/binding-majors.json gives go
+# (scripts/abi-v1/majors.py; include/v2/chtypes.h once go speaks ABI v2).
+python3 "$SCRIPTS/lib/provenance.py" --header "$ROOT/$(python3 "$SCRIPTS/abi-v1/majors.py" header go)"
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/chtypes-standalone.XXXXXX")"
 trap 'rm -rf "$TMP" "${SCRATCH_CACHE:-}"' EXIT

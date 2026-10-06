@@ -1,11 +1,11 @@
 // conformance_test.go: the hand-written conformance runner (plan: "the
 // conformance runner (small)" is one of the three hand-written pieces,
 // alongside the loader and the eventual public API). It reads
-// tests/fixtures/abi-v1/cases.json and scripts/abi-v1/build-stubs.sh's
+// tests/fixtures/abi-v2/cases.json and scripts/abi-v1/build-stubs.sh's
 // stubs.json manifest, drives every case through the generated invoke-by-name
 // dispatcher (invoke_gen_test.go) and the hand-written loader (loader.go),
-// and writes a spec/abi-v1/schema/report.schema.json-shaped report.
-package abi1
+// and writes a spec/abi-v2/schema/report.schema.json-shaped report.
+package abi2
 
 import (
 	"bytes"
@@ -64,7 +64,7 @@ type conformanceReport struct {
 }
 
 // repoRoot finds the repository root from this file's own location
-// (go/internal/abi1/conformance_test.go is three directories below it),
+// (go/internal/abi2/conformance_test.go is three directories below it),
 // never from the process's current working directory.
 func repoRoot(t *testing.T) string {
 	t.Helper()
@@ -91,11 +91,11 @@ func plainPredicate(p map[string]interface{}) map[string]any {
 }
 
 // stubLibraryPath resolves a stub variant's library under THIS job's own
-// CHTYPES_ABI1_STUBS directory, by file name only -- never variant.Path
+// CHTYPES_ABI2_STUBS directory, by file name only -- never variant.Path
 // verbatim. stubs.json's path is written by the v1-abi-stubs job, on a
 // DIFFERENT runner (and a different $RUNNER_TEMP) than the
 // v1-abi-conformance job that downloads the artifact and sets
-// CHTYPES_ABI1_STUBS, so a path recorded there (absolute or not) does not
+// CHTYPES_ABI2_STUBS, so a path recorded there (absolute or not) does not
 // generally resolve here; only its file name does, and that is stable
 // however build-stubs.sh spells the "path" field.
 func stubLibraryPath(stubsDir string, variant stubVariant) string {
@@ -131,17 +131,17 @@ func computeCasesHash(casesRaw interface{}) (string, error) {
 
 // TestConformance is the v1-abi-conformance leg's entry point
 // (scripts/abi-v1/conformance/go.sh runs `go test -run TestConformance`).
-// Without CHTYPES_ABI1_STUBS it skips LOUDLY by name, exactly like every
+// Without CHTYPES_ABI2_STUBS it skips LOUDLY by name, exactly like every
 // other no-registry test in this repository: it never passes silently and
 // never fails for want of an environment nobody gave it.
 func TestConformance(t *testing.T) {
-	stubsDir := os.Getenv("CHTYPES_ABI1_STUBS")
+	stubsDir := os.Getenv("CHTYPES_ABI2_STUBS")
 	if stubsDir == "" {
-		t.Skip("CHTYPES_ABI1_STUBS not set; skipping the ABI v1 conformance suite")
+		t.Skip("CHTYPES_ABI2_STUBS not set; skipping the ABI v1 conformance suite")
 	}
 
 	root := repoRoot(t)
-	casesPath := filepath.Join(root, "tests", "fixtures", "abi-v1", "cases.json")
+	casesPath := filepath.Join(root, "tests", "fixtures", "abi-v2", "cases.json")
 	rawCases, err := os.ReadFile(casesPath)
 	if err != nil {
 		t.Fatalf("reading %s: %v", casesPath, err)
@@ -237,8 +237,8 @@ func TestConformance(t *testing.T) {
 		results = append(results, reportResult{ID: c.ID, Pass: pass, Detail: detail})
 	}
 
-	if reportPath := os.Getenv("CHTYPES_ABI1_REPORT"); reportPath != "" {
-		toolchain := os.Getenv("CHTYPES_ABI1_TOOLCHAIN")
+	if reportPath := os.Getenv("CHTYPES_ABI2_REPORT"); reportPath != "" {
+		toolchain := os.Getenv("CHTYPES_ABI2_TOOLCHAIN")
 		if toolchain == "" {
 			toolchain = "go.mod"
 		}

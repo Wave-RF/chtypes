@@ -182,7 +182,7 @@ func subjectMatchesLayer(subjects []StatementSubject, layerDigest Digest) bool {
 }
 
 // validateArtifactPredicate checks the platform-artifact predicate fields
-// (docs/guides/fetch-v1.md §4): abi equals ABIGeneration (never a stray
+// (docs/guides/fetch-v1.md §4): abi equals the active contract's (2 on the dev channel, rule r6) (never a stray
 // "abi_revision" — v0's key name, which must not be read as this one), os
 // and arch equal platform, and clickhouse_version lies within request.
 func validateArtifactPredicate(pred map[string]any, platform Platform, request string) error {
@@ -191,8 +191,8 @@ func validateArtifactPredicate(pred map[string]any, platform Platform, request s
 		return fmt.Errorf(`predicate carries no "abi" field`)
 	}
 	abiNum, ok := asInt(abiVal)
-	if !ok || abiNum != ABIGeneration {
-		return fmt.Errorf("predicate abi %v, expected %d", abiVal, ABIGeneration)
+	if want := active().abi; !ok || abiNum != want {
+		return fmt.Errorf("predicate abi %v, expected %d", abiVal, want)
 	}
 	osVal, _ := pred["os"].(string)
 	if osVal != platform.OS {

@@ -33,6 +33,13 @@
 # summary line (color stripped) and refuse zero tests passed. Nothing in this
 # file computes a verdict; every step runs a script or a test runner whose own
 # output is the answer.
+#
+# MAJORS (public issue #511). spec/binding-majors.json says which ABI major
+# each binding speaks (scripts/abi-v1/majors.py; absent on main: ABI v1 for
+# all). Each binding job prints "ABI major tested: N (spec/binding-majors.json@
+# <commit>)" to its log and step summary, and asserts N against the identity
+# compiled into the binding's generated layer (and, for Go, against the
+# constants its own test binary prints), never against the file's own value.
 name: ci
 
 # merge_group (checks_requested): the merge queue's own candidate combination
@@ -224,6 +231,14 @@ jobs:
           cache: false          # the module is stdlib-only: there is no go.sum to cache
       - name: build and vet, dlopen-only
         run: cd go && go build ./... && go vet ./...
+      - name: the ABI major this job tests, derived and asserted against the Go binding's compiled-in identity
+        run: |
+          python3 scripts/abi-v1/majors.py announce go --what "build, vet, standalone"
+          python3 scripts/abi-v1/majors.py assert-layer go
+          dir="$(python3 scripts/abi-v1/majors.py layer-dir go)"
+          (cd go && go test -count=1 -v -run '^TestABIIdentity$' "./${dir#go/}/") > "$RUNNER_TEMP/abi-identity.log"
+          cat "$RUNNER_TEMP/abi-identity.log"
+          python3 scripts/abi-v1/majors.py assert-identity go "$RUNNER_TEMP/abi-identity.log"
       # Selftest first, same rule as everywhere else in this job: needs no
       # registry and no `go` on PATH — it drives scripts/lib/standalone_census.py
       # directly against synthetic go-test -json logs — so it belongs in this
@@ -282,6 +297,10 @@ jobs:
           uv run ruff check src tests
           uv run ruff format --check src tests
           uv run python -c 'import chtypes; print("chtypes", chtypes.__version__)'
+      - name: the ABI major this job tests, derived and asserted against the python binding's compiled-in layer
+        run: |
+          python3 scripts/abi-v1/majors.py announce python --what "suite, no artifacts"
+          python3 scripts/abi-v1/majors.py assert-layer python
       - name: suite — the artifact tests skip by name, the rest runs
         run: scripts/check-suite.sh --no-artifacts python
       - name: CLI parity — this binding's chtypes command line matches the shared expectation
@@ -306,6 +325,10 @@ jobs:
           cache-dependency-path: ts/pnpm-lock.yaml
       - name: build and typecheck
         run: cd ts && pnpm install --frozen-lockfile && pnpm build && pnpm typecheck
+      - name: the ABI major this job tests, derived and asserted against the ts binding's compiled-in layer
+        run: |
+          python3 scripts/abi-v1/majors.py announce ts --what "suite, no artifacts"
+          python3 scripts/abi-v1/majors.py assert-layer ts
       - name: suite — the artifact tests skip by name, the rest runs
         run: scripts/check-suite.sh --no-artifacts ts
       - name: CLI parity — this binding's chtypes command line matches the shared expectation
@@ -324,6 +347,10 @@ jobs:
         run: cd rust && cargo build --locked && cargo clippy --locked --all-targets -- -D warnings && cargo fmt --check
       - name: --no-default-features — the configuration docs/install.md tells a consumer to build
         run: cd rust && cargo test --locked --no-default-features && cargo clippy --locked --all-targets --no-default-features -- -D warnings
+      - name: the ABI major this job tests, derived and asserted against the rust binding's compiled-in layer
+        run: |
+          python3 scripts/abi-v1/majors.py announce rust --what "suite, no artifacts"
+          python3 scripts/abi-v1/majors.py assert-layer rust
       - name: suite — the artifact tests skip by name, the rest runs
         run: scripts/check-suite.sh --no-artifacts rust
       - name: CLI parity — this binding's chtypes command line matches the shared expectation
@@ -356,6 +383,15 @@ jobs:
         with:
           node-version: 22
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
+      # A tour runs against a real library its binding fetches through its own
+      # CLI, so a binding at ABI v2 fetches from the staging dev channel only
+      # (spec/abi-v2/docs.md r6; examples/chplay.sh picks its line there).
+      - name: the ABI major each tour tests, derived and asserted against each binding's compiled-in layer
+        run: |
+          for b in go python ts rust; do
+            python3 scripts/abi-v1/majors.py announce "$b" --what "examples tour"
+            python3 scripts/abi-v1/majors.py assert-layer "$b"
+          done
       - name: every enrolled tour runs every section; every other tour is skipped by name
         run: scripts/check-examples-v1.sh
 
@@ -537,6 +573,10 @@ jobs:
       # from the step and with its post-step skipped, which is a runner abort
       # rather than a lint finding; it passed on rerun with no code change.
       # Removing the compile removes that surface.
+      - name: the ABI major this job lints, derived and asserted against the Go binding's compiled-in layer
+        run: |
+          python3 scripts/abi-v1/majors.py announce go --what "golangci-lint"
+          python3 scripts/abi-v1/majors.py assert-layer go
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.13.2

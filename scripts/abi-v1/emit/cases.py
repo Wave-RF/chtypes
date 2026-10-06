@@ -122,7 +122,17 @@ from model import BUF_HANDLE
 
 from . import Output, banner, stub, _stubshared
 
+# Every major some binding speaks (emit/__init__.py, SHARED): each major's
+# conformance runners need their own cases and stubs.
+MAJORS = (1, 2)
+SHARED = True
+
 PATH = "tests/fixtures/abi-v1/cases.json"
+
+
+def path(major: int) -> str:
+    """Each major's own file: tests/fixtures/abi-v<major>/cases.json."""
+    return f"tests/fixtures/abi-v{major}/cases.json"
 
 
 # ------------------------------------------------------------------ recipes
@@ -648,7 +658,12 @@ def _check_calls(model, cases: list[dict]) -> None:
 
 def build_cases(model) -> list[dict]:
     kinds = stub.classify(model)
-    cases = list(HANDWRITTEN_CASES)
+    # The handshake answers this description's own generation (1, or 2 under
+    # gen.py --major 2): the stub returns CHS_ABI_VERSION from its own header.
+    cases = [
+        {**c, "expect": {"int": model.abi}} if c["id"] == "chs_abi_version.handshake" else c
+        for c in HANDWRITTEN_CASES
+    ]
     for fn in model.functions:
         if kinds.get(fn.name) != "generic":
             continue
@@ -670,4 +685,4 @@ def render(model) -> str:
 
 
 def outputs(model) -> list[Output]:
-    return [Output(PATH, content=render(model))]
+    return [Output(path(model.major), content=render(model))]

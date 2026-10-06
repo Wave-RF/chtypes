@@ -36,6 +36,25 @@ generates for more than one major must give each major its own output paths
 (`model.major` says which it is being run for), and `banner(model)` names the
 major, so no major's --check or --write ever reads or deletes another's output.
 
+WHICH MAJOR A BINDING SPEAKS. A binding's emitter also sets
+
+    BINDING = "go"
+
+and then runs for exactly ONE major: the one spec/binding-majors.json gives
+that binding at this commit (scripts/abi-v1/majors.py; absent, every binding
+speaks ABI v1). So on the `v2` branch, with go at 2, `gen.py --major 2` writes
+the Go layer and plain `gen.py` no longer does, and each run's stale-banner
+scan removes the other major's Go files: --check agrees with the map in both
+directions. Because a binding runs for one major only, its emitter may reuse
+one path across majors (go/chtypes/vocab_gen.go is the one public package's
+vocabulary file at either major). A map that gives a binding a major its
+emitter does not list in MAJORS is refused, never skipped. An emitter that
+serves every binding of a major (the conformance cases, the stub) sets
+
+    SHARED = True
+
+and runs for each major in its MAJORS that at least one binding speaks.
+
 BUILD-TIME FILES. An emitter may also define
 
     def render_files(model: model.Model) -> dict[str, str]
@@ -108,8 +127,18 @@ def block_markers(name: str) -> tuple[str, str]:
     return f"<!-- BEGIN GENERATED: {name} -->", f"<!-- END GENERATED: {name} -->"
 
 
-def discover(major: int = 1) -> list[ModuleType]:
-    """Every emitter that generates for `major` (its MAJORS, default (1,))."""
+class MajorsMismatch(Exception):
+    """spec/binding-majors.json gives a binding a major no emitter of that
+    binding generates for."""
+
+
+def discover(major: int = 1, majors=None) -> list[ModuleType]:
+    """Every emitter that generates for `major`: by its MAJORS (default (1,)),
+    and, for a binding's emitter (BINDING), only when `majors` (a
+    majors.Majors; None reads every binding as ABI v1) gives that binding
+    `major`; a SHARED emitter only when some binding speaks `major`."""
+    by_binding = majors.by_binding if majors is not None else None
+    spoken = set(by_binding.values()) if by_binding is not None else {1}
     mods = []
     for info in sorted(pkgutil.iter_modules(__path__), key=lambda i: i.name):
         if info.name.startswith("_"):
@@ -117,6 +146,20 @@ def discover(major: int = 1) -> list[ModuleType]:
         mod = importlib.import_module(f"{__name__}.{info.name}")
         if not callable(getattr(mod, "outputs", None)):
             raise TypeError(f"emit/{info.name}.py defines no outputs(model)")
-        if major in getattr(mod, "MAJORS", (1,)):
+        listed = getattr(mod, "MAJORS", (1,))
+        binding = getattr(mod, "BINDING", None)
+        if binding is not None:
+            wants = by_binding[binding] if by_binding is not None else 1
+            if wants == major:
+                if major not in listed:
+                    raise MajorsMismatch(
+                        f"spec/binding-majors.json says {binding} speaks ABI v{major}, but emit/{info.name}.py "
+                        f"generates only for {listed}"
+                    )
+                mods.append(mod)
+            continue
+        if getattr(mod, "SHARED", False) and major not in spoken:
+            continue
+        if major in listed:
             mods.append(mod)
     return mods

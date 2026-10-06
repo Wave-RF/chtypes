@@ -57,9 +57,9 @@ func readLock(path string) (*Lock, error) {
 		return nil, newError(CodeArtifactPinned, "", "", path, uerr,
 			"lock file %s fails schema %d validation: %v; re-lock with `fetch --lock`", path, LockSchema, uerr)
 	}
-	if lock.ABI != ABIGeneration {
+	if lock.ABI != active().abi {
 		return nil, newError(CodeArtifactPinned, "", "", path, nil,
-			"lock file %s names abi %d, this fetcher speaks abi %d; re-lock with `fetch --lock`", path, lock.ABI, ABIGeneration)
+			"lock file %s names abi %d, this fetcher speaks abi %d; re-lock with `fetch --lock`", path, lock.ABI, active().abi)
 	}
 	return &lock, nil
 }
@@ -95,7 +95,7 @@ func writeLock(path string, lock *Lock) error {
 // uses this: it touches only the spelling it just resolved, leaving every
 // other spelling's pins untouched.
 func mergeLockRequest(existing *Lock, spelling string, pins map[string]LockPin) *Lock {
-	out := &Lock{Schema: LockSchema, ABI: ABIGeneration, Requests: map[string]map[string]LockPin{}}
+	out := &Lock{Schema: LockSchema, ABI: active().abi, Requests: map[string]map[string]LockPin{}}
 	if existing != nil {
 		for k, v := range existing.Requests {
 			out.Requests[k] = v
@@ -122,7 +122,7 @@ func mergeLockRequest(existing *Lock, spelling string, pins map[string]LockPin) 
 // re-resolves every locked request and rewrites the lock from scratch,
 // "never merges a stale entry with a fresh one" (§6).
 func rewriteLockForUpdate(freshResults map[string]map[string]LockPin) *Lock {
-	out := &Lock{Schema: LockSchema, ABI: ABIGeneration, Requests: map[string]map[string]LockPin{}}
+	out := &Lock{Schema: LockSchema, ABI: active().abi, Requests: map[string]map[string]LockPin{}}
 	platformSet := map[string]bool{}
 	for spelling, byPlatform := range freshResults {
 		out.Requests[spelling] = byPlatform

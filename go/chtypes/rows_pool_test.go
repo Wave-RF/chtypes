@@ -15,7 +15,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/wave-rf/chtypes/go/internal/abi1"
+	"github.com/wave-rf/chtypes/go/v2/internal/abi2"
 )
 
 func readBatchDoc(t testing.TB, name string) []byte {
@@ -111,7 +111,7 @@ func TestStubTakeIntoMatchesTake(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer schema.Close()
-	call := func() *abi1.Buf {
+	call := func() *abi2.Buf {
 		doc, exp, cerr := lib.tbl.PreviewBatch(schema.h, int32(JSONEachRow), []byte(`{"x":1}`), nil, nil, nil, int32(ExportNone), 0)
 		if cerr != nil {
 			t.Fatal(cerr)

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/wave-rf/chtypes/go/internal/ocifetch"
+	"github.com/wave-rf/chtypes/go/v2/internal/ocifetch"
 )
 
 func runCLI(t *testing.T, env map[string]string, args ...string) (code int, stdout, stderr string) {

@@ -2,7 +2,8 @@ package chtypes
 
 // errors.go — the error classes (bindings-v1.md section 4). Every call error
 // carries the five fields of chs_error verbatim; the class of a status is
-// spec/abi-v1/sdk.json's table, generated into the abi1 layer.
+// spec/abi-v2/sdk.json's table, generated into the abi2 layer. A status the
+// description does not list is its unknown(n) and an InternalError (rule r3).
 
 import (
 	"errors"
@@ -10,8 +11,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/wave-rf/chtypes/go/internal/abi1"
-	"github.com/wave-rf/chtypes/go/internal/ocifetch"
+	"github.com/wave-rf/chtypes/go/v2/internal/abi2"
+	"github.com/wave-rf/chtypes/go/v2/internal/ocifetch"
 )
 
 // CallError is the five fields every call error carries, verbatim and with
@@ -118,9 +119,9 @@ func internalError(format string, args ...any) error {
 	return &InternalError{CallError{Status: StatusInternal, Message: fmt.Sprintf(format, args...)}}
 }
 
-// callError maps one abi1 call error by the D3 status table. A status outside
+// callError maps one abi2 call error by the D3 status table. A status outside
 // the closed set is an InternalError naming its value.
-func callError(c *abi1.CallError) error {
+func callError(c *abi2.CallError) error {
 	if c == nil {
 		return nil
 	}
@@ -131,12 +132,14 @@ func callError(c *abi1.CallError) error {
 		if n, err := strconv.ParseInt(strings.TrimPrefix(c.Status, "CHS_STATUS_"), 10, 32); err == nil {
 			raw = n
 		}
+		// A status outside the closed set is its unknown(n) (rule r3), and the
+		// call still fails: an internal error naming n.
 		ce.Status = Status(raw)
-		ce.Message = fmt.Sprintf("unknown call status %s: %s", c.Status, c.Message)
+		ce.Message = fmt.Sprintf("call status %s is outside the closed set: %s", ce.Status, c.Message)
 		return &InternalError{ce}
 	}
 	ce.Status = status
-	switch abi1.StatusClass(c.Status) {
+	switch abi2.StatusClass(c.Status) {
 	case "schema":
 		return &SchemaError{ce}
 	case "unsupported":
@@ -247,11 +250,11 @@ func fetchError(err error) error {
 	return usageError("%s", err.Error())
 }
 
-// loadError maps the abi1 loader's error: a refusal is an ArtifactError
+// loadError maps the abi2 loader's error: a refusal is an ArtifactError
 // (incompatible or corrupt, by sdk.json's own table), a step 7 failure is the
 // call's own error, and a refused unverified open is misuse.
 func loadError(err error) error {
-	var le *abi1.LoadError
+	var le *abi2.LoadError
 	if errors.As(err, &le) {
 		code := CodeArtifactIncompatible
 		if le.Class() == "artifact_corrupt" {
@@ -264,16 +267,21 @@ func loadError(err error) error {
 		case le.Got != "":
 			detail = fmt.Sprintf(" (%s)", le.Got)
 		}
+		msg := fmt.Sprintf("chtypes: %s refused: %s%s [%s]", le.Path, le.Reason, detail, code)
+		if exact := le.Message(); exact != "" {
+			// A dev SDK's fingerprint refusal carries rule r6's exact message.
+			msg = exact
+		}
 		return &ArtifactError{
 			Code: code, Reason: le.Reason, Path: le.Path, Want: le.Want, Got: le.Got, Err: le,
-			Msg: fmt.Sprintf("chtypes: %s refused: %s%s [%s]", le.Path, le.Reason, detail, code),
+			Msg: msg,
 		}
 	}
-	var ce *abi1.CallError
+	var ce *abi2.CallError
 	if errors.As(err, &ce) {
 		return callError(ce)
 	}
-	var ur *abi1.UnverifiedRefusedError
+	var ur *abi2.UnverifiedRefusedError
 	if errors.As(err, &ur) {
 		return usageError("opening %s without verification needs allow=true AND CHTYPES_ALLOW_UNVERIFIED_LIBRARY=1", ur.Path)
 	}

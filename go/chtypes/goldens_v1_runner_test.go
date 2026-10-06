@@ -47,6 +47,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -56,8 +57,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/wave-rf/chtypes/go/internal/abi1"
-	"github.com/wave-rf/chtypes/go/internal/ocifetch"
+	"github.com/wave-rf/chtypes/go/v2/internal/abi2"
+	"github.com/wave-rf/chtypes/go/v2/internal/ocifetch"
 )
 
 // ---- the goldens document: only the members a runner needs
@@ -132,6 +133,15 @@ func goldensPlatform() (key, osArch string) {
 }
 
 func TestGoldensV1Runner(t *testing.T) {
+	if os.Getenv(envLibrary) == "" {
+		// Against a registry, the runner fetches exactly as a non-test
+		// binary of this 2.0.0-dev SDK does: the ABI v2 dev channel, its
+		// staging base and its staging key only, whatever base the caller
+		// names (spec/abi-v2/docs.md, rule r6). The goldens are an OCI
+		// referrer of the platform manifest signed with that key, and the
+		// highest verified revision wins (docs/guides/goldens-v1.md).
+		t.Cleanup(ocifetch.UseDevChannelForTests())
+	}
 	if id := os.Getenv(envChildID); id != "" {
 		runGoldensChild(t, id)
 		return
@@ -282,6 +292,14 @@ func fetchGoldens(t *testing.T) []byte {
 		t.Fatalf("ensure %s for %s: %v", os.Getenv(envVersion), key, err)
 	}
 	sa, err := ocifetch.FetchSigned(context.Background(), "", string(res.Digests.Manifest), ocifetch.PredicateTypeGoldens, opts)
+	var fe *ocifetch.FetchError
+	if errors.As(err, &fe) && fe.Code == ocifetch.CodeArtifactUnpublished && ocifetch.ChannelName() == "v2-dev" {
+		// The build is published (ensure above succeeded) and carries no
+		// goldens referrer: the first v2-dev builds ship none. A skip BY
+		// NAME, never a pass: the workflows read this line.
+		t.Skipf("SKIPPED: no v2-dev goldens published yet: %s %s (%s) has no goldens referrer on %s; the goldens did not run (%v)",
+			os.Getenv(envVersion), key, res.Digests.Manifest, ocifetch.DevChannelBase, err)
+	}
 	if err != nil {
 		t.Fatalf("fetch_signed (goldens) for %s: %v", res.Digests.Manifest, err)
 	}
@@ -374,7 +392,7 @@ func containsString(list []string, s string) bool {
 }
 
 // stopAt records the step a call sequence stopped at and why.
-func stopAt(rec map[string]any, step string, ce *abi1.CallError) {
+func stopAt(rec map[string]any, step string, ce *abi2.CallError) {
 	rec["at"] = step
 	rec["status"] = ce.Status
 	rec["error"] = map[string]any{
@@ -484,9 +502,9 @@ func TestGoldensV1StubSelfCheck(t *testing.T) {
 	if os.Getenv(envChildID) != "" {
 		t.Skip("child process")
 	}
-	dir := os.Getenv("CHTYPES_ABI1_STUBS")
+	dir := os.Getenv("CHTYPES_ABI2_STUBS")
 	if dir == "" {
-		t.Skip("SKIPPED: CHTYPES_ABI1_STUBS is not set (scripts/abi-v1/build-stubs.sh --out DIR); the goldens runner's stub self-check did not run")
+		t.Skip("SKIPPED: CHTYPES_ABI2_STUBS is not set (scripts/abi-v1/build-stubs.sh --out DIR); the goldens runner's stub self-check did not run")
 	}
 	py, err := exec.LookPath("python3")
 	if err != nil {
@@ -499,15 +517,17 @@ func TestGoldensV1StubSelfCheck(t *testing.T) {
 	if _, err := os.Stat(compare); err != nil {
 		t.Skipf("SKIPPED: %v: the comparator is not beside this checkout; the self-check did not run", err)
 	}
-	doc, err := filepath.Abs("testdata/goldens-v1-stub.json")
-	if err != nil {
-		t.Fatal(err)
-	}
+	tmp := t.TempDir()
+	// The hand-written document names the stub's identity as the stubs'
+	// own manifest gives it (stubs.json, rendered from the description the
+	// stub is built from), so an UNSTABLE description's moving fingerprint
+	// never needs a hand edit here; the comparator then checks it against
+	// the identity the loaded stub reports.
+	doc := stubGoldensDocument(t, dir, tmp)
 	self, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
-	tmp := t.TempDir()
 	report := filepath.Join(tmp, "report.json")
 	cmd := exec.CommandContext(context.Background(), self, "-test.run", "^TestGoldensV1Runner$", "-test.count=1")
 	cmd.Env = append(os.Environ(),
@@ -565,4 +585,44 @@ func TestGoldensV1StubSelfCheck(t *testing.T) {
 	if o, err := judge(bad); err == nil {
 		t.Fatalf("the comparator accepted a report with a wrong byte in a document:\n%s", o)
 	}
+}
+
+// stubGoldensDocument writes testdata/goldens-v1-stub.json to tmp with its
+// abi and abi_fingerprint taken from the "ok" stub's predicate in stubs.json.
+func stubGoldensDocument(t *testing.T, stubs, tmp string) string {
+	t.Helper()
+	var manifest struct {
+		Variants map[string]struct {
+			Predicate map[string]any `json:"predicate"`
+		} `json:"variants"`
+	}
+	raw, err := os.ReadFile(filepath.Join(stubs, "stubs.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	pred := manifest.Variants["ok"].Predicate
+	if pred["abi"] == nil || pred["abi_fingerprint"] == nil {
+		t.Fatalf("stubs.json's ok predicate names no abi or abi_fingerprint: %v", pred)
+	}
+	src, err := os.ReadFile("testdata/goldens-v1-stub.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(src, &doc); err != nil {
+		t.Fatal(err)
+	}
+	doc["abi"], doc["abi_fingerprint"] = pred["abi"], pred["abi_fingerprint"]
+	out, err := json.MarshalIndent(doc, "", " ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(tmp, "goldens-stub.json")
+	if err := os.WriteFile(path, out, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }

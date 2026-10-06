@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/wave-rf/chtypes/go/internal/abi1"
+	"github.com/wave-rf/chtypes/go/v2/internal/abi2"
 )
 
 // Library is one loaded ClickHouse version, safe for concurrent use: every
@@ -22,7 +22,7 @@ type Library struct {
 	Minor   string
 	Path    string
 
-	tbl      *abi1.Table
+	tbl      *abi2.Table
 	info     BuildInfo
 	resolved *Resolved
 
@@ -51,7 +51,7 @@ func imageKey(kind, path string) string {
 // (it refuses a different setup while one is recorded). A failed load is never
 // cached, so the next open runs every step again; the open that called this
 // settles a failure with failedOpen, whatever failed in the attempt.
-func openImage(key string, load func(zone, defaults []byte) (*abi1.Table, error), path string, resolved *Resolved) (*Library, error) {
+func openImage(key string, load func(zone, defaults []byte) (*abi2.Table, error), path string, resolved *Resolved) (*Library, error) {
 	images.mu.Lock()
 	defer images.mu.Unlock()
 	zone, defaults, err := commitSetup()
@@ -92,7 +92,7 @@ func openImage(key string, load func(zone, defaults []byte) (*abi1.Table, error)
 func OpenUnverified(path string, allow bool) (l *Library, err error) {
 	// The caller's two opt-ins are checked before anything is attempted, so a
 	// refusal here is misuse and unlocks nothing (bindings-v1.md section 6).
-	if err := abi1.CheckUnverifiedAllowed(path, allow); err != nil {
+	if err := abi2.CheckUnverifiedAllowed(path, allow); err != nil {
 		return nil, loadError(err)
 	}
 	gen := setupGeneration()
@@ -101,8 +101,8 @@ func OpenUnverified(path string, allow bool) (l *Library, err error) {
 			failedOpen(gen)
 		}
 	}()
-	return openImage(imageKey("unverified", path), func(zone, defaults []byte) (*abi1.Table, error) {
-		return abi1.OpenUnverified(path, allow, zone, defaults)
+	return openImage(imageKey("unverified", path), func(zone, defaults []byte) (*abi2.Table, error) {
+		return abi2.OpenUnverified(path, allow, zone, defaults)
 	}, path, nil)
 }
 
@@ -115,7 +115,7 @@ func (l *Library) BuildInfo() BuildInfo { return l.info }
 func (l *Library) Resolved() *Resolved { return l.resolved }
 
 // text runs one call that returns a byte string.
-func (l *Library) text(call func() (*abi1.Buf, *abi1.CallError)) (string, error) {
+func (l *Library) text(call func() (*abi2.Buf, *abi2.CallError)) (string, error) {
 	buf, cerr := call()
 	if cerr != nil {
 		return "", callError(cerr)
@@ -124,7 +124,7 @@ func (l *Library) text(call func() (*abi1.Buf, *abi1.CallError)) (string, error)
 }
 
 // document runs one call that returns a JSON document.
-func (l *Library) document(call func() (*abi1.Buf, *abi1.CallError)) ([]byte, error) {
+func (l *Library) document(call func() (*abi2.Buf, *abi2.CallError)) ([]byte, error) {
 	buf, cerr := call()
 	if cerr != nil {
 		return nil, callError(cerr)
@@ -135,23 +135,23 @@ func (l *Library) document(call func() (*abi1.Buf, *abi1.CallError)) ([]byte, er
 // ValidateType canonicalizes a type with ClickHouse's own parser
 // (chs_type_validate).
 func (l *Library) ValidateType(typeExpr string) (string, error) {
-	return l.text(func() (*abi1.Buf, *abi1.CallError) { return l.tbl.TypeValidate([]byte(typeExpr)) })
+	return l.text(func() (*abi2.Buf, *abi2.CallError) { return l.tbl.TypeValidate([]byte(typeExpr)) })
 }
 
 // QuoteIdentifier quotes an identifier, always (chs_back_quote).
 func (l *Library) QuoteIdentifier(name string) (string, error) {
-	return l.text(func() (*abi1.Buf, *abi1.CallError) { return l.tbl.BackQuote([]byte(name)) })
+	return l.text(func() (*abi2.Buf, *abi2.CallError) { return l.tbl.BackQuote([]byte(name)) })
 }
 
 // QuoteIdentifierIfNeeded quotes an identifier only when it needs it
 // (chs_back_quote_if_needed).
 func (l *Library) QuoteIdentifierIfNeeded(name string) (string, error) {
-	return l.text(func() (*abi1.Buf, *abi1.CallError) { return l.tbl.BackQuoteIfNeeded([]byte(name)) })
+	return l.text(func() (*abi2.Buf, *abi2.CallError) { return l.tbl.BackQuoteIfNeeded([]byte(name)) })
 }
 
 // QuoteLiteral quotes a string literal (chs_quote_string).
 func (l *Library) QuoteLiteral(text string) (string, error) {
-	return l.text(func() (*abi1.Buf, *abi1.CallError) { return l.tbl.QuoteString([]byte(text)) })
+	return l.text(func() (*abi2.Buf, *abi2.CallError) { return l.tbl.QuoteString([]byte(text)) })
 }
 
 // ErrorCodes is this build's own error-code table (chs_error_codes). It is
@@ -187,7 +187,7 @@ func (l *Library) DiscoverQuery() (string, error) {
 // to DiscoverQuery, and returns the column declarations as ClickHouse's own
 // formatter writes them (chs_discover_columns).
 func (l *Library) DiscoverColumns(rows []byte) (Discovery, error) {
-	raw, err := l.document(func() (*abi1.Buf, *abi1.CallError) { return l.tbl.DiscoverColumns(rows) })
+	raw, err := l.document(func() (*abi2.Buf, *abi2.CallError) { return l.tbl.DiscoverColumns(rows) })
 	if err != nil {
 		return Discovery{}, err
 	}
