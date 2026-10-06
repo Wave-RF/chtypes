@@ -34,14 +34,14 @@ name: v1-abi
 
 on:
   pull_request:
-    branches: [main, v1]
+    branches: [main]
   # The merge queue's candidate combination must run every required context
   # here too, or the queue waits forever: v1 and v1-abi's contexts are required
   # on main once v1 merges (nothing below reads the event's base or head).
   merge_group:
     types: [checks_requested]
   push:
-    branches: [main, v1]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
