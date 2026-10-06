@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"sync"
 	"unicode/utf8"
 )
 
@@ -24,14 +25,31 @@ func stringMapJSON(m map[string]string) ([]byte, error) {
 	return marshalNoEscape(m)
 }
 
+// jsonEncoder is a stock encoder with HTML escaping off, writing into its own
+// buffer, kept between calls so a call builds neither.
+type jsonEncoder struct {
+	buf bytes.Buffer
+	enc *json.Encoder
+}
+
+var jsonEncoders sync.Pool
+
 func marshalNoEscape(v any) ([]byte, error) {
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(v); err != nil {
+	e, _ := jsonEncoders.Get().(*jsonEncoder)
+	if e == nil {
+		e = &jsonEncoder{}
+		e.enc = json.NewEncoder(&e.buf)
+		e.enc.SetEscapeHTML(false)
+	}
+	e.buf.Reset()
+	if err := e.enc.Encode(v); err != nil {
+		jsonEncoders.Put(e)
 		return nil, internalError("encoding a call input: %v", err)
 	}
-	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
+	// The result is the caller's: copy it out of the buffer the encoder keeps.
+	out := bytes.Clone(bytes.TrimSuffix(e.buf.Bytes(), []byte("\n")))
+	jsonEncoders.Put(e)
+	return out, nil
 }
 
 // callSettings is a call's settings JSON: the settings map, with the per-call

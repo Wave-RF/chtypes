@@ -1,6 +1,6 @@
 # testdata
 
-## batch-100-flags0.json and batch-100-flags7.json
+## batch-100-flags0.json, batch-100-flags7.json and batch-100-filter.json
 
 Real batch documents: the exact bytes `chs_preview_batch` returned for one 100-row JSONEachRow body, one at `doc_flags` 0 and one at `doc_flags` 7 (`DocAll`). They are the input of `BenchmarkDecodeBatch` and one of the document sets of `TestDecodeBatchEquivalence`, both in `decode_bench_test.go` and `decode_equivalence_test.go`.
 
@@ -16,5 +16,7 @@ CHTYPES_CAPTURE_LIBRARY=$HOME/.cache/chtypes/v1/unpacked/sha256/<manifest digest
 CHTYPES_CAPTURE_BATCH_DIR=chtypes/testdata \
 go test -run TestCaptureBatchDocuments ./chtypes
 ```
+
+`batch-100-filter.json` is the same schema and body with a filter attached (`small < {m:Int8}`, `m` = 50) and an export asked for (`JSONCompactEachRow`), at `doc_flags` 0: the shape a filtering caller gets, with `rows_passed`, `rows_cut` and one `row_spans` entry per row. The same test writes it.
 
 The files are never hand-edited. A different build or a changed body yields different bytes; nothing compares against these bytes except the two decoders with each other, so regenerating them is safe.

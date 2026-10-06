@@ -445,6 +445,33 @@ type spanDoc struct {
 	Len fU64 `json:"len"`
 }
 
+// spanSlot is one element of a list of spans (row_spans, unconsumed). A
+// pointer element would cost the stock decoder an allocation per span; a value
+// element does not, and a null element is told apart by null.
+type spanSlot struct {
+	null bool
+	v    spanDoc
+}
+
+func (s *spanSlot) UnmarshalJSON(data []byte) error {
+	if isJSONNull(data) {
+		s.null = true
+		return nil
+	}
+	if data[0] != '{' {
+		return errDeclined
+	}
+	sd, _ := stringDecoders.Get().(*subDecoder)
+	if sd == nil {
+		sd = newSubDecoder()
+	}
+	err := sd.decode(data, &s.v)
+	if err == nil {
+		stringDecoders.Put(sd)
+	}
+	return err
+}
+
 type transformDoc struct {
 	Row       fInt    `json:"row"`
 	Reason    fWord   `json:"reason"`
@@ -665,18 +692,47 @@ func transformsOf(list []transformDoc, present bool) ([]Transform, bool) {
 	return out, true
 }
 
-func spansOf(list []*spanDoc, present bool) ([]Span, bool) {
-	if !present {
-		return nil, true
+// decodeSpanList reads a list of spans one element at a time, so the decoder
+// never holds the whole list in its buffer (a list of one span per row is
+// most of a document that has no row detail), and straight into the []Span the
+// result carries. The result is nil for JSON null and non-nil, however short,
+// for a list; hint sizes it. A null element is an error, as it is for the
+// generic reader.
+func decodeSpanList(dec *json.Decoder, hint int) ([]Span, error) {
+	t, err := dec.Token()
+	if err != nil {
+		return nil, errDeclined
 	}
-	out := make([]Span, 0, len(list))
-	for _, s := range list {
-		if s == nil {
-			return nil, false
+	if t == nil {
+		return nil, nil
+	}
+	if t != json.Delim('[') {
+		return nil, errDeclined
+	}
+	list := make([]Span, 0, hint)
+	// One slot for every element: a slot declared per element would be a heap
+	// allocation each, since the decoder keeps the pointer.
+	slot := new(spanSlot)
+	for dec.More() {
+		*slot = spanSlot{}
+		if err := dec.Decode(slot); err != nil || slot.null {
+			return nil, errDeclined
 		}
-		out = append(out, Span{Off: s.Off.v, Len: s.Len.v})
+		list = append(list, Span{Off: slot.v.Off.v, Len: slot.v.Len.v})
 	}
-	return out, true
+	if t, err := dec.Token(); err != nil || t != json.Delim(']') {
+		return nil, errDeclined
+	}
+	return list, nil
+}
+
+// spanHint is the count a document has already announced (one span per row),
+// or 0 when none was or it is not credible for a document of docLen bytes.
+func spanHint(n fU64, docLen int) int {
+	if !n.seen || n.v > uint64(docLen/16) { // a span takes at least 16 bytes
+		return 0
+	}
+	return int(n.v)
 }
 
 func (d *batchRowDoc) result(slabs *rowSlabs) (RowResult, bool) {
@@ -861,7 +917,7 @@ func decodeBatchFast(raw, payload []byte) (res BatchResult, ok bool) {
 		exportDeclinedB64     fB64
 		partitionCount        fU64
 		transformed           []transformDoc
-		rowSpans, unconsumed  []*spanDoc
+		rowSpans, unconsumed  []Span
 		engineRows            [][]cellDoc
 		framing               *framingDoc
 		storageTransforms     fIgnore
@@ -907,9 +963,12 @@ func decodeBatchFast(raw, payload []byte) (res BatchResult, ok bool) {
 		case "transformed":
 			bit, err = kTransformed, dec.Decode(&top.transformed)
 		case "row_spans":
-			bit, err = kRowSpans, dec.Decode(&top.rowSpans)
+			// One span per row, so rows_read, when it came first, sizes the list.
+			bit = kRowSpans
+			top.rowSpans, err = decodeSpanList(dec, spanHint(top.rowsRead, len(raw)))
 		case "unconsumed":
-			bit, err = kUnconsumed, dec.Decode(&top.unconsumed)
+			bit = kUnconsumed
+			top.unconsumed, err = decodeSpanList(dec, 0)
 		case "engine_rows":
 			bit, err = kEngineRows, dec.Decode(&top.engineRows)
 		case "framing":
@@ -949,16 +1008,12 @@ func decodeBatchFast(raw, payload []byte) (res BatchResult, ok bool) {
 		return res, false
 	}
 	res.Payload = payload
-	if res.Spans, good = spansOf(top.rowSpans, top.rowSpans != nil); !good {
-		return res, false
-	}
+	res.Spans = top.rowSpans
 	if res.ExportDeclined, good = bytesOf(&top.exportDeclined, &top.exportDeclinedB64); !good {
 		return res, false
 	}
 	res.RowsPassed, res.RowsCut = top.rowsPassed.v, top.rowsCut.v
-	if res.Unconsumed, good = spansOf(top.unconsumed, top.unconsumed != nil); !good {
-		return res, false
-	}
+	res.Unconsumed = top.unconsumed
 	if rowsPresent {
 		res.Rows = rows
 	}
