@@ -128,9 +128,13 @@ type BatchResult struct {
 	RowsPassed     uint64
 	RowsCut        uint64
 	PartitionCount *uint64
-	// Unconsumed is the byte ranges the reader's error recovery skipped. A
-	// caller that needs a contract over the body's records declines the body
-	// when it is non-empty, and never counts records itself.
+	// Unconsumed is the byte ranges the reader's error recovery skipped. It
+	// does not account for every record: a skipped row's InputSpan can cover
+	// more than one input record, so verdicts can be fewer than records while
+	// this is empty. A caller that needs every record accounted for declines
+	// a body with any skipped row or any Unconsumed range, or compares the
+	// verdict count with its own count of the body's records
+	// (docs/guides/batches.md).
 	Unconsumed []Span
 	Framing    *Framing
 }
