@@ -361,7 +361,9 @@ func newSubDecoder() *subDecoder {
 
 func (s *subDecoder) decode(data []byte, v any) error {
 	s.feed.b = data
-	if err := s.dec.Decode(v); err != nil {
+	err := s.dec.Decode(v)
+	s.feed.b = nil
+	if err != nil {
 		return errDeclined
 	}
 	return nil
@@ -594,15 +596,6 @@ func nameOf(plain *fString, b64 *fB64) (string, bool) {
 	return s, ok && present
 }
 
-// optBytesOf is reader.optBytes.
-func optBytesOf(plain *fString, b64 *fB64) (*string, bool) {
-	s, present, ok := byteOf(plain, b64)
-	if !ok || !present {
-		return nil, ok
-	}
-	return &s, true
-}
-
 // strSlab hands out *string from one allocation: a row's value_b64 entries
 // share a backing array instead of allocating a pointer each.
 type strSlab []string
@@ -686,7 +679,7 @@ func spansOf(list []*spanDoc, present bool) ([]Span, bool) {
 	return out, true
 }
 
-func (d *batchRowDoc) result(spans *[]Span) (RowResult, bool) {
+func (d *batchRowDoc) result(slabs *rowSlabs) (RowResult, bool) {
 	var res RowResult
 	var ok bool
 	res.Outcome = parseRowOutcome(d.Outcome.s)
@@ -768,20 +761,59 @@ func (d *batchRowDoc) result(spans *[]Span) (RowResult, bool) {
 		}
 	}
 	if d.Verdict.seen && !d.Verdict.null {
-		v := parseVerdict(d.Verdict.s)
-		res.Verdict = &v
+		res.Verdict = slabs.verdict(parseVerdict(d.Verdict.s))
 	}
-	if res.PartitionID, ok = optBytesOf(&d.PartitionID, &d.PartitionIDB64); !ok {
+	if s, present, good := byteOf(&d.PartitionID, &d.PartitionIDB64); !good {
 		return res, false
+	} else if present {
+		res.PartitionID = slabs.partition(s)
 	}
 	if d.InputSpan.present() {
-		// Spans come from a shared chunk, one allocation for many rows.
-		sp := &(*spans)[0]
-		*spans = (*spans)[1:]
-		*sp = Span{Off: d.InputSpan.v.Off.v, Len: d.InputSpan.v.Len.v}
-		res.InputSpan = sp
+		res.InputSpan = slabs.span(Span{Off: d.InputSpan.v.Off.v, Len: d.InputSpan.v.Len.v})
 	}
 	return res, true
+}
+
+// rowSlabs hands out the per-row pointers a RowResult carries (Verdict,
+// PartitionID, InputSpan) from shared chunks, one allocation for many rows
+// where one allocation per row was. Every pointer still addresses its own
+// element, so a caller that writes through one changes only that row.
+type rowSlabs struct {
+	spans    []Span
+	verdicts []Verdict
+	parts    []string
+}
+
+const slabChunk = 32
+
+func (s *rowSlabs) span(v Span) *Span {
+	if len(s.spans) == 0 {
+		s.spans = make([]Span, slabChunk)
+	}
+	p := &s.spans[0]
+	s.spans = s.spans[1:]
+	*p = v
+	return p
+}
+
+func (s *rowSlabs) verdict(v Verdict) *Verdict {
+	if len(s.verdicts) == 0 {
+		s.verdicts = make([]Verdict, slabChunk)
+	}
+	p := &s.verdicts[0]
+	s.verdicts = s.verdicts[1:]
+	*p = v
+	return p
+}
+
+func (s *rowSlabs) partition(v string) *string {
+	if len(s.parts) == 0 {
+		s.parts = make([]string, slabChunk)
+	}
+	p := &s.parts[0]
+	s.parts = s.parts[1:]
+	*p = v
+	return p
 }
 
 // batch top-level keys, as a bit set for the duplicate check.
@@ -815,8 +847,10 @@ func decodeBatchFast(raw, payload []byte) (res BatchResult, ok bool) {
 		return res, false
 	}
 
-	var (
-		seen                  uint32
+	// Every field below is decoded through a pointer the decoder keeps, so
+	// each would be its own heap allocation as a separate variable; one
+	// struct is one.
+	var top struct {
 		outcome               fString
 		code                  fI32
 		errText               fString
@@ -831,8 +865,11 @@ func decodeBatchFast(raw, payload []byte) (res BatchResult, ok bool) {
 		engineRows            [][]cellDoc
 		framing               *framingDoc
 		storageTransforms     fIgnore
-		rows                  []RowResult
-		rowsPresent           bool
+	}
+	var (
+		seen        uint32
+		rows        []RowResult
+		rowsPresent bool
 	)
 	for dec.More() {
 		kt, err := dec.Token()
@@ -846,44 +883,44 @@ func decodeBatchFast(raw, payload []byte) (res BatchResult, ok bool) {
 		var bit uint32
 		switch key {
 		case "outcome":
-			bit, err = kOutcome, dec.Decode(&outcome)
+			bit, err = kOutcome, dec.Decode(&top.outcome)
 		case "code":
-			bit, err = kCode, dec.Decode(&code)
+			bit, err = kCode, dec.Decode(&top.code)
 		case "err":
-			bit, err = kErr, dec.Decode(&errText)
+			bit, err = kErr, dec.Decode(&top.errText)
 		case "err_b64":
-			bit, err = kErrB64, dec.Decode(&errB64)
+			bit, err = kErrB64, dec.Decode(&top.errB64)
 		case "rows_read":
-			bit, err = kRowsRead, dec.Decode(&rowsRead)
+			bit, err = kRowsRead, dec.Decode(&top.rowsRead)
 		case "rows_skipped":
-			bit, err = kRowsSkipped, dec.Decode(&rowsSkipped)
+			bit, err = kRowsSkipped, dec.Decode(&top.rowsSkipped)
 		case "rows_passed":
-			bit, err = kRowsPassed, dec.Decode(&rowsPassed)
+			bit, err = kRowsPassed, dec.Decode(&top.rowsPassed)
 		case "rows_cut":
-			bit, err = kRowsCut, dec.Decode(&rowsCut)
+			bit, err = kRowsCut, dec.Decode(&top.rowsCut)
 		case "export_declined":
-			bit, err = kExportDeclined, dec.Decode(&exportDeclined)
+			bit, err = kExportDeclined, dec.Decode(&top.exportDeclined)
 		case "export_declined_b64":
-			bit, err = kExportDeclinedB64, dec.Decode(&exportDeclinedB64)
+			bit, err = kExportDeclinedB64, dec.Decode(&top.exportDeclinedB64)
 		case "partition_count":
-			bit, err = kPartitionCount, dec.Decode(&partitionCount)
+			bit, err = kPartitionCount, dec.Decode(&top.partitionCount)
 		case "transformed":
-			bit, err = kTransformed, dec.Decode(&transformed)
+			bit, err = kTransformed, dec.Decode(&top.transformed)
 		case "row_spans":
-			bit, err = kRowSpans, dec.Decode(&rowSpans)
+			bit, err = kRowSpans, dec.Decode(&top.rowSpans)
 		case "unconsumed":
-			bit, err = kUnconsumed, dec.Decode(&unconsumed)
+			bit, err = kUnconsumed, dec.Decode(&top.unconsumed)
 		case "engine_rows":
-			bit, err = kEngineRows, dec.Decode(&engineRows)
+			bit, err = kEngineRows, dec.Decode(&top.engineRows)
 		case "framing":
-			bit, err = kFraming, dec.Decode(&framing)
+			bit, err = kFraming, dec.Decode(&top.framing)
 		case "storage_transforms":
-			bit, err = kStorageTransforms, dec.Decode(&storageTransforms)
+			bit, err = kStorageTransforms, dec.Decode(&top.storageTransforms)
 		case "rows":
 			bit = kRows
 			hint := 0
-			if rowsRead.seen && rowsRead.v <= uint64(len(raw)) {
-				hint = int(rowsRead.v)
+			if top.rowsRead.seen && top.rowsRead.v <= uint64(len(raw)) {
+				hint = int(top.rowsRead.v)
 			}
 			rows, rowsPresent, err = decodeBatchRows(dec, hint)
 		default:
@@ -902,40 +939,40 @@ func decodeBatchFast(raw, payload []byte) (res BatchResult, ok bool) {
 	}
 
 	var good bool
-	res.Outcome = parseBatchOutcome(outcome.s)
-	res.ErrCode = code.v
-	if res.ErrMsg, good = bytesOf(&errText, &errB64); !good {
+	res.Outcome = parseBatchOutcome(top.outcome.s)
+	res.ErrCode = top.code.v
+	if res.ErrMsg, good = bytesOf(&top.errText, &top.errB64); !good {
 		return res, false
 	}
-	res.RowsRead, res.RowsSkipped = rowsRead.v, rowsSkipped.v
-	if res.Transformed, good = transformsOf(transformed, transformed != nil); !good {
+	res.RowsRead, res.RowsSkipped = top.rowsRead.v, top.rowsSkipped.v
+	if res.Transformed, good = transformsOf(top.transformed, top.transformed != nil); !good {
 		return res, false
 	}
 	res.Payload = payload
-	if res.Spans, good = spansOf(rowSpans, rowSpans != nil); !good {
+	if res.Spans, good = spansOf(top.rowSpans, top.rowSpans != nil); !good {
 		return res, false
 	}
-	if res.ExportDeclined, good = bytesOf(&exportDeclined, &exportDeclinedB64); !good {
+	if res.ExportDeclined, good = bytesOf(&top.exportDeclined, &top.exportDeclinedB64); !good {
 		return res, false
 	}
-	res.RowsPassed, res.RowsCut = rowsPassed.v, rowsCut.v
-	if res.Unconsumed, good = spansOf(unconsumed, unconsumed != nil); !good {
+	res.RowsPassed, res.RowsCut = top.rowsPassed.v, top.rowsCut.v
+	if res.Unconsumed, good = spansOf(top.unconsumed, top.unconsumed != nil); !good {
 		return res, false
 	}
 	if rowsPresent {
 		res.Rows = rows
 	}
-	if engineRows != nil {
+	if top.engineRows != nil {
 		cellSlab := make(strSlab, 0)
-		for _, cells := range engineRows {
+		for _, cells := range top.engineRows {
 			for i := range cells {
 				if hasRawValue(&cells[i].ValueB64) == 1 {
 					cellSlab = append(cellSlab, "")
 				}
 			}
 		}
-		res.EngineRows = make([][]EngineCell, 0, len(engineRows))
-		for _, cells := range engineRows {
+		res.EngineRows = make([][]EngineCell, 0, len(top.engineRows))
+		for _, cells := range top.engineRows {
 			out := make([]EngineCell, 0, len(cells))
 			for i := range cells {
 				c := &cells[i]
@@ -953,19 +990,19 @@ func decodeBatchFast(raw, payload []byte) (res BatchResult, ok bool) {
 			res.EngineRows = append(res.EngineRows, out)
 		}
 	}
-	if partitionCount.seen && !partitionCount.null {
-		n := partitionCount.v
+	if top.partitionCount.seen && !top.partitionCount.null {
+		n := top.partitionCount.v
 		res.PartitionCount = &n
 	}
-	if framing != nil {
+	if top.framing != nil {
 		f := &Framing{}
-		if framing.BomSkipped.seen && !framing.BomSkipped.null {
-			b := framing.BomSkipped.v
+		if top.framing.BomSkipped.seen && !top.framing.BomSkipped.null {
+			b := top.framing.BomSkipped.v
 			f.BomSkipped = &b
 		}
-		f.Container = framing.Container.s
-		if framing.Header.present() {
-			h := &framing.Header.v
+		f.Container = top.framing.Container.s
+		if top.framing.Header.present() {
+			h := &top.framing.Header.v
 			hd := &Header{Consumed: h.Consumed.v, Lines: h.Lines.v}
 			if h.Names.present() {
 				hd.Names = make([]string, 0, len(h.Names.v))
@@ -998,19 +1035,16 @@ func decodeBatchRows(dec *json.Decoder, hint int) (rows []RowResult, present boo
 		return nil, false, errDeclined
 	}
 	rows = make([]RowResult, 0, hint)
-	row := newBatchRowDoc()
+	row := getRowDoc()
 	p := row
-	var spans []Span
+	var slabs rowSlabs
 	for dec.More() {
 		row.reset()
 		p = row
 		if err := dec.Decode(&p); err != nil || p == nil {
 			return nil, false, errDeclined
 		}
-		if row.InputSpan.present() && len(spans) == 0 {
-			spans = make([]Span, 32)
-		}
-		res, ok := row.result(&spans)
+		res, ok := row.result(&slabs)
 		if !ok {
 			return nil, false, errDeclined
 		}
@@ -1019,5 +1053,25 @@ func decodeBatchRows(dec *json.Decoder, hint int) (rows []RowResult, present boo
 	if t, err := dec.Token(); err != nil || t != json.Delim(']') {
 		return nil, false, errDeclined
 	}
+	putRowDoc(row)
 	return rows, true, nil
+}
+
+// rowDocs keeps row documents, each with its sub-decoder and the backing
+// arrays of its lists, between calls, so a call builds none. A document is
+// put back only after a clean pass, emptied; one that met an error is dropped,
+// and nothing a RowResult holds points into one (every value is copied out in
+// result).
+var rowDocs sync.Pool
+
+func getRowDoc() *batchRowDoc {
+	if d, _ := rowDocs.Get().(*batchRowDoc); d != nil {
+		return d
+	}
+	return newBatchRowDoc()
+}
+
+func putRowDoc(d *batchRowDoc) {
+	d.reset()
+	rowDocs.Put(d)
 }

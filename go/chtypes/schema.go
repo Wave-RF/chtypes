@@ -136,10 +136,29 @@ func (s *Schema) Rows(format Format, body []byte, opts ...RowsOption) (BatchResu
 	if cerr != nil {
 		return BatchResult{}, callError(cerr)
 	}
-	raw := s.lib.tbl.Take(docBuf)
+	// The document is read once, here, and nothing the result holds points
+	// into it (decodeBatch copies every value out), so its copy lives in a
+	// pooled buffer. The export payload is returned to the caller, so it is a
+	// copy of its own.
+	bp, _ := docBufs.Get().(*[]byte)
+	if bp == nil {
+		bp = new([]byte)
+	}
+	raw := s.lib.tbl.TakeInto(docBuf, *bp)
 	payload := s.lib.tbl.Take(exportBuf)
-	return decodeBatch(raw, payload)
+	res, err := decodeBatch(raw, payload)
+	if raw != nil && cap(raw) <= docBufMax {
+		*bp = raw[:0]
+	}
+	docBufs.Put(bp)
+	return res, err
 }
+
+// docBufs holds the document buffers of Rows between calls; one larger than
+// docBufMax is left to the collector rather than kept.
+var docBufs sync.Pool
+
+const docBufMax = 1 << 20
 
 // CompileFilter compiles a boolean expression over the schema (chs_filter_create).
 // The filter's zone is its own, fixed here: the session timezone option, or a
