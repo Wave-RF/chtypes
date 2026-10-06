@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "platform": "linux-arm64",
+  "version": "26.2.8.1",
+  "channel": "lts",
+  "build": "20260208.000001",
+  "library": "libchtypes.so",
+  "library_sha256": "63dfa6e7c0fbc5285c5df306970024e694f58f876206e954782c2159f24a2322",
+  "library_bytes": 87,
+  "digests": {
+    "index": null,
+    "manifest": "sha256:635b91b139ed71b001661d9591f2426395ed80f677a69dd0359363f086b037c2",
+    "layer": "sha256:5a4000774a6f96a83d9e3c03fa6e9a94527ef760cbbe20353d83b845817ca9de",
+    "bundle": "sha256:125305cfd4f941e03fbaaaf48db635a6dbc6e4b7757f297e6d7784fc61a61871",
+    "bundle_manifest": "sha256:50241b8cc82e3152dfe1c450d921c075c6dc4604829cfbde1991abbb9ada1bc7"
+  },
+  "signed_by": "6c3468e4ec653ac0",
+  "predicate": {
+    "abi": 1,
+    "abi_fingerprint": "sha256:c4415089873be7cea12b2626f8393db654ce1213803b6ecd6c88c4db52402551",
+    "clickhouse_version": "26.2.8.1",
+    "channel": "lts",
+    "clickhouse_minor": "26.2",
+    "clickhouse_commit": "4c91c325cfda71c10f402e688424782cd9284bb4",
+    "os": "linux",
+    "arch": "arm64",
+    "build": "20260208.000001",
+    "core_commit": "9173fd2251a2e039b6bcf9aa67129276e7741bec",
+    "inputs_sha256": "4d0d0460f421e4a67139735ebfe63326b59fe837ab556e94285be16c5055f886",
+    "library": "libchtypes.so",
+    "library_sha256": "63dfa6e7c0fbc5285c5df306970024e694f58f876206e954782c2159f24a2322",
+    "library_bytes": 87,
+    "glibc_floor": "2.17"
+  }
+}

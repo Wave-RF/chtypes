@@ -325,6 +325,44 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    /// The registry's own MISSING carries the fetch layer's 0.x hint, the same
+    /// sentence the offline fetch gives (public issue #486).
+    #[test]
+    fn a_missing_request_from_a_zero_x_registry_names_it() {
+        let dir = std::env::temp_dir().join(format!(
+            "chtypes_registry_zero_x_{}_{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(dir.join("26.1")).unwrap();
+        std::fs::write(dir.join("26.1").join("manifest.json"), b"{}").unwrap();
+        let r = Registry::new(RegistryOptions {
+            fetch: FetchOptions {
+                platform: Some("linux-amd64".to_string()),
+                cache_dir: Some(dir.to_string_lossy().into_owned()),
+                system_dirs: Some(Vec::new()),
+                ..Default::default()
+            },
+            autofetch: Some(false),
+            ..Default::default()
+        })
+        .unwrap();
+        let err = r.for_version("26.1").unwrap_err();
+        let Error::ArtifactMissing(m) = &err else {
+            panic!("want ArtifactMissing, got {err:?}")
+        };
+        let hint = format!(
+            "{} holds a 0.x registry (26.1/manifest.json); chtypes 1.x uses an OCI layout at",
+            dir.display()
+        );
+        assert!(m.contains(&hint), "{m}");
+        assert!(
+            !dir.join("oci-layout").exists(),
+            "a lookup wrote into the 0.x registry"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn a_library_outside_its_request_is_refused_as_corrupt() {
         let path = Path::new("/cache/unpacked/sha256/x/libchtypes.so");
