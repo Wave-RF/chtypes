@@ -26,9 +26,17 @@
 #      header;
 #   2. cache root: `chtypes where` names <CHTYPES_CACHE>/[CACHE_SUBROOT] (rule
 #      r5 of spec/abi-v2/docs.md), so the CLI is a channel build, not a 1.x one;
-#   3. listing: `chtypes list` names at least one line, and every line it names
+#   3. listing: `chtypes list` names at least one line, every line it names
 #      is a tag that [REGISTRY_BASE] serves, read here independently from that
-#      repository's own tags/list;
+#      repository's own tags/list, AND the listing provably came from that
+#      registry (#523). Tag names alone cannot prove it: staging serves the
+#      same line tags as production, so a 1.x CLI listing production matches
+#      them. No CLI's `list` or `where` names its registry, or a digest, so the
+#      proof is a probe: `chtypes fetch <newest line>` into a throwaway cache,
+#      whose install directory is named by the manifest digest the CLI
+#      verified, must be the platform manifest [REGISTRY_BASE] serves for that
+#      line. The probe runs only after the names matched, and its cache is
+#      discarded; check 4 still fetches into the real one;
 #   4. fetch: `chtypes fetch <newest line>` installs into
 #      <CHTYPES_CACHE>/[CACHE_SUBROOT]/unpacked/sha256/<hex>, and sha256:<hex>
 #      is the platform manifest [REGISTRY_BASE] serves for that line on this
@@ -117,6 +125,13 @@ check_listing() { # <the CLI's published lines> <the registry's tags>: newline-s
   [ -z "$missing" ] || { echo "the CLI listed$missing, which $REGISTRY_BASE does not serve (it serves: $(paste -sd' ' - <<<"${tags:-<no tags>}")): the CLI did not list the channel's registry"; return 1; }
   echo "every line the CLI listed ($(paste -sd' ' - <<<"$cli")) is a tag $REGISTRY_BASE serves"
 }
+check_origin() { # <dir the probe fetch printed> <the registry's manifest digest for that line>
+  local dir="$1" want="$2" hex="${1##*/}"
+  [ "$(basename "$(dirname "$dir")")" = sha256 ] && [[ "$hex" =~ ^[0-9a-f]{64}$ ]] || { echo "the probe fetch installed into '${dir:-<nothing>}', which is not named by a manifest digest, so the listing's origin is unproven"; return 1; }
+  [ -n "$want" ] || { echo "$REGISTRY_BASE serves no manifest for this platform, so the listing's origin cannot be proven"; return 1; }
+  [ "sha256:$hex" = "$want" ] || { echo "the names match, but the CLI's manifest for that line is sha256:$hex and $REGISTRY_BASE serves $want: the listing came from another registry"; return 1; }
+  echo "the CLI's manifest for that line is $want, the one $REGISTRY_BASE serves"
+}
 check_fetch_dir() { # <dir the CLI printed> <cache root> <the registry's manifest digest>
   local dir="$1" root="$2" want="$3" hex
   case "$dir" in
@@ -199,6 +214,15 @@ if [ "${1:-}" = "--selftest" ]; then
   refuses "production's lines against an empty dev repository" "did not list the channel's registry" check_listing $'26.3\n26.9' ""
   refuses "one line the dev repository does not serve" "the CLI listed 26.7" check_listing $'26.9\n26.7' $'26.9\n26.9.8'
   refuses "no line listed" "listed no published line" check_listing "" $'26.9'
+  # 3b. the listing's origin (#523): names that match are not enough
+  prod_names=$'26.3\n26.9'
+  passes "the production-shaped listing's names DO match staging's (why names are not proof)" check_listing "$prod_names" $'26.3\n26.9\n26.9.8'
+  stg="sha256:$(printf 'b%.0s' {1..64})"; prod="sha256:$(printf 'c%.0s' {1..64})"
+  refuses "a production-shaped listing with matching names (the probe lands on production's manifest)" "the listing came from another registry" check_origin "/p/unpacked/sha256/${prod#sha256:}" "$stg"
+  passes "a true staging listing (positive control)" check_origin "/p/v2-dev/unpacked/sha256/${stg#sha256:}" "$stg"
+  refuses "a probe that installed outside a digest directory" "origin is unproven" check_origin /p/unpacked/26.9 "$stg"
+  refuses "a probe with nothing printed" "origin is unproven" check_origin "" "$stg"
+  refuses "no staging manifest for this platform" "listing's origin cannot be proven" check_origin "/p/unpacked/sha256/${stg#sha256:}" ""
   # 4. fetch
   index='{"manifests":[{"digest":"sha256:aaaa","platform":{"os":"darwin","architecture":"arm64"}},{"digest":"sha256:'"$(printf 'b%.0s' {1..64})"'","platform":{"os":"linux","architecture":"amd64"}}]}'
   bdigest="sha256:$(printf 'b%.0s' {1..64})"; cdigest="sha256:$(printf 'c%.0s' {1..64})"
@@ -467,6 +491,16 @@ run_check "2 cache root" check_cache_root "$where_out" "$cache_root"
 # 3
 line=""
 api="$(registry_api "$REGISTRY_BASE")"
+read -r os arch <<<"$(this_platform)"
+# staging_manifest <line>: the platform manifest digest the channel's registry serves for <line>;
+# leaves the HTTP status in $work/manifest.status (a $(...) caller cannot see a variable). Empty when it serves none.
+staging_manifest() {
+  local manifest_status
+  manifest_status="$(curl -sS -A "$RC_UA" --retry 3 --retry-all-errors -o "$work/index.json" -w '%{http_code}' \
+    -H 'Accept: application/vnd.oci.image.index.v1+json' "$api/manifests/$1")" || manifest_status=""
+  printf '%s' "$manifest_status" > "$work/manifest.status"
+  [ "$manifest_status" != 200 ] || manifest_for "$os" "$arch" < "$work/index.json"
+}
 if ! listing="$("$CLI" list 2>"$work/list.err")"; then
   verdict FAIL "3 listing" "'chtypes list' failed: $(paste -sd' ' - < "$work/list.err")"
 elif ! status="$(http_get "$api/tags/list" "$work/tags.json")" || [ "$status" != 200 ]; then
@@ -475,7 +509,22 @@ else
   echo "--- chtypes list ---"; printf '%s\n' "$listing"; echo "--------------------"
   if out="$(check_listing "$(published_lines <<<"$listing")" "$(tags_of < "$work/tags.json")")"; then
     line="$(parse_line <<<"$listing")"
-    if [ -n "$line" ]; then verdict PASS "3 listing" "$out; newest line $line"; else verdict FAIL "3 listing" "$out, but none is a two-part line"; fi
+    if [ -z "$line" ]; then
+      verdict FAIL "3 listing" "$out, but none is a two-part line"
+    else
+      # The origin probe (#523): the names matched, which production's listing would also do.
+      want_manifest="$(staging_manifest "$line")"
+      manifest_status="$(cat "$work/manifest.status")"
+      [ "$manifest_status" = 200 ] || echo "  $api/manifests/$line answered HTTP ${manifest_status:-none}"
+      probe_dir="$(CHTYPES_CACHE="$work/probe-cache" "$CLI" fetch "$line" 2>"$work/probe.err" | tail -n 1)" || probe_dir=""
+      [ ! -s "$work/probe.err" ] || sed 's/^/  probe fetch: /' "$work/probe.err"
+      if origin="$(check_origin "$probe_dir" "$want_manifest")"; then
+        verdict PASS "3 listing" "$out; newest line $line; $origin"
+      else
+        verdict FAIL "3 listing" "$origin"; line=""
+      fi
+      rm -rf "$work/probe-cache"
+    fi
   else
     verdict FAIL "3 listing" "$out"
   fi
@@ -488,12 +537,9 @@ else
   if ! dir="$("$CLI" fetch "$line" | tail -n 1)"; then
     verdict FAIL "4 fetch" "'chtypes fetch $line' failed"
   else
-    read -r os arch <<<"$(this_platform)"
-    status="$(curl -sS -A "$RC_UA" --retry 3 --retry-all-errors -o "$work/index.json" -w '%{http_code}' \
-      -H 'Accept: application/vnd.oci.image.index.v1+json' "$api/manifests/$line")" || status=""
-    manifest=""
-    [ "$status" != 200 ] || manifest="$(manifest_for "$os" "$arch" < "$work/index.json")"
-    [ "$status" = 200 ] || echo "  $api/manifests/$line answered HTTP ${status:-none}"
+    manifest="$(staging_manifest "$line")"
+    manifest_status="$(cat "$work/manifest.status")"
+    [ "$manifest_status" = 200 ] || echo "  $api/manifests/$line answered HTTP ${manifest_status:-none}"
     run_check "4 fetch" check_fetch_dir "$dir" "$cache_root" "$manifest"
   fi
   if [ -n "$dir" ] && [ -d "$dir" ]; then
