@@ -6,6 +6,10 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+### Fixed
+
+- Concurrent installs into one cache could rarely fail (about 1 in 3,000 installs with eight processes on a fresh cache): two processes could draw the same temporary name (#482). In 1.0.x this surfaced as `CHTYPES_SOURCE_UNREACHABLE` (`io error: No such file or directory`), and in 1.1.0 as `CHTYPES_CACHE_UNUSABLE` with reason `unwritable` (`ENOENT`). Temporary names now include the process id and random bytes. Rust named its temporary files and directories under the cache, and the directory a replaced entry is moved aside into, from a clock reading and the thread id, and the main thread has the same id in every process, so two processes that read the clock in the same instant chose the same name: they wrote the same temporary `oci-layout` or `index.json`, or unpacked into one shared temporary directory, and the first to rename it took it from the other. Every such name is now also created exclusively, so a name another process holds is never reused, and a replaced entry is moved into a fresh `.stale-*` directory, as in the other three bindings. Go, Python and TypeScript already drew random names and are unchanged. No name or signature changes.
+
 ## [1.1.0] — 2026-10-06
 
 ### Added
