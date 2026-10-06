@@ -151,7 +151,7 @@ A `CHECK` in the compiled DDL is evaluated, and a violation answers ClickHouse's
 
 The violation's message matches the server's in its code, the constraint's name and the constraint's expression. A real server's message also names its own table (database, table and UUID) and the violating row's column values. This library has no table, so that part of the message differs by design. Match a CHECK violation on the code and the constraint name, never on the whole message text.
 
-> **The CHECK expression itself must return `UInt8`, and a real server passes a row only when that value equals `1` exactly.** Today's library instead admits any non-zero `UInt8` value and any result type, which a real server rejects — a `UInt8` result other than `1` with code 469, a non-`UInt8` result with code 1 — so write `CHECK x = 1`, or another comparison, rather than a bare column. See [`limitations.md` → A CHECK constraint admits any non-zero or non-UInt8 result a real server refuses](../limitations.md#a-check-constraint-admits-any-non-zero-or-non-uint8-result-a-real-server-refuses).
+> **The CHECK expression itself must return `UInt8`, and a real server passes a row only when that value equals `1` exactly.** 1.0 enforces the same rule on every supported line: a `UInt8` result other than `1` rejects the batch with code 469, and a non-`UInt8` result with code 1, as a real server does. Write `CHECK x = 1`, or another comparison, rather than a bare column.
 
 ### Too many partitions: a batch-shape 252
 
