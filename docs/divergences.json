@@ -61,6 +61,12 @@
       "heading": "A Date-valued TTL follows the call's session_timezone; a real server uses its own zone",
       "note": "no machine check is expressible in this register's schema: the case needs a per-call session_timezone and the storage transforms' ttl_expired/ttl_column_expired, neither of which the retired v0 checker could drive. The v1 replacement of the checker must add both before this entry can carry a check. Retirement: on the artifact producer's measured re-run of this differential against the production build that ships the fix, never on CI.",
       "checks": []
+    },
+    {
+      "id": "row-preview-skips-insert-merge-step",
+      "heading": "The row preview skips the engine's insert-time merge step on Collapsing and Replacing-with-`is_deleted` tables",
+      "note": "no machine check is expressible in this register's schema: a check drives one call tree (compile a schema, then a payload through the batch, or a filter through Filter.rows) and asserts that call's own outcome, so it cannot express the differential here, which is the row preview accepting a row that the batch preview refuses with 117. The schema has no field that selects the row preview (chs_preview_row) rather than the batch preview, and no 'expect' that contrasts two calls' outcomes. The v1 replacement of the checker must add both before this entry can carry a check. Retirement: on the artifact producer's measured re-run against the production library build that ships the fix, never on CI.",
+      "checks": []
     }
   ]
 }
