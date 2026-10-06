@@ -125,7 +125,7 @@ For example, with the server and this library both on UTC, `TTL toDate(ts) + 1`,
 
 Those are the rows whose expiry falls between the two zones' midnights. With no per-call `session_timezone`, or one equal to this library's zone, both sides agree.
 
-**Measured**: by the artifact producer, against the production 1.0 build `20261004.052404` and live servers on `26.3.38.2`, `26.7.19.5`, `26.8.15.10` and `26.9.8.3` (linux-amd64). The direction measured is this library dropping what the server keeps; the reverse is being measured. A library fix is in progress; this entry is removed on the 1.0.x release that ships it.
+**Measured**: by the artifact producer, against the production 1.0 build `20261004.052404` and live servers on `26.3.38.2`, `26.7.19.5`, `26.8.15.10` and `26.9.8.3` (linux-amd64). The direction measured is this library dropping what the server keeps; the reverse is being measured. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run of this differential against the production build that ships the fix, showing both sides agree. It does not retire on a CI result.
 
 Until then, for a table with a Date-valued TTL, either do not pass a per-call `session_timezone` that differs from this library's zone, or do not rely on `ttl_expired` and `ttl_column_expired` from such a call.
 
