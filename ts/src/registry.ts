@@ -37,7 +37,7 @@ import {
 } from './ocifetch/index.js';
 import { ENV_AUTOFETCH_NAME, SPELLING_REGEX } from './ocifetch/constants.gen.js';
 import { withEnvironment } from './env.js';
-import { commitSetup } from './setup.js';
+import { commitSetup, settleSetup } from './setup.js';
 
 /** The fetch layer's options (bases, cache directory, system directories, trusted keys, token, allow-unsigned, offline, frozen, lock path, ...) without its test-only hooks. */
 export type FetchOptions = Omit<FetchV1Options, 'beforeIndexRename' | 'httpLog' | 'clock'>;
@@ -141,6 +141,7 @@ export class Registry {
       platform: resolved.platform,
       timezone: setup.timezone,
       defaults: setup.defaults,
+      settle: settleSetup,
     });
     return libraryOf(image, resolved);
   }

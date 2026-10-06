@@ -153,3 +153,28 @@ def test_open_unverified_needs_both_opt_ins_and_has_no_resolved(stub_copy, monke
         lib = open_unverified(path, allow=True)
     assert lib.resolved is None
     _setup._reset_for_tests()
+
+
+def test_a_defaults_failure_at_step_7_clears_the_record_too(
+    stub_copy, monkeypatch, clean_process
+) -> None:
+    # The shared setup case (test_public_setup_cases.py) covers a zone the
+    # library refuses; the stub cannot refuse a default, so this forces the
+    # chs_set_defaults half of step 7 to fail. The rule is the same: no image
+    # has completed step 7, so the record is cleared and a corrected setup is
+    # accepted, and the open that follows runs step 7 again under it.
+    path, predicate = stub_copy()
+
+    def refuse(self, d):
+        raise SchemaError(1, 115, "UNKNOWN_SETTING", b"Unknown setting no_such_setting")
+
+    monkeypatch.setattr(_decls.Api, "set_defaults", refuse)
+    setup(timezone="Asia/Tokyo", defaults={"no_such_setting": "1"})
+    with pytest.raises(SchemaError) as info:
+        library.open_image(path, predicate, None)
+    assert info.value.ch_code == 115
+    setup(timezone="Asia/Tokyo")  # the corrected setup: no longer refused
+    first = library.open_image(path, predicate, None)
+    with pytest.raises(UsageError):
+        setup(timezone="Asia/Tokyo", defaults={"no_such_setting": "1"})  # now latched
+    assert library.open_image(path, predicate, None) is first
