@@ -13,7 +13,7 @@
 //! WHY THIS FILE RE-DECLARES THE CRATE'S MODULES WITH `#[path]`. An integration
 //! test is a separate crate that sees only public items, and the generated
 //! call layer, the loader, the fetch layer and the document decoders are
-//! deliberately private (`rust/tests/abi1_conformance.rs` explains the same
+//! deliberately private (`rust/tests/abi2_conformance.rs` explains the same
 //! constraint). The files are compiled twice, from identical source. The
 //! decoders are the very functions `Schema::row`, `Schema::rows`,
 //! `Filter::rows` and `Schema::describe` hand each document to, so
@@ -32,10 +32,15 @@
 //! `CHTYPES_GOLDENS_REPORT` and `CHTYPES_GOLDENS_DOCUMENT`. Unset, the runner
 //! skips LOUDLY by name and exits 0, so a plain `cargo test` stays green.
 //!
+//! THE DEV CHANNEL. This is the 2.0.0-dev binding (ABI v2): against a registry
+//! it fetches only from the staging dev channel under the staging key, and a
+//! build with no goldens referrer is a skip by name ("no v2-dev goldens
+//! published yet"), never a pass (`fetch_inputs`).
+//!
 //! PROVING IT BEFORE A REAL ARTIFACT EXISTS (the stub). Two overrides bypass the
 //! fetch: `CHTYPES_GOLDENS_LIBRARY` (a library to load, unverified) with
 //! `CHTYPES_GOLDENS_DOCUMENT_IN` (a goldens document to execute). With only
-//! `CHTYPES_ABI1_STUBS` set (the `v1-abi-conformance` leg's environment), the
+//! `CHTYPES_ABI2_STUBS` set (the `v1-abi-conformance` leg's environment), the
 //! runner runs `rust/tests/goldens_v1_stub/goldens.json` against that
 //! directory's `ok` stub, hands the report to the comparator, which must pass,
 //! and then plants one wrong byte in the report, which the comparator must
@@ -47,9 +52,9 @@
 // The included files' own `#[cfg(test)]` modules are compiled here too (cargo
 // builds this target with cfg(test)), and with no libtest harness their imports
 // are unused; hence `unused_imports` on each.
-#[path = "../src/abi1/mod.rs"]
+#[path = "../src/abi2/mod.rs"]
 #[allow(unused_imports)]
-mod abi1;
+mod abi2;
 #[path = "../src/decode.rs"]
 #[allow(dead_code, unused_imports)]
 mod decode;
@@ -74,9 +79,9 @@ use base64::Engine as _;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
-use abi1::calls_gen::{RawCallError, SchemaHandle};
-use abi1::decls::{self, Api};
-use abi1::loader::{self, LoadError, LoadInput};
+use abi2::calls_gen::{RawCallError, SchemaHandle};
+use abi2::decls::{self, Api};
+use abi2::loader::{self, LoadError, LoadInput};
 use ocifetch::ensure::{self, Options};
 
 const ENV_REGISTRY_BASE: &str = "CHTYPES_GOLDENS_REGISTRY_BASE";
@@ -86,7 +91,7 @@ const ENV_REPORT: &str = "CHTYPES_GOLDENS_REPORT";
 const ENV_DOCUMENT: &str = "CHTYPES_GOLDENS_DOCUMENT";
 const ENV_LIBRARY: &str = "CHTYPES_GOLDENS_LIBRARY";
 const ENV_DOCUMENT_IN: &str = "CHTYPES_GOLDENS_DOCUMENT_IN";
-const ENV_STUBS: &str = "CHTYPES_ABI1_STUBS";
+const ENV_STUBS: &str = "CHTYPES_ABI2_STUBS";
 // Child mode: the setup id to run, and where the parent put what the child needs.
 const ENV_CHILD: &str = "CHTYPES_GOLDENS_CHILD";
 const ENV_CHILD_LIBRARY: &str = "CHTYPES_GOLDENS_CHILD_LIBRARY";
@@ -151,7 +156,9 @@ fn parent() -> Result<(), String> {
         && std::env::var(ENV_DOCUMENT_IN).is_ok_and(|v| !v.is_empty());
     let stubs = std::env::var(ENV_STUBS).is_ok_and(|v| !v.is_empty());
     if real {
-        let inputs = fetch_inputs()?;
+        let Some(inputs) = fetch_inputs()? else {
+            return Ok(());
+        };
         let report = run(&inputs)?;
         return write_outputs(&inputs.document, &report);
     }
@@ -196,7 +203,14 @@ fn host_platform_key() -> String {
 /// The fetch layer's `ensure` for the release, then `fetch_signed` for the
 /// goldens, which takes the PLATFORM manifest digest and does the referrer
 /// selection itself: this runner does no lookup of its own.
-fn fetch_inputs() -> Result<Inputs, String> {
+///
+/// This 2.0.0-dev binding fetches exactly as a user's build does: the ABI v2
+/// dev channel, its staging base and its staging key only, whatever base
+/// `CHTYPES_GOLDENS_REGISTRY_BASE` names (spec/abi-v2/docs.md, rule r6; the
+/// fetch layer warns once that it ignores it). A published build with no
+/// goldens referrer (the first v2-dev builds ship none) is a skip BY NAME,
+/// never a pass: `Ok(None)`, and the workflow reads the line.
+fn fetch_inputs() -> Result<Option<Inputs>, String> {
     let base = std::env::var(ENV_REGISTRY_BASE).map_err(|e| e.to_string())?;
     let version = std::env::var(ENV_VERSION).map_err(|e| e.to_string())?;
     let platform = std::env::var(ENV_PLATFORM).map_err(|e| e.to_string())?;
@@ -207,24 +221,37 @@ fn fetch_inputs() -> Result<Inputs, String> {
     };
     let resolved = ensure::ensure(&version, options())
         .map_err(|e| format!("ensure {version} for {platform}: {e}"))?;
-    let (document, _predicate, _digests) = ensure::fetch_signed(
-        std::slice::from_ref(&base),
+    let fetched = ensure::fetch_signed(
+        &ensure::configured_bases(&options()),
         &resolved.digests.manifest,
         ocifetch::constants::PREDICATE_TYPE_GOLDENS,
         &mut options(),
-    )
-    .map_err(|e| {
-        format!(
-            "fetch_signed goldens for {}: {e}",
-            resolved.digests.manifest
-        )
-    })?;
-    Ok(Inputs {
+    );
+    let (document, _predicate, _digests) = match fetched {
+        Err(ocifetch::error::Error::ArtifactUnpublished(e))
+            if ocifetch::channel::active().name == "v2-dev" =>
+        {
+            announce(&format!(
+                "goldens_v1_runner: SKIPPED: no v2-dev goldens published yet: {version} {platform} ({}) has no goldens \
+                 referrer on {}; the goldens did not run ({e})",
+                resolved.digests.manifest,
+                ocifetch::channel::DEV_CHANNEL_BASE
+            ));
+            return Ok(None);
+        }
+        other => other.map_err(|e| {
+            format!(
+                "fetch_signed goldens for {}: {e}",
+                resolved.digests.manifest
+            )
+        })?,
+    };
+    Ok(Some(Inputs {
         library: resolved.library_path.clone(),
         predicate: Some(resolved.predicate.clone()),
         document,
         platform,
-    })
+    }))
 }
 
 /// `linux-amd64` to the report's `linux/amd64`.
@@ -601,8 +628,33 @@ fn stub_selftest() -> Result<(), String> {
     let ok = manifest["variants"]["ok"]["path"]
         .as_str()
         .ok_or("stubs.json names no `ok` variant")?;
-    let document_path =
+    let source_path =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/goldens_v1_stub/goldens.json");
+    let scratch = std::env::temp_dir().join(format!("goldens_v1_stub_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::create_dir_all(&scratch).map_err(|e| e.to_string())?;
+    // The hand-written document names the stub's identity as the stubs' own
+    // manifest gives it (stubs.json, rendered from the description the stub is
+    // built from), so an UNSTABLE description's moving fingerprint never needs
+    // a hand edit here; the comparator then checks it against the identity the
+    // loaded stub reports.
+    let document_path = scratch.join("goldens-stub.json");
+    let mut document: Value = serde_json::from_slice(
+        &std::fs::read(&source_path).map_err(|e| format!("{}: {e}", source_path.display()))?,
+    )
+    .map_err(|e| format!("{} is not JSON: {e}", source_path.display()))?;
+    let ok_predicate = &manifest["variants"]["ok"]["predicate"];
+    for field in ["abi", "abi_fingerprint"] {
+        if ok_predicate[field].is_null() {
+            return Err(format!("stubs.json's ok predicate names no {field}"));
+        }
+        document[field] = ok_predicate[field].clone();
+    }
+    std::fs::write(
+        &document_path,
+        serde_json::to_vec_pretty(&document).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
     let inputs = Inputs {
         library: stubs_dir.join(ok),
         predicate: None,
@@ -612,9 +664,6 @@ fn stub_selftest() -> Result<(), String> {
     };
     let report = run(&inputs)?;
 
-    let scratch = std::env::temp_dir().join(format!("goldens_v1_stub_{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&scratch);
-    std::fs::create_dir_all(&scratch).map_err(|e| e.to_string())?;
     let report_path = scratch.join("report.json");
     std::fs::write(
         &report_path,

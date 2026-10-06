@@ -1,11 +1,20 @@
 //! `chtypes`: the command line over the v1 fetch layer
 //! (`docs/guides/fetch-v1.md`), spelled identically in every SDK.
 //!
+//! 2.0.0-dev: UNSTABLE, staging only, not for production. This CLI speaks the
+//! ABI v2 dev channel (`spec/abi-v2/docs.md`, rules r5 and r6): it fetches only
+//! from `https://registry-staging.wavehouse.dev/chtypes/v2-dev` and trusts only
+//! the staging key; `CHTYPES_ARTIFACTS_URL`, `CHTYPES_TRUSTED_KEYS` and
+//! `CHTYPES_ALLOW_UNSIGNED` are ignored, each with one warning; `--lock`,
+//! `--frozen` and `--update` are refused before any network call; its default
+//! cache is `${XDG_CACHE_HOME:-~/.cache}/chtypes/v2-dev`, and `--cache DIR` (or
+//! `CHTYPES_CACHE`) is used through its subroot `DIR/v2-dev`.
+//!
 //! ```text
 //! chtypes fetch <spelling>... | --all  [--platform <key>] [--cache <dir>] [--lock <file>] [--frozen] [--offline] [--update] [--strict]
 //! chtypes verify [--cache <dir>] [--strict]       re-verify the installed cache
 //! chtypes list [--cache <dir>] [--offline] [--strict]   installed builds, and the published lines unless --offline
-//! chtypes where [--cache <dir>] [--strict]        the v1 cache root
+//! chtypes where [--cache <dir>] [--strict]        the cache root (the v2-dev one)
 //! ```
 //!
 //! Progress and warnings go to stderr; results go to stdout. Exit statuses
@@ -36,7 +45,7 @@ chtypes: fetch, verify and list ClickHouse artifacts for the chtypes SDKs
   chtypes fetch --all         [--platform <os-arch>] [--cache <dir>] [--lock <file>] [--frozen] [--offline] [--update] [--strict]
   chtypes verify [--cache <dir>] [--strict]            re-verify the installed cache
   chtypes list [--cache <dir>] [--offline] [--strict]  installed builds; without --offline, published lines too
-  chtypes where [--cache <dir>] [--strict]             the v1 cache root
+  chtypes where [--cache <dir>] [--strict]             the cache root (<dir>/v2-dev)
   chtypes --version                         chtypes <version>
   chtypes -h | --help                       this text
 
@@ -49,9 +58,13 @@ rewrites the lock (it requires --lock). `fetch` prints each installed directory.
 --strict (or CHTYPES_CACHE_STRICT=1): a cache that cannot be read is
 CHTYPES_CACHE_UNUSABLE, never not-installed.
 
-Environment: CHTYPES_ARTIFACTS_URL (the only base override), CHTYPES_CACHE,
-CHTYPES_DOWNLOAD_TOKEN, CHTYPES_TRUSTED_KEYS, CHTYPES_ALLOW_UNSIGNED,
-CHTYPES_CACHE_STRICT.
+Environment: CHTYPES_CACHE (this 2.0.0-dev SDK uses its subroot
+<CHTYPES_CACHE>/v2-dev), CHTYPES_DOWNLOAD_TOKEN, CHTYPES_CACHE_STRICT.
+
+2.0.0-dev: UNSTABLE, staging only, not for production. Fetches only from the
+staging dev channel and trusts only its key; --lock, --frozen and --update are
+refused; CHTYPES_ARTIFACTS_URL, CHTYPES_TRUSTED_KEYS and CHTYPES_ALLOW_UNSIGNED
+are ignored (spec/abi-v2/docs.md, rule r6).
 ";
 
 /// A usage problem, reported on stderr with exit status 2.
@@ -226,6 +239,11 @@ fn cmd_fetch(args: &Args) -> Result<u8, Usage> {
         return Err(Usage(
             "--frozen fetches what the lock pins; --update rewrites it: pass one".into(),
         ));
+    }
+    // A dev SDK pins nothing: the refusal comes before anything else, the
+    // network above all (spec/abi-v2/docs.md, rule r6).
+    if let Some(refusal) = ocifetch::channel::refuse_pinning(&options(args)) {
+        return Err(Usage(refusal));
     }
     // Every spelling is checked before the first fetch: a typo in the third
     // argument must not cost the first two downloads.

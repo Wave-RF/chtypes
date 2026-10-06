@@ -77,11 +77,12 @@ name = "goldens_v1_runner"
 path = "tests/goldens_v1_runner.rs"
 harness = false
 
-# The ABI v1 conformance suite re-declares src/abi1's module tree with
-# #[path] (rust/src/abi1/mod.rs explains why) and needs the abi-v1 feature's
-# generated layer and loader to exist at all.
+# The ABI conformance suite re-declares the generated layer's module tree
+# (src/abi2 at ABI v2, the major spec/binding-majors.json gives rust) with
+# #[path] (rust/src/abi2/mod.rs explains why). The `abi-v1` feature is a
+# retained name gating nothing, which CI commands still spell.
 [[test]]
-name = "abi1_conformance"
+name = "abi2_conformance"
 required-features = ["abi-v1"]
 
 [dev-dependencies]

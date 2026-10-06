@@ -1,4 +1,4 @@
-//! The v1 public API, end to end over the stub libraries
+//! The public API (the v1 shape, at ABI v2), end to end over the ABI v2 stub libraries
 //! (`scripts/abi-v1/build-stubs.sh`): the objects, their lifetimes, the error
 //! classes, the loader refusals, and the zero-live-handles proof.
 //!
@@ -8,7 +8,7 @@
 //! behavior. Document decoding is proved by the decoder's own unit tests over
 //! documents of the described shape.
 //!
-//! `CHTYPES_ABI1_STUBS` unset: this suite skips LOUDLY by name and passes,
+//! `CHTYPES_ABI2_STUBS` unset: this suite skips LOUDLY by name and passes,
 //! the same discipline every v1 conformance runner follows.
 //!
 //! One test function, deliberately: `setup` is process-wide, and the order of
@@ -25,7 +25,7 @@ use chtypes::{
 };
 use serde_json::Value;
 
-const ENV_STUBS: &str = "CHTYPES_ABI1_STUBS";
+const ENV_STUBS: &str = "CHTYPES_ABI2_STUBS";
 const ENV_UNVERIFIED: &str = "CHTYPES_ALLOW_UNVERIFIED_LIBRARY";
 
 fn stubs() -> Option<(PathBuf, serde_json::Map<String, Value>)> {
@@ -135,7 +135,8 @@ fn the_public_api_over_the_stub() {
 
     // --- what the library is --------------------------------------------------
     let info = lib.build_info();
-    assert_eq!(info.abi, 1);
+    // This binding speaks ABI v2 (spec/binding-majors.json), and so do the stubs it loads.
+    assert_eq!(info.abi, 2);
     assert!(info.abi_fingerprint.starts_with("sha256:"));
     assert_eq!(lib.version(), info.clickhouse_version);
     assert_eq!(lib.minor(), info.clickhouse_minor);
@@ -190,9 +191,11 @@ fn the_public_api_over_the_stub() {
     let row = schema
         .row(Format::JsonEachRow, br#"{"x":1}"#, &RowOptions::default())
         .expect("row decodes the document");
-    // The stub's document names no outcome: an unknown outcome reads as the
-    // description's fallback, never as an acceptance.
-    assert_eq!(row.outcome, chtypes::Outcome::Unsupported);
+    // The stub's document names no outcome: the empty spelling is not one the
+    // description lists, so it is the vocabulary's `Unknown` (rule r3), never
+    // an acceptance.
+    assert_eq!(row.outcome, chtypes::Outcome::Unknown(String::new()));
+    assert!(!row.outcome.is_known());
     let filter = schema
         .compile_filter("x = 1", &FilterOptions::default())
         .unwrap();
@@ -214,7 +217,7 @@ fn the_public_api_over_the_stub() {
             },
         )
         .expect("rows with a filter and an export");
-    assert_eq!(batch.outcome, chtypes::Outcome::Unsupported);
+    assert_eq!(batch.outcome, chtypes::Outcome::Unknown(String::new()));
 
     // The per-call zone: written into the settings, and never twice.
     let both = schema

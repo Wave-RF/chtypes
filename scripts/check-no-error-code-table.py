@@ -116,6 +116,8 @@ from gen import is_generated, produced_by_major, produced_outputs  # noqa: E402
 # The Go layer's directory at the major spec/binding-majors.json gives go
 # (go/internal/abi2 on the `v2` branch; scripts/abi-v1/majors.py).
 GO_LAYER = bmajors.layer_dir("go", bmajors.load().by_binding["go"])
+# The Rust layer's, likewise (rust/src/abi2 once rust speaks ABI v2).
+RUST_LAYER = bmajors.layer_dir("rust", bmajors.load().by_binding["rust"])
 
 # --------------------------------------------------------------- what is scanned
 
@@ -140,7 +142,7 @@ DECL_SOURCES = (
     ("go-linked", f"{GO_LAYER}/linked_gen.go", r"&{sym}\s*;"),
     ("python", "python/src/chtypes/_abi1/_decls.py", r'_add\(\s*"{sym}"'),
     ("ts", "ts/src/abi1/decls.gen.ts", r'"{sym}"\s*:\s*\{{'),
-    ("rust", "rust/src/abi1/decls.rs", r'concat!\(\s*"{sym}"'),
+    ("rust", f"{RUST_LAYER}/decls.rs", r'concat!\(\s*"{sym}"'),
 )
 DECL_SYMBOLS = ("chs_error_codes",)
 
@@ -484,7 +486,7 @@ def check(root: str, produced: dict[int, frozenset[str]] | None = None) -> tuple
         f"{GO_LAYER}/loader.go",
         "python/src/chtypes/_abi1/_loader.py",
         "ts/src/abi1/loader.ts",
-        "rust/src/abi1/loader.rs",
+        f"{RUST_LAYER}/loader.rs",
     )
     for anchor in anchors:
         if anchor not in files:
@@ -654,10 +656,10 @@ PLANTS = (
     ),
     (
         "rust declaration dropped",
-        "rust/src/abi1/decls.rs",
+        f"{RUST_LAYER}/decls.rs",
         'concat!("chs_error_codes", "\\0")',
         'concat!("chs_absent_symbol", "\\0")',
-        "rust: rust/src/abi1/decls.rs does not declare chs_error_codes",
+        f"rust: {RUST_LAYER}/decls.rs does not declare chs_error_codes",
     ),
     (
         "generated banner stripped from a would-be-generated file",

@@ -4,8 +4,11 @@
 //! * **Stock JSON only.** Every document is read by `serde_json`; the library
 //!   guarantees RFC 8259 documents (no bare `inf`/`nan`, integers beyond 2^53
 //!   as strings, names that are not UTF-8 in their `_b64` form).
-//! * **Absent is the default; unknown keys are ignored**, so the library can
-//!   add a field without breaking this crate.
+//! * **Absent is the default; unknown keys are ignored** at every object level
+//!   (ABI v2 rule r2), so the library can add a field without breaking this
+//!   crate.
+//! * **An unlisted vocabulary value is its `Unknown`** (rule r3): kept for that
+//!   field alone, it never fails the document, the row or the batch.
 //! * **A duplicate key, or a value of the wrong JSON type, is an
 //!   [`Error::Internal`]** naming the document and the key.
 //! * **Nothing is computed.** A vocabulary fact is read from the generated
@@ -22,8 +25,8 @@ use base64::Engine as _;
 use serde::de::{Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde_json::{Map, Value as Json};
 
-use crate::abi1::vocab_gen::{
-    BYTES_SUFFIX, DefaultKind, FilterOutcome, Outcome, VALUE_BYTES, Verdict, reason, source,
+use crate::abi2::vocab_gen::{
+    BYTES_SUFFIX, DefaultKind, FilterOutcome, Outcome, Reason, Source, VALUE_BYTES, Verdict,
 };
 use crate::error::{Error, Result};
 use crate::raw::RawText;
@@ -361,15 +364,14 @@ fn spans(o: &Obj<'_>, key: &str) -> Result<Vec<Span>> {
 // --------------------------------------------------------------------- rows
 
 fn value_of(o: &Obj<'_>) -> Result<Value> {
-    let source = o.string("src")?;
-    // A source the description does not list has no `is_stored` fact to read:
-    // the vocabulary has no fallback, so it is the library's bug.
-    let is_stored = source::is_stored(&source).ok_or_else(|| {
-        Error::internal(format!(
-            "the {} document: {} carries the source {source:?}, which the description does not list",
-            o.doc, o.at
-        ))
-    })?;
+    // An unlisted src is its `Unknown` (rule r3): kept, never a failure, and not
+    // stored until the description says otherwise. An ABSENT src is no value at
+    // all, and stays a malformed entry.
+    if o.get("src").is_none() {
+        return Err(o.fail("src", "present"));
+    }
+    let source = Source::from_wire(&o.string("src")?);
+    let is_stored = source.is_stored();
     Ok(Value {
         column: o.name("name")?,
         text: o.bytes("stored")?,
@@ -381,13 +383,15 @@ fn value_of(o: &Obj<'_>) -> Result<Value> {
 }
 
 fn transform_of(o: &Obj<'_>) -> Result<Transform> {
-    let reason_word = o.string("reason")?;
+    // An unlisted reason is its `Unknown` (rule r3), and reports the fallback's
+    // `lossy` fact.
+    let reason = Reason::from_wire(&o.string("reason")?);
     Ok(Transform {
         column: o.bytes("column")?,
         input: o.bytes("input")?,
         stored: o.bytes("stored")?,
-        lossy: reason::is_lossy(&reason_word),
-        reason: reason_word,
+        lossy: reason.lossy(),
+        reason,
         row: o.uint64("row")?,
     })
 }
@@ -578,12 +582,8 @@ pub(crate) fn schema_description(bytes: &[u8]) -> Result<SchemaDescription> {
     let mut columns = Vec::new();
     for (i, v) in o.array("columns")?.iter().enumerate() {
         let c = Obj::of("schema_description", format!("columns[{i}]"), v)?;
-        let kind = c.string("default_kind")?;
-        let default_kind = DefaultKind::from_wire(&kind).ok_or_else(|| {
-            Error::internal(format!(
-                "the schema_description document: columns[{i}] carries the default_kind {kind:?}, which the description does not list"
-            ))
-        })?;
+        // An unlisted default_kind is its `Unknown` (rule r3): kept, never a failure.
+        let default_kind = DefaultKind::from_wire(&c.string("default_kind")?);
         columns.push(Column {
             name: c.name("name")?,
             r#type: c.bytes("type")?,
@@ -692,7 +692,7 @@ pub(crate) fn build_info(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::abi1::vocab_gen::{DefaultKind, FilterOutcome, Outcome, Verdict};
+    use crate::abi2::vocab_gen::{DefaultKind, FilterOutcome, Outcome, Reason, Source, Verdict};
 
     fn internal(e: Error) -> String {
         match e {
@@ -777,22 +777,41 @@ mod tests {
         assert!(r.columns[2].is_stored && !r.columns[1].is_stored);
     }
 
+    /// Rule r3: an unlisted source is its `Unknown`, for that column alone, not
+    /// stored, and the row decodes on; an absent one is still malformed.
     #[test]
-    fn an_unlisted_source_is_internal_because_no_fact_can_be_read() {
-        let msg = internal(
-            row(br#"{"outcome":"accepted","cols":[{"name":"a","null":false,"src":"from_the_future"}]}"#)
-                .unwrap_err(),
+    fn an_unlisted_source_is_its_unknown_and_the_row_decodes_on() {
+        let r = row(br#"{"outcome":"accepted","cols":[
+                {"name":"a","null":false,"src":"from_the_future","stored":"1"},
+                {"name":"b","null":false,"src":"input","stored":"2"}]}"#)
+        .unwrap();
+        assert_eq!(
+            r.columns[0].source,
+            Source::Unknown("from_the_future".into())
         );
-        assert!(msg.contains("from_the_future"), "{msg}");
+        assert!(!r.columns[0].source.is_known() && !r.columns[0].is_stored);
+        assert_eq!(r.columns[0].text.as_bytes(), b"1");
+        assert_eq!(r.columns[1].source, Source::Input);
+        assert_eq!(r.values.len(), 1);
+        let msg = internal(
+            row(br#"{"outcome":"accepted","cols":[{"name":"a","null":false}]}"#).unwrap_err(),
+        );
+        assert!(msg.contains("src"), "{msg}");
     }
 
+    /// Rules r2 and r3: an unknown member is ignored, and an unlisted outcome or
+    /// verdict is its `Unknown`, never accepted and never an answer.
     #[test]
-    fn an_unknown_outcome_reads_as_the_fallback_and_unknown_keys_are_ignored() {
+    fn an_unknown_outcome_is_its_unknown_and_unknown_keys_are_ignored() {
         let r =
             row(br#"{"outcome":"verdict_from_the_future","brand_new_key":{"x":[1,2]}}"#).unwrap();
-        assert_eq!(r.outcome, Outcome::Unsupported);
+        assert_eq!(
+            r.outcome,
+            Outcome::Unknown("verdict_from_the_future".into())
+        );
+        assert!(!r.outcome.is_known() && r.outcome != Outcome::Accepted);
         let f = filter_result(br#"{"outcome":"nope","verdicts":"tfedz"}"#).unwrap();
-        assert_eq!(f.outcome, FilterOutcome::Unsupported);
+        assert_eq!(f.outcome, FilterOutcome::Unknown("nope".into()));
         assert_eq!(
             f.verdicts,
             vec![
@@ -800,10 +819,11 @@ mod tests {
                 Verdict::False,
                 Verdict::Error,
                 Verdict::Decline,
-                Verdict::Decline
+                Verdict::Unknown("z".into())
             ]
         );
         assert!(f.verdicts[2..].iter().all(|v| !v.answered()));
+        assert_eq!(f.verdicts[4].as_char(), 'z');
     }
 
     #[test]
@@ -816,9 +836,14 @@ mod tests {
         assert!(r.transformed[0].lossy);
         assert_eq!(r.transformed[0].row, 3);
         assert!(!r.transformed[1].lossy);
-        // A reason the description does not list keeps its spelling and takes
-        // the fallback's fact (value_changed: lossy).
-        assert_eq!(r.transformed[2].reason, "some_new_reason");
+        // A reason the description does not list is its `Unknown`, keeps its
+        // spelling and takes the fallback's fact (value_changed: lossy).
+        assert_eq!(r.transformed[0].reason, Reason::OverflowWrap);
+        assert_eq!(
+            r.transformed[2].reason,
+            Reason::Unknown("some_new_reason".into())
+        );
+        assert_eq!(r.transformed[2].reason.as_str(), "some_new_reason");
         assert!(r.transformed[2].lossy);
     }
 
@@ -892,11 +917,18 @@ mod tests {
         assert_eq!(d.columns[1].default_kind, DefaultKind::Materialized);
         assert_eq!(d.columns[1].default_expr.as_bytes(), b"now()");
         assert_eq!(d.columns[2].name.as_bytes(), &[0x00, 0xff]);
-        let msg = internal(
-            schema_description(br#"{"columns":[{"name":"a","type":"X","default_kind":"MAYBE"}]}"#)
-                .unwrap_err(),
+        // Rule r3: an unlisted kind is its `Unknown`, and the column decodes on.
+        let d = schema_description(
+            br#"{"columns":[{"name":"a","type":"X","default_kind":"MAYBE"},{"name":"b","type":"Y"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            d.columns[0].default_kind,
+            DefaultKind::Unknown("MAYBE".into())
         );
-        assert!(msg.contains("MAYBE"), "{msg}");
+        assert!(!d.columns[0].default_kind.is_known());
+        assert_eq!(d.columns[0].r#type.as_bytes(), b"X");
+        assert_eq!(d.columns[1].default_kind, DefaultKind::None);
     }
 
     #[test]

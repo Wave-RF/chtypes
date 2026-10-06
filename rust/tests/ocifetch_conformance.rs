@@ -168,6 +168,20 @@ const RUNNER_TRANSPORTS: &[&str] = &["file", "http", "registry"];
 
 #[test]
 fn conformance() {
+    // The fetch-v1 cases specify the v1 contract, and this test speaks it: the
+    // ABI v2 dev channel this 2.0.0-dev binding ships narrows it (rules r5 and
+    // r6), and its own rules are tests/devchannel.rs. The seam is test-only and
+    // per thread; every case runs on this one.
+    let _v1 = ocifetch::channel::use_fetch_v1_for_tests();
+    eprintln!(
+        "fetch contract: {} (the fetch-v1 cases' own; the dev channel this binding ships is tested by tests/devchannel.rs)",
+        ocifetch::channel::active().name
+    );
+    assert_eq!(
+        ocifetch::channel::active().name,
+        "v1",
+        "the fetch-v1 conformance cases must run under the v1 contract"
+    );
     let Ok(fixtures_env) = std::env::var(ENV_FIXTURES) else {
         eprintln!(
             "SKIP: {ENV_FIXTURES} is not set — the v1 conformance suite needs \

@@ -40,7 +40,7 @@ impl Lock {
     pub fn new() -> Self {
         Lock {
             schema: constants::LOCK_SCHEMA,
-            abi: constants::ABI_GENERATION,
+            abi: super::channel::active().abi,
             platforms: Vec::new(),
             requests: Requests::new(),
         }
@@ -90,12 +90,12 @@ pub fn read(path: &Path) -> Result<Option<Lock>> {
     }
     let lock: Lock = serde_json::from_value(value)
         .map_err(|e| Error::ArtifactCorrupt(format!("{}: {e}", path.display())))?;
-    if lock.abi != constants::ABI_GENERATION {
+    let abi = super::channel::active().abi;
+    if lock.abi != abi {
         return Err(Error::ArtifactPinned(format!(
-            "{} pins ABI generation {}, this build speaks {} — re-lock with `update`",
+            "{} pins ABI generation {}, this build speaks {abi} — re-lock with `update`",
             path.display(),
             lock.abi,
-            constants::ABI_GENERATION
         )));
     }
     Ok(Some(lock))

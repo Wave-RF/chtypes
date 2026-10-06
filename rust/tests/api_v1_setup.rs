@@ -3,14 +3,14 @@
 //! loader step-7 failure (`chs_initialize`) is the call's own error mapped by
 //! the status table, never a loader refusal.
 //!
-//! `CHTYPES_ABI1_STUBS` unset: this suite skips LOUDLY by name and passes.
+//! `CHTYPES_ABI2_STUBS` unset: this suite skips LOUDLY by name and passes.
 
 use std::path::PathBuf;
 
 use chtypes::{Error, Library, SetupOptions, status};
 use serde_json::Value;
 
-const ENV_STUBS: &str = "CHTYPES_ABI1_STUBS";
+const ENV_STUBS: &str = "CHTYPES_ABI2_STUBS";
 const ENV_UNVERIFIED: &str = "CHTYPES_ALLOW_UNVERIFIED_LIBRARY";
 
 #[test]

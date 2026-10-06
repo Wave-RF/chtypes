@@ -1,14 +1,15 @@
-//! The Rust leg of `v1-abi-conformance`: every case in
-//! `tests/fixtures/abi-v1/cases.json`, run against the stub libraries
+//! The Rust leg of `v1-abi-conformance` at ABI v2 (the major
+//! spec/binding-majors.json gives rust): every case in
+//! `tests/fixtures/abi-v2/cases.json`, run against the stub libraries
 //! `scripts/abi-v1/build-stubs.sh` built, through this binding's generated
 //! invoke-by-name dispatcher and hand-written loader.
 //!
-//! WHY THIS FILE RE-DECLARES `rust/src/abi1`'s MODULES WITH `#[path]`.
-//! `rust/src/lib.rs` declares `abi1` as `mod abi1;` (not `pub`): it is not
+//! WHY THIS FILE RE-DECLARES `rust/src/abi2`'s MODULES WITH `#[path]`.
+//! `rust/src/lib.rs` declares `abi2` as `mod abi2;` (not `pub`): it is not
 //! part of this crate's public API, same as every v0 internal module. An
 //! integration test under `rust/tests/` is a SEPARATE crate with only this
 //! crate's PUBLIC items visible — `rust/tests/abi_revision.rs` reaches only
-//! `chtypes::Registry`, for instance — so `chtypes::abi1::*` is not a path
+//! `chtypes::Registry`, for instance — so `chtypes::abi2::*` is not a path
 //! this file can use. Instead the three files are re-declared here with
 //! `#[path]`, so they are compiled twice (once, unreached, inside the
 //! library; once here, where this test actually calls them) from the
@@ -17,7 +18,7 @@
 //! both compilations, since both place `decls` as a sibling of `invoke_gen`
 //! one level down from a crate root.
 //!
-//! WHAT RUNS. `CHTYPES_ABI1_STUBS` unset: this test prints a loud skip on
+//! WHAT RUNS. `CHTYPES_ABI2_STUBS` unset: this test prints a loud skip on
 //! stderr and passes trivially (every test here skips loudly by name; it
 //! never passes silently and never fails, per the lane brief). Set: the
 //! `"ok"` stub is loaded once through the real loader (proving the loader
@@ -25,8 +26,8 @@
 //! case in `cases.json` runs against that one `Api`; every `loader` case
 //! loads its OWN named stub variant fresh and checks the loader's refusal
 //! reason (or acceptance) against `_stubshared.py`'s plan. A
-//! `spec/abi-v1/schema/report.schema.json`-shaped report is written to
-//! `CHTYPES_ABI1_REPORT` before the final assertion, so a partial result is
+//! `spec/abi-v2/schema/report.schema.json`-shaped report is written to
+//! `CHTYPES_ABI2_REPORT` before the final assertion, so a partial result is
 //! visible even when some cases fail.
 //!
 //! A `loader`-kind case may carry an `"os"` field (`cases.schema.json`,
@@ -47,13 +48,13 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-#[path = "../src/abi1/calls_gen.rs"]
+#[path = "../src/abi2/calls_gen.rs"]
 mod calls_gen;
-#[path = "../src/abi1/decls.rs"]
+#[path = "../src/abi2/decls.rs"]
 mod decls;
-#[path = "../src/abi1/invoke_gen.rs"]
+#[path = "../src/abi2/invoke_gen.rs"]
 mod invoke_gen;
-#[path = "../src/abi1/loader.rs"]
+#[path = "../src/abi2/loader.rs"]
 mod loader;
 
 use decls::Api;
@@ -202,7 +203,7 @@ fn resolve_and_call(
     // SAFETY: every `ResolvedArg::Handle` above was minted by this same
     // `api` (`resolve_arg` only ever builds one from an `outputs` entry this
     // same api's own `invoke` just returned), and `api` completed loader
-    // step 6 before any case runs (see `abi1_conformance`, below).
+    // step 6 before any case runs (see `abi2_conformance`, below).
     let outcome = unsafe { invoke(api, &call.fn_name, &args) }?;
     if let Outcome::Call { outputs, .. } = &outcome {
         for h in outputs.values() {
@@ -412,10 +413,10 @@ fn check_call(api: &Api, outcome: &Outcome, expect: &Value) -> Result<(), String
 // ------------------------------------------------------------------ loader
 
 /// Resolve one stub variant's library, BY FILE NAME, under `stubs_dir` — the
-/// real `CHTYPES_ABI1_STUBS` directory for THIS job. `stubs.json`'s own
+/// real `CHTYPES_ABI2_STUBS` directory for THIS job. `stubs.json`'s own
 /// `path` field was written by the (separate) `v1-abi-stubs` build job, under
 /// ITS OWN `$RUNNER_TEMP`; once the artifact crosses jobs (download-artifact
-/// into this job's `${{ runner.temp }}/abi1-stubs`, a different path on a
+/// into this job's `${{ runner.temp }}/abi-stubs/v2`, a different path on a
 /// different runner), that field's directory component is stale — only its
 /// file name still names a real file here. Taking the file name alone is
 /// also forward-compatible with a future `stubs.json` that records a
@@ -822,21 +823,21 @@ fn host_os_arch() -> (&'static str, &'static str) {
 }
 
 #[test]
-fn abi1_conformance() {
-    let Some(stubs_dir) = std::env::var_os("CHTYPES_ABI1_STUBS") else {
+fn abi2_conformance() {
+    let Some(stubs_dir) = std::env::var_os("CHTYPES_ABI2_STUBS") else {
         announce(
-            "SKIP: CHTYPES_ABI1_STUBS is unset; the abi1 conformance suite needs the stub \
+            "SKIP: CHTYPES_ABI2_STUBS is unset; the ABI v2 conformance suite needs the stub \
              libraries scripts/abi-v1/build-stubs.sh produces",
         );
         return;
     };
     let stubs_dir = PathBuf::from(stubs_dir);
-    let report_path = std::env::var_os("CHTYPES_ABI1_REPORT").map(PathBuf::from);
+    let report_path = std::env::var_os("CHTYPES_ABI2_REPORT").map(PathBuf::from);
     let toolchain =
-        std::env::var("CHTYPES_ABI1_TOOLCHAIN").unwrap_or_else(|_| "unknown".to_string());
+        std::env::var("CHTYPES_ABI2_TOOLCHAIN").unwrap_or_else(|_| "unknown".to_string());
 
     let stubs_text = std::fs::read_to_string(stubs_dir.join("stubs.json"))
-        .expect("read CHTYPES_ABI1_STUBS/stubs.json");
+        .expect("read CHTYPES_ABI2_STUBS/stubs.json");
     let stubs: Value = serde_json::from_str(&stubs_text).expect("parse stubs.json");
     let variants = stubs
         .get("variants")
@@ -846,7 +847,7 @@ fn abi1_conformance() {
     let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .expect("rust/ has a parent directory");
-    let cases_path = repo_root.join("tests/fixtures/abi-v1/cases.json");
+    let cases_path = repo_root.join("tests/fixtures/abi-v2/cases.json");
     let cases_text = std::fs::read_to_string(&cases_path)
         .unwrap_or_else(|e| panic!("read {}: {e}", cases_path.display()));
     let cases_doc: Value = serde_json::from_str(&cases_text).expect("parse cases.json");
@@ -946,7 +947,7 @@ fn abi1_conformance() {
         let text = serde_json::to_string_pretty(&report).expect("serialize report");
         std::fs::write(path, text).unwrap_or_else(|e| panic!("write {}: {e}", path.display()));
     } else {
-        announce("CHTYPES_ABI1_REPORT is unset; the report was built but not written to a file");
+        announce("CHTYPES_ABI2_REPORT is unset; the report was built but not written to a file");
     }
 
     let failed: Vec<&str> = results
@@ -956,7 +957,7 @@ fn abi1_conformance() {
         .collect();
     assert!(
         failed.is_empty(),
-        "{} of {} abi1 conformance case(s) failed: {failed:?}",
+        "{} of {} ABI v2 conformance case(s) failed: {failed:?}",
         failed.len(),
         results.len()
     );

@@ -5,6 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
+use super::channel;
 use super::constants;
 use super::dsse::{self, TrustedKey};
 use super::error::{Error, Result};
@@ -57,30 +58,40 @@ pub struct VerifyResult {
 }
 
 /// Options shared by every entry point. A library caller builds one per
-/// call; nothing here is read from `std::env` except where documented.
+/// call; nothing here is read from `std::env` except where documented. Under
+/// the dev channel this build speaks (channel.rs; spec/abi-v2/docs.md, rule
+/// r6), the base, trust and unsigned fields and their variables are ignored
+/// with one warning each, and the four pinning fields are refused.
 pub struct Options {
     /// The platform key (`"linux-arm64"`, …). Defaults to the host platform.
     pub platform: Option<String>,
     /// Base URLs, most-preferred first. Defaults to `$CHTYPES_ARTIFACTS_URL`
-    /// (comma-separated) or `constants::DEFAULT_BASES`.
+    /// (comma-separated) or the contract's default; ignored by the dev channel,
+    /// which fetches only from `channel::DEV_CHANNEL_BASE`.
     pub bases: Option<Vec<String>>,
-    /// The OCI-layout cache root. Defaults to `$CHTYPES_CACHE` or
-    /// `${XDG_CACHE_HOME:-~/.cache}/chtypes/v1`.
+    /// The cache. Defaults to `$CHTYPES_CACHE`, else the contract's default
+    /// root; the dev channel uses an explicit cache through its subroot
+    /// `<cache>/v2-dev` and defaults to `${XDG_CACHE_HOME:-~/.cache}/chtypes/v2-dev`
+    /// (rule r5).
     pub cache_dir: Option<String>,
     /// Read-only system directories, searched after the cache.
     pub system_dirs: Vec<PathBuf>,
     /// Never touch the network; read the cache only.
     pub offline: bool,
-    /// Perform no discovery: fetch exactly the lock's pinned digests.
+    /// Perform no discovery: fetch exactly the lock's pinned digests. Refused
+    /// by the dev channel.
     pub frozen: bool,
     /// Where the lock lives. `frozen`/`lock_write` without one is a
-    /// configuration error (`SourceIncompatible`).
+    /// configuration error (`SourceIncompatible`). Refused by the dev channel.
     pub lock_path: Option<PathBuf>,
-    /// After a successful online resolve, record it in the lock.
+    /// After a successful online resolve, record it in the lock. Refused by
+    /// the dev channel.
     pub lock_write: bool,
-    /// Re-resolve even if the lock already pins this request.
+    /// Re-resolve even if the lock already pins this request. Refused by the
+    /// dev channel.
     pub update: bool,
-    /// Proceed, with a warning, when no bundle verifies.
+    /// Proceed, with a warning, when no bundle verifies. Ignored by the dev
+    /// channel.
     pub allow_unsigned: bool,
     /// Strict mode (public issue #486): every fault of the cache and of an
     /// existing system dir is `CHTYPES_CACHE_UNUSABLE`, never "not
@@ -88,8 +99,9 @@ pub struct Options {
     /// `CHTYPES_CACHE_STRICT` (`1` is on), else off.
     pub strict_cache: Option<bool>,
     /// The trust list: raw 32-byte ed25519 public keys as hex. Non-empty
-    /// REPLACES the default (else `$CHTYPES_TRUSTED_KEYS`, else the release
-    /// key); it never appends to it.
+    /// REPLACES the default (else `$CHTYPES_TRUSTED_KEYS`, else the contract's
+    /// key); it never appends to it. Ignored by the dev channel, which trusts
+    /// only the staging key.
     pub trusted_keys: Option<Vec<String>>,
     /// `$CHTYPES_DOWNLOAD_TOKEN` override.
     pub token: Option<String>,
@@ -107,7 +119,8 @@ impl Default for Options {
             platform: None,
             bases: None,
             cache_dir: None,
-            system_dirs: constants::SYSTEM_CACHE_DIRS
+            system_dirs: channel::active()
+                .system_dirs
                 .iter()
                 .map(PathBuf::from)
                 .collect(),
@@ -138,30 +151,22 @@ struct Resources {
 }
 
 /// The ordered base list one call uses: the options' own, else
-/// `$CHTYPES_ARTIFACTS_URL` (comma-separated), else the built-in default.
+/// `$CHTYPES_ARTIFACTS_URL` (comma-separated), else the contract's default;
+/// under the dev channel, `channel::DEV_CHANNEL_BASE` alone, always.
 pub fn configured_bases(options: &Options) -> Vec<String> {
-    options.bases.clone().unwrap_or_else(|| {
-        std::env::var(constants::ENV_BASES_NAME)
-            .ok()
-            .filter(|s| !s.is_empty())
-            .map(|s| {
-                s.split(constants::BASE_SEPARATOR)
-                    .map(str::to_string)
-                    .collect()
-            })
-            .unwrap_or_else(|| {
-                constants::DEFAULT_BASES
-                    .iter()
-                    .map(|s| s.to_string())
-                    .collect()
-            })
-    })
+    channel::bases(options.bases.as_deref())
 }
 
 /// One call's shared state. It creates nothing: a lookup is read-only, and
 /// only a fetch makes the layout (`ensure`, past its offline branch;
 /// docs/guides/fetch-v1.md §6, public issue #486).
 fn resources(options: &mut Options) -> Result<Resources> {
+    // The dev channel refuses every pinning request before anything else, the
+    // network above all (rule r6), and names each ignored override once.
+    if let Some(refusal) = channel::refuse_pinning(options) {
+        return Err(Error::InvalidInput(refusal));
+    }
+    channel::warn_overrides(options);
     let root = layout::cache_root(options.cache_dir.as_deref())?;
     let platform = options
         .platform
@@ -220,11 +225,11 @@ fn default_host_platform() -> String {
 /// §1.3). On success, the library file exists on disk and every guarantee
 /// in §1.3 holds.
 pub fn ensure(request: &str, mut options: Options) -> Result<Resolved> {
-    if std::env::var(constants::ENV_ALLOW_UNSIGNED_NAME).is_ok_and(|v| v == "1") {
-        options.allow_unsigned = true;
-    }
     let version_request = VersionRequest::parse(request)?;
     let res = resources(&mut options)?;
+    // The option or `CHTYPES_ALLOW_UNSIGNED=1`, where the contract honors them;
+    // never under the dev channel.
+    options.allow_unsigned = channel::allow_unsigned(options.allow_unsigned);
 
     let lock = match &options.lock_path {
         Some(p) => lock::read(p)?,
@@ -441,7 +446,7 @@ fn ensure_online(
             options.before_index_rename.as_deref(),
         )?;
         return Ok(Resolved {
-            abi_generation: constants::ABI_GENERATION,
+            abi_generation: channel::active().abi,
             platform: res.platform.clone(),
             request: request.to_string(),
             version: record.version,
@@ -554,7 +559,7 @@ fn ensure_frozen(
             Error::ArtifactCorrupt(format!("{}: missing verified.json", dir.display()))
         })?;
         return Ok(Resolved {
-            abi_generation: constants::ABI_GENERATION,
+            abi_generation: channel::active().abi,
             platform: platform.to_string(),
             request: request.to_string(),
             version: record.version,
@@ -644,7 +649,7 @@ fn ensure_frozen(
     })?;
 
     Ok(Resolved {
-        abi_generation: constants::ABI_GENERATION,
+        abi_generation: channel::active().abi,
         platform: platform.to_string(),
         request: request.to_string(),
         version: entry.version.clone(),
@@ -894,6 +899,19 @@ pub fn fetch_signed(
     expected_predicate_type: &str,
     options: &mut Options,
 ) -> Result<(Vec<u8>, serde_json::Value, Digests)> {
+    // Under the dev channel the bases a caller names are an override too: it
+    // fetches only from its own base (rule r6), whatever is passed.
+    channel::warn_overrides(options);
+    let dev_bases;
+    let repository_bases = if channel::active().overridable {
+        repository_bases
+    } else {
+        dev_bases = channel::bases(None);
+        if repository_bases != dev_bases.as_slice() {
+            channel::warn_ignored("the repository bases argument");
+        }
+        dev_bases.as_slice()
+    };
     let clock = options
         .clock
         .take()
@@ -1042,10 +1060,11 @@ fn verify_unpacked_library(
     Ok(())
 }
 
-/// `predicate.abi` must be the JSON integer `1` (never the v0 field
-/// `abi_revision`), and `os`/`arch` must equal `platform`, and the version
-/// must lie within `version_request` (plan §1.3's guarantees).
-fn validate_predicate(
+/// `predicate.abi` must be the JSON integer the contract speaks (`2` on the dev
+/// channel, rule r6; never the v0 field `abi_revision`), and `os`/`arch` must
+/// equal `platform`, and the version must lie within `version_request` (plan
+/// §1.3's guarantees).
+pub fn validate_predicate(
     predicate: &serde_json::Value,
     platform: &str,
     version_request: Option<&VersionRequest>,
@@ -1054,14 +1073,13 @@ fn validate_predicate(
         .iter()
         .find(|p| p.key == platform)
         .expect("validated by `resources`");
+    let abi = channel::active().abi;
     match predicate.get("abi") {
-        Some(serde_json::Value::Number(n))
-            if n.as_u64() == Some(constants::ABI_GENERATION as u64) => {}
+        Some(serde_json::Value::Number(n)) if n.as_u64() == Some(u64::from(abi)) => {}
         _ => {
             return Err(Error::ArtifactCorrupt(format!(
-                "predicate.abi is {:?}, want the integer {}",
+                "predicate.abi is {:?}, want the integer {abi}",
                 predicate.get("abi"),
-                constants::ABI_GENERATION
             )));
         }
     }
@@ -1446,7 +1464,7 @@ fn record_to_resolved(
     already_installed: bool,
 ) -> Resolved {
     Resolved {
-        abi_generation: constants::ABI_GENERATION,
+        abi_generation: channel::active().abi,
         platform: platform.to_string(),
         request: request.to_string(),
         version: record.version,
@@ -1535,6 +1553,8 @@ mod cache_roots_tests {
     /// `verify_installed` read the same roots.
     #[test]
     fn resolve_list_and_verify_read_every_root_newest_first() {
+        // The v1 cache rules these cases specify: a fixture cache used whole.
+        let _v1 = channel::use_fetch_v1_for_tests();
         for (cache_vb, sys_vb, system_wins) in [
             (
                 ("26.8.1.1", "20260801.000001"),
@@ -1628,6 +1648,8 @@ mod cache_roots_tests {
     /// a 0.x registry.
     #[test]
     fn read_only_lookups_create_nothing() {
+        // The v1 cache rules these cases specify: a fixture cache used whole.
+        let _v1 = channel::use_fetch_v1_for_tests();
         let base = scratch("readonly");
         let zero_x = base.join("zero-x");
         zero_x_registry(&zero_x);
@@ -1658,6 +1680,8 @@ mod cache_roots_tests {
     /// cache without an `oci-layout` and an empty one carry no hint.
     #[test]
     fn missing_carries_the_zero_x_hint() {
+        // The v1 cache rules these cases specify: a fixture cache used whole.
+        let _v1 = channel::use_fetch_v1_for_tests();
         let base = scratch("hint");
         let zero_x = base.join("zero-x");
         zero_x_registry(&zero_x);
@@ -1691,6 +1715,8 @@ mod cache_roots_tests {
     /// private 0700/0600, or the comparison could not tell the two apart.
     #[test]
     fn install_modes_follow_the_umask() {
+        // The v1 cache rules these cases specify: a fixture cache used whole.
+        let _v1 = channel::use_fetch_v1_for_tests();
         let base = scratch("modes");
         std::fs::create_dir_all(&base).unwrap();
         let control_dir = base.join("control-dir");
@@ -1882,6 +1908,8 @@ mod cache_strict_tests {
 
     #[test]
     fn every_cache_fault_in_both_modes() {
+        // The v1 cache rules these cases specify: a fixture cache used whole.
+        let _v1 = channel::use_fetch_v1_for_tests();
         for (name, reason, warns) in [
             ("root-000", "unreadable_root", true),
             ("unpacked-000", "unreadable_root", true),
@@ -1989,6 +2017,8 @@ mod cache_strict_tests {
 
     #[test]
     fn a_failed_write_is_cache_unusable() {
+        // The v1 cache rules these cases specify: a fixture cache used whole.
+        let _v1 = channel::use_fetch_v1_for_tests();
         let base = scratch("unwritable");
         let cache = base.join("cache");
         std::fs::create_dir_all(&cache).unwrap();

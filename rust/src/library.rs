@@ -20,10 +20,10 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use serde_json::{Map, Value as Json};
 
-use crate::abi1::calls_gen::SchemaHandle;
-use crate::abi1::decls::Api;
-use crate::abi1::errmap_gen::UNVERIFIED_ENV;
-use crate::abi1::loader::{self, LoadError, LoadInput, Refusal};
+use crate::abi2::calls_gen::SchemaHandle;
+use crate::abi2::decls::Api;
+use crate::abi2::errmap_gen::UNVERIFIED_ENV;
+use crate::abi2::loader::{self, LoadError, LoadInput, Refusal};
 use crate::decode;
 use crate::error::{Error, Result};
 use crate::ocifetch::ensure::Resolved;
@@ -288,7 +288,7 @@ impl Library {
     /// Run one generated call and map its error by `sdk.json`'s status table.
     pub(crate) fn call<T>(
         &self,
-        f: impl FnOnce(&Arc<Api>) -> std::result::Result<T, crate::abi1::calls_gen::RawCallError>,
+        f: impl FnOnce(&Arc<Api>) -> std::result::Result<T, crate::abi2::calls_gen::RawCallError>,
     ) -> Result<T> {
         f(&self.api).map_err(Error::from_call)
     }

@@ -14,12 +14,12 @@
 use std::fmt;
 use std::path::PathBuf;
 
-use crate::abi1::calls_gen::RawCallError;
-use crate::abi1::errmap_gen::{ErrorClass, RefusalClass, refusal_class, status_class};
-use crate::abi1::vocab_gen::status;
+use crate::abi2::calls_gen::RawCallError;
+use crate::abi2::errmap_gen::{ErrorClass, RefusalClass, refusal_class, status_class};
+use crate::abi2::vocab_gen::{Status, status};
 use crate::raw::RawText;
 
-pub use crate::abi1::loader::Refusal;
+pub use crate::abi2::loader::Refusal;
 
 /// What a [`Error::CacheUnusable`] names: a cache directory or entry the
 /// fetch layer could not read or write, or one strict mode refuses
@@ -134,10 +134,12 @@ pub enum Error {
     /// call (a refused version spelling, a conflicting setup, a zone given
     /// twice, an unverified open without both opt-ins).
     Usage(CallError),
-    /// `CHS_INTERNAL`; a status outside the closed set, naming its value; a
-    /// document that does not decode.
+    /// `CHS_INTERNAL`; a status outside the closed set, naming its
+    /// `unknown(n)` (rule r3); a document that does not decode.
     Internal(CallError),
-    /// A loader refusal at steps 1, 2, 3, 4 (the fingerprint) or 6.
+    /// A loader refusal at steps 1, 2, 3, 4 (the fingerprint) or 6. A dev SDK's
+    /// fingerprint refusal displays exactly rule r6's message
+    /// ([`Refusal::dev_message`]).
     ArtifactIncompatible(Refusal),
     /// A loader refusal at step 5 or a malformed `build_info`, and the fetch
     /// layer's own corruption.
@@ -216,20 +218,15 @@ impl Error {
     }
 
     /// A call's own error, mapped by `sdk.json`'s status table. A status
-    /// outside the closed set is an internal error naming its value.
+    /// outside the closed set is its `unknown(n)` (rule r3), and the call still
+    /// fails: an internal error naming it.
     pub(crate) fn from_call(e: RawCallError) -> Error {
-        let known = [
-            status::REJECTED,
-            status::DECLINED,
-            status::INVALID_ARGUMENT,
-            status::INTERNAL,
-        ];
-        if !known.contains(&e.status) {
+        let read = Status::from_code(e.status);
+        if !read.is_known() || read == Status::Ok {
             let mut call = CallError::from(e);
             let original = call.message.to_lossy().into_owned();
             call.message = RawText::from(format!(
-                "status {} is outside the closed set of call statuses; {original}",
-                call.status
+                "call status {read} is outside the closed set of call statuses; {original}"
             ));
             return Error::Internal(call);
         }
@@ -259,6 +256,8 @@ impl fmt::Display for Error {
             Error::Unsupported(c) => write!(f, "declined: {c}"),
             Error::Usage(c) => write!(f, "misuse: {c}"),
             Error::Internal(c) => write!(f, "internal error: {c}"),
+            // A dev SDK's fingerprint refusal is rule r6's exact message, alone.
+            Error::ArtifactIncompatible(r) if r.dev_message().is_some() => write!(f, "{r}"),
             Error::ArtifactIncompatible(r) | Error::ArtifactCorrupt(r) => {
                 write!(f, "{}: {r}", self.code().unwrap_or_default())
             }
@@ -361,14 +360,50 @@ mod tests {
         assert!(!matches!(decline, Error::Schema(_)));
     }
 
+    /// Rule r3: a status outside the closed set is its `unknown(n)`, and the
+    /// call still fails, as an internal error naming it.
     #[test]
-    fn a_status_outside_the_closed_set_is_internal_and_names_its_value() {
+    fn a_status_outside_the_closed_set_is_internal_and_names_its_unknown() {
         let e = Error::from_call(raw(99));
         let Error::Internal(c) = e else {
             panic!("want an internal error, got {e:?}")
         };
         assert_eq!(c.status, 99);
-        assert!(c.message.to_lossy().contains("99"), "{c}");
+        let read = Status::from_code(c.status);
+        assert_eq!(read, Status::Unknown(99));
+        assert!(!read.is_known());
+        assert_eq!(read.to_string(), "unknown(99)");
+        assert!(c.message.to_lossy().contains("unknown(99)"), "{c}");
+        for listed in [
+            status::OK,
+            status::REJECTED,
+            status::DECLINED,
+            status::INVALID_ARGUMENT,
+            status::INTERNAL,
+        ] {
+            assert!(Status::from_code(listed).is_known(), "{listed}");
+        }
+    }
+
+    /// Rule r6: a fingerprint refusal of this dev SDK is
+    /// `CHTYPES_ARTIFACT_INCOMPATIBLE` and displays exactly the rule's message.
+    #[test]
+    fn a_dev_fingerprint_refusal_is_incompatible_with_rule_r6s_message() {
+        let fingerprint = crate::abi2::decls::CHS_ABI_FINGERPRINT;
+        let other = format!("sha256:{}", "0".repeat(64));
+        let e = Error::from_refusal(Refusal {
+            reason: "fingerprint".to_string(),
+            path: PathBuf::from("/p"),
+            want: Some(fingerprint.to_string()),
+            got: Some(other.clone()),
+            detail: None,
+        });
+        let want = format!(
+            "this SDK speaks dev fingerprint {fingerprint}; the library has {other} — update your dev SDK"
+        );
+        assert!(matches!(e, Error::ArtifactIncompatible(_)), "{e:?}");
+        assert_eq!(e.code(), Some("CHTYPES_ARTIFACT_INCOMPATIBLE"));
+        assert_eq!(e.to_string(), want);
     }
 
     #[test]

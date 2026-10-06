@@ -37,33 +37,20 @@ impl TrustedKey {
 /// The trust list for one call (docs/guides/fetch-v1.md §4): `explicit` (the
 /// caller's own list, raw 32-byte keys as hex) if it is non-empty, else
 /// `$CHTYPES_TRUSTED_KEYS` (comma-separated hex) if it is set, else the
-/// release key. An explicit list or the environment REPLACES the default; it
-/// never appends to it, and the fixture-only test key is trusted only when a
-/// list names it.
+/// contract's key. An explicit list or the environment REPLACES the default;
+/// it never appends to it, and the fixture-only test key is trusted only when
+/// a list names it. Under the dev channel this build speaks
+/// (`super::channel`), the staging key alone, always: neither the list nor the
+/// variable is honored (spec/abi-v2/docs.md, rule r6).
 pub fn trusted_keys(explicit: Option<&[String]>) -> Result<Vec<TrustedKey>> {
-    let from_env: Vec<String>;
-    let hexes: &[String] = match explicit {
-        Some(list) if !list.is_empty() => list,
-        _ => {
-            from_env = std::env::var(constants::ENV_TRUSTED_KEYS_NAME)
-                .map(|v| {
-                    v.split(constants::BASE_SEPARATOR)
-                        .map(|k| k.trim().to_string())
-                        .filter(|k| !k.is_empty())
-                        .collect()
-                })
-                .unwrap_or_default();
-            &from_env
-        }
-    };
-    if !hexes.is_empty() {
-        return hexes.iter().map(|h| TrustedKey::from_hex(h)).collect();
-    }
     let mut out = Vec::new();
-    for rk in constants::RELEASE_KEYS {
-        out.push(TrustedKey {
-            keyid: rk.keyid.to_string(),
-            key: hex32(rk.ed25519_hex)?,
+    for (keyid, hex) in super::channel::trusted_key_hexes(explicit) {
+        out.push(match keyid {
+            Some(keyid) => TrustedKey {
+                keyid: keyid.to_string(),
+                key: hex32(&hex)?,
+            },
+            None => TrustedKey::from_hex(&hex)?,
         });
     }
     Ok(out)
