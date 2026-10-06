@@ -6,7 +6,7 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
-## [1.0.2] — unreleased
+## [1.0.2] — 2026-10-06
 
 ### Changed
 
