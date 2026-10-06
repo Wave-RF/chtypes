@@ -2,7 +2,7 @@
 """policy-merge-check.py — may this pull request enqueue itself to merge?
 
     scripts/policy-merge-check.py --selftest          every refusal below fires, and an all-good input passes
-    scripts/policy-merge-check.py --check-ci-names     REQUIRED_CHECKS agrees with ci.yml's blocking jobs (no network)
+    scripts/policy-merge-check.py --check-ci-names     REQUIRED_CHECKS agrees with ci.yml's blocking jobs, and each V1_REQUIRED_CHECKS name is a v1.yml/v1-abi.yml job (no network)
     scripts/policy-merge-check.py --check-guide        CONTRIBUTING.md's protected-glob block agrees with PROTECTED_GLOBS (no network)
     scripts/policy-merge-check.py --check-carve-out    the security carve-out agrees with the tree's verification code (no network)
     scripts/policy-merge-check.py --print-protected    PROTECTED_GLOBS, one per line
@@ -381,8 +381,13 @@ rights), so it is pinned below, once. `--check-ci-names` derives, from
 carry job-level `continue-on-error: true`, and fails if that set and
 REQUIRED_CHECKS differ in either direction. ci.yml marks its deliberately
 non-blocking jobs exactly that way, and every other job in it is meant to be
-required. Branch protection still has the final word at merge time; this list
-only stops the workflow from attempting an enqueue it already knows would fail.
+required. The contexts v1.yml and v1-abi.yml report, required on main since
+v1 merged into it, are pinned separately as V1_REQUIRED_CHECKS; for those,
+`--check-ci-names` checks only that each is carried by exactly one job, since
+those files' other jobs are matrix legs or deliberately unrequired. The
+workflow runs when any of ci, v1 and v1-abi completes, and waits for both
+lists. Branch protection still has the final word at merge time; these lists
+only stop the workflow from attempting an enqueue it already knows would fail.
 
 Exit status: 0 for an enqueue, a dry run or a refusal; 1 for a failed
 selftest, or a REQUIRED_CHECKS or guide disagreement; 2 for an API failure or
@@ -1411,11 +1416,9 @@ def guide_problems(guide_text: str, expected_block: str) -> list[str]:
 # The check-run names ci.yml's blocking jobs report, which branch protection
 # on `main` requires (copied from it). --check-ci-names fails when this and
 # ci.yml's blocking jobs disagree; see the header for why the list lives here
-# rather than being read at run time. Contexts reported by OTHER workflows
-# (v1.yml, v1-abi.yml) are required by branch protection too but are not
-# listed: this list only stops the policy merge from attempting an enqueue it
-# already knows would fail, branch protection and the merge queue have the
-# final word, and --check-ci-names can only derive names from ci.yml.
+# rather than being read at run time. The contexts the OTHER two workflows
+# report (v1.yml, v1-abi.yml), which branch protection also requires since v1
+# merged into main, are V1_REQUIRED_CHECKS below.
 REQUIRED_CHECKS = (
     "checks — repository scripts and their selftests (no network, no artifact)",
     "go — build, vet, standalone check (no artifacts)",
@@ -1430,6 +1433,35 @@ REQUIRED_CHECKS = (
     "public — no pointers into the private repository",
     "prose — markdownlint + no-hard-wrap (dprint textWrap never)",
 )
+
+# The required contexts v1.yml and v1-abi.yml report. Branch protection has
+# required them since v1 merged into main (2026-10-06). Without them here the
+# policy merge judged "every required check green" as soon as ci finished, and
+# enqueued before v1-parity and the rest had reported, which GitHub refused
+# ("Required status check … is expected"), 4 times in 2 h. --check-ci-names
+# cannot derive these the way it derives ci.yml's (most jobs in those files
+# are matrix legs or deliberately unrequired), so it checks the other
+# direction: each name below is carried by exactly one job there. The
+# policy-merge workflow also runs when v1 or v1-abi completes, so the last of
+# the three to finish is the one that finds every context green.
+V1_REQUIRED_CHECKS = (
+    "v1-constants — one constants source, generated into all four",
+    "v1-fixtures — fixtures regenerate byte-identical from the generator",
+    "v1-sandbox — the no-network sandbox, proven on every pull request",
+    "v1-parity — every enrolled binding passes every conformance case",
+    "v1-cache-interop — a cache one binding writes, every binding reads",
+    "v1-abi-gen — the description, the header and every generated file agree",
+    "v1-abi-linked — Go linked mode type-checks against the v1 header",
+    "v1-abi-rust — clippy/fmt/test --features abi-v1",
+    "v1-abi-parity — every enrolled binding passes every ABI case",
+)
+V1_WORKFLOWS = (
+    os.path.join(ROOT, ".github", "workflows", "v1.yml"),
+    os.path.join(ROOT, ".github", "workflows", "v1-abi.yml"),
+)
+
+# Everything the policy merge waits for: what branch protection requires on main.
+ALL_REQUIRED_CHECKS = REQUIRED_CHECKS + V1_REQUIRED_CHECKS
 
 # Branch protection pins every required context to the GitHub Actions app, so
 # a check run of the same name from any other app satisfies nothing.
@@ -1559,7 +1591,7 @@ def decide(*, repo: str, expected_head_sha: str, run_head_repo: str | None, pr: 
            files: list[dict], check_runs: list[dict], reviews: list[dict],
            review_comments: list[dict], test_counts: TestCountFacts | None = None,
            api_verdicts: dict[str, list[str]] | None = None, dependabot_ecosystem: str | None = None,
-           required: tuple[str, ...] = REQUIRED_CHECKS) -> Refusal | None:
+           required: tuple[str, ...] = ALL_REQUIRED_CHECKS) -> Refusal | None:
     """The first condition that fails, or None when every condition holds.
     gather_test_counts reads everything condition 7 needs (job logs, never a
     head file) up front, so both `gate` and `enqueue` check it fully.
@@ -1760,6 +1792,30 @@ def ci_jobs(text: str) -> list[CiJob]:
             raise CiShapeError(f"ci.yml line {lineno}: job {current['id']} has a strategy; a matrix changes "
                                "its check-run names, so extend this parser before relying on it")
     return [CiJob(j["id"], j["name"] if j["name"] is not None else j["id"], not j["coe"]) for j in jobs]
+
+
+def v1_name_problems(texts: list[str], required: tuple[str, ...] = V1_REQUIRED_CHECKS) -> list[str]:
+    """Each V1_REQUIRED_CHECKS name is carried by exactly one job `name:` line
+    in v1.yml or v1-abi.yml. The reverse direction cannot be derived (those
+    files' other jobs are matrix legs or deliberately unrequired)."""
+    found: dict[str, int] = {}
+    for text in texts:
+        for line in text.splitlines():
+            s = line.strip()
+            if line.startswith("    name: ") and not line.startswith("     "):
+                v = s[len("name: "):].strip()
+                if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
+                    v = v[1:-1]
+                found[v] = found.get(v, 0) + 1
+    problems = []
+    if len(set(required)) != len(required):
+        problems.append("V1_REQUIRED_CHECKS lists a name more than once")
+    for name in required:
+        if found.get(name, 0) == 0:
+            problems.append(f"V1_REQUIRED_CHECKS names {name!r}, which no v1.yml or v1-abi.yml job carries")
+        elif found[name] > 1:
+            problems.append(f"V1_REQUIRED_CHECKS names {name!r}, which {found[name]} jobs carry")
+    return problems
 
 
 def ci_name_problems(ci_text: str, required: tuple[str, ...]) -> list[str]:
@@ -2279,7 +2335,12 @@ def cmd_check_ci_names() -> int:
     with open(CI_YML, encoding="utf-8") as f:
         text = f.read()
     try:
-        problems = ci_name_problems(text, REQUIRED_CHECKS) + api_surface_job_problems(text)
+        v1_texts = []
+        for path in V1_WORKFLOWS:
+            with open(path, encoding="utf-8") as f:
+                v1_texts.append(f.read())
+        problems = (ci_name_problems(text, REQUIRED_CHECKS) + api_surface_job_problems(text)
+                    + v1_name_problems(v1_texts))
     except CiShapeError as e:
         print(f"policy-merge-check: {e}", file=sys.stderr)
         return 1
@@ -2292,8 +2353,9 @@ def cmd_check_ci_names() -> int:
               "  change, and ask an admin to update branch protection's required checks to match.", file=sys.stderr)
         return 1
     blocking = sum(1 for j in ci_jobs(text) if j.blocking)
-    print(f"policy-merge-check: ok, REQUIRED_CHECKS names exactly ci.yml's {blocking} blocking job(s), and the "
-          "api-surface job is there and non-blocking")
+    print(f"policy-merge-check: ok, REQUIRED_CHECKS names exactly ci.yml's {blocking} blocking job(s), the "
+          f"api-surface job is there and non-blocking, and each of the {len(V1_REQUIRED_CHECKS)} V1_REQUIRED_CHECKS "
+          "is carried by exactly one v1.yml/v1-abi.yml job")
     return 0
 
 
@@ -2392,7 +2454,7 @@ def _good() -> dict:
     return dict(
         repo=REPO, expected_head_sha=SHA, run_head_repo=REPO, pr=_good_pr(),
         files=[{"filename": "README.md", "status": "modified"}],
-        check_runs=[_run(n) for n in REQUIRED_CHECKS]
+        check_runs=[_run(n) for n in ALL_REQUIRED_CHECKS]
         + [_run("divergences — docs/limitations.md's Known-divergences claims", conclusion="failure")],
         reviews=[], review_comments=[],
     )
@@ -2405,7 +2467,7 @@ def _with(**changes: object) -> dict:
 
 
 def _checks(drop: str | None = None, replace: dict | None = None, extra: list | None = None) -> list[dict]:
-    runs = [_run(n) for n in REQUIRED_CHECKS if n != drop]
+    runs = [_run(n) for n in ALL_REQUIRED_CHECKS if n != drop]
     if replace:
         runs = [replace if r["name"] == replace["name"] else r for r in runs]
     return runs + (extra or [])
@@ -3397,6 +3459,27 @@ def selftest() -> int:
             failures.append(f"ci_jobs: {label} was read instead of refused")
         except CiShapeError:
             pass
+
+    # v1_name_problems: each V1 name carried by exactly one job `name:` line.
+    v1_req = ("v1-a — first", "v1-b — second")
+    v1_ok = ["jobs:\n  a:\n    name: \"v1-a — first\"\n    steps:\n      - name: \"v1-b — second\"\n",
+             "jobs:\n  b:\n    name: 'v1-b — second'\n"]
+    if v1_name_problems(v1_ok, v1_req):
+        failures.append(f"v1_name_problems: an agreeing pair of files was refused: {v1_name_problems(v1_ok, v1_req)}")
+    for label, texts, req in (
+        ("a required name no job carries", [v1_ok[0]], v1_req),
+        ("a name only a STEP carries", [v1_ok[0]], ("v1-a — first", "v1-b — second")),
+        ("a name two jobs carry", v1_ok + ["jobs:\n  c:\n    name: \"v1-a — first\"\n"], v1_req),
+        ("a name listed twice", v1_ok, v1_req + ("v1-a — first",)),
+    ):
+        if not v1_name_problems(texts, req):
+            failures.append(f"v1_name_problems: {label} was not caught")
+    # decide() waits for every required context, V1_REQUIRED_CHECKS included:
+    # a green ci with one v1 context missing is a `checks` refusal, never an enqueue.
+    for missing in (V1_REQUIRED_CHECKS[0], V1_REQUIRED_CHECKS[3]):
+        r = decide(**_with(check_runs=_checks(drop=missing)))
+        if r is None or r.condition != "checks":
+            failures.append(f"decide: a missing {missing!r} was not refused as `checks` ({r})")
 
     if failures:
         for f in failures:
