@@ -67,8 +67,6 @@ export interface ImageSetup {
   readonly timezone?: string;
   /** Seeded once with `chs_set_defaults` when there are any. */
   readonly defaults?: Readonly<Record<string, string>>;
-  /** Told how step 7 ended, when given: the public layer's setup guard latches on success and clears its record on a failure before any image has completed step 7 (`../setup.ts`). */
-  readonly settle?: (completed: boolean) => void;
 }
 
 /** The loader's own input, decoupled from the fetch layer's `Resolved` type: the adapter in `../registry.ts` joins them and passes the predicate verbatim. */
@@ -260,19 +258,9 @@ export function openAbi1(input: LoadInput): LoadedImage {
 
 /**
  * Step 7: `chs_initialize(zone)`, then `chs_set_defaults` when there are defaults. A failure is the call's own error, mapped by the status table; the zone asked for is named in the message either way.
- * `setup.settle`, when given, is told how step 7 ended. The caller caches the image only after this returns, so a failure is never remembered and the next open runs step 7 again.
+ * The caller caches the image only after this returns, so a failure is never remembered and the next open runs every step again; the public layer settles the setup with the open's outcome (`../setup.ts`).
  */
 function initializeImage(image: LoadedImage, setup: ImageSetup): void {
-  try {
-    runStep7(image, setup);
-  } catch (err) {
-    setup.settle?.(false);
-    throw err;
-  }
-  setup.settle?.(true);
-}
-
-function runStep7(image: LoadedImage, setup: ImageSetup): void {
   const timezone = setup.timezone ?? '';
   try {
     image.calls.initialize(Buffer.from(timezone, 'utf8'));

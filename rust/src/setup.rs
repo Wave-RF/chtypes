@@ -14,10 +14,12 @@
 //!    called, the first open records the empty setup: the empty zone, which
 //!    the library reads as `UTC`, and no defaults. Once an image completes
 //!    step 7 (`chs_initialize`, then `chs_set_defaults` when there are
-//!    defaults), [`setup`] succeeds only with exactly the setup in effect. If
-//!    step 7 fails before any image has completed it, the record is cleared,
-//!    so a corrected [`setup`] is accepted and the next open runs step 7 with
-//!    it. Call [`setup`] first.
+//!    defaults), [`setup`] succeeds only with exactly the setup in effect.
+//!    Until then, any open that fails, whatever failed (the fetch, the
+//!    signature, an incompatible artifact, a missing symbol or step 7),
+//!    clears the record: the next [`setup`] is accepted, and an open with no
+//!    [`setup`] after the failure records the empty setup. Call [`setup`]
+//!    first.
 //! 3. There is no public setter for defaults during traffic.
 
 use std::sync::Mutex;
@@ -47,17 +49,24 @@ pub(crate) struct Recorded {
 }
 
 /// The setup guard: the record, and whether any image has completed load step
-/// 7 under it. Every open holds the image list's lock from its commit to its
-/// settle (`crate::library::open_image`), so the record a load ran under is the
-/// one it settles.
+/// 7 under it. An open commits, loads and latches under the image list's lock
+/// (`crate::library::open_image`), and a failed open clears under it too
+/// (`crate::library::settle_failed_open`), so a clear never lands between
+/// another open's commit and its latch.
 static STATE: Mutex<State> = Mutex::new(State {
     recorded: None,
     latched: false,
+    generation: 0,
 });
 
 struct State {
     recorded: Option<Recorded>,
     latched: bool,
+    /// Counts the records [`setup`] made and the records failed opens cleared.
+    /// An open reads it when it begins, and clears the record on failure only
+    /// if it is unchanged: a failed open never clears a setup recorded after it
+    /// began.
+    generation: u64,
 }
 
 fn recorded_of(options: &SetupOptions) -> Result<Recorded> {
@@ -103,6 +112,7 @@ pub fn setup(options: SetupOptions) -> Result<()> {
     match &state.recorded {
         None => {
             state.recorded = Some(wanted);
+            state.generation += 1;
             Ok(())
         }
         Some(current) if *current == wanted => Ok(()),
@@ -127,18 +137,31 @@ pub(crate) fn commit() -> Recorded {
         .clone()
 }
 
-/// How load step 7 ended, under the setup guard. A success latches the setup
-/// in effect. A failure before any image has completed step 7 clears the
-/// record, so [`setup`] accepts a corrected setup; once the setup has latched,
-/// a failure changes nothing (the library's own process-once rule answers a
-/// different zone on an image that already has one).
-pub(crate) fn settle(completed: bool) {
+/// Read when an open begins, for [`clear_after_failed_open`].
+pub(crate) fn generation() -> u64 {
+    STATE.lock().unwrap_or_else(|e| e.into_inner()).generation
+}
+
+/// An image completed load step 7: from then on the setup in effect stands.
+/// Called under the image list's lock, right after the load.
+pub(crate) fn latch() {
+    STATE.lock().unwrap_or_else(|e| e.into_inner()).latched = true;
+}
+
+/// Settle an open that failed, whatever failed. While no image has completed
+/// step 7 it clears the record, so [`setup`] accepts a corrected setup, unless
+/// a setup was recorded after the open began (`began` is [`generation`] then).
+/// Once the setup has latched it changes nothing: the library's own
+/// process-once rule answers a different zone on an image that already has one.
+/// Called only through `crate::library::settle_failed_open`, which holds the
+/// image list's lock.
+pub(crate) fn clear_after_failed_open(began: u64) {
     let mut state = STATE.lock().unwrap_or_else(|e| e.into_inner());
-    if completed {
-        state.latched = true;
-    } else if !state.latched {
-        state.recorded = None;
+    if state.latched || state.generation != began {
+        return;
     }
+    state.recorded = None;
+    state.generation += 1;
 }
 
 #[cfg(test)]

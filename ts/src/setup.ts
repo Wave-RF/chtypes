@@ -11,12 +11,14 @@
  *      the first open records the empty setup: the empty zone, which the
  *      library reads as UTC, and no defaults. Once an image completes loader
  *      step 7 (`chs_initialize`, then `chs_set_defaults` when there are
- *      defaults), `setup` succeeds only with exactly the setup in effect. If
- *      step 7 fails before any image has completed it, the record is cleared,
- *      so a corrected `setup` is accepted and the next open runs step 7 with it.
+ *      defaults), `setup` succeeds only with exactly the setup in effect
+ *      (`latchSetup`). Until then, any open that fails, whatever failed (the
+ *      fetch, the signature, an incompatible artifact, a missing symbol or
+ *      step 7), clears the record (`settleFailedOpen`): the next `setup` is
+ *      accepted, and an open with no `setup` after the failure records the
+ *      empty setup.
  *   3. Every image is set up at loader step 7, once, from this record
- *      (`./abi1/loader.ts`), which reports how step 7 ended to `settleSetup`;
- *      nothing sets either again for that image.
+ *      (`./abi1/loader.ts`); nothing sets either again for that image.
  *
  * This is state of the isolate: every worker thread calls it identically, and
  * a worker whose zone differs is refused by the library at its first open.
@@ -40,6 +42,8 @@ export interface ProcessSetup {
 let recorded: ProcessSetup | undefined;
 /** Whether any image has completed loader step 7 under the record. */
 let latched = false;
+/** Counts the records `setup` made and the records failed opens cleared. An open reads it when it begins, and clears the record on failure only if it is unchanged: a failed open never clears a setup recorded after it began. */
+let generation = 0;
 
 function describe(s: ProcessSetup): string {
   const keys = Object.keys(s.defaults).sort();
@@ -63,6 +67,7 @@ export function setup(options: SetupOptions = {}): void {
   const next: ProcessSetup = { timezone, defaults: { ...defaults } };
   if (recorded === undefined) {
     recorded = next;
+    generation += 1;
     return;
   }
   if (!same(recorded, next)) {
@@ -76,16 +81,23 @@ export function commitSetup(): ProcessSetup {
   return recorded;
 }
 
+/** Read when an open begins, for `settleFailedOpen`. */
+export function setupGeneration(): number {
+  return generation;
+}
+
+/** An image completed loader step 7: from then on the setup in effect stands. An open calls it synchronously after the load that committed the record, so it latches the record that load ran under. */
+export function latchSetup(): void {
+  latched = true;
+}
+
 /**
- * How loader step 7 ended, reported by the loader. A success latches the setup in effect. A failure before any image has completed step 7 clears the record, so `setup` accepts a corrected setup; once the setup has latched, a failure changes nothing (the library's own process-once rule answers a different zone on an image that already has one).
- * An isolate runs this synchronously with the commit and the load that preceded it, so the record it settles is the one that load ran under.
+ * Settle an open that failed, whatever failed. While no image has completed step 7 it clears the record, so `setup` accepts a corrected setup, unless a setup was recorded after the open began (`began` is `setupGeneration()` then). Once the setup has latched it changes nothing: the library's own process-once rule answers a different zone on an image that already has one.
  */
-export function settleSetup(completed: boolean): void {
-  if (completed) {
-    latched = true;
-    return;
-  }
-  if (!latched) recorded = undefined;
+export function settleFailedOpen(began: number): void {
+  if (latched || generation !== began) return;
+  recorded = undefined;
+  generation += 1;
 }
 
 /** Test only: forget the recorded setup and the latch. Not part of the public API. */

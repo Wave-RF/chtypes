@@ -5,7 +5,6 @@ package chtypes
 // exactly one ABI call and takes no lock.
 
 import (
-	"errors"
 	"path/filepath"
 	"sync"
 
@@ -47,11 +46,11 @@ func imageKey(kind, path string) string {
 
 // openImage loads (or returns the already loaded) image for key. Every image is
 // set up at load step 7, once, under the process setup, which the first open
-// records. images.mu is held from the commit to the settle, so every open
-// loads under the record it settles, and Setup cannot change that record in
-// between (it refuses a different setup while one is recorded). A step 7
-// failure is the loader's *abi1.CallError, and only that clears the record;
-// a failed load is never cached, so the next open runs step 7 again.
+// records. images.mu is held from the commit to the latch, so an image latches
+// the record it loaded under, and Setup cannot change that record in between
+// (it refuses a different setup while one is recorded). A failed load is never
+// cached, so the next open runs every step again; the open that called this
+// settles a failure with failedOpen, whatever failed.
 func openImage(key string, load func(zone, defaults []byte) (*abi1.Table, error), path string, resolved *Resolved) (*Library, error) {
 	images.mu.Lock()
 	defer images.mu.Unlock()
@@ -63,16 +62,10 @@ func openImage(key string, load func(zone, defaults []byte) (*abi1.Table, error)
 		return l, nil
 	}
 	tbl, err := load(zone, defaults)
-	var step7 *abi1.CallError
-	switch {
-	case err == nil:
-		settleSetup(true)
-	case errors.As(err, &step7):
-		settleSetup(false)
-	}
 	if err != nil {
 		return nil, loadError(err)
 	}
+	latchSetup()
 	info, err := decodeBuildInfo([]byte(tbl.BuildInfo()))
 	if err != nil {
 		return nil, &ArtifactError{
@@ -96,7 +89,13 @@ func openImage(key string, load func(zone, defaults []byte) (*abi1.Table, error)
 // CHTYPES_ALLOW_UNVERIFIED_LIBRARY=1 is set, and warns once per path. It runs
 // step 7 under the process setup like any open, is not reachable through a
 // Registry, and its Library has no Resolved record.
-func OpenUnverified(path string, allow bool) (*Library, error) {
+func OpenUnverified(path string, allow bool) (l *Library, err error) {
+	gen := setupGeneration()
+	defer func() {
+		if err != nil {
+			failedOpen(gen)
+		}
+	}()
 	return openImage(imageKey("unverified", path), func(zone, defaults []byte) (*abi1.Table, error) {
 		return abi1.OpenUnverified(path, allow, zone, defaults)
 	}, path, nil)

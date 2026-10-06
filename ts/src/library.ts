@@ -16,7 +16,7 @@ import {
 } from './documents.js';
 import type { Resolved } from './ocifetch/index.js';
 import { Schema, type CompileOptions } from './schema.js';
-import { commitSetup, settleSetup } from './setup.js';
+import { commitSetup, latchSetup, settleFailedOpen, setupGeneration } from './setup.js';
 import { type BytesIn, bytesIn, encodeSettings } from './settings.js';
 
 export class Library {
@@ -125,6 +125,15 @@ export function libraryOf(image: LoadedImage, resolved: Resolved | undefined): L
  * no `resolved`, unless a registry had already opened the same image.
  */
 export function openUnverified(path: string, options: { readonly allow: boolean }): Library {
-  const setup = commitSetup();
-  return libraryOf(loadUnverified(path, { allow: options.allow, timezone: setup.timezone, defaults: setup.defaults, settle: settleSetup }), undefined);
+  const began = setupGeneration();
+  try {
+    const setup = commitSetup();
+    const image = loadUnverified(path, { allow: options.allow, timezone: setup.timezone, defaults: setup.defaults });
+    latchSetup();
+    return libraryOf(image, undefined);
+  } catch (err) {
+    // Like any open: a failure clears the setup record while no image has completed step 7.
+    settleFailedOpen(began);
+    throw err;
+  }
 }

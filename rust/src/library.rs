@@ -69,6 +69,15 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// Settle an open that failed, whatever failed (`crate::setup`'s rule): under
+/// the image list's lock, so the clear never lands between another open's
+/// commit and its latch. `began` is `setup::generation()` read when the open
+/// began.
+pub(crate) fn settle_failed_open(began: u64) {
+    let _images = lock(&IMAGES);
+    setup::clear_after_failed_open(began);
+}
+
 /// Open the image at `path`, or return the one this process already opened.
 /// `predicate` is the fetch layer's verified statement, verbatim; `None` is an
 /// unverified open.
@@ -99,27 +108,24 @@ pub(crate) fn open_image(
         return Ok(Arc::clone(&image.library));
     }
 
-    // The image list's lock is held from the commit to the settle, so the
-    // record this load runs under is the one it settles, and `setup` cannot
-    // change it in between (it refuses a different setup while one is
-    // recorded). Only a step 7 failure (`LoadError::Call`) clears the record,
-    // and a failed load is never pushed, so the next open runs step 7 again.
+    // The image list's lock is held from the commit to the latch, so an image
+    // latches the record it loaded under, and `setup` cannot change that record
+    // in between (it refuses a different setup while one is recorded). A failed
+    // load is never pushed, so the next open runs every step again; the open
+    // that called this settles a failure with `settle_failed_open`, whatever
+    // failed.
     let setup = setup::commit();
     let loaded = loader::load(LoadInput {
         library_path: &canonical,
         predicate,
         timezone: &setup.timezone,
         defaults: setup.defaults.as_deref(),
-    });
-    match &loaded {
-        Ok(_) => setup::settle(true),
-        Err(LoadError::Call(_)) => setup::settle(false),
-        Err(LoadError::Refused(_)) => {}
-    }
-    let loaded = loaded.map_err(|e| match e {
+    })
+    .map_err(|e| match e {
         LoadError::Refused(r) => Error::from_refusal(r),
         LoadError::Call(c) => Error::from_call(c),
     })?;
+    setup::latch();
     let build_info = decode::build_info(&loaded.build_info, &loaded.build_info_raw)
         .map_err(|detail| refusal("build_info_malformed", detail))?;
     let library = Arc::new(Library {
@@ -148,7 +154,17 @@ impl Library {
     /// It is not reachable through a [`crate::Registry`], and the library it
     /// returns has no [`Library::resolved`].
     pub fn open_unverified(path: impl AsRef<Path>, allow: bool) -> Result<Arc<Library>> {
-        let path = path.as_ref();
+        // Like any open: a failure clears the setup record while no image has
+        // completed load step 7, whatever failed.
+        let began = setup::generation();
+        let opened = Self::open_unverified_once(path.as_ref(), allow);
+        if opened.is_err() {
+            settle_failed_open(began);
+        }
+        opened
+    }
+
+    fn open_unverified_once(path: &Path, allow: bool) -> Result<Arc<Library>> {
         let env_on = std::env::var(UNVERIFIED_ENV).is_ok_and(|v| v == "1");
         if !(allow && env_on) {
             return Err(Error::usage(format!(

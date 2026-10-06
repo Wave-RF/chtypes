@@ -26,9 +26,10 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use crate::error::{Error, Result};
-use crate::library::{Library, open_image};
+use crate::library::{Library, open_image, settle_failed_open};
 use crate::ocifetch::constants::ENV_AUTOFETCH_NAME;
 use crate::ocifetch::ensure::{self, Options, Resolved};
+use crate::setup;
 
 /// What the fetch layer is configured with, under its own names
 /// (`docs/guides/fetch-v1.md`). Every field defaults to the fetch layer's own
@@ -192,6 +193,27 @@ impl Registry {
         if let Some(o) = opened.iter().find(|o| o.request == request) {
             return Ok(Arc::clone(&o.library));
         }
+        // A failed open clears the setup record while no image has completed
+        // load step 7, whatever failed: the spelling, the fetch, the signature
+        // or any load step (bindings-v1.md section 6, rule 4).
+        let began = setup::generation();
+        let library = match self.resolve_and_open(request, may_fetch) {
+            Ok(library) => library,
+            Err(e) => {
+                settle_failed_open(began);
+                return Err(e);
+            }
+        };
+        opened.push(Opened {
+            request: request.to_string(),
+            library: Arc::clone(&library),
+        });
+        Ok(library)
+    }
+
+    /// Resolve a request, fetching when allowed, and open its image: the part
+    /// of [`Registry::open`] whose failure settles the setup.
+    fn resolve_and_open(&self, request: &str, may_fetch: bool) -> Result<Arc<Library>> {
         let platform = self.fetch.platform.clone().unwrap_or_else(host_platform);
         let resolved = match ensure::resolve_installed(request, &platform, self.fetch.to_options())?
         {
@@ -212,16 +234,11 @@ impl Registry {
         };
         // The adapter: the fetch layer's record to the loader's input. The
         // predicate goes across exactly as returned, never re-encoded.
-        let library = open_image(
+        open_image(
             &resolved.library_path.clone(),
             Some(&resolved.predicate.clone()),
             Some(resolved),
-        )?;
-        opened.push(Opened {
-            request: request.to_string(),
-            library: Arc::clone(&library),
-        });
-        Ok(library)
+        )
     }
 }
 

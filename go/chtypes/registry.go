@@ -125,12 +125,21 @@ func (r *Registry) ForContext(ctx context.Context, request string) (*Library, er
 	return r.open(ctx, request, r.autofetch)
 }
 
-func (r *Registry) open(ctx context.Context, request string, mayFetch bool) (*Library, error) {
+func (r *Registry) open(ctx context.Context, request string, mayFetch bool) (_ *Library, err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if l := r.memo[request]; l != nil {
 		return l, nil
 	}
+	// A failed open clears the setup record while no image has completed load
+	// step 7, whatever failed: the spelling, the fetch, the signature or any
+	// load step (bindings-v1.md section 6, rule 4).
+	gen := setupGeneration()
+	defer func() {
+		if err != nil {
+			failedOpen(gen)
+		}
+	}()
 	opts := r.fetch.internal()
 	req := ocifetch.Request{Spelling: request}
 	res, err := ocifetch.ResolveInstalled(req, "", opts)

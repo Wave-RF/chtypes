@@ -147,3 +147,58 @@ func TestFirstOpenCommitsTheEmptySetup(t *testing.T) {
 		t.Error("a setup after the first open commit must be refused: it is not the one in effect")
 	}
 }
+
+// TestAFailedFetchBeforeStep7ClearsTheSetup: a registry open that fails before
+// any load (nothing installed, autofetch off) clears the setup record while no
+// image has completed step 7, so a different setup is accepted afterwards.
+func TestAFailedFetchBeforeStep7ClearsTheSetup(t *testing.T) {
+	resetSetup(t)
+	if err := Setup(SetupOptions{Timezone: "Asia/Tokyo"}); err != nil {
+		t.Fatal(err)
+	}
+	reg, err := NewRegistry(WithFetchOptions(FetchOptions{CacheDir: t.TempDir(), SystemDirs: []string{t.TempDir()}, Offline: true}), WithAutoFetch(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.For("26.8"); !errors.Is(err, ErrArtifactMissing) {
+		t.Fatalf("For on an empty cache = %v, want ErrArtifactMissing", err)
+	}
+	if err := Setup(SetupOptions{Timezone: "UTC"}); err != nil {
+		t.Errorf("a different setup after a failed open = %v, want it accepted", err)
+	}
+	// A refused version spelling is a failed open too.
+	var ue *UsageError
+	if _, err := reg.For("v26.8"); !errors.As(err, &ue) {
+		t.Fatalf("For(v26.8) = %v, want a *UsageError", err)
+	}
+	if err := Setup(SetupOptions{Timezone: "Europe/Berlin"}); err != nil {
+		t.Errorf("a different setup after a refused spelling = %v, want it accepted", err)
+	}
+	// Before any open is attempted, a second, different setup is still misuse.
+	if err := Setup(SetupOptions{Timezone: "Asia/Tokyo"}); !errors.As(err, &ue) {
+		t.Errorf("a second, different setup before any open = %v, want a *UsageError", err)
+	}
+}
+
+// TestAFailedOpenClearsOnlyItsOwnRecordAndNeverALatchedOne: a failed open never
+// clears a setup recorded after it began, and once an image has completed step
+// 7 a failure clears nothing.
+func TestAFailedOpenClearsOnlyItsOwnRecordAndNeverALatchedOne(t *testing.T) {
+	resetSetup(t)
+	began := setupGeneration()
+	if err := Setup(SetupOptions{Timezone: "Asia/Tokyo"}); err != nil {
+		t.Fatal(err)
+	}
+	failedOpen(began) // began before Asia/Tokyo was recorded
+	if err := Setup(SetupOptions{Timezone: "UTC"}); err == nil {
+		t.Error("a failed open cleared a setup recorded after it began")
+	}
+	latchSetup()
+	failedOpen(setupGeneration())
+	if err := Setup(SetupOptions{Timezone: "UTC"}); err == nil {
+		t.Error("a failed open cleared a latched setup")
+	}
+	if err := Setup(SetupOptions{Timezone: "Asia/Tokyo"}); err != nil {
+		t.Errorf("the latched setup again = %v, want a no-op", err)
+	}
+}

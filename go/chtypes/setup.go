@@ -3,8 +3,8 @@ package chtypes
 // setup.go — the process setup (bindings-v1.md section 6). The image zone and
 // the default settings are process-wide in ClickHouse, so both are chosen once,
 // before traffic: Setup records them, and every image gets them at load step 7.
-// The record latches once an image completes step 7; a step 7 failure before
-// that clears it, so a corrected setup can be recorded.
+// The record latches once an image completes step 7; before that, any failed
+// open clears it, so a corrected setup can be recorded.
 
 import (
 	"reflect"
@@ -22,13 +22,19 @@ type SetupOptions struct {
 }
 
 // setup is the setup guard: the record, and whether any image has completed
-// load step 7 under it. Every open holds images.mu around its commit, its load
-// and its settle, so the record a load ran under is the one it settles.
+// load step 7 under it. An open commits the record, loads and latches under
+// images.mu, and a failed open clears the record under images.mu too, so a
+// clear never lands between another open's commit and its latch.
 var setup struct {
 	mu       sync.Mutex
 	recorded bool
 	latched  bool // an image completed load step 7 under the record
-	opts     SetupOptions
+	// gen counts the records Setup made and the records failed opens cleared.
+	// An open reads it when it begins, and clears the record on failure only
+	// if it is unchanged: a failed open never clears a setup recorded after it
+	// began.
+	gen  uint64
+	opts SetupOptions
 }
 
 func sameSetup(a, b SetupOptions) bool {
@@ -64,14 +70,17 @@ func quoteForMessage(s string) string {
 // first setup stands. The first open records the empty setup if Setup was
 // never called. The setup latches once an image completes load step 7
 // (chs_initialize, then chs_set_defaults when there are defaults); from then
-// on Setup succeeds only with exactly the setup in effect. If step 7 fails
-// before any image has completed it, the record is cleared, so a corrected
-// Setup is accepted and the next open runs step 7 with it. Call it first.
+// on Setup succeeds only with exactly the setup in effect. Until then, any
+// open that fails, whatever failed (the fetch, the signature, an incompatible
+// artifact, a missing symbol or step 7), clears the record: the next Setup is
+// accepted, and an open with no Setup after the failure records the empty
+// setup. Call it first.
 func Setup(opts SetupOptions) error {
 	setup.mu.Lock()
 	defer setup.mu.Unlock()
 	if !setup.recorded {
 		setup.recorded = true
+		setup.gen++
 		setup.opts = SetupOptions{Timezone: opts.Timezone, Defaults: copyMap(opts.Defaults)}
 		return nil
 	}
@@ -94,21 +103,37 @@ func commitSetup() (zone []byte, defaults []byte, err error) {
 	return []byte(setup.opts.Timezone), defaults, nil
 }
 
-// settleSetup records how load step 7 ended, under the setup guard. A success
-// latches the setup in effect. A failure before any image has completed step 7
-// clears the record, so Setup accepts a corrected setup; once the setup has
-// latched, a failure changes nothing (the library's own process-once rule
-// answers a different zone on an image that already has one).
-func settleSetup(completed bool) {
+// setupGeneration is read when an open begins, for failedOpen.
+func setupGeneration() uint64 {
 	setup.mu.Lock()
 	defer setup.mu.Unlock()
-	if completed {
-		setup.latched = true
+	return setup.gen
+}
+
+// latchSetup is called, under images.mu, when an image completes load step 7:
+// from then on the setup in effect stands.
+func latchSetup() {
+	setup.mu.Lock()
+	defer setup.mu.Unlock()
+	setup.latched = true
+}
+
+// failedOpen settles an open that failed, whatever failed. While no image has
+// completed step 7 it clears the record, so Setup accepts a corrected setup,
+// unless a setup was recorded after the open began (gen moved). Once the setup
+// has latched it changes nothing: the library's own process-once rule answers
+// a different zone on an image that already has one. It takes images.mu, so it
+// never lands between another open's commit and its latch.
+func failedOpen(gen uint64) {
+	images.mu.Lock()
+	defer images.mu.Unlock()
+	setup.mu.Lock()
+	defer setup.mu.Unlock()
+	if setup.latched || setup.gen != gen {
 		return
 	}
-	if !setup.latched {
-		setup.recorded, setup.opts = false, SetupOptions{}
-	}
+	setup.recorded, setup.opts = false, SetupOptions{}
+	setup.gen++
 }
 
 func copyMap(m map[string]string) map[string]string {

@@ -6,6 +6,10 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+### Fixed
+
+- Any open that fails before a library has completed load step 7 now clears the setup record, whatever failed (#468). After `Setup(SetupOptions{Timezone: "Asia/Tokyo"})`, an open that failed before step 7 left that setup recorded, whether the fetch, the signature check, an incompatible artifact (`CHTYPES_ARTIFACT_INCOMPATIBLE`) or a missing symbol failed it. A different `Setup` was then a `*UsageError` until the process restarted. 1.0.2 cleared the record only when step 7 itself failed. Now every failed open clears it (`Registry.For`, `OpenUnverified` and `OpenLinked`), so the next `Setup` is accepted, whatever it is. An open with no `Setup` after the failure uses the empty setup, so call `Setup` again before you retry. Two things are unchanged. A second, different `Setup` before any open is attempted is still a `*UsageError`, never a silent last-wins. Once a library has completed step 7, a different setup is still a `*UsageError`. No name or signature changes. All four bindings run the same case, `tests/fixtures/abi-v1/setup-cases.json`, and the rule is `docs/reference/bindings-v1.md` section 6.
+
 ## [1.0.2] — 2026-10-06
 
 ### Changed
