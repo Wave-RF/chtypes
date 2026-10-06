@@ -57,7 +57,7 @@ A bad **row** is a verdict, not an exception: `outcome` becomes `Outcome.REJECTE
 | [Transformations](https://github.com/wave-rf/chtypes/blob/main/docs/guides/transformations.md)                                                                              | the silent-change report, and the DEFAULTs you must echo back                |
 | [Settings](https://github.com/wave-rf/chtypes/blob/main/docs/guides/settings.md) · [Discovery](https://github.com/wave-rf/chtypes/blob/main/docs/guides/discovery.md)       | the four channels; asking a real server what profile to validate under       |
 | [Filters](https://github.com/wave-rf/chtypes/blob/main/docs/guides/filters.md) · [Multi-version](https://github.com/wave-rf/chtypes/blob/main/docs/guides/multi-version.md) | boolean expressions over rows; several ClickHouse versions in one process    |
-| [Support matrix](https://github.com/wave-rf/chtypes/blob/main/docs/support-v1.md) · [Limitations](https://github.com/wave-rf/chtypes/blob/main/docs/limitations.md)            | what works where; what chtypes declines to answer                            |
+| [Support matrix](https://github.com/wave-rf/chtypes/blob/main/docs/support-v1.md) · [Limitations](https://github.com/wave-rf/chtypes/blob/main/docs/limitations.md)         | what works where; what chtypes declines to answer                            |
 
 ## Fetching from the command line
 
