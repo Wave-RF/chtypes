@@ -3337,6 +3337,22 @@
     },
     {
       "expect": {
+        "reason": "accepted"
+      },
+      "id": "loader.ok-e",
+      "kind": "loader",
+      "variant": "ok-e"
+    },
+    {
+      "expect": {
+        "reason": "accepted"
+      },
+      "id": "loader.ok-e-bi",
+      "kind": "loader",
+      "variant": "ok-e-bi"
+    },
+    {
+      "expect": {
         "reason": "missing_symbol:chs_abi_revision"
       },
       "id": "loader.missing-chs_abi_revision",

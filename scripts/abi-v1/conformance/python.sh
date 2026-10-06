@@ -52,9 +52,9 @@ XML="$(mktemp "${TMPDIR:-/tmp}/py-stub-census.XXXXXX")"
 trap 'rm -f "$XML"' EXIT
 rc=0
 if [ -n "${CHTYPES_ABI1_TOOLCHAIN:-}" ]; then
-    uv run --python "$CHTYPES_ABI1_TOOLCHAIN" pytest tests/abi1 -q -rs --junitxml="$XML" || rc=$?
+    uv run --python "$CHTYPES_ABI1_TOOLCHAIN" pytest tests/abi1 -q -rsP --junitxml="$XML" || rc=$?
 else
-    uv run pytest tests/abi1 -q -rs --junitxml="$XML" || rc=$?
+    uv run pytest tests/abi1 -q -rsP --junitxml="$XML" || rc=$?
 fi
 echo "python.sh: stub census"
 census_rc=0

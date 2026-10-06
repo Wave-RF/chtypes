@@ -67,6 +67,21 @@ echo "go.sh: go test -race ./... -count=1 -json (CHTYPES_ABI1_STUBS=$CHTYPES_ABI
 rc=0
 go test -race ./... -count=1 -json >"$LOG" 2>&1 || rc=$?
 
+echo "go.sh: PROBE (do not merge): every TestProbe verdict and PROBE- line, from the go test -json log"
+python3 - "$LOG" <<'PY' || true
+import json, sys
+for line in open(sys.argv[1], encoding="utf-8", errors="replace"):
+    try:
+        ev = json.loads(line)
+    except ValueError:
+        continue
+    test = ev.get("Test") or ""
+    out = ev.get("Output") or ""
+    if test.startswith("TestProbe") and ev.get("Action") in ("pass", "fail", "skip"):
+        print(f"  {ev['Action'].upper()} {test}")
+    elif "PROBE-" in out:
+        print("  " + out.strip())
+PY
 echo "go.sh: stub census"
 census_rc=0
 python3 "$CENSUS" go "$LOG" "$rc" \

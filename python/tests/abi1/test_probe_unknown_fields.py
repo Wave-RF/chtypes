@@ -79,3 +79,90 @@ def test_probe_filter_result(probe_lib) -> None:
 def test_probe_discovery(probe_lib) -> None:
     d = probe_lib.discover_columns(b"{}")
     assert len(d.columns) == 1 and d.columns[0].declaration == b"c String" and d.columns_sql == b"c String"
+
+
+# --- the second question: an UNKNOWN ENUM VALUE (stub variants ok-e, ok-e-bi).
+# Each probe RECORDS what the released decoder did, as a PROBE-ENUM line; it
+# asserts nothing beyond "no crash", because every outcome is a finding.
+
+
+def _open_variant(stubs_dir: Path, stubs_manifest: dict, tmp_path: Path, variant: str):
+    entry = stubs_manifest["variants"][variant]
+    source = stubs_dir / Path(entry["path"]).name
+    target = tmp_path / f"{variant}-copy.so"
+    shutil.copyfile(source, target)
+    target.chmod(0o755)
+    with pytest.warns(UserWarning, match="UNVERIFIED"):
+        return library.open_unverified(str(target), allow=True)
+
+
+def _report(id_: str, fn) -> None:
+    try:
+        got = fn()
+    except Exception as e:  # noqa: BLE001 - the class is the finding
+        print(f"PROBE-ENUM python {id_} => ERROR {type(e).__name__}: {str(e)[:300]}")
+        return
+    print(f"PROBE-ENUM python {id_} => {got}")
+
+
+def test_probe_unknown_enum_values(stubs_dir, stubs_manifest, tmp_path, clean_process, monkeypatch) -> None:
+    monkeypatch.setenv("CHTYPES_ALLOW_UNVERIFIED_LIBRARY", "1")
+    try:
+        bi = _open_variant(stubs_dir, stubs_manifest, tmp_path, "ok-e-bi")
+        print(f"PROBE-ENUM python build_info.capabilities => {bi.build_info.capabilities!r}")
+    except Exception as e:  # noqa: BLE001
+        print(f"PROBE-ENUM python build_info.capabilities => ERROR {type(e).__name__}: {str(e)[:300]}")
+
+    lib = _open_variant(stubs_dir, stubs_manifest, tmp_path, "ok-e")
+    _report("status.unknown", lambda: lib.validate_type(b"!U:"))
+    _report(
+        "describe.default_kind",
+        lambda: repr(lib.compile_table(b"!E:describe.default_kind").describe().columns[0].default_kind),
+    )
+    clean = lib.compile_table(b"CREATE TABLE t (x Int32)")
+    _report("describe.control", lambda: repr(clean.describe().columns[0].default_kind))
+
+    def row(id_, pick):
+        _report(id_, lambda: pick(clean.row(Format.JSON_EACH_ROW, b"!E:" + id_.encode())))
+
+    row("row.outcome", lambda r: f"outcome={r.outcome!r}")
+    row("row.cols.src", lambda r: f"source={r.columns[0].source!r} is_stored={r.columns[0].is_stored!r}")
+    row("row.transformed.reason", lambda r: f"reason={r.transformed[0].reason!r} lossy={r.transformed[0].lossy!r}")
+    row("row.verdict", lambda r: f"verdict={r.verdict!r}")
+    _report(
+        "row.control",
+        lambda: (lambda r: f"outcome={r.outcome!r} source={r.columns[0].source!r}")(
+            clean.row(Format.JSON_EACH_ROW, b"{}")
+        ),
+    )
+
+    def batch(id_, pick):
+        _report(
+            id_,
+            lambda: pick(clean.rows(Format.JSON_EACH_ROW, b"!E:" + id_.encode(), export=Format.JSON_EACH_ROW)),
+        )
+
+    batch("batch.outcome", lambda b: f"outcome={b.outcome!r}")
+    batch("batch.rows.outcome", lambda b: f"outcome={b.rows[0].outcome!r}")
+    batch(
+        "batch.rows.cols.src",
+        lambda b: f"source={b.rows[0].columns[0].source!r} is_stored={b.rows[0].columns[0].is_stored!r}",
+    )
+    batch(
+        "batch.transformed.reason",
+        lambda b: f"reason={b.transformed[0].reason!r} lossy={b.transformed[0].lossy!r}",
+    )
+    batch("batch.framing.container", lambda b: f"framing={b.framing!r}")
+    batch("batch.control", lambda b: f"outcome={b.outcome!r}")
+
+    flt = clean.compile_filter("x > 1")
+    for id_ in ("filter.outcome", "filter.verdicts", "filter.control"):
+        body = b"{}" if id_ == "filter.control" else b"!E:" + id_.encode()
+        _report(
+            id_,
+            lambda body=body: (lambda f: f"outcome={f.outcome!r} verdicts={f.verdicts!r}")(
+                flt.rows(Format.JSON_EACH_ROW, body)
+            ),
+        )
+
+    _report("discovery.default_kind", lambda: repr(lib.discover_columns(b"!E:discovery.default_kind").columns))

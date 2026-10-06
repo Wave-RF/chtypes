@@ -103,3 +103,77 @@ describe.skipIf(!stubsAvailable)('PROBE unknown members in every document (ok-x 
     expect(d.columnsSql.toString()).toBe('c String');
   });
 });
+
+// --- the second question: an UNKNOWN ENUM VALUE (stub variants ok-e, ok-e-bi).
+// Each probe RECORDS what the released decoder did, as a PROBE-ENUM line; it
+// asserts nothing beyond "no crash", because every outcome is a finding.
+
+function openVariant(variant: string): Library {
+  const doc = JSON.parse(readFileSync(path.join(STUBS_DIR as string, 'stubs.json'), 'utf8')) as {
+    variants: Record<string, { readonly predicate: Predicate }>;
+  };
+  const v = doc.variants[variant];
+  if (v === undefined) throw new Error(`no stub variant ${variant}`);
+  const image = openAbi1({
+    libraryPath: path.join(STUBS_DIR as string, `${variant}.so`),
+    predicate: v.predicate,
+    platform: `${v.predicate.os}-${v.predicate.arch}`,
+  });
+  return libraryOf(image, undefined);
+}
+
+function show(value: unknown): string {
+  return JSON.stringify(value, (_k, x) => (Buffer.isBuffer(x) ? `<buf ${x.toString()}>` : x));
+}
+
+function report(id: string, fn: () => string): void {
+  try {
+    console.log(`PROBE-ENUM ts ${id} => ${fn()}`);
+  } catch (e) {
+    const err = e as Error;
+    console.log(`PROBE-ENUM ts ${id} => ERROR ${err.constructor.name}: ${String(err.message).slice(0, 300)}`);
+  }
+}
+
+describe.skipIf(!stubsAvailable)('PROBE unknown enum values (ok-e, ok-e-bi stubs)', () => {
+  it('probe unknown enum values', () => {
+    report('build_info.capabilities', () => show(openVariant('ok-e-bi').buildInfo.capabilities));
+    const lib = openVariant('ok-e');
+    report('status.unknown', () => show(lib.validateType('!U:')));
+    report('describe.default_kind', () =>
+      show(lib.compileTable('!E:describe.default_kind').describe().columns[0]?.defaultKind),
+    );
+    const clean = lib.compileTable(CREATE);
+    report('describe.control', () => show(clean.describe().columns[0]?.defaultKind));
+    const row = (id: string, pick: (r: ReturnType<typeof clean.row>) => unknown) =>
+      report(id, () => show(pick(clean.row(Format.JSONEachRow, Buffer.from(`!E:${id}`)))));
+    row('row.outcome', (r) => ({ outcome: r.outcome }));
+    row('row.cols.src', (r) => ({ source: r.columns[0]?.source, isStored: r.columns[0]?.isStored }));
+    row('row.transformed.reason', (r) => ({ reason: r.transformed[0]?.reason, lossy: r.transformed[0]?.lossy }));
+    row('row.verdict', (r) => ({ verdict: r.verdict ?? 'undefined' }));
+    report('row.control', () => show(clean.row(Format.JSONEachRow, Buffer.from('{}')).outcome));
+    const batch = (id: string, pick: (b: ReturnType<typeof clean.rows>) => unknown) =>
+      report(id, () =>
+        show(pick(clean.rows(Format.JSONEachRow, Buffer.from(`!E:${id}`), { exportFormat: Format.JSONEachRow }))),
+      );
+    batch('batch.outcome', (b) => ({ outcome: b.outcome }));
+    batch('batch.rows.outcome', (b) => ({ outcome: b.rows[0]?.outcome }));
+    batch('batch.rows.cols.src', (b) => ({
+      source: b.rows[0]?.columns[0]?.source,
+      isStored: b.rows[0]?.columns[0]?.isStored,
+    }));
+    batch('batch.transformed.reason', (b) => ({ reason: b.transformed[0]?.reason, lossy: b.transformed[0]?.lossy }));
+    batch('batch.framing.container', (b) => ({ container: b.framing?.container }));
+    batch('batch.control', (b) => ({ outcome: b.outcome }));
+    const filter = clean.compileFilter('x > 1');
+    for (const id of ['filter.outcome', 'filter.verdicts', 'filter.control']) {
+      const body = id === 'filter.control' ? Buffer.from('{}') : Buffer.from(`!E:${id}`);
+      report(id, () => {
+        const f = filter.rows(Format.JSONEachRow, body);
+        return show({ outcome: f.outcome, verdicts: f.verdicts });
+      });
+    }
+    report('discovery.default_kind', () => show(lib.discoverColumns(Buffer.from('!E:discovery.default_kind')).columns));
+    expect(true).toBe(true);
+  });
+});

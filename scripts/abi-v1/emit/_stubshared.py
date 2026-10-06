@@ -215,6 +215,65 @@ PROBE_X_DOCS = {
         {"code": 53, "name": "TYPE_MISMATCH", "x_future": {"a": [1]}},
     ],
 }
+# PROBE (do not merge), the second question: an UNKNOWN ENUM VALUE. A stub
+# built with -DCHS_STUB_PROBE_E (variant "ok-e") answers each document call with
+# the CLEAN document of its kind (PROBE_E_BASE: no unknown member anywhere), or,
+# when the call's first bytes_in parameter is exactly b"!E:" + <id>, with that
+# document after one field is set to a value its vocabulary does not list
+# (PROBE_E_MUTATIONS). chs_schema_describe has no bytes_in: it answers the
+# mutation named by the image's last chs_schema_create statement, when that
+# began "!E:". chs_type_validate("!U:") answers a status outside the closed
+# set. Variant "ok-e-bi" is the ok build with unknown values in every
+# capabilities list of its build_info.
+def _strip_unknown(v):
+    unknown = {"x_future", "x_future_obj", "x_future_arr", "x_future_null", "x_future_b64",
+               "segments", "deferred", "server_profile", "timezone", "tables"}
+    if isinstance(v, dict):
+        return {k: _strip_unknown(x) for k, x in v.items() if k not in unknown}
+    if isinstance(v, list):
+        return [_strip_unknown(x) for x in v]
+    return v
+
+
+PROBE_E_BASE = {k: _strip_unknown(v) for k, v in PROBE_X_DOCS.items() if k != "error_code_table"}
+# id -> (document kind, path, value)
+PROBE_E_MUTATIONS = {
+    "row.outcome": ("row", ("outcome",), "x_future_outcome"),
+    "row.cols.src": ("row", ("cols", 0, "src"), "x_future_src"),
+    "row.transformed.reason": ("row", ("transformed", 0, "reason"), "x_future_reason"),
+    "row.verdict": ("row", ("verdict",), "x"),
+    "batch.outcome": ("batch", ("outcome",), "x_future_outcome"),
+    "batch.rows.outcome": ("batch", ("rows", 0, "outcome"), "x_future_outcome"),
+    "batch.rows.cols.src": ("batch", ("rows", 0, "cols", 0, "src"), "x_future_src"),
+    "batch.transformed.reason": ("batch", ("transformed", 0, "reason"), "x_future_reason"),
+    "batch.framing.container": ("batch", ("framing", "container"), "x_future_container"),
+    "filter.outcome": ("filter_result", ("outcome",), "x_future_outcome"),
+    "filter.verdicts": ("filter_result", ("verdicts",), "tx"),
+    "describe.default_kind": ("schema_description", ("columns", 0, "default_kind"), "X_FUTURE"),
+    "discovery.default_kind": ("discovery", ("columns", 0, "default_kind"), "X_FUTURE"),
+}
+PROBE_E_UNKNOWN_STATUS = 99
+PROBE_E_CAPABILITIES = {
+    "input_formats": ["JSONEachRow", "XFutureFormat"],
+    "export_formats": ["JSONEachRow", "XFutureFormat"],
+    "doc_flags": ["values", "x_future_flag"],
+    "features": ["default_generators", "x_future_feature"],
+}
+
+
+def probe_e_doc(mutation_id: str):
+    """The document PROBE_E_MUTATIONS[mutation_id] names, as a Python value."""
+    import copy
+
+    kind, path, value = PROBE_E_MUTATIONS[mutation_id]
+    doc = copy.deepcopy(PROBE_E_BASE[kind])
+    cur = doc
+    for step in path[:-1]:
+        cur = cur[step]
+    cur[path[-1]] = value
+    return doc
+
+
 # The export bytes ok-x answers when a binding passes an out_export pointer.
 PROBE_X_EXPORT = b'{"s":"abc"}\n'
 # The symbols ok-extra-export exports beyond the description.
@@ -390,6 +449,8 @@ def plan(model) -> list[Variant]:
         Variant("ok-extra-export", (("CHS_STUB_EXTRA_EXPORT", "1"),), "accepted"),
         Variant("ok-pred-x", (), "accepted"),
         Variant("ok-future", (("CHS_STUB_PROBE_X", "1"), ("CHS_STUB_EXTRA_EXPORT", "1")), "accepted"),
+        Variant("ok-e", (("CHS_STUB_PROBE_E", "1"),), "accepted"),
+        Variant("ok-e-bi", (("CHS_STUB_PROBE_E_BUILD_INFO", "1"),), "accepted"),
     ]
     for sym in model.symbols():
         if sym == ABI_VERSION_SYMBOL:

@@ -611,6 +611,15 @@ static uint8_t *chs_stub_concat(const uint8_t *p, size_t n, const char *suffix, 
 '''
 
 
+def _c_caps_e() -> str:
+    """PROBE_E_CAPABILITIES as JSON, escaped for a C string literal (an
+    interpolated f-string value: its braces are not re-read)."""
+    import json
+
+    text = json.dumps(_stubshared.PROBE_E_CAPABILITIES, separators=(",", ":"))
+    return text.replace('"', '\\"')
+
+
 def _build_info_section(model) -> str:
     """chs_build_info()'s four variant bodies, keyed by CHS_STUB_BUILD_INFO_MODE
     (0 = normal, 1 = NULL, 2 = malformed JSON, 3 = a duplicate key,
@@ -649,6 +658,15 @@ def _build_info_section(model) -> str:
     "\\"capabilities\\":{{\\"input_formats\\":[\\"JSONEachRow\\"],\\"export_formats\\":[\\"JSONEachRow\\"],\\"doc_flags\\":[\\"values\\"]," \\
     "\\"features\\":[\\"default_generators\\"]}}}}"
 
+/* PROBE (do not merge): the same build_info with a value no vocabulary lists in
+   every capabilities list (CHS_STUB_PROBE_E_BUILD_INFO, variant ok-e-bi). */
+#define CHS_STUB_BUILD_INFO_FMT_E \\
+    "{{\\"schema\\":1,\\"abi\\":%d,\\"abi_fingerprint\\":\\"%s\\",\\"clickhouse_version\\":\\"26.8.15.10\\"," \\
+    "\\"channel\\":\\"lts\\",\\"clickhouse_minor\\":\\"26.8\\",\\"clickhouse_commit\\":\\"{"a" * 40}\\"," \\
+    "\\"core_commit\\":\\"{"b" * 40}\\",\\"build\\":\\"20261001.000000\\",\\"inputs_sha256\\":\\"{"c" * 64}\\"," \\
+    "\\"os\\":\\"%s\\",\\"arch\\":\\"%s\\",\\"toolchain\\":{{\\"cc\\":\\"stub\\"}}," \\
+    "\\"capabilities\\":{_c_caps_e()}}}"
+
 /* PROBE (do not merge): the same build_info plus members no description names,
    at the top level and inside capabilities (CHS_STUB_PROBE_X, variant ok-x). */
 #define CHS_STUB_BUILD_INFO_FMT_X \\
@@ -678,6 +696,8 @@ def _build_info_section(model) -> str:
     snprintf(buf, sizeof buf, CHS_STUB_BUILD_INFO_FMT, {model.abi}, {fp_other}, CHS_STUB_OS, CHS_STUB_ARCH);
 #  elif defined(CHS_STUB_PROBE_X)
     snprintf(buf, sizeof buf, CHS_STUB_BUILD_INFO_FMT_X, {model.abi}, {fp_ok}, CHS_STUB_OS, CHS_STUB_ARCH);
+#  elif defined(CHS_STUB_PROBE_E_BUILD_INFO)
+    snprintf(buf, sizeof buf, CHS_STUB_BUILD_INFO_FMT_E, {model.abi}, {fp_ok}, CHS_STUB_OS, CHS_STUB_ARCH);
 #  else
     snprintf(buf, sizeof buf, CHS_STUB_BUILD_INFO_FMT, {model.abi}, {fp_ok}, CHS_STUB_OS, CHS_STUB_ARCH);
 #  endif
@@ -1059,6 +1079,96 @@ def _probe_x(model, fn) -> list[str]:  # noqa: ARG001
     return lines
 
 
+
+def _probe_e(model, fn) -> list[str]:  # noqa: ARG001
+    """PROBE (do not merge): under CHS_STUB_PROBE_E (variant ok-e), see
+    _stubshared.PROBE_E_MUTATIONS. Emitted after the input checks and the
+    status injection."""
+    import json
+
+    lines: list[str] = []
+    first_bytes = next((p for p in fn.params if p.kind == "bytes_in"), None)
+    if fn.name == "chs_type_validate":
+        n = _stubshared.PROBE_E_UNKNOWN_STATUS
+        msg = "probe: a status outside the closed set"
+        return [
+            "#if defined(CHS_STUB_PROBE_E)",
+            f'    if ({first_bytes.name}_len == 3 && memcmp({first_bytes.name}, "!U:", 3) == 0) {{',
+            f"        chs_stub_set_err(err, chs_stub_make_error((chs_status) {n}, 0, \"\", 0, {_c_str(msg)}, {len(msg)}));",
+            f"        return (chs_status) {n};",
+            "    }",
+            "#endif",
+        ]
+    if fn.name == "chs_schema_create":
+        return [
+            "#if defined(CHS_STUB_PROBE_E)",
+            f"    chs_stub_probe_e_create_len = 0;",
+            f"    if ({first_bytes.name}_len > 3 && {first_bytes.name}_len < sizeof chs_stub_probe_e_create &&",
+            f'        memcmp({first_bytes.name}, "!E:", 3) == 0) {{',
+            f"        memcpy(chs_stub_probe_e_create, {first_bytes.name} + 3, {first_bytes.name}_len - 3);",
+            f"        chs_stub_probe_e_create_len = {first_bytes.name}_len - 3;",
+            "    }",
+            "#endif",
+        ]
+    outs = [q for q in fn.params if q.kind == "out_handle" and q.type == BUF_HANDLE]
+    docs = [q for q in outs if q.content and q.content.startswith("document:")]
+    if len(docs) != 1:
+        return []
+    out = docs[0]
+    kind = out.content[len("document:") :]
+    base = _stubshared.PROBE_E_BASE.get(kind)
+    if base is None:
+        return []
+    muts = [(mid, _stubshared.probe_e_doc(mid)) for mid, (k, _, _) in _stubshared.PROBE_E_MUTATIONS.items() if k == kind]
+    if first_bytes is not None:
+        key_ptr, key_len = f"{first_bytes.name}", f"{first_bytes.name}_len"
+        key_pre = "3"
+        key_check = f'{key_len} > 3 && memcmp({key_ptr}, "!E:", 3) == 0'
+        key_rest = f"{key_ptr} + 3", f"{key_len} - 3"
+    else:
+        key_check = "chs_stub_probe_e_create_len > 0"
+        key_rest = "(const uint8_t *) chs_stub_probe_e_create", "chs_stub_probe_e_create_len"
+    lines += [
+        "#if defined(CHS_STUB_PROBE_E)",
+        "    {",
+        f"        const char *probe_doc = {_c_str(json.dumps(base, separators=(',', ':')))};",
+        f"        if ({key_check}) {{",
+        f"            const uint8_t *k = {key_rest[0]}; size_t kn = {key_rest[1]};",
+    ]
+    for mid, doc in muts:
+        lines += [
+            f"            if (kn == {len(mid)} && memcmp(k, {_c_str(mid)}, {len(mid)}) == 0)",
+            f"                probe_doc = {_c_str(json.dumps(doc, separators=(',', ':')))};",
+        ]
+    lines += [
+        "        }",
+        f"        if ({out.name} == NULL) {{",
+        *_c_fixed_error("CHS_INVALID_ARGUMENT", f"{out.name}: required", indent="            "),
+        "        }",
+    ]
+    for q in outs:
+        if q is out:
+            continue
+        lines += [
+            f"        if ({q.name} != NULL) {{",
+            f"            static const char probe_export[] = {_c_bytes_lit(_stubshared.PROBE_X_EXPORT)};",
+            "            chs_sb xb; chs_sb_init(&xb);",
+            "            chs_sb_cat(&xb, probe_export);",
+            f"            *{q.name} = chs_stub_finish_buf(&xb);",
+            "        }",
+        ]
+    lines += [
+        "        chs_sb sb; chs_sb_init(&sb);",
+        "        chs_sb_cat(&sb, probe_doc);",
+        f"        *{out.name} = chs_stub_finish_buf(&sb);",
+        "        chs_stub_set_err(err, NULL);",
+        "        return CHS_OK;",
+        "    }",
+        "#endif",
+    ]
+    return lines
+
+
 def _fill_outputs(model, fn) -> list[str]:
     """Fill every out_handle. `p.nullable` here means "the pointer-TO-pointer
     itself may be NULL" (the caller does not want this output); a required
@@ -1144,6 +1254,7 @@ def _gen_generic(model, fn) -> str:
     body += _zone_probe(fn)
     body += _document_mode(model, fn)
     body += _probe_x(model, fn)
+    body += _probe_e(model, fn)
     body += _fill_outputs(model, fn)
     err_param = next((p for p in fn.params if p.kind == "out_error"), None)
     if err_param is not None:
@@ -1321,6 +1432,13 @@ def render_stub_c(model) -> str:
             body_by_name[fn.name] = _gen_generic(model, fn)
 
     out = parts
+    out.append(
+        "\n/* PROBE (do not merge): the mutation chs_schema_describe answers (CHS_STUB_PROBE_E). */\n"
+        "#if defined(CHS_STUB_PROBE_E)\n"
+        "static char chs_stub_probe_e_create[128];\n"
+        "static size_t chs_stub_probe_e_create_len = 0;\n"
+        "#endif\n"
+    )
     out.append(
         "\n/* PROBE (do not merge): exports no description names (CHS_STUB_EXTRA_EXPORT). */\n"
         "#if defined(CHS_STUB_EXTRA_EXPORT)\n"

@@ -7,7 +7,10 @@ package chtypes
 // live_handles carry unknown members too. Each subtest decodes one document
 // through the public API and checks the known fields still decode.
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestProbeUnknownFields(t *testing.T) {
 	lib := openStub(t, "ok-x")
@@ -102,4 +105,133 @@ func TestProbeUnknownFields(t *testing.T) {
 			t.Errorf("discovery = %+v", d)
 		}
 	})
+}
+
+// TestProbeUnknownEnumValues: the second question. The "ok-e" stub answers a
+// clean document, or (on a "!E:<id>" body) the same document with one field
+// set to a value its vocabulary does not list; "ok-e-bi" carries an unknown
+// value in every capabilities list of build_info; chs_type_validate("!U:")
+// answers status 99. Each probe RECORDS what the released decoder did (an
+// error and its class, or the decoded value) as a PROBE-ENUM line; it asserts
+// nothing beyond "no crash", because every outcome is a finding.
+func TestProbeUnknownEnumValues(t *testing.T) {
+	report := func(id, got string, err error) {
+		if err != nil {
+			t.Logf("PROBE-ENUM go %s => ERROR %T: %v", id, err, err)
+			return
+		}
+		t.Logf("PROBE-ENUM go %s => %s", id, got)
+	}
+
+	resetSetup(t)
+	t.Setenv("CHTYPES_ALLOW_UNVERIFIED_LIBRARY", "1")
+	bi, err := OpenUnverified(stubFile(t, "ok-e-bi"), true)
+	if err != nil {
+		report("build_info.capabilities", "", err)
+	} else {
+		report("build_info.capabilities", fmt.Sprintf("%+v", bi.BuildInfo().Capabilities), nil)
+	}
+
+	lib := openStub(t, "ok-e")
+	_, err = lib.ValidateType("!U:")
+	report("status.unknown", "no error", err)
+
+	schema, err := lib.CompileTable("!E:describe.default_kind")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := schema.Describe()
+	if err == nil {
+		report("describe.default_kind", fmt.Sprintf("default_kind=%q", d.Columns[0].DefaultKind), nil)
+	} else {
+		report("describe.default_kind", "", err)
+	}
+	clean, err := lib.CompileTable("CREATE TABLE t (x Int32)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d, err := clean.Describe(); err == nil {
+		report("describe.control", fmt.Sprintf("default_kind=%q", d.Columns[0].DefaultKind), nil)
+	} else {
+		report("describe.control", "", err)
+	}
+
+	row := func(id string, pick func(RowResult) string) {
+		r, err := clean.Row(JSONEachRow, []byte("!E:"+id))
+		if err != nil {
+			report(id, "", err)
+			return
+		}
+		report(id, pick(r), nil)
+	}
+	row("row.outcome", func(r RowResult) string { return fmt.Sprintf("outcome=%q", r.Outcome) })
+	row("row.cols.src", func(r RowResult) string {
+		return fmt.Sprintf("source=%q is_stored=%v", r.Columns[0].Source, r.Columns[0].IsStored)
+	})
+	row("row.transformed.reason", func(r RowResult) string {
+		return fmt.Sprintf("reason=%q lossy=%v", r.Transformed[0].Reason, r.Transformed[0].Lossy)
+	})
+	row("row.verdict", func(r RowResult) string {
+		if r.Verdict == nil {
+			return "verdict=nil"
+		}
+		return fmt.Sprintf("verdict=%q answered=%v", *r.Verdict, r.Verdict.Answered())
+	})
+	if r, err := clean.Row(JSONEachRow, []byte(`{}`)); err == nil {
+		report("row.control", fmt.Sprintf("outcome=%q source=%q", r.Outcome, r.Columns[0].Source), nil)
+	} else {
+		report("row.control", "", err)
+	}
+
+	batch := func(id string, pick func(BatchResult) string) {
+		b, err := clean.Rows(JSONEachRow, []byte("!E:"+id), WithExport(JSONEachRow))
+		if err != nil {
+			report(id, "", err)
+			return
+		}
+		report(id, pick(b), nil)
+	}
+	batch("batch.outcome", func(b BatchResult) string { return fmt.Sprintf("outcome=%q", b.Outcome) })
+	batch("batch.rows.outcome", func(b BatchResult) string { return fmt.Sprintf("outcome=%q", b.Rows[0].Outcome) })
+	batch("batch.rows.cols.src", func(b BatchResult) string {
+		c := b.Rows[0].Columns[0]
+		return fmt.Sprintf("source=%q is_stored=%v", c.Source, c.IsStored)
+	})
+	batch("batch.transformed.reason", func(b BatchResult) string {
+		return fmt.Sprintf("reason=%q lossy=%v", b.Transformed[0].Reason, b.Transformed[0].Lossy)
+	})
+	batch("batch.framing.container", func(b BatchResult) string {
+		if b.Framing == nil {
+			return "framing=nil"
+		}
+		return fmt.Sprintf("container=%q", b.Framing.Container)
+	})
+	batch("batch.control", func(b BatchResult) string { return fmt.Sprintf("outcome=%q", b.Outcome) })
+
+	filter, err := clean.CompileFilter("x > 1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"filter.outcome", "filter.verdicts", "filter.control"} {
+		body := []byte("!E:" + id)
+		if id == "filter.control" {
+			body = []byte(`{}`)
+		}
+		f, err := filter.Rows(JSONEachRow, body)
+		if err != nil {
+			report(id, "", err)
+			continue
+		}
+		answered := make([]bool, len(f.Verdicts))
+		for i, v := range f.Verdicts {
+			answered[i] = v.Answered()
+		}
+		report(id, fmt.Sprintf("outcome=%q verdicts=%q answered=%v", f.Outcome, f.Verdicts, answered), nil)
+	}
+
+	if dc, err := lib.DiscoverColumns([]byte("!E:discovery.default_kind")); err == nil {
+		report("discovery.default_kind", fmt.Sprintf("%+v", dc.Columns), nil)
+	} else {
+		report("discovery.default_kind", "", err)
+	}
 }
