@@ -201,3 +201,25 @@ def test_search_dirs_is_the_order_a_lookup_reads(tmp_path: Path) -> None:
         got = resolve_installed(Request("26.8"), "linux-arm64", options)
         assert got is not None
         assert (got.dir, got.source) == (entry, f"system:{dirs[i]}")
+
+
+@pytest.mark.parametrize("how", ["explicit", "env"])
+def test_relative_cache_dir_resolves_to_absolute(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, how: str
+) -> None:
+    """A relative cache directory (explicit or CHTYPES_CACHE) is resolved against
+    the cwd once, so `dir` and `library_path` are absolute (fetch-v1.md section 9;
+    public issue #541)."""
+    monkeypatch.chdir(tmp_path)
+    _write_record(tmp_path / "rel-cache", "26.8.1.1", "20260801.000001")
+    monkeypatch.delenv("CHTYPES_CACHE", raising=False)
+    if how == "env":
+        monkeypatch.setenv("CHTYPES_CACHE", "rel-cache")
+    options = Options(
+        cache_dir="rel-cache" if how == "explicit" else None,
+        system_dirs=(),
+        platform="linux-arm64",
+    )
+    got = resolve_installed(Request("26.8"), "linux-arm64", options)
+    assert got is not None
+    assert got.dir.is_absolute() and got.library_path.is_absolute()

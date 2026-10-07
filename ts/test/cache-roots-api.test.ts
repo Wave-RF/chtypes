@@ -29,7 +29,7 @@ afterEach(() => {
   rmSync(tmp, { recursive: true, force: true });
 });
 
-const sub = (v: string): string => v.replace('<TMP>', tmp);
+const sub = (v: string): string => v.replace('<TMP>', tmp).replace('<CWD>', process.cwd());
 
 describe('the shared table', () => {
   for (const c of table.cases) {

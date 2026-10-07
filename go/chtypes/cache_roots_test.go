@@ -117,7 +117,13 @@ func TestCacheRootsSharedTable(t *testing.T) {
 	for _, c := range table.Cases {
 		t.Run(c.Name, func(t *testing.T) {
 			tmp := t.TempDir()
-			sub := func(s string) string { return strings.ReplaceAll(s, "<TMP>", tmp) }
+			cwd, err := os.Getwd()
+			if err != nil {
+				t.Fatal(err)
+			}
+			sub := func(s string) string {
+				return strings.ReplaceAll(strings.ReplaceAll(s, "<TMP>", tmp), "<CWD>", cwd)
+			}
 			clearCacheEnv(t)
 			for k, v := range c.Env {
 				t.Setenv(k, sub(v))

@@ -18,6 +18,7 @@ fn table() -> serde_json::Value {
 
 fn sub(v: &str, tmp: &Path) -> String {
     v.replace("<TMP>", &tmp.to_string_lossy())
+        .replace("<CWD>", &std::env::current_dir().unwrap().to_string_lossy())
 }
 
 fn strings(v: &serde_json::Value, tmp: &Path) -> Vec<String> {

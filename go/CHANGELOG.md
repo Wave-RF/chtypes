@@ -10,6 +10,10 @@ The four bindings in this repository are released together and give one answer, 
 
 - The resolved cache root and the ordered directories searched for installed builds are now public API (#530): Go `chtypes.CacheRoot(FetchOptions) (string, error)` and `chtypes.SearchDirs(FetchOptions) ([]string, error)`. They run the fetch layer's own resolution (the explicit directory, `CHTYPES_CACHE`, `XDG_CACHE_HOME` or `~/.cache`, then the system directories), so an embedder no longer copies the precedence, and they create nothing. `chtypes where --all` prints the same directories, the root first, one per line; plain `chtypes where` is unchanged. All four bindings are held to one list for the same inputs by `tests/fixtures/cache-roots/cases.json`.
 
+### Fixed
+
+- An explicit or `CHTYPES_CACHE` relative cache directory is now resolved to an absolute path, as TypeScript already did, so a fetch's `dir` and library path are absolute as `fetch-v1.md` section 9 documents (#541).
+
 ## [1.1.0] — 2026-10-06
 
 ### Added

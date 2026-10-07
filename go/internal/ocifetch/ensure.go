@@ -144,6 +144,14 @@ func resolveOptions(o *Options) (resolvedOptions, error) {
 			ro.cacheDir = dir
 		}
 	}
+	// A relative cache directory is the process cwd's at this call, resolved
+	// here once so every path derived from it (Resolved.Dir, LibraryPath) is
+	// absolute, as docs/guides/fetch-v1.md §9 says (public issue #541).
+	abs, err := filepath.Abs(ro.cacheDir)
+	if err != nil {
+		return ro, fmt.Errorf("chtypes: resolving the cache directory %q: %w", ro.cacheDir, err)
+	}
+	ro.cacheDir = abs
 
 	ro.systemDirs = o.SystemDirs
 	if ro.systemDirs == nil {

@@ -1619,6 +1619,30 @@ mod cache_roots_tests {
         let _ = std::fs::remove_dir_all(&base);
     }
 
+    /// A relative cache directory is resolved against the cwd once, so the
+    /// answer's `dir` and `library_path` are absolute (public issue #541).
+    #[test]
+    fn relative_cache_dir_resolves_to_absolute() {
+        let base = scratch("relative");
+        write_record(&base.join("cache"), "26.8.1.1", "20260801.000001");
+        // Reach the seeded cache by a path relative to the cwd (`..` up to the
+        // root, then down), so the test needs no process-wide chdir.
+        let depth = std::env::current_dir().unwrap().components().count() - 1;
+        let mut relative = PathBuf::new();
+        for _ in 0..depth {
+            relative.push("..");
+        }
+        relative.push(base.strip_prefix("/").unwrap().join("cache"));
+        assert!(relative.is_relative());
+        let got = resolve_installed("26.8", "linux-arm64", options(&relative, Vec::new()))
+            .unwrap()
+            .expect("a record answers 26.8");
+        assert!(got.dir.is_absolute(), "{:?}", got.dir);
+        assert!(got.library_path.is_absolute(), "{:?}", got.library_path);
+        assert!(!got.dir.components().any(|c| c.as_os_str() == ".."));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     /// Every path under `root` with its size, or `None` when `root` is absent.
     fn tree_of(root: &Path) -> Option<Vec<(PathBuf, u64)>> {
         fn walk(dir: &Path, out: &mut Vec<(PathBuf, u64)>) {

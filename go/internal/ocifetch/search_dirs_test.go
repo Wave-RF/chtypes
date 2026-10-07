@@ -4,6 +4,7 @@ package ocifetch
 // lookups read, not a second copy of it.
 
 import (
+	"path/filepath"
 	"reflect"
 	"testing"
 )
@@ -34,6 +35,30 @@ func TestSearchDirsIsTheOrderALookupReads(t *testing.T) {
 		}
 		if res.Dir != entry || res.Source != "system:"+dirs[i] {
 			t.Errorf("answered %s from %q, want %s from system:%s", res.Dir, res.Source, entry, dirs[i])
+		}
+	}
+}
+
+// TestRelativeCacheDirResolvesToAbsolute: a relative cache directory (explicit
+// or CHTYPES_CACHE) is resolved against the cwd once, so Resolved.Dir and
+// LibraryPath are absolute (fetch-v1.md §9; public issue #541).
+func TestRelativeCacheDirResolvesToAbsolute(t *testing.T) {
+	base := t.TempDir()
+	t.Chdir(base)
+	writeRecordRoot(t, filepath.Join(base, "rel-cache"), "26.8.1.1", "20260801.000001")
+	for name, opts := range map[string]*Options{
+		"explicit": {CacheDir: "rel-cache", SystemDirs: []string{}},
+		"env":      {SystemDirs: []string{}},
+	} {
+		if name == "env" {
+			t.Setenv(EnvCacheName, "rel-cache")
+		}
+		res, err := ResolveInstalled(Request{Spelling: "26.8"}, "linux-arm64", opts)
+		if err != nil || res == nil {
+			t.Fatalf("%s: ResolveInstalled = %v, %v", name, res, err)
+		}
+		if !filepath.IsAbs(res.Dir) || !filepath.IsAbs(res.LibraryPath) {
+			t.Errorf("%s: Dir %q, LibraryPath %q must be absolute", name, res.Dir, res.LibraryPath)
 		}
 	}
 }

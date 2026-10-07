@@ -1,5 +1,5 @@
 {
-  "_comment": "One table, read by all four bindings' cache-roots tests (public issue #530): for the same environment and options, CacheRoot and SearchDirs answer the same list. <TMP> is a scratch directory the test makes. env keys absent from a case are unset. cache_dir null means no explicit directory; system_dirs null means the built-in list and [] none.",
+  "_comment": "One table, read by all four bindings' cache-roots tests (public issue #530): for the same environment and options, CacheRoot and SearchDirs answer the same list. <TMP> is a scratch directory the test makes; <CWD> is the process working directory at the call (a relative directory resolves against it, lexically, so `.` and `..` fold and no symlink is followed: public issue #541). env keys absent from a case are unset. cache_dir null means no explicit directory; system_dirs null means the built-in list and [] none.",
   "defaults": ["/usr/local/share/chtypes/v1", "/opt/chtypes/v1"],
   "cases": [
     {
@@ -43,6 +43,27 @@
       "cache_dir": "<TMP>/explicit",
       "system_dirs": [],
       "search_dirs": ["<TMP>/explicit"]
+    },
+    {
+      "name": "relative-explicit-directory",
+      "env": { "HOME": "<TMP>/user" },
+      "cache_dir": "rel/explicit",
+      "system_dirs": [],
+      "search_dirs": ["<CWD>/rel/explicit"]
+    },
+    {
+      "name": "relative-cache-env",
+      "env": { "CHTYPES_CACHE": "rel/env", "HOME": "<TMP>/user" },
+      "cache_dir": null,
+      "system_dirs": [],
+      "search_dirs": ["<CWD>/rel/env"]
+    },
+    {
+      "name": "relative-dot-segments-fold",
+      "env": { "HOME": "<TMP>/user" },
+      "cache_dir": "rel/./a/../explicit",
+      "system_dirs": [],
+      "search_dirs": ["<CWD>/rel/explicit"]
     }
   ]
 }

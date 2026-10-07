@@ -4,6 +4,7 @@ fetch layer runs, in the order it reads, and create nothing."""
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -17,7 +18,7 @@ _CASES = json.loads(
 
 def _subst(value, tmp: Path):
     if isinstance(value, str):
-        return value.replace("<TMP>", str(tmp))
+        return value.replace("<TMP>", str(tmp)).replace("<CWD>", os.getcwd())
     if isinstance(value, list):
         return [_subst(v, tmp) for v in value]
     return value
