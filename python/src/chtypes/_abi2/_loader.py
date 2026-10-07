@@ -9,15 +9,20 @@ wired up; `predicate` is passed through exactly as that seam promises.
 Every `chs_*` spelling in this module is forbidden by
 scripts/abi-v1/check-no-hand-decls.py (it is not a generated file), so this
 calls ONLY python/src/chtypes/_abi2/_decls.py's non-`chs_`-prefixed surface:
-`resolve_abi_version()`, `resolve_all()`, and the `Api` object they return.
+`resolve_abi_version()`, `resolve_build_info()`, `resolve_all()`, and the `Api` object they return.
 
-Steps 1-6 run in the order plan section 3.2 gives (with step 6's full
-resolve-all sweep run right after step 3, BEFORE step 4's
-`chs_build_info()` call -- step 4 needs that symbol already resolved, and
-`tests/fixtures/abi-v2/cases.json`'s `missing-chs_build_info` and
-`missing-chs_clickhouse_version` stub variants both expect the step 6
-`missing_symbol:<name>` reason, not a step 4 one, which is only possible if
-the full symbol sweep happens before chs_build_info is ever called). Step 7
+Steps 1-7 run in the documented order, the order Go, TypeScript and Rust
+run: glibc (1), dlopen (2), `chs_abi_version` alone (3), `chs_build_info`
+alone, parsed strictly and its fingerprint compared (4: rule r6's exact
+message wins here), the signed-statement cross-check (5), and only then the
+resolve-every-declared-symbol sweep (6). A library with another fingerprint
+that also lacks a symbol this SDK declares (every fingerprint move that adds
+an export meets one) is therefore refused with r6's message, never as
+`missing_symbol:<name>` (public issue #537; the stub variant
+`fingerprint-other-missing-symbol`). A symbol missing from step 4's own
+`chs_build_info` is still `missing_symbol:chs_build_info`, and
+`tests/fixtures/abi-v2/cases.json`'s other `missing-<sym>` variants still
+expect `missing_symbol:<name>` from step 6. Step 7
 calls the image's once-per-image zone setup (empty zone = UTC unless the
 caller supplies one) and then its default settings.
 """
@@ -198,15 +203,15 @@ def _open(
     if version != _decls.CHS_ABI_VERSION:
         _refuse("abi_version", path, want=_decls.CHS_ABI_VERSION, got=version)
 
+    # Step 4: chs_build_info ALONE, parsed strictly, then the fingerprint
+    # compared. Rule r6 is decided here, before the step 6 sweep can name a
+    # missing symbol instead (#537).
     try:
-        api = _decls.resolve_all(lib)
+        build_info_fn = _decls.resolve_build_info(lib)
     except _decls.MissingSymbol as e:
         _refuse(f"missing_symbol:{e.name}", path, want=e.name, got=None)
-        # _refuse always raises; the following line only satisfies a type
-        # checker that cannot see that. (Never reached.)
-        raise
-
-    raw = api.build_info()
+        raise  # never reached: _refuse always raises
+    raw = build_info_fn()
     if raw is None:
         _refuse("build_info_malformed", path, got="chs_build_info() returned NULL")
     info = _parse_build_info(raw, path)
@@ -214,8 +219,16 @@ def _open(
     if info["abi_fingerprint"] != _decls.CHS_ABI_FINGERPRINT:
         _refuse_fingerprint(path, info.get("abi_fingerprint"))
 
+    # Step 5: the signed predicate against build_info.
     if not skip_step5:
         _cross_check(info, predicate, path)
+
+    # Step 6: resolve every declared symbol.
+    try:
+        api = _decls.resolve_all(lib)
+    except _decls.MissingSymbol as e:
+        _refuse(f"missing_symbol:{e.name}", path, want=e.name, got=None)
+        raise  # never reached: _refuse always raises
 
     # Step 7: the once-per-image setup (docs/reference/bindings-v1.md section
     # 6): the image zone (empty = UTC), then the default settings when there

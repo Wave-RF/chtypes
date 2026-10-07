@@ -4081,6 +4081,14 @@
     },
     {
       "expect": {
+        "reason": "fingerprint"
+      },
+      "id": "loader.fingerprint-other-missing-symbol",
+      "kind": "loader",
+      "variant": "fingerprint-other-missing-symbol"
+    },
+    {
+      "expect": {
         "reason": "missing_symbol:chs_abi_revision"
       },
       "id": "loader.missing-chs_abi_revision",

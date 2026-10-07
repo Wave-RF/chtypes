@@ -417,6 +417,10 @@ ABI_VERSION_SYMBOL = "chs_abi_version"
 # 6's generic sweep. not_v1 stays reserved for chs_abi_version alone.
 
 
+# The symbols loader steps 3 and 4 resolve before the full sweep.
+HANDSHAKE_SYMBOLS = frozenset({"chs_abi_version", "chs_build_info"})
+
+
 def omit_define(symbol: str) -> str:
     """The preprocessor guard macro that omits `symbol`'s definition from the
     compiled stub. emit/stub.py wraps every function body in
@@ -474,6 +478,22 @@ def plan(model) -> list[Variant]:
             Variant("r3-unknown-values", (("CHS_STUB_R3_VALUES", "1"),), "accepted"),
             Variant("r3-unknown-capabilities", (("CHS_STUB_R3_CAPABILITIES", "1"),), "accepted"),
         ]
+        # Rule r6 beats the symbol sweep (public issue #537): ANOTHER
+        # fingerprint AND one declared symbol absent. Loader step 4's
+        # fingerprint comparison runs before step 6's resolve-every-symbol
+        # sweep, so every binding refuses this as "fingerprint" (r6's exact
+        # message), never as missing_symbol:<name>. A fingerprint move that
+        # adds an export meets exactly this library until staging catches up.
+        # The omitted symbol is the last one in sorted order, never a
+        # handshake symbol steps 3 and 4 resolve first.
+        absent = sorted(s for s in model.symbols() if s not in HANDSHAKE_SYMBOLS)[-1]
+        out.append(
+            Variant(
+                "fingerprint-other-missing-symbol",
+                (("CHS_STUB_FINGERPRINT_OTHER", "1"), (omit_define(absent), None)),
+                "fingerprint",
+            )
+        )
     for sym in model.symbols():
         if sym == ABI_VERSION_SYMBOL:
             continue

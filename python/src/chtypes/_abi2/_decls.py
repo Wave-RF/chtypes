@@ -506,6 +506,18 @@ def resolve_abi_version(lib: ctypes.CDLL) -> Callable[..., object]:
     return fn
 
 
+def resolve_build_info(lib: ctypes.CDLL) -> Callable[..., object]:
+    """Loader step 4's dlsym: `chs_build_info` ALONE, so the fingerprint can be
+    compared before step 6's full sweep (rule r6 beats a missing symbol,
+    public issue #537). Absent is MissingSymbol, the step 4 refusal."""
+    try:
+        fn = lib.chs_build_info
+    except AttributeError:
+        raise MissingSymbol("chs_build_info") from None
+    _set_signature(fn, FUNCTIONS["chs_build_info"])
+    return fn
+
+
 class Api:
     """Every described symbol, resolved and signature-typed, step 6
     (plan section 3.2). Constructed ONLY by resolve_all(): the constructor
@@ -968,17 +980,15 @@ _API_KEY = object()
 
 
 def resolve_all(lib: ctypes.CDLL) -> Api:
-    """Every described symbol, in sorted, deterministic order -- chs_abi_version
-    INCLUDED, even though _loader.py's step 3 (resolve_abi_version) already
-    resolved it before this runs: the test-only invoke_by_name() dispatcher
-    below needs every symbol reachable through ONE Api, handshake class
-    included, and re-resolving an already-present symbol is harmless (by the
-    time step 6 runs, step 3 has already proven it exists). The first symbol
-    ctypes cannot dlsym raises MissingSymbol(name); _loader.py's step 6 turns
-    that into "missing_symbol:<name>", matching every missing-<sym> stub
-    variant (tests/fixtures/abi-v2/cases.json), chs_build_info and
-    chs_clickhouse_version included -- loader step 4 needs chs_build_info
-    already resolved, which is exactly why this sweep must run before it."""
+    """Every described symbol, in sorted, deterministic order -- the handshake
+    symbols INCLUDED, even though _loader.py's steps 3 and 4 (resolve_abi_version,
+    resolve_build_info) already resolved theirs before this runs: the test-only
+    invoke_by_name() dispatcher below needs every symbol reachable through ONE
+    Api, and re-resolving an already-present symbol is harmless. The first
+    symbol ctypes cannot dlsym raises MissingSymbol(name); _loader.py's step 6
+    turns that into "missing_symbol:<name>", matching every missing-<sym> stub
+    variant. Step 6 runs AFTER step 4's fingerprint comparison, so a library
+    with another fingerprint is refused with rule r6's message first."""
     raw: dict = {}
     for name in ALL_SYMBOLS:
         try:
