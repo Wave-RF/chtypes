@@ -30,6 +30,7 @@ use crate::ocifetch::ensure::Resolved;
 use crate::raw::RawText;
 use crate::result::{BuildInfo, Discovery, ErrorCodeTable};
 use crate::schema::{CompileOptions, Schema, settings_object};
+use crate::server::{Server, ServerProfile, server_profile_json};
 use crate::setup;
 
 /// One loaded library image.
@@ -273,6 +274,20 @@ impl Library {
         decode::live_handles(&self.call(|api| api.live_handles())?)
     }
 
+    /// Describe one ClickHouse server from a profile (`chs_server_create`). The
+    /// library validates the whole profile here, once, and the server never
+    /// changes after it. A zone `DateLUT` cannot load, or a setting the
+    /// server's `SET` check refuses, is the library's own refusal
+    /// ([`Error::Schema`] carrying ClickHouse's code); a malformed macro set is
+    /// [`Error::Usage`]; a build that will not describe the profile declines it
+    /// ([`Error::Unsupported`]). The binding checks none of it first. No server
+    /// option is defined yet, so the options document is empty.
+    pub fn new_server(&self, profile: &ServerProfile) -> Result<Server> {
+        let doc = server_profile_json(profile)?;
+        self.call(|api| api.server_create(&doc, &[]))
+            .map(Server::new)
+    }
+
     /// Compile exactly one `CREATE TABLE` statement (`chs_schema_create`).
     pub fn compile_table(
         self: &Arc<Self>,
@@ -280,10 +295,12 @@ impl Library {
         options: &CompileOptions,
     ) -> Result<Schema> {
         let settings = settings_object(&options.settings, options.session_timezone.as_deref())?;
-        // No server (NULL) and no options (length 0, `{}`): the schema is on the
-        // image's own server, exactly as before the server profile existed.
+        // No server (NULL) puts the schema on the image's own server, exactly as
+        // before the server profile existed. No schema option is defined yet,
+        // so the options document is empty (length 0).
+        let server = options.server.as_ref().map(Server::handle);
         let handle: SchemaHandle =
-            self.call(|api| api.schema_create(None, create_table.as_ref(), &settings, &[]))?;
+            self.call(|api| api.schema_create(server, create_table.as_ref(), &settings, &[]))?;
         Ok(Schema::new(Arc::clone(self), handle))
     }
 

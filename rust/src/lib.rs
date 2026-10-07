@@ -108,6 +108,7 @@ mod registry;
 mod registry_stub_tests;
 mod result;
 mod schema;
+mod server;
 mod setup;
 
 pub use abi2::vocab_gen::{
@@ -122,11 +123,12 @@ pub use registry::{FetchOptions, Registry, RegistryOptions, cache_root, search_d
 pub use result::{
     BatchResult, BuildInfo, Capabilities, Column, Computed, DiscoveredColumn, Discovery,
     EngineCell, ErrorCodeEntry, ErrorCodeTable, FilterResult, FilterRowError, Framing, Header,
-    RowResult, SchemaDescription, Span, Transform, Value,
+    RowResult, SchemaDescription, SchemaReplicated, SchemaServer, Span, Transform, Value,
 };
 pub use schema::{
     Block, CompileOptions, EvalOptions, Filter, FilterOptions, RowOptions, RowsOptions, Schema,
 };
+pub use server::{Server, ServerProfile};
 pub use setup::{SetupOptions, setup};
 
 /// The binding's compiled-in ABI identity, printed for the CI jobs that test
@@ -227,6 +229,7 @@ mod thread_contract {
         clone_send_sync_static::<Schema>();
         clone_send_sync_static::<Filter>();
         clone_send_sync_static::<Block>();
+        clone_send_sync_static::<Server>();
         // Results, errors and BuildInfo are plain values.
         send_sync::<RowResult>();
         send_sync::<BatchResult>();

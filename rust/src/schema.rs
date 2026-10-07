@@ -99,7 +99,8 @@ fn columns_array(columns: &[Vec<u8>]) -> Result<Vec<u8>> {
         .map_err(|e| Error::internal(format!("the column list does not encode: {e}")))
 }
 
-/// What a compile takes: the profile settings, and the per-call zone.
+/// What a compile takes: the profile settings, the per-call zone and the
+/// server.
 ///
 /// In a compile profile the zone is a default for later calls on that schema;
 /// a compiled type always takes the image zone, never the profile's.
@@ -109,6 +110,13 @@ pub struct CompileOptions {
     pub settings: Vec<(String, String)>,
     /// The `session_timezone` key, written into the settings verbatim.
     pub session_timezone: Option<String>,
+    /// The server to compile on (`chs_schema_create`'s `server`, ABI v2): the
+    /// schema's home zone is the server's `timezone`, the server's `settings`
+    /// layer under the schema's own, and a Replicated engine's ZooKeeper path
+    /// and replica name expand its `macros`. `None` compiles on the image's own
+    /// server, exactly as before the server profile existed. A server from
+    /// another library is that library's own refusal ([`Error::Usage`]).
+    pub server: Option<crate::server::Server>,
 }
 
 /// What `row` and `parse_block` take.

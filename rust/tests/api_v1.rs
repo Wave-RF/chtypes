@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use chtypes::{
     CompileOptions, Error, EvalOptions, FilterOptions, Format, Library, RowOptions, RowsOptions,
-    SetupOptions, status,
+    ServerProfile, SetupOptions, status,
 };
 use serde_json::Value;
 
@@ -247,6 +247,96 @@ fn the_public_api_over_the_stub() {
         .unwrap();
     let cross = filter.eval(&other_block).unwrap_err();
     assert!(matches!(cross, Error::Usage(_)), "{cross:?}");
+
+    // --- the server profile: the handle, what a compile receives, the refusals -
+    {
+        let live_servers = |l: &Arc<Library>| -> u64 {
+            let live = l.live_handles().unwrap();
+            *live
+                .get("chs_server")
+                .unwrap_or_else(|| panic!("live_handles has no chs_server: {live:?}"))
+        };
+        const STMT: &str = "CREATE TABLE t (k UInt8) ENGINE = Memory";
+
+        // The stub's closed-document check (rule r1), generated from the
+        // description's input:server_profile, refuses any key it does not list,
+        // so a profile with every member proves the member names.
+        let every = lib
+            .new_server(&ServerProfile {
+                timezone: Some("Asia/Tokyo".into()),
+                settings: Some(BTreeMap::from([("max_threads".into(), "8".into())])),
+                macros: Some(BTreeMap::new()),
+            })
+            .expect("a profile with every member");
+        drop(every);
+
+        // new_server, then drop: a clone shares the one handle.
+        let srv = lib
+            .new_server(&ServerProfile {
+                timezone: Some("Asia/Tokyo".into()),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(live_servers(&lib), 1);
+        let twin = srv.clone();
+        assert_eq!(live_servers(&lib), 1, "a clone shares one handle");
+        assert_eq!(srv, twin);
+        drop(twin);
+        assert_eq!(
+            live_servers(&lib),
+            1,
+            "the last clone frees it, not the first"
+        );
+
+        // The stub's chs_schema_create takes a counted reference to the server
+        // it RECEIVES: after the caller drops the server, the stub still counts
+        // it live exactly when the schema got a non-NULL server.
+        let on = lib
+            .compile_table(
+                STMT,
+                &CompileOptions {
+                    settings: vec![("a".to_string(), "b".to_string())],
+                    server: Some(srv.clone()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        drop(srv);
+        assert_eq!(
+            live_servers(&lib),
+            1,
+            "the stub did not receive the server: nothing holds it after the drop"
+        );
+        on.describe()
+            .expect("a schema whose server was dropped keeps working");
+        drop(on);
+        assert_eq!(live_servers(&lib), 0, "the schema's drop frees the server");
+
+        // The control: no server (NULL) means the stub holds nothing.
+        let srv = lib.new_server(&ServerProfile::default()).unwrap();
+        let plain = lib.compile_table(STMT, &CompileOptions::default()).unwrap();
+        drop(srv);
+        assert_eq!(live_servers(&lib), 0, "a schema with no server holds none");
+        drop(plain);
+
+        // A server from another library is that library's own refusal.
+        let foreign = lib.new_server(&ServerProfile::default()).unwrap();
+        let refused = other
+            .compile_table(
+                STMT,
+                &CompileOptions {
+                    server: Some(foreign),
+                    ..Default::default()
+                },
+            )
+            .unwrap_err();
+        let call = refused
+            .call_error()
+            .unwrap_or_else(|| panic!("want the library's error: {refused:?}"));
+        assert!(matches!(refused, Error::Usage(_)), "{refused:?}");
+        assert_eq!(call.status, status::INVALID_ARGUMENT, "{refused:?}");
+        assert_eq!(live_servers(&lib), 0);
+    }
 
     // --- every handle is shareable, and calls run concurrently ----------------
     let schema = Arc::new(schema);
