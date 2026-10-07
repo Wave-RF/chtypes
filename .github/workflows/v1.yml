@@ -33,9 +33,12 @@
 # the v1 fetch contract's specification: a binding at ABI v2 runs them under
 # that contract through a test-only seam (its fixtures name their own
 # registry, key, locks and schema-1 records), and its dev channel's own rules
-# (spec/abi-v2/docs.md r5, r6) run beside them. v1-cache-interop reads and
-# writes only through the bindings at ABI v1, and proves a v2 binding's cache
-# isolation (r5) with its real CLI.
+# (spec/abi-v2/docs.md r5, r6) run beside them. v1-cache-interop derives its
+# mode from the same map: the 1.x rows run over the bindings at ABI v1 (the
+# loopback fixture registry), the ABI v2 matrix over the bindings at ABI v2
+# (their real CLIs against the staging dev channel, which is the only source
+# a dev CLI honors), each skipped by name when it has no participant, and it
+# proves every v2 binding's cache isolation (r5) with its real CLI.
 name: v1
 
 on:
@@ -54,6 +57,11 @@ on:
     inputs:
       registry_base:
         description: "Staging-registry conformance run: the https base the v1-staging job points each enrolled binding at, repository path included (docs/guides/fetch-v1.md §10, The staging run). Empty: the job does not run."
+        required: false
+        type: string
+        default: ""
+      interop_published_version:
+        description: "v1-cache-interop's ABI v2 matrix over the PUBLISHED dev CLIs: a channel version (2.0.0-dev.N). Go, TypeScript and Python are installed from their registries at it; Rust, and any binding at ABI v1, are built from this ref. Empty: all four are built from this ref."
         required: false
         type: string
         default: ""
@@ -723,22 +731,49 @@ jobs:
     # suites each start from an empty cache or a generated one, so none of them
     # could see two bindings disagree about a record on the SAME cache — which
     # is how the examples job found Rust refusing a record Go had written, on a
-    # cache all four tours share. This job runs the four real CLIs against the
-    # loopback fixture server: each binding writes a cache, all four read it
-    # (4 x 4), and a 0.x cache directory must never crash any of them. Then two
-    # lines in one cache, writer x reader x line: every request is answered
-    # within its own line (public issue #481). Then 8 processes install one
-    # build into one fresh cache at once, each binding alone and all four
-    # mixed, with a watcher for torn, vanished or replaced entries (public
-    # issue #482). Then the read-only commands must create nothing, a cache
-    # one uid writes at umask 022 must be read by another uid, `nobody`
-    # through `sudo -n`, and every cache fault must get the same answer from
-    # every reader in the default mode and with --strict (public issue #486):
-    # the hosted runner has sudo, and the CLIs are installed under one
+    # cache all four tours share.
+    #
+    # THE MODE comes from spec/binding-majors.json (scripts/abi-v1/majors.py),
+    # as every other binding job's major does, and is printed: the bindings at
+    # ABI v1 run the 1.x rows, the bindings at ABI v2 run the ABI v2 matrix,
+    # and a set with no participant is SKIPPED BY NAME, never run empty. On
+    # `main` (no map, all four at ABI v1) that is the 1.x rows alone, as before;
+    # on `v2` (all four at ABI v2) it is the ABI v2 matrix alone.
+    #
+    # THE 1.x ROWS run the four real CLIs against the loopback fixture server:
+    # each binding writes a cache, all four read it (4 x 4), and a 0.x cache
+    # directory must never crash any of them. Then two lines in one cache,
+    # writer x reader x line: every request is answered within its own line
+    # (public issue #481). Then 8 processes install one build into one fresh
+    # cache at once, each binding alone and all four mixed, with a watcher for
+    # torn, vanished or replaced entries (public issue #482). Then the
+    # read-only commands must create nothing, a cache one uid writes at umask
+    # 022 must be read by another uid, `nobody` through `sudo -n`, and every
+    # cache fault must get the same answer from every reader in the default
+    # mode and with --strict (public issue #486).
+    #
+    # THE ABI v2 MATRIX (public issue #511). A 2.0.0-dev CLI fetches only from
+    # the staging dev channel and honors no source or trust override
+    # (spec/abi-v2/docs.md r6), so no fixture server can feed it: the four real
+    # CLIs run against the real staging `chtypes/v2-dev` repository, as the
+    # examples job's do, through one explicit cache each and so its v2-dev
+    # subroot (r5), with the real ~300 MB library in every cell. 4 x 4 over
+    # schema-2 records, writer x reader x line over the registry's two newest
+    # lines, 8 concurrent installs per set (each binding alone and mixed) at
+    # the natural clock and again under an in-repo LD_PRELOAD shim that makes
+    # the wall clock coarse (scripts/fetch-v1/coarse-clock.c, with its own
+    # positive control; public PR #516), the read-only commands, and the 4 x 4
+    # read again as `nobody`. Everything a CLI is judged against comes from the
+    # channel definition (scripts/release-channel.sh) and the registry itself,
+    # never from another CLI. A dispatch that sets `interop_published_version`
+    # runs it over the PUBLISHED dev CLIs instead (Go, TypeScript and Python
+    # from their registries; Rust from this ref).
+    #
+    # The hosted runner has sudo, and the CLIs are installed under one
     # world-readable prefix so `nobody` can run them. It fails if any cell
     # fails, and prints the tables.
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -758,65 +793,144 @@ jobs:
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
         with:
           toolchain: stable
+      # Derived, printed and asserted, never assumed: `announce` names the
+      # major each binding is tested at, and `assert-layer` refuses unless the
+      # binding's compiled-in generated layer is that major's.
+      - name: "the mode: which bindings run the 1.x rows and which the ABI v2 matrix, from spec/binding-majors.json"
+        id: mode
+        run: |
+          v1=""
+          v2=""
+          for b in go python ts rust; do
+            python3 scripts/abi-v1/majors.py announce "$b" --what "cache interop"
+            python3 scripts/abi-v1/majors.py assert-layer "$b"
+            major="$(python3 scripts/abi-v1/majors.py get "$b")"
+            case "$major" in
+              1) v1="$v1 $b" ;;
+              2) v2="$v2 $b" ;;
+              *) echo "::error::v1-cache-interop: $b speaks ABI v$major, which no row set here covers"; exit 1 ;;
+            esac
+          done
+          v1="${v1# }"
+          v2="${v2# }"
+          echo "v1=$v1" >> "$GITHUB_OUTPUT"
+          echo "v2=$v2" >> "$GITHUB_OUTPUT"
+          echo "v1-cache-interop: mode: the 1.x rows for [${v1:-none}]; the ABI v2 matrix for [${v2:-none}]" | tee -a "$GITHUB_STEP_SUMMARY"
       # One world-readable prefix outside the runner's home, so the cross-uid
       # rows can run the same four CLIs as `nobody`: Go and Rust as binaries,
       # Python in a venv over a uv-managed interpreter installed inside the
       # prefix, TypeScript as its built dist with its node_modules (pnpm's
-      # links are relative, so `cp -a` keeps them working).
-      - name: build the four CLIs
+      # links are relative, so `cp -a` keeps them working). A binding at ABI v2
+      # is built for release, as an installed CLI is: its cells unpack and hash
+      # the real ~300 MB library, which a debug build of the Rust decoder takes
+      # minutes over. On a dispatch naming `interop_published_version`, Go,
+      # TypeScript and Python come from their registries at that version
+      # instead, and each must say so in its --version.
+      - name: build the four CLIs (or install the published dev CLIs, on a dispatch that names a version)
         env:
           X: /tmp/cli-prefix
           UV_PYTHON_INSTALL_DIR: /tmp/cli-prefix/python
+          V2: ${{ steps.mode.outputs.v2 }}
+          PUBLISHED: ${{ inputs.interop_published_version }}
         run: |
           mkdir -p "$X/bin" "$X/ts"
-          (cd go && go build -o "$X/bin/cli-go" ./cmd/chtypes)
+          is_v2() { case " $V2 " in *" $1 "*) return 0 ;; esac; return 1; }
+          published() { [ -n "$PUBLISHED" ] && is_v2 "$1"; }
+          pep440=""
+          if [ -n "$PUBLISHED" ]; then
+            # The channel's version rule refuses anything else, so nothing
+            # below ever sees an arbitrary string; PyPI spells it by PEP 440.
+            scripts/release-channel.sh tag go "go/v$PUBLISHED" > /dev/null
+            pep440="$(printf '%s' "$PUBLISHED" | sed -E 's/-dev\.([0-9]+)$/.dev\1/')"
+            echo "v1-cache-interop: the PUBLISHED $PUBLISHED CLIs for go, ts and python (where at ABI v2); rust from this ref" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+          if published go; then
+            GOBIN="$X/gobin" go install "$(scripts/release-channel.sh get GO_MODULE)/cmd/chtypes@v$PUBLISHED"
+            cp "$X/gobin/chtypes" "$X/bin/cli-go"
+          else
+            (cd go && go build -o "$X/bin/cli-go" ./cmd/chtypes)
+          fi
           uv venv --managed-python --python 3.13 "$X/py"
-          (cd python && UV_PROJECT_ENVIRONMENT="$X/py" uv sync --locked --no-dev --no-editable --link-mode copy)
+          if published python; then
+            uv pip install --python "$X/py/bin/python" --link-mode copy "$(scripts/release-channel.sh get PYPI_PROJECT)==$pep440"
+          else
+            (cd python && UV_PROJECT_ENVIRONMENT="$X/py" uv sync --locked --no-dev --no-editable --link-mode copy)
+          fi
           printf '#!/usr/bin/env bash\nexec "%s/py/bin/python" -m chtypes "$@"\n' "$X" > "$X/bin/cli-python"
-          (cd ts && pnpm install --frozen-lockfile && pnpm build)
-          cp -a ts/dist ts/node_modules ts/package.json "$X/ts/"
-          printf '#!/usr/bin/env bash\nexec "%s" "%s/ts/dist/cli.js" "$@"\n' "$(command -v node)" "$X" > "$X/bin/cli-ts"
-          (cd rust && cargo build --locked --bin chtypes)
-          cp rust/target/debug/chtypes "$X/bin/cli-rust"
+          if published ts; then
+            npm install --prefix "$X/tsp" --no-save --no-audit --no-fund "$(scripts/release-channel.sh get NPM_PACKAGE)@$PUBLISHED"
+            printf '#!/usr/bin/env bash\nexec "%s" "%s/tsp/node_modules/%s/dist/cli.js" "$@"\n' \
+              "$(command -v node)" "$X" "$(scripts/release-channel.sh get NPM_PACKAGE)" > "$X/bin/cli-ts"
+          else
+            (cd ts && pnpm install --frozen-lockfile && pnpm build)
+            cp -a ts/dist ts/node_modules ts/package.json "$X/ts/"
+            printf '#!/usr/bin/env bash\nexec "%s" "%s/ts/dist/cli.js" "$@"\n' "$(command -v node)" "$X" > "$X/bin/cli-ts"
+          fi
+          if is_v2 rust; then
+            (cd rust && cargo build --locked --release --bin chtypes)
+            cp rust/target/release/chtypes "$X/bin/cli-rust"
+          else
+            (cd rust && cargo build --locked --bin chtypes)
+            cp rust/target/debug/chtypes "$X/bin/cli-rust"
+          fi
           chmod -R a+rX "$X"
           chmod a+x "$X"/bin/cli-*
           for b in go python ts rust; do "$X/bin/cli-$b" --version; done
+          if [ -n "$PUBLISHED" ]; then
+            for b in go python ts; do
+              published "$b" || continue
+              got="$("$X/bin/cli-$b" --version)"
+              case "$got" in
+                "chtypes $PUBLISHED" | "chtypes $pep440") echo "v1-cache-interop: $b is the published $got" ;;
+                *) echo "::error::v1-cache-interop: $b --version says '$got', not the published $PUBLISHED"; exit 1 ;;
+              esac
+            done
+          fi
           # The same four, as `nobody`: a CLI it cannot run would read as an empty cache.
           for b in go python ts rust; do sudo -n -u nobody "$X/bin/cli-$b" --version; done
-      - name: "selftest — the interop driver's own comparison and table logic"
+      - name: "selftest — the interop driver's own logic: the 1.x comparisons and tables, the ABI v2 matrix over stand-in CLIs with three planted defects, and the coarse-clock shim's control both ways"
         run: python3 scripts/fetch-v1/cache-interop.py --selftest
       # /opt/chtypes/v1 is one of the CLIs' default system dirs (spec/fetch-v1/constants.json);
       # the fault rows fill it with a readable build to prove the default mode answers from it
       # and strict mode never falls through to it, and leave it empty again.
       # The bindings at ABI v1 share one cache contract (docs/guides/fetch-v1.md
-      # §1) and run the interop rows; a binding at ABI v2 (spec/binding-majors.json)
+      # §1) and run these rows; a binding at ABI v2 (spec/binding-majors.json)
       # must never read or write a 1.x cache (spec/abi-v2/docs.md r5), so it is
-      # not a participant here: the next step proves that isolation instead.
-      - name: "4 x 4: each binding writes a cache, every binding reads it; the 0.x rows; writer x reader x line (#481); concurrent installs (#482); read-only commands, cross-uid reads and writer x reader x fault x mode (#486)"
+      # not a participant here: the ABI v2 matrix and the r5 step cover it.
+      - name: "1.x: 4 x 4: each binding writes a cache, every binding reads it; the 0.x rows; writer x reader x line (#481); concurrent installs (#482); read-only commands, cross-uid reads and writer x reader x fault x mode (#486)"
         env:
           X: /tmp/cli-prefix
+          V1: ${{ steps.mode.outputs.v1 }}
         run: |
-          sudo install -d -m 0755 -o "$(id -u)" -g "$(id -g)" /opt/chtypes/v1
-          clis=()
-          for b in go python ts rust; do
-            python3 scripts/abi-v1/majors.py announce "$b" --what "cache interop"
-            if [ "$(python3 scripts/abi-v1/majors.py get "$b")" = "1" ]; then
-              clis+=(--cli "$b=$X/bin/cli-$b")
-            else
-              echo "v1-cache-interop: $b speaks ABI v$(python3 scripts/abi-v1/majors.py get "$b"): not a 1.x cache participant (r5); its isolation is the next step"
-            fi
-          done
           # Once every binding speaks ABI v2 (the `v2` branch after all four
           # convert, public issue #511) no CLI shares the 1.x cache contract:
           # the 1.x rows have no participant, said so by name, never run empty.
-          # The next step still proves each ABI v2 CLI's r5 isolation.
-          if [ "${#clis[@]}" -eq 0 ]; then
-            echo "v1-cache-interop: SKIPPED the 1.x rows by name: no binding speaks ABI v1 at this commit (spec/binding-majors.json); the r5 isolation step below runs" | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ -z "$V1" ]; then
+            echo "v1-cache-interop: SKIPPED the 1.x rows by name: no binding speaks ABI v1 at this commit (spec/binding-majors.json); the ABI v2 matrix and the r5 isolation step below run" | tee -a "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
+          sudo install -d -m 0755 -o "$(id -u)" -g "$(id -g)" /opt/chtypes/v1
+          clis=()
+          for b in $V1; do clis+=(--cli "$b=$X/bin/cli-$b"); done
           python3 scripts/fetch-v1/cache-interop.py "${clis[@]}" \
             --other-user nobody \
             --system-dir /opt/chtypes/v1
+      # The ABI v2 matrix (scripts/fetch-v1/cache-interop.py, "ABI v2 MODE"):
+      # the bindings at ABI v2, their real CLIs, the staging dev channel.
+      - name: "ABI v2: 4 x 4 through each writer's v2-dev subroot from the staging registry; writer x reader x line (#481); concurrent installs at the natural and a coarse clock (#482, #516); read-only commands and cross-uid reads (#486)"
+        env:
+          X: /tmp/cli-prefix
+          V2: ${{ steps.mode.outputs.v2 }}
+        run: |
+          if [ -z "$V2" ]; then
+            echo "v1-cache-interop: SKIPPED the ABI v2 matrix by name: no binding speaks ABI v2 at this commit (spec/binding-majors.json)" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          clis=()
+          for b in $V2; do clis+=(--cli "$b=$X/bin/cli-$b"); done
+          python3 scripts/fetch-v1/cache-interop.py --abi 2 "${clis[@]}" \
+            --other-user nobody \
+            --coarse-clock
       # r5, with the real CLIs: a cache a 1.x binding wrote (the committed
       # cache-record-canonical layout) is listed by every 1.x CLI (the
       # control) and by no ABI v2 CLI, whether CHTYPES_CACHE names it (a v2
