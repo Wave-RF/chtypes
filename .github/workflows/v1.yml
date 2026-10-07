@@ -60,6 +60,17 @@ on:
         required: false
         type: string
         default: ""
+      staging_table:
+        description: "v1-staging's case table: served (the staged fixture tree) or retired (registry_base is a retired repository that answers 410 Gone: three cases, public issue #571)."
+        required: false
+        type: choice
+        options: [served, retired]
+        default: served
+      staging_serving_base:
+        description: "staging_table retired only: a base that serves 26.8, the second base of retired-410-no-fallthrough. Empty: that case is excluded."
+        required: false
+        type: string
+        default: "https://registry-staging.wavehouse.dev/chtypes/v2-dev"
       interop_published_version:
         description: "v1-cache-interop's ABI v2 matrix over the PUBLISHED dev CLIs: a channel version (2.0.0-dev.N). Go, TypeScript, Python and Rust are installed from their registries at it; any binding at ABI v1 is built from this ref. Empty: all four are built from this ref."
         required: false
@@ -1297,8 +1308,12 @@ jobs:
   # information in the job summary (docs/guides/fetch-v1.md §10, "The staging
   # run"). Each leg runs ONE binding's own conformance runner, unchanged, over
   # the derived case table scripts/fetch-v1/staging.py emits, with the
-  # registry transport pointed at `registry_base`. A binding with no
-  # enrollment marker, or no runner file yet, skips loudly and uploads nothing.
+  # registry transport pointed at `registry_base`, and writes its own cases to
+  # its job summary. `staging_table` picks the table: the staged fixture tree
+  # (served), or a retired repository's 410 Gone (retired, public issue #571,
+  # with `staging_serving_base` as the no-fallthrough case's second base). A
+  # binding with no enrollment marker, or no runner file yet, skips loudly and
+  # uploads nothing.
   v1-staging:
     name: "v1-staging (${{ matrix.binding }})"
     if: github.event_name == 'workflow_dispatch' && inputs.registry_base != ''
@@ -1322,6 +1337,8 @@ jobs:
       # loopback only, and this job exists to reach a live host over HTTPS.
       # Through the environment, never interpolated into a script body.
       REGISTRY_BASE: ${{ inputs.registry_base }}
+      STAGING_TABLE: ${{ inputs.staging_table }}
+      STAGING_SERVING_BASE: ${{ inputs.staging_serving_base }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: registry_base must be an https URL with no trailing slash
@@ -1383,9 +1400,14 @@ jobs:
       - name: "derive the staging case table — the SDK test key is trusted here by explicit opt-in, and nowhere else"
         if: steps.gate.outputs.run == 'true'
         run: |
+          serving=()
+          if [ "${STAGING_TABLE:-served}" = retired ] && [ -n "$STAGING_SERVING_BASE" ]; then
+            serving=(--serving-base "$STAGING_SERVING_BASE")
+          fi
           scripts/fetch-v1/staging.py emit \
             --out "$RUNNER_TEMP/staging-fixtures" \
-            --trust-test-key "$(cat tests/fixtures/fetch-v1/test-key/public.hex)"
+            --trust-test-key "$(cat tests/fixtures/fetch-v1/test-key/public.hex)" \
+            --table "${STAGING_TABLE:-served}" "${serving[@]}"
       - name: run the binding's own conformance runner against registry_base
         if: steps.gate.outputs.run == 'true'
         env:
@@ -1402,6 +1424,12 @@ jobs:
             ts) (cd ts && pnpm exec vitest run test/ocifetch/conformance.test.ts) ;;
             rust) (cd rust && cargo test --locked --offline --features fetch-v1 --test ocifetch_conformance) ;;
           esac
+      # This binding's own leg, to its own job summary (information only).
+      - name: this binding's staging cases, to the job summary
+        if: always() && steps.gate.outputs.run == 'true'
+        run: |
+          scripts/fetch-v1/staging.py summary --derived "$RUNNER_TEMP/staging-fixtures" \
+            --binding "${{ matrix.binding }}" --report "$RUNNER_TEMP/staging-report-${{ matrix.binding }}.json"
       # `staging-report-*`, never `report-*`: v1-parity downloads `report-*`
       # and must never see a staging report.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1431,9 +1459,16 @@ jobs:
       - name: verdict, to the job summary only (exit status is 0 whatever it says)
         env:
           REGISTRY_BASE: ${{ inputs.registry_base }}
+          STAGING_TABLE: ${{ inputs.staging_table }}
+          STAGING_SERVING_BASE: ${{ inputs.staging_serving_base }}
         run: |
           mkdir -p "$RUNNER_TEMP/staging-reports"
+          serving=()
+          if [ "${STAGING_TABLE:-served}" = retired ] && [ -n "$STAGING_SERVING_BASE" ]; then
+            serving=(--serving-base "$STAGING_SERVING_BASE")
+          fi
           scripts/fetch-v1/staging.py emit --out "$RUNNER_TEMP/staging-fixtures" \
-            --trust-test-key "$(cat tests/fixtures/fetch-v1/test-key/public.hex)" >/dev/null
+            --trust-test-key "$(cat tests/fixtures/fetch-v1/test-key/public.hex)" \
+            --table "${STAGING_TABLE:-served}" "${serving[@]}" >/dev/null
           scripts/fetch-v1/staging.py verdict --derived "$RUNNER_TEMP/staging-fixtures" \
             --reports-dir "$RUNNER_TEMP/staging-reports" --registry-base "$REGISTRY_BASE"

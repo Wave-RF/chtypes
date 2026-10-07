@@ -265,3 +265,43 @@ def test_strict_flag(env, tmp_path, monkeypatch, capsys) -> None:
         assert code == 9 and f"{locked} is unusable as a cache: unreadable_root (EACCES)" in err
     finally:
         os.chmod(locked, 0o755)
+
+
+def test_a_retired_repository_exits_10_with_the_registry_message(tmp_path, monkeypatch, capsys):
+    """fetch-v1.md section 2, public issue #571: every route of a retired
+    repository answers 410 with the registry's document, so fetch and list
+    print the registry's own message and exit 10, after one request each."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    message = "chtypes/v1 is retired: use chtypes/v2 (this registry no longer serves chtypes/v1)"
+    body = json.dumps({"errors": [{"code": "DENIED", "message": message}]}).encode()
+    requests: list[str] = []
+
+    class Gone(BaseHTTPRequestHandler):
+        def log_message(self, *args) -> None:
+            pass
+
+        def do_GET(self) -> None:  # noqa: N802
+            requests.append(self.path)
+            self.send_response(410)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    httpd = HTTPServer(("127.0.0.1", 0), Gone)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        host, port = httpd.server_address[:2]
+        monkeypatch.setenv("CHTYPES_ARTIFACTS_URL", f"http://{host}:{port}/chtypes/v1")
+        monkeypatch.setenv("CHTYPES_CACHE", str(tmp_path / "cache"))
+        monkeypatch.setattr(cli, "detect_host_platform", lambda: "linux-arm64")
+        for argv in (("fetch", "26.9"), ("list",)):
+            requests.clear()
+            code, out, err = run(capsys, *argv)
+            assert code == C.ERROR_EXIT_CODES["CHTYPES_SOURCE_RETIRED"] == 10, (argv, err)
+            assert out == "" and "CHTYPES_SOURCE_RETIRED" in err and message in err, (argv, err)
+            assert len(requests) == 1, (argv, requests)
+    finally:
+        httpd.shutdown()

@@ -32,6 +32,7 @@ import {
   ArtifactUnpublishedError,
   ArtifactUntrustedError,
   FetchV1Error,
+  SourceRetiredError,
   SourceUnreachableError,
 } from './errors.js';
 import { readFileUrl, type RequestOptions, requestBuffered } from './http.js';
@@ -629,7 +630,9 @@ async function unsignedPredicateFallback(
       library_sha256: asString(field(json, 'library_sha256')),
       library_bytes: Number(asString(field(json, 'library_bytes'))) || 0,
     };
-  } catch {
+  } catch (err) {
+    // A retired repository (a 410, guide §2) is the answer, never a fallback.
+    if (err instanceof SourceRetiredError) throw err;
     return fallback;
   }
 }
@@ -820,7 +823,10 @@ async function writeLockEntry(
           layer: otherManifest.layer.digest,
           bundle: trust.bundleDigest,
         });
-      } catch {
+      } catch (err) {
+        // A retired repository (a 410, guide §2) fails the write: it is
+        // permanent, never a platform to leave out.
+        if (err instanceof SourceRetiredError) throw err;
         // Best-effort: a platform whose bundle cannot be fetched/verified is
         // left out of the lock rather than failing the whole write.
       }
@@ -957,7 +963,9 @@ async function fetchGoldens(
       blobDigest = manifest.layer.digest;
       blob = await fetchBlobBytesByDigest([repository], manifest.layer, reqOptions);
     } catch (err) {
-      if (!(err instanceof FetchV1Error)) throw err;
+      // A retired repository (a 410, guide §2) is the answer, never a
+      // candidate to pass over.
+      if (!(err instanceof FetchV1Error) || err instanceof SourceRetiredError) throw err;
       note(err);
       continue;
     }
@@ -972,7 +980,8 @@ async function fetchGoldens(
         const bundleManifest = await fetchManifestByDigest([repository], bundleRef.digest, reqOptions);
         bundleDigest = bundleManifest.layer.digest;
         bundleBytes = await fetchBlobBytesByDigest([repository], bundleManifest.layer, reqOptions);
-      } catch {
+      } catch (err) {
+        if (err instanceof SourceRetiredError) throw err;
         continue;
       }
       const signed = verifyBundleSignature(bundleBytes, trustedKeys);

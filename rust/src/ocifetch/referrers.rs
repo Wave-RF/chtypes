@@ -70,6 +70,10 @@ fn try_referrers_api(source: &Source<'_>, subject_digest: &str) -> Result<Option
                 return Ok(Some(index.manifests));
             }
             Ok((404, _)) => continue,
+            // A retired repository (a 410, §2) is permanent: never read as
+            // "nothing here", and never a reason to try the next base or the
+            // fallback tag.
+            Err(e @ Error::SourceRetired(_)) => return Err(e),
             Ok(_) | Err(_) => continue,
         }
     }
@@ -102,6 +106,10 @@ fn try_fallback_tag(source: &Source<'_>, subject_digest: &str) -> Result<Option<
                 return Ok(Some(index.manifests));
             }
             Ok((404, _)) => continue,
+            // A retired repository (a 410, §2) is permanent: never read as
+            // "nothing here", and never a reason to try the next base or the
+            // fallback tag.
+            Err(e @ Error::SourceRetired(_)) => return Err(e),
             Ok(_) | Err(_) => continue,
         }
     }

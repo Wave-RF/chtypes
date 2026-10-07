@@ -141,7 +141,8 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["attempts", "first_wait_s", "multiplier", "retry_statuses",
-                   "retry_after_statuses", "retry_after_over_budget", "digest_404", "tag_404"],
+                   "retry_after_statuses", "retry_after_over_budget", "digest_404", "tag_404",
+                   "retired_statuses"],
       "properties": {
         "attempts": {"type": "integer", "minimum": 1},
         "first_wait_s": {"type": "number", "exclusiveMinimum": 0},
@@ -150,7 +151,14 @@
         "retry_after_statuses": {"type": "array", "items": {"type": "integer"}},
         "retry_after_over_budget": {"type": "string", "const": "refuse"},
         "digest_404": {"type": "string", "const": "next_base_then_retry_on_last"},
-        "tag_404": {"type": "string", "const": "next_base_then_unpublished"}
+        "tag_404": {"type": "string", "const": "next_base_then_unpublished"},
+        "retired_statuses": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "integer", "minimum": 400, "maximum": 499},
+          "description": "Statuses that mean a retired repository (docs/guides/fetch-v1.md §2, public issue #571): permanent, so never retried and never a reason to try the next base; CHTYPES_SOURCE_RETIRED."
+        }
       }
     },
     "timeouts": {
@@ -166,7 +174,8 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["manifest_bytes", "bundle_bytes", "tags_list_bytes", "layout_index_bytes",
-                   "max_referrers", "max_redirects", "max_unpacked_bytes", "zstd_window_log_max"],
+                   "max_referrers", "max_redirects", "max_unpacked_bytes", "zstd_window_log_max",
+                   "retired_body_bytes", "retired_message_code_points"],
       "properties": {
         "manifest_bytes": {"type": "integer", "exclusiveMinimum": 0},
         "bundle_bytes": {"type": "integer", "exclusiveMinimum": 0},
@@ -175,7 +184,17 @@
         "max_referrers": {"type": "integer", "exclusiveMinimum": 0},
         "max_redirects": {"type": "integer", "minimum": 0},
         "max_unpacked_bytes": {"type": "integer", "exclusiveMinimum": 0},
-        "zstd_window_log_max": {"type": "integer", "exclusiveMinimum": 0}
+        "zstd_window_log_max": {"type": "integer", "exclusiveMinimum": 0},
+        "retired_body_bytes": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "description": "At most this many bytes of a retired_statuses response's body are read, for the registry's own message."
+        },
+        "retired_message_code_points": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "description": "The registry's message is cut to this many Unicode code points, after its control and bidirectional-formatting characters are removed."
+        }
       }
     },
     "cache": {
@@ -215,7 +234,7 @@
         "CHTYPES_ARTIFACT_PINNED", "CHTYPES_ARTIFACT_UNPUBLISHED", "CHTYPES_SOURCE_UNREACHABLE",
         "CHTYPES_SOURCE_UNAUTHORIZED", "CHTYPES_SOURCE_FORBIDDEN", "CHTYPES_SOURCE_INCOMPATIBLE",
         "CHTYPES_ARTIFACT_INCOMPATIBLE",
-        "CHTYPES_CACHE_UNUSABLE"
+        "CHTYPES_CACHE_UNUSABLE", "CHTYPES_SOURCE_RETIRED"
       ],
       "properties": {
         "CHTYPES_ARTIFACT_MISSING": {"type": "integer", "minimum": 1, "maximum": 255},
@@ -228,7 +247,8 @@
         "CHTYPES_SOURCE_FORBIDDEN": {"type": "integer", "minimum": 1, "maximum": 255},
         "CHTYPES_SOURCE_INCOMPATIBLE": {"type": "integer", "minimum": 1, "maximum": 255},
         "CHTYPES_ARTIFACT_INCOMPATIBLE": {"type": "integer", "minimum": 1, "maximum": 255},
-        "CHTYPES_CACHE_UNUSABLE": {"type": "integer", "minimum": 1, "maximum": 255}
+        "CHTYPES_CACHE_UNUSABLE": {"type": "integer", "minimum": 1, "maximum": 255},
+        "CHTYPES_SOURCE_RETIRED": {"type": "integer", "minimum": 1, "maximum": 255}
       }
     }
   }

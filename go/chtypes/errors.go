@@ -168,6 +168,7 @@ const (
 	CodeSourceIncompatible   = ocifetch.CodeSourceIncompatible
 	CodeArtifactIncompatible = ocifetch.CodeArtifactIncompatible
 	CodeCacheUnusable        = ocifetch.CodeCacheUnusable
+	CodeSourceRetired        = ocifetch.CodeSourceRetired
 )
 
 // The sentinels, one per code: errors.Is(err, chtypes.ErrArtifactCorrupt) is
@@ -185,6 +186,7 @@ var (
 	ErrSourceIncompatible   = ocifetch.ErrSourceIncompatible
 	ErrArtifactIncompatible = errors.New(string(CodeArtifactIncompatible))
 	ErrCacheUnusable        = ocifetch.ErrCacheUnusable
+	ErrSourceRetired        = ocifetch.ErrSourceRetired
 )
 
 func sentinel(c ErrorCode) error {

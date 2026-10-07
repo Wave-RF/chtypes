@@ -20,7 +20,7 @@ import { createHash, createPublicKey, verify as cryptoVerify } from 'node:crypto
 import { items, type Json, parseJsonValue } from '../json.js';
 import { activeChannel } from './channel.js';
 import { DSSE_MAX_SIGNATURES, DSSE_PAYLOAD_TYPE, SPELLING_REGEX } from './constants.gen.js';
-import { ArtifactCorruptError } from './errors.js';
+import { ArtifactCorruptError, SourceRetiredError } from './errors.js';
 import { fetchBlobBytesByDigest, fetchManifestByDigest, type ManifestInfo } from './oci.js';
 import type { RequestOptions } from './http.js';
 import { discoverSignatureCandidates } from './referrers.js';
@@ -375,7 +375,10 @@ export async function verifyAnyReferrerBundle(
     try {
       referrerManifest = await fetchManifestByDigest([repositoryRoot], candidate.digest, options);
       bundleBytes = await fetchBlobBytesByDigest([repositoryRoot], referrerManifest.layer, options);
-    } catch {
+    } catch (err) {
+      // A retired repository (a 410, guide §2) is the answer, never a
+      // reason to try the next candidate.
+      if (err instanceof SourceRetiredError) throw err;
       continue;
     }
     const verified = verifyBundleSignature(bundleBytes, trustedKeys);

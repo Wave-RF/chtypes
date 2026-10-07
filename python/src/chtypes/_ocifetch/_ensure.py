@@ -38,6 +38,7 @@ from chtypes._ocifetch._errors import (
     ArtifactUntrustedError,
     FetchError,
     SourceForbiddenError,
+    SourceRetiredError,
     SourceUnauthorizedError,
     SourceUnreachableError,
 )
@@ -49,6 +50,7 @@ from chtypes._ocifetch._http import (
     ForbiddenHttpError,
     NotFoundHttpError,
     OversizeHttpError,
+    RetiredHttpError,
     RetryPolicy,
     TransportError,
     UnauthorizedHttpError,
@@ -440,7 +442,7 @@ def _find_verified_signature(
                 bases, ref.digest, policy=policy, retry=retry
             )
             blob_desc = manifest_single_layer(referrer_doc, expected_media_type=C.MEDIA_TYPE_BUNDLE)
-        except ArtifactCorruptError:
+        except (ArtifactCorruptError, RetiredHttpError):
             raise
         except (TransportError, FetchError):
             continue
@@ -458,7 +460,7 @@ def _find_verified_signature(
             with open(bundle_path, "rb") as f:
                 bundle_json = json.loads(f.read())
             verified = verify_bundle(bundle_json, trusted_keys)
-        except ArtifactCorruptError:
+        except (ArtifactCorruptError, RetiredHttpError):
             raise
         except (TransportError, FetchError, json.JSONDecodeError):
             continue
@@ -983,6 +985,8 @@ def _translate_transport_error(e: TransportError) -> FetchError:
         return SourceForbiddenError(f"chtypes: {e}")
     if isinstance(e, OversizeHttpError):
         return ArtifactCorruptError(f"chtypes: {e}")
+    if isinstance(e, RetiredHttpError):
+        return SourceRetiredError(f"chtypes: {e}")
     if isinstance(e, UnreachableHttpError):
         return SourceUnreachableError(f"chtypes: {e}", retryable=getattr(e, "retryable", True))
     return SourceUnreachableError(f"chtypes: {e}")
@@ -1466,6 +1470,8 @@ def _fetch_goldens(
                     retry=retry,
                     max_bytes=C.MAX_UNPACKED_BYTES,
                 )
+            except RetiredHttpError:
+                raise
             except (TransportError, FetchError) as e:
                 first_failure = first_failure or e
                 continue
@@ -1580,6 +1586,8 @@ def _verify_goldens_signature(
         except ArtifactCorruptError as e:
             failure = failure or e
             continue
+        except RetiredHttpError:
+            raise
         except (TransportError, FetchError, json.JSONDecodeError):
             continue
         finally:

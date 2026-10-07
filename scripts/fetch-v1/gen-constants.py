@@ -192,6 +192,9 @@ def render_go(data: dict[str, Any], sha: str) -> str:
     lines.append(f"\tMaxUnpackedBytes    = {limits['max_unpacked_bytes']}")
     lines.append(f"\tZstdWindowLogMax    = {limits['zstd_window_log_max']}")
     lines.append("")
+    lines.append(f"\tRetiredBodyMaxBytes         = {limits['retired_body_bytes']}")
+    lines.append(f"\tRetiredMessageMaxCodePoints = {limits['retired_message_code_points']}")
+    lines.append("")
     lines.append(f"\tCacheRootTemplate     = {_go_string(cache['root_template'])}")
     lines.append(f"\tCacheUnpackedDir      = {_go_string(cache['unpacked_dir'])}")
     lines.append(f"\tCacheVerifiedRecord   = {_go_string(cache['verified_record'])}")
@@ -255,6 +258,11 @@ def render_go(data: dict[str, Any], sha: str) -> str:
     lines.append("// (either the delta-seconds or the HTTP-date form) is honored.")
     go_list = ", ".join(str(v) for v in retry["retry_after_statuses"])
     lines.append(f"var RetryAfterStatuses = []int{{{go_list}}}")
+    lines.append("")
+    lines.append("// RetiredStatuses mean a retired repository: permanent, so never retried and")
+    lines.append("// never a reason to try the next base (CHTYPES_SOURCE_RETIRED).")
+    go_list = ", ".join(str(v) for v in retry["retired_statuses"])
+    lines.append(f"var RetiredStatuses = []int{{{go_list}}}")
     lines.append("")
     lines.append("// SystemCacheDirs are read-only system directories searched after the user cache.")
     go_list = ", ".join(_go_string(v) for v in cache["system_dirs"])
@@ -423,6 +431,8 @@ def render_python(data: dict[str, Any], sha: str) -> str:
     lines.append(f"RETRY_AFTER_OVER_BUDGET: Final[str] = {_py_str(retry['retry_after_over_budget'])}")
     lines.append(f"DIGEST_404_POLICY: Final[str] = {_py_str(retry['digest_404'])}")
     lines.append(f"TAG_404_POLICY: Final[str] = {_py_str(retry['tag_404'])}")
+    retired_statuses = _py_tuple([str(v) for v in retry["retired_statuses"]])
+    lines.append(f"RETIRED_STATUSES: Final[tuple[int, ...]] = {retired_statuses}")
     lines.append("")
     lines.append(f"CONNECT_TIMEOUT_S: Final[float] = {float(timeouts['connect_s'])}")
     lines.append(f"IDLE_READ_TIMEOUT_S: Final[float] = {float(timeouts['idle_read_s'])}")
@@ -435,6 +445,8 @@ def render_python(data: dict[str, Any], sha: str) -> str:
     lines.append(f"MAX_REDIRECTS: Final[int] = {limits['max_redirects']}")
     lines.append(f"MAX_UNPACKED_BYTES: Final[int] = {limits['max_unpacked_bytes']}")
     lines.append(f"ZSTD_WINDOW_LOG_MAX: Final[int] = {limits['zstd_window_log_max']}")
+    lines.append(f"RETIRED_BODY_MAX_BYTES: Final[int] = {limits['retired_body_bytes']}")
+    lines.append(f"RETIRED_MESSAGE_MAX_CODE_POINTS: Final[int] = {limits['retired_message_code_points']}")
     lines.append("")
     lines.append(f"CACHE_ROOT_TEMPLATE: Final[str] = {_py_str(cache['root_template'])}")
     system_cache_dirs = _py_tuple([_py_str(v) for v in cache["system_dirs"]])
@@ -569,6 +581,9 @@ def render_ts(data: dict[str, Any], sha: str) -> str:
     lines.append(f"export const RETRY_AFTER_OVER_BUDGET = {json.dumps(retry['retry_after_over_budget'])} as const;")
     lines.append(f"export const DIGEST_404_POLICY = {json.dumps(retry['digest_404'])} as const;")
     lines.append(f"export const TAG_404_POLICY = {json.dumps(retry['tag_404'])} as const;")
+    lines.append(
+        f"export const RETIRED_STATUSES = {arr([str(v) for v in retry['retired_statuses']])};".replace('"', "")
+    )
     lines.append("")
     lines.append(f"export const CONNECT_TIMEOUT_S = {float(timeouts['connect_s'])} as const;")
     lines.append(f"export const IDLE_READ_TIMEOUT_S = {float(timeouts['idle_read_s'])} as const;")
@@ -581,6 +596,8 @@ def render_ts(data: dict[str, Any], sha: str) -> str:
     lines.append(f"export const MAX_REDIRECTS = {limits['max_redirects']} as const;")
     lines.append(f"export const MAX_UNPACKED_BYTES = {limits['max_unpacked_bytes']} as const;")
     lines.append(f"export const ZSTD_WINDOW_LOG_MAX = {limits['zstd_window_log_max']} as const;")
+    lines.append(f"export const RETIRED_BODY_MAX_BYTES = {limits['retired_body_bytes']} as const;")
+    lines.append(f"export const RETIRED_MESSAGE_MAX_CODE_POINTS = {limits['retired_message_code_points']} as const;")
     lines.append("")
     # A plain double-quoted string, deliberately NOT a template literal: the
     # value contains literal `${...}` shell-expansion syntax (a shell path
@@ -735,6 +752,8 @@ def render_rust(data: dict[str, Any], sha: str) -> str:
     lines.append(f"pub const RETRY_AFTER_OVER_BUDGET: &str = {rs_str(retry['retry_after_over_budget'])};")
     lines.append(f"pub const DIGEST_404_POLICY: &str = {rs_str(retry['digest_404'])};")
     lines.append(f"pub const TAG_404_POLICY: &str = {rs_str(retry['tag_404'])};")
+    go_list = ", ".join(str(v) for v in retry["retired_statuses"])
+    lines.append(f"pub const RETIRED_STATUSES: &[u16] = &[{go_list}];")
     lines.append("")
     lines.append(f"pub const CONNECT_TIMEOUT_S: f64 = {float(timeouts['connect_s'])};")
     lines.append(f"pub const IDLE_READ_TIMEOUT_S: f64 = {float(timeouts['idle_read_s'])};")
@@ -747,6 +766,8 @@ def render_rust(data: dict[str, Any], sha: str) -> str:
     lines.append(f"pub const MAX_REDIRECTS: u32 = {limits['max_redirects']};")
     lines.append(f"pub const MAX_UNPACKED_BYTES: u64 = {limits['max_unpacked_bytes']};")
     lines.append(f"pub const ZSTD_WINDOW_LOG_MAX: u32 = {limits['zstd_window_log_max']};")
+    lines.append(f"pub const RETIRED_BODY_MAX_BYTES: u64 = {limits['retired_body_bytes']};")
+    lines.append(f"pub const RETIRED_MESSAGE_MAX_CODE_POINTS: u32 = {limits['retired_message_code_points']};")
     lines.append("")
     lines.append(f"pub const CACHE_ROOT_TEMPLATE: &str = {rs_str(cache['root_template'])};")
     lines.append(f"pub const SYSTEM_CACHE_DIRS: &[&str] = {rs_arr(cache['system_dirs'])};")
@@ -849,6 +870,14 @@ def render_guide_block(data: dict[str, Any], sha: str) -> str:
     lines.append("")
     lines.append(f"A digest 404: `{data['retry']['digest_404']}`. A tag 404: `{data['retry']['tag_404']}`.")
     lines.append("")
+    retired = ", ".join(str(s) for s in data["retry"]["retired_statuses"])
+    lines.append(
+        f"A {retired}, on any request: permanent, a retired repository. It is never retried and never a reason "
+        "to try the next base, and it is `CHTYPES_SOURCE_RETIRED`, carrying the registry's own message from at "
+        f"most {data['limits']['retired_body_bytes']} bytes of the body, cut to "
+        f"{data['limits']['retired_message_code_points']} code points (§2, \"A retired repository\")."
+    )
+    lines.append("")
     lines.append("## 8. Errors")
     lines.append("")
     lines.extend(
@@ -862,8 +891,8 @@ def render_guide_block(data: dict[str, Any], sha: str) -> str:
         "The six codes above the line in `spec/fetch-v1/constants.json` carry v0's own real, measured exit "
         "status (every binding's CLI agreed on 2026-10-01: the four \"verification failed\" codes all exit "
         "1, `CHTYPES_ARTIFACT_UNPUBLISHED` exits 4, `CHTYPES_SOURCE_UNREACHABLE` exits 3). The new v1-only "
-        "codes have no v0 precedent and are assigned here: the first four by lane 0A, the last by public "
-        "issue #486:"
+        "codes have no v0 precedent and are assigned here: the first four by lane 0A, "
+        "`CHTYPES_CACHE_UNUSABLE` by public issue #486 and `CHTYPES_SOURCE_RETIRED` by public issue #571:"
     )
     lines.append("")
     lines.append(
@@ -888,6 +917,12 @@ def render_guide_block(data: dict[str, Any], sha: str) -> str:
         "write, or that strict mode refuses: it names the path and a reason (§1, the cache faults). It is "
         "the one code for the local filesystem, never the network's `CHTYPES_SOURCE_UNREACHABLE`, so a "
         "retry loop never retries a permission error."
+    )
+    lines.append(
+        "- `CHTYPES_SOURCE_RETIRED` — the fetch layer, a `410 Gone` from a source: a retired repository, "
+        "which is permanent, so the request is never retried and never sent to the next base (§2, \"A "
+        "retired repository\"; §7). Its message names the URL that answered and carries the registry's own "
+        "message, made safe to print. Assigned by public issue #571."
     )
     lines.append("")
     lines.append(GUIDE_END)

@@ -93,6 +93,17 @@ Nothing about a 0.x cache may crash 1.0, including when something points the 1.0
 - **User-Agent.** Every HTTP request a binding's fetch layer makes (manifests, blobs, referrers, `tags/list`, anonymous-token exchanges, and every redirect hop followed) carries exactly `User-Agent: chtypes-<binding>/<version>`, where `<binding>` is `go`, `python`, `ts` or `rust` and `<version>` is that binding's own package version (`0.0.0-dev` when it cannot be determined; the header is never omitted). The string matches `^chtypes-(go|python|ts|rust)/[0-9A-Za-z.+-]+$` and carries nothing else. Delivery hosts may refuse a generic library agent (`measured`: the default delivery zone answers `Python-urllib/3.13` with a 403 from its browser-integrity check and `chtypes-python/<version>` with a 200), so no binding may send its HTTP stack's default. Each binding builds the header in one helper that every request path uses. The conformance fixture server (`scripts/fetch-v1/server.py`) answers `400` to any request whose agent does not match the pattern and records the agent in its request log, so a binding that omits it fails every http-transport case.
 - `CHTYPES_REGISTRY` (the v0 variable) is **retired**: set, it produces exactly one loud warning and is otherwise ignored. `CHTYPES_ARTIFACTS_URL` is v1's equivalent.
 
+### A retired repository
+
+The registry's operator answers every route of a retired repository with `410 Gone` (`retry.retired_statuses`) and a short error document, served `cache-control: no-store`. The operator's permanent set is agreed (public issue #571): `410` is permanent, and only for a retired repository; a `404` is "not here now", never permanent (§3, §7); `429` and `503` with `Retry-After` are transient (§7). The first use is the 1.x repository once v2 ships. `measured` (staging `chtypes/v1`, 2026-10-07): every route answers `410` with `{"errors":[{"code":"DENIED","message":"chtypes/v1 is retired: use chtypes/v2 (this registry no longer serves chtypes/v1)","detail":{…}}]}`.
+
+- **Scope.** A `410` to ANY request the fetch layer makes to a registry: `tags/list`, a manifest by tag, by the dev channel's alias (§3) or by digest, a blob, the referrers API and its fallback tag (§4), including a `410` reached after a redirect.
+- **Permanent.** It is never retried and never a reason to try the next base, the referrers fallback tag, the next signature candidate, or the plain tag after an alias. One request, then stop.
+- **The code** is `CHTYPES_SOURCE_RETIRED` (exit status 10, §8): Go `CodeSourceRetired` and `ErrSourceRetired`, Python and TypeScript `SourceRetiredError`, Rust `Error::SourceRetired`. Every CLI prints it as it prints every other code and exits 10.
+- **The message** names the URL that answered and carries the registry's own message, made safe to print: `<url> answered 410 Gone: the repository is retired; the registry says: <message>`, or without the last clause when there is no message. Nothing stands in for a missing one.
+- **The registry's message.** At most `limits.retired_body_bytes` of the body are read; a body that fails part way is no body. When what was read is UTF-8 JSON and `errors[0].message` is a string, that string is the message: every code point in U+0000-U+001F, U+007F-U+009F, U+200E, U+200F, U+202A-U+202E and U+2066-U+2069 is removed, then the rest is cut to `limits.retired_message_code_points` code points (code points, never UTF-16 units or bytes), with `…` (U+2026) appended when it was cut. Nothing else is changed: no trimming, rewording, translation or quoting. Anything else (no body, a body that is not UTF-8 or not JSON, a byte order mark, `NaN`, a lone surrogate escape, a `message` that is not a string or is empty once sanitized) is no message, and the error is still `CHTYPES_SOURCE_RETIRED`. A repeated key reads as its last value. One function per binding does this, and `tests/fixtures/retired-message/cases.json` is the table every binding's unit test reads, so the four give one answer.
+- **Tests.** The `retired-410-*` and `list-tags-retired-410` cases (§10) pin it in every binding against the fixture server, and the `v1-staging` job's retired table (§10, "The staging run") against a real retired repository.
+
 ## 3. Resolve
 
 `GET /v2/<repository>/manifests/<tag>` for the requested spelling (a two-, three- or four-part version) returns a multi-platform **OCI image index**. The fetch layer:
@@ -106,7 +117,7 @@ An index, manifest or layer whose media type the fetch layer does not recognize 
 **The dev channel's alias step.** A 2.0.0-dev SDK (the ABI v2 dev channel, `spec/abi-v2/docs.md` rules r5 and r6), and no other channel, resolves a version request (a two-, three- or four-part spelling; an arbitrary tag has no alias) through an alias first. Beside every tag a dev publish writes, the dev registry serves `<tag>--fp-<hex>`, where `<hex>` is an ABI fingerprint as 64 lowercase hex characters without its `sha256:` prefix, and the alias names the newest build of that tag whose `abi_fingerprint` is that fingerprint. The SDK `GET`s `manifests/<tag>--fp-<hex>` with its OWN fingerprint, the binding's generated `CHS_ABI_FINGERPRINT` (for `26.9`, a 73-character tag), before `manifests/<tag>`:
 
 - **a 404 on every base** (the registry's `MANIFEST_UNKNOWN`, for a fingerprint it has no build of) falls back to `manifests/<tag>`, exactly as if there were no alias step;
-- **any other failure** of the alias request, on any base (a 5xx or a transport error once the retry table is spent, a timeout, a 401 or a 403), is that request's error, with the code the tag would get for it, and the tag is NOT requested: a transient fault must never route a request to the tag, which may name a build of a newer fingerprint. Bases are tried in order as for any tag (§2), so an alias that one base answers 404 and another 200 is that 200;
+- **any other failure** of the alias request, on any base (a 5xx or a transport error once the retry table is spent, a timeout, a 401 or a 403), is that request's error, with the code the tag would get for it, and the tag is NOT requested: a transient fault must never route a request to the tag, which may name a build of a newer fingerprint. Bases are tried in order as for any tag (§2), so an alias that one base answers 404 and another 200 is that 200. An alias that answers `410` is a retired repository (§2): `CHTYPES_SOURCE_RETIRED` at once, with no other base and never a fallback to the tag;
 - **a 200** is the answer, even when its index has no manifest for the requested platform: that is `CHTYPES_ARTIFACT_UNPUBLISHED`, as from the tag, and the tag is not tried, because it names another fingerprint, which this SDK would refuse at load.
 
 The alias is a pointer, never a credential. What it names is verified exactly as the tag's answer would be (§4, then the loader's fingerprint and version checks, §9), and a build outside the request is refused with the codes it gets today. The request, not the alias, is what is recorded: `Resolved.request` and the cache's records are unchanged, and an alias name is never a cache key or a lock entry (the dev channel pins nothing). **A listing never shows an alias**: `chtypes list` and every binding's tag listing keep version spellings only, which an alias is not. The step is automatic, with no option and no variable; the v1 contract (the fetch-v1 cases below) and every production channel never take it. The `dev-alias-*` and `list-tags-dev-alias` cases (§10) pin it in every binding.
@@ -166,7 +177,7 @@ Every one of the checks above runs **in this order**, and a failure at any step 
 
 <!-- BEGIN GENERATED: fetch-v1 constants -->
 
-Generated from `spec/fetch-v1/constants.json` (sha256:`163dbaa1e5173aa65de7d46f1eac27c02f862e96b5c8160a23fee8cfabd77a2a`) by `scripts/fetch-v1/gen-constants.py`; do not hand-edit between the markers. Covers this guide's §7 and §8, plus a quick reference for the media types, predicate types and default trust key introduced in earlier sections.
+Generated from `spec/fetch-v1/constants.json` (sha256:`4554956faeb154fc324a6120b7b35976222c6bc8ecbce7fd0147502e3073611d`) by `scripts/fetch-v1/gen-constants.py`; do not hand-edit between the markers. Covers this guide's §7 and §8, plus a quick reference for the media types, predicate types and default trust key introduced in earlier sections.
 
 ## Reference
 
@@ -206,6 +217,8 @@ Key id algorithm: `sha256-first16hex` — the first 16 hex characters of sha256 
 
 A digest 404: `next_base_then_retry_on_last`. A tag 404: `next_base_then_unpublished`.
 
+A 410, on any request: permanent, a retired repository. It is never retried and never a reason to try the next base, and it is `CHTYPES_SOURCE_RETIRED`, carrying the registry's own message from at most 65536 bytes of the body, cut to 256 code points (§2, "A retired repository").
+
 ## 8. Errors
 
 | error code                      | exit status |
@@ -221,13 +234,15 @@ A digest 404: `next_base_then_retry_on_last`. A tag 404: `next_base_then_unpubli
 | `CHTYPES_SOURCE_INCOMPATIBLE`   | 7           |
 | `CHTYPES_ARTIFACT_INCOMPATIBLE` | 8           |
 | `CHTYPES_CACHE_UNUSABLE`        | 9           |
+| `CHTYPES_SOURCE_RETIRED`        | 10          |
 
-The six codes above the line in `spec/fetch-v1/constants.json` carry v0's own real, measured exit status (every binding's CLI agreed on 2026-10-01: the four "verification failed" codes all exit 1, `CHTYPES_ARTIFACT_UNPUBLISHED` exits 4, `CHTYPES_SOURCE_UNREACHABLE` exits 3). The new v1-only codes have no v0 precedent and are assigned here: the first four by lane 0A, the last by public issue #486:
+The six codes above the line in `spec/fetch-v1/constants.json` carry v0's own real, measured exit status (every binding's CLI agreed on 2026-10-01: the four "verification failed" codes all exit 1, `CHTYPES_ARTIFACT_UNPUBLISHED` exits 4, `CHTYPES_SOURCE_UNREACHABLE` exits 3). The new v1-only codes have no v0 precedent and are assigned here: the first four by lane 0A, `CHTYPES_CACHE_UNUSABLE` by public issue #486 and `CHTYPES_SOURCE_RETIRED` by public issue #571:
 
 - `CHTYPES_SOURCE_UNAUTHORIZED` and `CHTYPES_SOURCE_FORBIDDEN` — the fetch layer, a 401 or 403 from a source (§2, §5.1 of this guide).
 - `CHTYPES_SOURCE_INCOMPATIBLE` — the fetch layer, an unrecognized manifest or layer media type during resolve (§3).
 - `CHTYPES_ARTIFACT_INCOMPATIBLE` — the **FFI/loader layer**, never the fetch layer: a wrong `chs_abi_version`, an `abi_fingerprint` mismatch against the loaded library, a described symbol the library does not export, or a glibc floor the host does not meet (§9, the seam). It is reserved here, ahead of that lane landing, so the shared error vocabulary and exit-code table stay in one place while the ABI v1 design is still in flux. No v1 fetch-layer conformance case raises it — the fetch layer "never dlopens, checks glibc, or reads `chs_*` symbols" (§1.3 of the v1 fetch-layer plan).
 - `CHTYPES_CACHE_UNUSABLE` — the fetch layer, a cache directory or entry it could not read or write, or that strict mode refuses: it names the path and a reason (§1, the cache faults). It is the one code for the local filesystem, never the network's `CHTYPES_SOURCE_UNREACHABLE`, so a retry loop never retries a permission error.
+- `CHTYPES_SOURCE_RETIRED` — the fetch layer, a `410 Gone` from a source: a retired repository, which is permanent, so the request is never retried and never sent to the next base (§2, "A retired repository"; §7). Its message names the URL that answered and carries the registry's own message, made safe to print. Assigned by public issue #571.
 
 <!-- END GENERATED: fetch-v1 constants -->
 
@@ -297,7 +312,7 @@ Each binding ships one runner, gated on `CHTYPES_V1_CONFORMANCE=<abs path to tes
 
 ### How to add a case
 
-1. Add it to the relevant `scripts/fetch-v1/genfixtures/*cases.go` file (grouped the same way `cases.json`'s id ranges already read: `resolve.go`, `trust.go`, `bytescases.go`, `cachecases.go`, `lockcases.go`, `httpcases.go`, `genericcases.go`, `aliascases.go`), building whatever tree/layout/http-script fixture it needs with the shared helpers in `artifact.go`/`tree.go`/`layout.go`/`sign.go`/`tarzstd.go`.
+1. Add it to the relevant `scripts/fetch-v1/genfixtures/*cases.go` file (grouped the same way `cases.json`'s id ranges already read: `resolve.go`, `trust.go`, `bytescases.go`, `cachecases.go`, `lockcases.go`, `httpcases.go`, `genericcases.go`, `aliascases.go`, `retiredcases.go`), building whatever tree/layout/http-script fixture it needs with the shared helpers in `artifact.go`/`tree.go`/`layout.go`/`sign.go`/`tarzstd.go`.
 2. `go run . --write`, then `python3 scripts/fetch-v1/schema_check.py` and `go run . --check` (twice — the `v1-fixtures` job's own gate).
 3. If the case is HTTP-transport, extend `server.py`'s selftest or at least smoke-test it directly against the regenerated fixtures (every special-cased script id in `server.py`'s own header comment is a precedent for what needs bespoke server logic versus a purely declarative `http/<id>.json`).
 4. Every case id must be unique across every category file (`checkUniqueIDs` in `cases.go` panics otherwise); every array/object field must be non-nil even when empty (`[]`, never `null` — `cases.schema.json` types every one of them as a bare array or object).
@@ -321,6 +336,16 @@ A case id starting `list-tags-` exercises the binding's tag listing (what `chtyp
 **Root-order cases** (§1, public issue #486): two layouts, `root-order-older` and `root-order-newer`, each hold one canonical record and its library for a build of `26.2`, and nothing else. `root-order-system-newer` uses the older as the cache and the newer as a system directory, and `root-order-cache-newer` the reverse; each runs through `--offline` and through `resolve_installed`, and both must answer with the newer build. A binding that stops at the first root with a match, or never reads a system directory's records, answers the first with the older.
 
 **Request-versus-signed-version cases** (§9): `installed-request-*` and `resolve-installed-request-*` install one signed build, `26.8.15.10`, and request it as `1.1`, `26.9` and `26.8.15.9` (never resolved) with `26.8` and `26.8.15.10` as controls, each through `--offline`, `resolve_installed` and `--frozen` (a lock pinning only the two matching spellings). `label-mismatch-*` plants the ref name `26.9` on the index entry of that same build, installed or only pre-seeded: a request for `26.9` must miss, and `26.8` (the signed version) is the control.
+
+**Retired-repository cases** (§2, "A retired repository"; public issue #571). The case schema carries two fields for them, both checked against a failed call's error text: `expect.message_contains`, text it must contain exactly (null in every other case), and `expect.message_excludes`, text it must not contain anywhere (empty in every other case). An http-script status response may carry a `body`, sent as its UTF-8 bytes, for the registry's error document. Every case is scripted, its body and expected message come from `tests/fixtures/retired-message/cases.json` (the contract body is the staging registry's own), and each expects `CHTYPES_SOURCE_RETIRED` with no sleep:
+
+- `retired-410-message`: the tag answers `410` with the contract body, then would serve the build. The registry's message, and one request.
+- `retired-410-no-fallthrough`: base 1 answers `410`; base 2 (`{base}/mirror`, the `http-retired-mirror` tree) serves the whole build. One request, and none to the mirror (`GET .*/mirror/`).
+- `retired-410-dev-alias`: under fixture fingerprint A, the alias answers `410` and the tag would serve a build. One request, and the tag is never requested (`GET .*/manifests/26.8$`).
+- `list-tags-retired-410`: the listing's `tags/list` answers `410`. One request. The id keeps the `list-tags-` prefix, which is how every runner knows to call its listing.
+- `retired-410-blob`: everything resolves and verifies, then the layer blob answers `410` once and would serve the bytes after, so a retry would succeed.
+- `retired-410-sanitized`: the message carries an escape sequence and a bidi override and runs past the cap: the error carries the sanitized, capped text.
+- `retired-410-no-body`: a `410` with no body. The error names the URL that answered and contains none of `null`, `undefined`, `None` or `<nil>`.
 
 ### Cache fixtures and `installed.json`
 
@@ -359,6 +384,8 @@ The `v1` workflow's `v1-staging` job is the first fetch over real HTTPS through 
 - `CHTYPES_V1_CONFORMANCE`: the derived fixtures directory (symlinks to the real one, plus the derived `cases.json` and a `staging-manifest.json` sidecar runners never read).
 - `CHTYPES_V1_REGISTRY_BASE`: the `{base}` for a `registry`-transport case, replacing the loopback value. When it is unset a runner skips its `registry` pairs, as it does under the ordinary matrix.
 - `CHTYPES_V1_REPORT`: where to write the report, as in the ordinary matrix. The report's `cases_sha256` is the derived table's.
+
+**The retired table.** Dispatched with `staging_table` `retired`, the job runs instead the `registry` twins of three retired-repository cases against `registry_base`, which must be a retired repository (staging `https://registry-staging.wavehouse.dev/chtypes/v1` answers every route `410`, `measured` 2026-10-07): `retired-410-message`, `retired-410-no-fallthrough` and `list-tags-retired-410`. Each asks for `26.8`, keeps only `requests.max: 1` from its request log expectations (the Go and Python runners count their own requests on every transport; the TypeScript and Rust runners read only the fixture server's log, so for them it is vacuous), and expects the real registry's message, recorded in `staging.py`'s `RETIRED_OVERRIDES` with its reason. `retired-410-no-fallthrough`'s second base is `staging_serving_base` (default `https://registry-staging.wavehouse.dev/chtypes/v2-dev`, which serves `26.8`), so a binding that moved on to it would answer with a build or another code; without a serving base the case is excluded, loudly. Every leg writes its own cases to its job summary (`staging.py summary`), and the verdict job names the table.
 
 **Per-case differences are recorded, never silent.** `OVERRIDES` in `staging.py` replaces a case's expected outcome on the real host and carries its reason into the summary; `NOTES` records a wire difference that does not change the outcome. `missing-platform` is the one note today: the host never serves a partial set, so tag `26.6` is a 404 there (`measured`) where the fixture tree serves a 200 index without the platform, and the expected `CHTYPES_ARTIFACT_UNPUBLISHED` should be the same either way (`inferred`, from the tag-404 rule in §7).
 

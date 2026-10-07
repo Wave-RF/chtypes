@@ -25,13 +25,15 @@ import {
   CONNECT_TIMEOUT_S,
   IDLE_READ_TIMEOUT_S,
   MAX_REDIRECTS,
+  RETIRED_BODY_MAX_BYTES,
   RETRY_AFTER_STATUSES,
   RETRY_ATTEMPTS,
   RETRY_FIRST_WAIT_S,
   RETRY_MULTIPLIER,
   RETRY_STATUSES,
 } from './constants.gen.js';
-import { ArtifactCorruptError, SourceForbiddenError, SourceUnauthorizedError, SourceUnreachableError } from './errors.js';
+import { ArtifactCorruptError, SourceForbiddenError, SourceRetiredError, SourceUnauthorizedError, SourceUnreachableError } from './errors.js';
+import { isRetiredStatus, readRetiredBody, retiredText } from './retired.js';
 import type { Clock } from './types.js';
 
 /**
@@ -360,7 +362,8 @@ function drain(stream: http.IncomingMessage, maxBytes: number): Promise<Buffer> 
  * `tags/list`, a bundle) — redirects, retries, the anonymous token flow, the
  * system CA store and the proxy all handled. Throws
  * `SourceUnauthorizedError`/`SourceForbiddenError` on a 401/403 that survives
- * (neither code is retryable) and `ArtifactCorruptError` on an oversize body
+ * (neither code is retryable), `SourceRetiredError` on a 410 (a retired
+ * repository, never retried) and `ArtifactCorruptError` on an oversize body
  * (never retryable — an oversize response is a content problem, not a
  * transient one). Any other non-2xx status is returned to the caller to
  * interpret (404 in particular means different things to a tag and a digest
@@ -421,6 +424,12 @@ export async function requestBuffered(startUrl: string, options: RequestOptions)
           bearerToken = undefined;
         }
         continue;
+      }
+      if (isRetiredStatus(res.status)) {
+        // A retired repository (guide §2): permanent, so thrown rather than
+        // returned, which skips the retry loop and every base loop above it.
+        const body = await readRetiredBody(res.stream, RETIRED_BODY_MAX_BYTES);
+        throw new SourceRetiredError(`chtypes: ${retiredText(url.toString(), res.status, body)}`);
       }
       if (res.status === 401) {
         const challenge = parseBearerChallenge(res.headers['www-authenticate']);
@@ -548,6 +557,12 @@ export async function requestToSink(
           bearerToken = undefined;
         }
         continue;
+      }
+      if (isRetiredStatus(res.status)) {
+        // A retired repository (guide §2): permanent, so thrown rather than
+        // returned, which skips the retry loop and every base loop above it.
+        const body = await readRetiredBody(res.stream, RETIRED_BODY_MAX_BYTES);
+        throw new SourceRetiredError(`chtypes: ${retiredText(url.toString(), res.status, body)}`);
       }
       if (res.status === 401) {
         const challenge = parseBearerChallenge(res.headers['www-authenticate']);

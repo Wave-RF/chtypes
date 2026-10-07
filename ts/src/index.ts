@@ -99,6 +99,7 @@ export {
   type Resolved,
   SourceForbiddenError,
   SourceIncompatibleError,
+  SourceRetiredError,
   SourceUnauthorizedError,
   SourceUnreachableError,
 } from './ocifetch/index.js';

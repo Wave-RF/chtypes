@@ -5,7 +5,7 @@ Scoped to `chtypes._ocifetch`: the stable, public exception types live in
 imports from or edits. A future switch lane decides how (or whether) these
 become public types; until then every name here is private.
 
-Every exception carries a `.code` string from one of the eleven codes
+Every exception carries a `.code` string from one of the twelve codes
 `spec/fetch-v1/constants.json`'s `errors` map assigns an exit status to
 (the generated `ERROR_EXIT_CODES` table), so a CLI added later needs no
 second mapping — it is the same lookup v0's `__main__.py` does today.
@@ -30,6 +30,7 @@ __all__ = [
     "CODE_CACHE_UNUSABLE",
     "CODE_SOURCE_FORBIDDEN",
     "CODE_SOURCE_INCOMPATIBLE",
+    "CODE_SOURCE_RETIRED",
     "CODE_SOURCE_UNAUTHORIZED",
     "CODE_SOURCE_UNREACHABLE",
     "ArtifactCorruptError",
@@ -41,6 +42,7 @@ __all__ = [
     "FetchError",
     "SourceForbiddenError",
     "SourceIncompatibleError",
+    "SourceRetiredError",
     "SourceUnauthorizedError",
     "SourceUnreachableError",
 ]
@@ -55,6 +57,7 @@ CODE_SOURCE_UNAUTHORIZED = "CHTYPES_SOURCE_UNAUTHORIZED"
 CODE_SOURCE_FORBIDDEN = "CHTYPES_SOURCE_FORBIDDEN"
 CODE_SOURCE_INCOMPATIBLE = "CHTYPES_SOURCE_INCOMPATIBLE"
 CODE_CACHE_UNUSABLE = "CHTYPES_CACHE_UNUSABLE"
+CODE_SOURCE_RETIRED = "CHTYPES_SOURCE_RETIRED"
 
 _CODES_USED_HERE = (
     CODE_ARTIFACT_MISSING,
@@ -67,6 +70,7 @@ _CODES_USED_HERE = (
     CODE_SOURCE_FORBIDDEN,
     CODE_SOURCE_INCOMPATIBLE,
     CODE_CACHE_UNUSABLE,
+    CODE_SOURCE_RETIRED,
 )
 
 # A drift guard, cheaper than a test: every code this module raises must be
@@ -187,3 +191,13 @@ class CacheUnusableError(FetchError):
         self.path = path
         self.reason = reason
         self.os_error = os_error
+
+
+class SourceRetiredError(FetchError):
+    """The source answered 410 Gone: a retired repository, which is permanent,
+    so the request was never retried and never sent to the next base
+    (docs/guides/fetch-v1.md §2, "A retired repository"; public issue #571).
+    The message names the URL that answered and carries the registry's own
+    message, made safe to print."""
+
+    code = CODE_SOURCE_RETIRED

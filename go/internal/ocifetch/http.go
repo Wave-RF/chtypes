@@ -278,6 +278,12 @@ func (c *client) doGet(ctx context.Context, rawURL string, opts requestOptions) 
 			return nil, newError(CodeSourceUnreachable, "", "", rawURL, err, "fetching %s: %v", rawURL, err)
 		}
 
+		// A retired repository (§2, RetiredStatuses) is permanent: never
+		// retried, and the error tells every base loop to stop here.
+		if err == nil && isRetiredStatus(status) {
+			return nil, retiredError(result.url, status, result.body)
+		}
+
 		// The anonymous Bearer-token flow (mirrors): a 401 with no static
 		// CHTYPES_DOWNLOAD_TOKEN configured and a Bearer challenge is an
 		// invitation to fetch a token and retry, not a final failure. A 401
@@ -374,6 +380,14 @@ func (c *client) attemptWithRedirects(ctx context.Context, rawURL string, opts r
 			includeAuth = sameOrigin(u, next)
 			current = next.String()
 			continue
+		}
+		if isRetiredStatus(resp.StatusCode) {
+			// Only the registry's message is wanted from a retired
+			// repository's answer: at most RetiredBodyMaxBytes of it, and a
+			// body that fails part way is simply a shorter one.
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, RetiredBodyMaxBytes))
+			_ = resp.Body.Close()
+			return &httpResult{status: resp.StatusCode, headers: resp.Header, body: body, url: current}, resp.StatusCode, nil, nil
 		}
 		body, readErr := readLimited(resp.Body, opts.maxBytes)
 		closeErr := resp.Body.Close()

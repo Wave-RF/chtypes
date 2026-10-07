@@ -68,7 +68,8 @@
         "CodeSourceIncompatible",
         "CodeSourceUnauthorized",
         "CodeSourceUnreachable",
-        "CodeCacheUnusable"
+        "CodeCacheUnusable",
+        "CodeSourceRetired"
       ],
       "issue": 500,
       "reason": "The typed values of ArtifactError.Code, which §4's Go column names (`*ArtifactError` with `Code` CHTYPES_…): one constant per code in spec/fetch-v1/constants.json, re-exported from the fetch layer, with the code's CLI exit status and sentinel. Python keeps the same codes as CODE_* constants (its own entry); §4 gives no spelling for them."
@@ -137,6 +138,7 @@
         "CODE_SOURCE_UNAUTHORIZED",
         "CODE_SOURCE_UNREACHABLE",
         "CODE_CACHE_UNUSABLE",
+        "CODE_SOURCE_RETIRED",
         "ArtifactError.code",
         "ArtifactCorruptError.code",
         "ArtifactIncompatibleError.code",
@@ -148,7 +150,8 @@
         "SourceIncompatibleError.code",
         "SourceUnauthorizedError.code",
         "SourceUnreachableError.code",
-        "CacheUnusableError.code"
+        "CacheUnusableError.code",
+        "SourceRetiredError.code"
       ],
       "issue": 500,
       "reason": "The fetch codes of spec/fetch-v1/constants.json, and each artifact class's code: the attribute §4's Go column calls ArtifactError's `Code` (Go's own entry). §4's Python column names the classes only."

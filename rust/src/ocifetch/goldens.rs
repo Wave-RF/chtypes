@@ -131,6 +131,9 @@ pub fn fetch_goldens(
         seen.push(referrer.digest.clone());
         let (blob_digest, bytes) = match fetch_goldens_blob(source, &referrer.digest) {
             Ok(v) => v,
+            // A retired repository (a 410, §2) is the answer, never a
+            // candidate to pass over.
+            Err(e @ Error::SourceRetired(_)) => return Err(e),
             Err(e) => {
                 first_failure.get_or_insert(e);
                 continue;
@@ -141,6 +144,7 @@ pub fn fetch_goldens(
         for bundle in &bundles {
             let stmt: VerifiedStatement = match referrers::verify_one(source, bundle, trust) {
                 Ok(s) => s,
+                Err(e @ Error::SourceRetired(_)) => return Err(e),
                 Err(e) => {
                     first_failure.get_or_insert(e);
                     continue;

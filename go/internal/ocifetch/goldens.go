@@ -98,7 +98,10 @@ func (s *session) fetchGoldens(ctx context.Context, ro resolvedOptions, bases []
 	if !Digest(ref).Valid() {
 		return nil, newError(CodeArtifactCorrupt, ref, "", "", nil, "a goldens fetch names a platform manifest by digest, not %q", ref)
 	}
-	listed := s.findReferrers(ctx, bases, Digest(ref), GoldensArtifactType)
+	listed, err := s.findReferrers(ctx, bases, Digest(ref), GoldensArtifactType)
+	if err != nil {
+		return nil, err
+	}
 	if len(listed) == 0 {
 		return nil, newError(CodeArtifactUnpublished, ref, "", "", nil, "no goldens referrer of %s", ref)
 	}
@@ -125,6 +128,9 @@ func (s *session) fetchGoldens(ctx context.Context, ro resolvedOptions, bases []
 		}
 		seen[cand.Digest] = true
 		body, blobDigest, manifestDigest, ferr := s.fetchReferrerContentMax(ctx, bases, cand, 0)
+		if isRetired(ferr) {
+			return nil, ferr
+		}
 		if ferr != nil {
 			note(ferr)
 			continue
@@ -132,8 +138,15 @@ func (s *session) fetchGoldens(ctx context.Context, ro resolvedOptions, bases []
 		unsigned = append(unsigned, unsignedDoc{manifestDigest, blobDigest, body})
 
 		var found *goldensCandidate
-		for _, sigDesc := range s.findReferrers(ctx, bases, manifestDigest, MediaTypeBundle) {
+		sigDescs, err := s.findReferrers(ctx, bases, manifestDigest, MediaTypeBundle)
+		if err != nil {
+			return nil, err
+		}
+		for _, sigDesc := range sigDescs {
 			bundleBody, bundleDigest, bundleManifestDigest, berr := s.fetchReferrerContent(ctx, bases, sigDesc)
+			if isRetired(berr) {
+				return nil, berr
+			}
 			if berr != nil {
 				continue
 			}

@@ -27,6 +27,8 @@ export const CODE_SOURCE_INCOMPATIBLE = 'CHTYPES_SOURCE_INCOMPATIBLE' satisfies 
 export const CODE_ARTIFACT_INCOMPATIBLE = 'CHTYPES_ARTIFACT_INCOMPATIBLE' satisfies FetchV1ErrorCode;
 /** A cache directory or entry the fetch layer could not read or write, or one strict mode refuses (guide §1; public issue #486). */
 export const CODE_CACHE_UNUSABLE = 'CHTYPES_CACHE_UNUSABLE' satisfies FetchV1ErrorCode;
+/** A source that answered 410 Gone: a retired repository, never retried and never sent to the next base (guide §2; public issue #571). */
+export const CODE_SOURCE_RETIRED = 'CHTYPES_SOURCE_RETIRED' satisfies FetchV1ErrorCode;
 
 /** Base of every error this module throws. */
 export class FetchV1Error extends Error {
@@ -111,6 +113,18 @@ export class SourceForbiddenError extends FetchV1Error {
 export class SourceIncompatibleError extends FetchV1Error {
   constructor(message: string, options?: { cause?: unknown }) {
     super(CODE_SOURCE_INCOMPATIBLE, message, options);
+  }
+}
+
+/**
+ * A source answered 410 Gone: a retired repository, which is permanent, so the
+ * request was never retried and never sent to the next base (guide §2, "A
+ * retired repository"; public issue #571). The message names the URL that
+ * answered and carries the registry's own message, made safe to print.
+ */
+export class SourceRetiredError extends FetchV1Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(CODE_SOURCE_RETIRED, message, options);
   }
 }
 

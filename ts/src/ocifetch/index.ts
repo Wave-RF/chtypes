@@ -47,6 +47,7 @@ export {
   FetchV1Error,
   SourceForbiddenError,
   SourceIncompatibleError,
+  SourceRetiredError,
   SourceUnauthorizedError,
   SourceUnreachableError,
 } from './errors.js';

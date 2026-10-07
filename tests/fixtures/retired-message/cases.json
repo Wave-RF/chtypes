@@ -1,0 +1,281 @@
+{
+  "_comment": "The one table every binding's test of its retired-message function reads (docs/guides/fetch-v1.md \u00a72, \"A retired repository\"; public issue #571). Each case is one 410 body, as the bytes the fetch layer read (body_text encoded as UTF-8, or body_hex), and the message the function must return: a string, or null for no message. The rule: if the body is JSON and errors[0].message is a string, every code point in U+0000-U+001F, U+007F-U+009F, U+200E, U+200F, U+202A-U+202E and U+2066-U+2069 is removed, the rest is cut to 256 code points with U+2026 appended when it was cut, and an empty result is no message. Nothing else is changed.",
+  "cases": [
+    {
+      "name": "contract-body",
+      "why": "the registry's own 410 body (measured on staging chtypes/v1, 2026-10-07): errors[0].message, verbatim",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"chtypes/v1 is retired: use chtypes/v2 (this registry no longer serves chtypes/v1)\",\"detail\":{\"retired\":\"chtypes/v1\",\"successor\":\"chtypes/v2\"}}]}",
+      "message": "chtypes/v1 is retired: use chtypes/v2 (this registry no longer serves chtypes/v1)"
+    },
+    {
+      "name": "c0-escape-sequence",
+      "why": "an ANSI escape sequence: ESC (U+001B) is removed, the printable rest is kept",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"\\u001b[31mretired\\u001b[0m: use chtypes/v2\"}]}",
+      "message": "[31mretired[0m: use chtypes/v2"
+    },
+    {
+      "name": "c0-controls",
+      "why": "U+0000 to U+001F are removed, tab, newline and carriage return included",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"a\\u0000b\\tc\\nd\\re\\u001ff\"}]}",
+      "message": "abcdef"
+    },
+    {
+      "name": "del-and-c1",
+      "why": "U+007F and U+0080 to U+009F are removed",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"a\\u007fb\\u0080c\\u0085d\\u009fe\"}]}",
+      "message": "abcde"
+    },
+    {
+      "name": "bidi-override",
+      "why": "a bidirectional override and its pop are removed",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"use \\u202echtypes/v2\\u202c now\"}]}",
+      "message": "use chtypes/v2 now"
+    },
+    {
+      "name": "bidi-marks-embeddings-isolates",
+      "why": "U+200E, U+200F, U+202A to U+202E and U+2066 to U+2069 are removed",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"x\\u200ey\\u200fz\\u202aa\\u202bb\\u202cc\\u202dd\\u2066e\\u2067f\\u2068g\\u2069h\"}]}",
+      "message": "xyzabcdefgh"
+    },
+    {
+      "name": "neighbors-kept",
+      "why": "the code points just outside each removed range are kept, and so is every other character",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"a\\u00a0b\\u200dc\\u2010d\\u2029e\\u202ff\\u2065g\\u206ah\\ufeffi\\u00e9j\"}]}",
+      "message": "a\u00a0b\u200dc\u2010d\u2029e\u202ff\u2065g\u206ah\ufeffi\u00e9j"
+    },
+    {
+      "name": "spaces-kept",
+      "why": "nothing is trimmed: leading, trailing and repeated spaces stay",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"  retired   twice  \"}]}",
+      "message": "  retired   twice  "
+    },
+    {
+      "name": "over-cap-300",
+      "why": "300 code points: cut to 256, then U+2026 appended",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}]}",
+      "message": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\u2026"
+    },
+    {
+      "name": "exactly-256",
+      "why": "256 code points: not cut, no ellipsis",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\"}]}",
+      "message": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+    },
+    {
+      "name": "257",
+      "why": "257 code points: cut to 256, then U+2026 appended",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\"}]}",
+      "message": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\u2026"
+    },
+    {
+      "name": "non-bmp-is-the-256th",
+      "why": "the 256th code point is U+1F600 (two UTF-16 units, four UTF-8 bytes): it is kept whole and the rest is cut",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\ud83d\\ude00tail\"}]}",
+      "message": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\ud83d\ude00\u2026"
+    },
+    {
+      "name": "non-bmp-exactly-256",
+      "why": "255 ASCII and one U+1F600 are 256 code points (257 UTF-16 units): not cut",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\ud83d\\ude00\"}]}",
+      "message": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\ud83d\ude00"
+    },
+    {
+      "name": "non-bmp-raw-utf8",
+      "why": "the same character sent as raw UTF-8 rather than an escape",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\ud83d\ude00cd\"}]}",
+      "message": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\ud83d\ude00\u2026"
+    },
+    {
+      "name": "combining-marks-count",
+      "why": "a combining mark is its own code point: 200 e + U+0301 pairs are 400 code points",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301e\\u0301\"}]}",
+      "message": "e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301\u2026"
+    },
+    {
+      "name": "cut-after-removal",
+      "why": "the cap counts what is left after removal: 50 removed and 250 kept is not cut",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001b\\u001bzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\"}]}",
+      "message": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+    },
+    {
+      "name": "sanitized-and-capped",
+      "why": "the conformance case retired-410-sanitized: an escape sequence, a bidi override and a message past 256 code points",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"\\u001b[1;31mchtypes/v1 is retired\\u001b[0m: use \\u202echtypes/v2\\u202c ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------\"}]}",
+      "message": "[1;31mchtypes/v1 is retired[0m: use chtypes/v2 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------\u2026"
+    },
+    {
+      "name": "empty-string",
+      "why": "an empty message is no message",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"\"}]}",
+      "message": null
+    },
+    {
+      "name": "only-removed-characters",
+      "why": "a message that is empty once sanitized is no message",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"\\u001b\\u202e\\u0000\"}]}",
+      "message": null
+    },
+    {
+      "name": "message-number",
+      "why": "a message that is not a string is no message",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":42}]}",
+      "message": null
+    },
+    {
+      "name": "message-null",
+      "why": "a null message is no message",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":null}]}",
+      "message": null
+    },
+    {
+      "name": "message-object",
+      "why": "an object message is no message",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":{\"text\":\"retired\"}}]}",
+      "message": null
+    },
+    {
+      "name": "message-array",
+      "why": "an array message is no message",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":[\"retired\"]}]}",
+      "message": null
+    },
+    {
+      "name": "no-message-key",
+      "why": "an error with no message is no message",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\"}]}",
+      "message": null
+    },
+    {
+      "name": "message-key-case",
+      "why": "the key is message, exactly: Message is another key",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"Message\":\"retired\"}]}",
+      "message": null
+    },
+    {
+      "name": "only-the-first-error",
+      "why": "only errors[0] is read",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\"},{\"code\":\"DENIED\",\"message\":\"second\"}]}",
+      "message": null
+    },
+    {
+      "name": "duplicate-message-key",
+      "why": "a repeated key: the last one is the value, as every binding's own JSON reader gives it",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"first\",\"message\":\"second\"}]}",
+      "message": "second"
+    },
+    {
+      "name": "errors-empty",
+      "why": "an empty errors array is no message",
+      "body_text": "{\"errors\":[]}",
+      "message": null
+    },
+    {
+      "name": "errors-not-an-array",
+      "why": "errors must be an array",
+      "body_text": "{\"errors\":{\"message\":\"retired\"}}",
+      "message": null
+    },
+    {
+      "name": "first-error-not-an-object",
+      "why": "errors[0] must be an object",
+      "body_text": "{\"errors\":[\"retired\"]}",
+      "message": null
+    },
+    {
+      "name": "no-errors-key",
+      "why": "a JSON object without errors is no message",
+      "body_text": "{\"message\":\"retired\"}",
+      "message": null
+    },
+    {
+      "name": "json-null",
+      "why": "the JSON value null is no message",
+      "body_text": "null",
+      "message": null
+    },
+    {
+      "name": "json-array",
+      "why": "a top-level array is no message",
+      "body_text": "[{\"message\":\"retired\"}]",
+      "message": null
+    },
+    {
+      "name": "json-string",
+      "why": "a top-level string is no message",
+      "body_text": "\"retired\"",
+      "message": null
+    },
+    {
+      "name": "not-json",
+      "why": "a plain-text body is no message",
+      "body_text": "chtypes/v1 is retired",
+      "message": null
+    },
+    {
+      "name": "nan-literal",
+      "why": "NaN is not JSON, so the body is no message even where a reader would accept it",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"retired\"}],\"n\":NaN}",
+      "message": null
+    },
+    {
+      "name": "truncated-json",
+      "why": "a body cut short is not JSON, so no message",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"chtypes/v1 is retired: use chtypes/v2 (this registry no longe",
+      "message": null
+    },
+    {
+      "name": "trailing-garbage",
+      "why": "JSON followed by more text is not JSON",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"chtypes/v1 is retired: use chtypes/v2 (this registry no longer serves chtypes/v1)\",\"detail\":{\"retired\":\"chtypes/v1\",\"successor\":\"chtypes/v2\"}}]}x",
+      "message": null
+    },
+    {
+      "name": "trailing-whitespace",
+      "why": "whitespace around the JSON is allowed",
+      "body_text": " \n{\"errors\":[{\"code\":\"DENIED\",\"message\":\"chtypes/v1 is retired: use chtypes/v2 (this registry no longer serves chtypes/v1)\",\"detail\":{\"retired\":\"chtypes/v1\",\"successor\":\"chtypes/v2\"}}]}\r\n ",
+      "message": "chtypes/v1 is retired: use chtypes/v2 (this registry no longer serves chtypes/v1)"
+    },
+    {
+      "name": "empty-body",
+      "why": "an empty body is no message",
+      "body_text": "",
+      "message": null
+    },
+    {
+      "name": "utf8-bom",
+      "why": "a UTF-8 byte order mark before the JSON makes it not JSON",
+      "body_hex": "efbbbf7b226572726f7273223a5b7b22636f6465223a2244454e494544222c226d657373616765223a22636874797065732f763120697320726574697265643a2075736520636874797065732f7632202874686973207265676973747279206e6f206c6f6e6765722073657276657320636874797065732f763129222c2264657461696c223a7b2272657469726564223a22636874797065732f7631222c22737563636573736f72223a22636874797065732f7632227d7d5d7d",
+      "message": null
+    },
+    {
+      "name": "invalid-utf8",
+      "why": "a body that is not UTF-8 is no message",
+      "body_hex": "7b226572726f7273223a5b7b22636f6465223a2244454e494544222c226d657373616765223a227265746972656420ff2068657265227d5d7d",
+      "message": null
+    },
+    {
+      "name": "raw-control-in-string",
+      "why": "an unescaped control character inside a JSON string makes it not JSON",
+      "body_hex": "7b226572726f7273223a5b7b22636f6465223a2244454e494544222c226d657373616765223a2272657469726564201b2068657265227d5d7d",
+      "message": null
+    },
+    {
+      "name": "lone-surrogate-escape",
+      "why": "a lone UTF-16 surrogate escape is not a Unicode string, so no message",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"retired \\ud800 here\"}]}",
+      "message": null
+    },
+    {
+      "name": "lone-trail-surrogate-escape",
+      "why": "a lone trailing surrogate escape, likewise",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"retired \\udc00 here\"}]}",
+      "message": null
+    },
+    {
+      "name": "surrogate-pair-escape",
+      "why": "a surrogate pair escape is one code point",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"use \\ud83d\\ude00 v2\"}]}",
+      "message": "use \ud83d\ude00 v2"
+    }
+  ]
+}

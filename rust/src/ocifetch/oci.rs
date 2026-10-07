@@ -180,6 +180,9 @@ pub fn fetch_by_tag(source: &Source<'_>, tag: &str) -> Result<Fetched> {
                     &format!("{base}: unexpected status {status} resolving tag {tag:?}"),
                 ));
             }
+            // A retired repository (a 410, §2) is permanent: never a reason to
+            // try the next base.
+            Err(e @ Error::SourceRetired(_)) => return Err(e),
             Err(e) => last_err = Some(e),
         }
     }
@@ -238,6 +241,9 @@ pub fn fetch_alias(source: &Source<'_>, alias: &str) -> Result<Option<Fetched>> 
                     &format!("{base}: unexpected status {status} resolving tag {alias:?}"),
                 ));
             }
+            // A retired repository (a 410, §2) is the answer: never the next
+            // base, and never a fall back to the tag.
+            Err(e @ Error::SourceRetired(_)) => return Err(e),
             Err(e) => failure = Some(e),
         }
     }
@@ -312,6 +318,9 @@ fn fetch_bytes_by_digest(
                     ));
                     break;
                 }
+                // A retired repository (a 410, §2) is permanent: never a
+                // reason to try the next base.
+                Err(e @ Error::SourceRetired(_)) => return Err(e),
                 Err(e) => {
                     last_err = Some(e);
                     break;
