@@ -641,32 +641,6 @@
       "reason": "PENDING: the ABI v2 server profile (chs_server_create, chs_schema_create's server, schema_description's server and replicated) landed in Go first, which sets the shape for all four. Python's follow-up pull request adds Library.new_server, the server= keyword of compile_table, ServerProfile, Server and the description's members, and removes this entry."
     },
     {
-      "binding": "ts",
-      "kind": "missing",
-      "names": [
-        "Library.newServer",
-        "CompileOptions.server",
-        "ServerProfile",
-        "ServerProfile.timezone",
-        "ServerProfile.settings",
-        "ServerProfile.macros",
-        "Server",
-        "Server.close",
-        "Server.[Symbol.dispose]",
-        "SchemaDescription.server",
-        "SchemaDescription.replicated",
-        "SchemaServer",
-        "SchemaServer.timezone",
-        "SchemaServer.settings",
-        "SchemaServer.macros",
-        "SchemaReplicated",
-        "SchemaReplicated.zookeeperPath",
-        "SchemaReplicated.replicaName"
-      ],
-      "issue": 511,
-      "reason": "PENDING: the ABI v2 server profile (chs_server_create, chs_schema_create's server, schema_description's server and replicated) landed in Go first, which sets the shape for all four. TypeScript's follow-up pull request adds lib.newServer, CompileOptions.server, ServerProfile, Server and the description's members, and removes this entry."
-    },
-    {
       "binding": "rust",
       "kind": "missing",
       "names": [

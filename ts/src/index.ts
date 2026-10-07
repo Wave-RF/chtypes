@@ -79,6 +79,8 @@ export {
   type Header,
   type RowResult,
   type SchemaDescription,
+  type SchemaReplicated,
+  type SchemaServer,
   type Span,
   type Transform,
   type Value,
@@ -108,5 +110,6 @@ export {
   type RowsOptions,
   Schema,
 } from './schema.js';
-export type { BytesIn, Settings } from './settings.js';
+export { Server } from './server.js';
+export type { BytesIn, ServerProfile, Settings } from './settings.js';
 export { setup, type SetupOptions } from './setup.js';

@@ -193,8 +193,31 @@ export interface Column {
   readonly defaultExpr: Buffer;
 }
 
+/**
+ * The server a schema was compiled on, as the library holds it. Its strings are
+ * the caller's own profile values given back, so they are plain text.
+ */
+export interface SchemaServer {
+  /** The zone the schema's types bind: the profile's, else the image zone. */
+  readonly timezone: string;
+  /** The server's settings as the profile gave them; `{}` when it gave none. */
+  readonly settings: Readonly<Record<string, string>> | undefined;
+  /** The server's macro set: `undefined` exactly when the profile carried no macros (unknown); present, even `{}`, is the complete set. */
+  readonly macros: Readonly<Record<string, string>> | undefined;
+}
+
+/** What ClickHouse's own TableZnodeInfo resolved for a Replicated engine, fully expanded. Both expand DDL bytes, so both are bytes. */
+export interface SchemaReplicated {
+  readonly zookeeperPath: Buffer;
+  readonly replicaName: Buffer;
+}
+
 export interface SchemaDescription {
   readonly columns: readonly Column[];
+  /** The server the schema was compiled on: `undefined` exactly when it was compiled without one. */
+  readonly server: SchemaServer | undefined;
+  /** A Replicated engine's resolved ZooKeeper path and replica name: `undefined` when the document carries none. */
+  readonly replicated: SchemaReplicated | undefined;
 }
 
 export interface DiscoveredColumn {
@@ -536,7 +559,25 @@ export function decodeFilterResult(bytes: Uint8Array): FilterResult {
 export function decodeSchemaDescription(bytes: Uint8Array): SchemaDescription {
   const doc = 'schema_description';
   const o = asObject(doc, '$', parseDoc(doc, bytes));
+  const serverValue = o.server;
+  const replicatedValue = o.replicated;
+  let server: SchemaServer | undefined;
+  if (serverValue !== undefined && serverValue !== null) {
+    const so = asObject(doc, '$.server', serverValue);
+    server = {
+      timezone: strOr(doc, so, 'timezone', ''),
+      settings: stringMapOf(doc, so, 'settings', '$.server'),
+      macros: stringMapOf(doc, so, 'macros', '$.server'),
+    };
+  }
+  let replicated: SchemaReplicated | undefined;
+  if (replicatedValue !== undefined && replicatedValue !== null) {
+    const ro = asObject(doc, '$.replicated', replicatedValue);
+    replicated = { zookeeperPath: bytesOr(doc, ro, 'zookeeper_path'), replicaName: bytesOr(doc, ro, 'replica_name') };
+  }
   return {
+    server,
+    replicated,
     columns: listOf(doc, o, 'columns').map((c) => {
       const co = asObject(doc, 'columns[]', c);
       // An unlisted default_kind is its unknown(n): kept, never a failure (r3).
@@ -544,6 +585,19 @@ export function decodeSchemaDescription(bytes: Uint8Array): SchemaDescription {
       return { name: nameOf(doc, co, 'name'), type: bytesOr(doc, co, 'type'), defaultKind, defaultExpr: bytesOr(doc, co, 'default_expression') };
     }),
   };
+}
+
+/** An object whose values are plain JSON strings: `undefined` when absent, an object (even an empty one) when present, so absent and `{}` stay apart. */
+function stringMapOf(doc: string, o: Obj, key: string, path: string): Readonly<Record<string, string>> | undefined {
+  const v = o[key];
+  if (v === undefined || v === null) return undefined;
+  const m = asObject(doc, `${path}.${key}`, v);
+  const out: Record<string, string> = {};
+  for (const [k, e] of Object.entries(m)) {
+    if (typeof e !== 'string') bad(doc, `${path}.${key}.${k}`, 'a JSON string', e);
+    Object.defineProperty(out, k, { value: e, enumerable: true, writable: true, configurable: true });
+  }
+  return out;
 }
 
 /** Decode a `discovery` document. */

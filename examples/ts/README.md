@@ -1,6 +1,6 @@
 # examples/ts: the TypeScript tour
 
-Seventeen sections over the whole chtypes surface, matching `../go`, `../python` and `../rust` section for section. See [`../README.md`](../README.md) for the section list. **Runs offline** once an artifact is installed: no Docker, no ClickHouse server, no network.
+Eighteen sections over the whole chtypes surface, matching `../go`, `../python` and `../rust` section for section through section 17; section 18, the ABI v2 server profile, landed in Go first. See [`../README.md`](../README.md) for the section list. **Runs offline** once an artifact is installed: no Docker, no ClickHouse server, no network.
 
 ## Run it
 
