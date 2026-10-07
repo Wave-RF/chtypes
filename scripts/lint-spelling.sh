@@ -133,15 +133,20 @@ WORD_PATTERN="(^|[^A-Za-z])(${ALTERNATION})([^A-Za-z]|$)"
 # Every tracked file except any LICENSE file, wherever it lives in the
 # current tree.
 list_files() {
-  # This script is excluded from itself, and it is the ONLY exclusion of its
-  # kind. Its WORDLIST is a table of British->American pairs, and its header
+  # The WHERE-affecting settings lists (spec/abi-v2/where-settings/*.json) are
+  # excluded too: they are data copied byte for byte, and they hold real
+  # ClickHouse setting names (enable_parallel_blocks_marshalling) whose
+  # spelling is upstream's, not this project's prose. Their README is checked.
+  # This script is excluded from itself, and it is the ONLY other exclusion of
+  # its kind. Its WORDLIST is a table of British->American pairs, and its header
   # names the words misspell does and does not catch; those spellings are the
   # payload, not an error. Unlike prose, a lookup table cannot be reworded
   # around the problem. Everything else in the tree is checked with no
   # exceptions — see the CHANGELOG entries, which were reworded rather than
   # excused, precisely so this stayed the only one.
   git ls-files | grep -vE '(^|/)LICENSE$' \
-               | grep -v '^scripts/lint-spelling\.sh$'
+               | grep -v '^scripts/lint-spelling\.sh$' \
+               | grep -vE '^spec/abi-v2/where-settings/[^/]+\.json$'
 }
 
 run_misspell() {

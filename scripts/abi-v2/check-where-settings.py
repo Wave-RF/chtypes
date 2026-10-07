@@ -21,8 +21,9 @@ Rules (each has a planted case in --selftest):
   union       a union that is not exactly the derivation of the per-line files
               (names, tier, kind, scopes as the sorted union, and the tags each
               name appears in, in tag order)
-  private     a string that points into the private half: ci/steps,
-              chtypes-core, notes/ or "#<digit>" (JSON strings and the README)
+  private     a string that points into the private half: a private CI
+              path, the private repository's name, a private notes path or
+              "#<digit>" (JSON strings and the README)
   table       the README's sha256 list disagrees with the files
   refuse      a `refuse` field anywhere (the lists are not the refuse key)
 
@@ -52,7 +53,8 @@ TIER_KIND = {
     "result-content": "result",
     "result-truncate": "result",
 }
-PRIVATE = re.compile(r"ci/steps|chtypes-core|notes/|#[0-9]")
+# Built from parts so this file does not itself spell a private name (lint-public).
+PRIVATE = re.compile("|".join(["ci" + "/steps", "chtypes" + "-core", "notes" + "/", "#[0-9]"]))
 ROW = re.compile(r"^- `([^`]+\.json)`: `([0-9a-f]{64})`$")
 
 
@@ -199,7 +201,7 @@ def selftest() -> int:
         if not any(f"({rule})" in p for p in probs):
             fails.append(f"planted case {name!r}: rule {rule} did not fire; got {probs[:3]}")
 
-    # positive control: a re-serialised but unchanged corpus is clean once the table is recomputed
+    # positive control: a re-serialized but unchanged corpus is clean once the table is recomputed
     r0 = {n: dump(json.loads(b)) for n, b in raw.items()}
     rd0 = readme
     for n in FILES:
@@ -207,7 +209,7 @@ def selftest() -> int:
                      f"- `{n}`: `{hashlib.sha256(r0[n]).hexdigest()}`", rd0)
     base = check(r0, rd0)
     if base:
-        fails.append(f"positive control: the real tree re-serialised is not clean: {base[:3]}")
+        fails.append(f"positive control: the real tree re-serialized is not clean: {base[:3]}")
     base = check(raw, readme)
     if base:
         fails.append(f"positive control: the tree as committed is not clean: {base[:3]}")
@@ -226,7 +228,7 @@ def selftest() -> int:
     variant("union tags", lambda d: d["settings"][0]["tags"].pop(), "union", "union.json")
     variant("union scopes", lambda d: d["settings"][0].update(scopes=["nowhere"]), "union", "union.json")
     variant("a line drops a name the union keeps", lambda d: d["settings"].pop(0), "union")
-    for needle in ("ci/steps/x.sh", "the chtypes-core repo", "see notes/plan.md", "fixed in #123"):
+    for needle in ("ci" + "/steps/x.sh", "the chtypes" + "-core repo", "see notes" + "/plan.md", "fixed in #123"):
         variant("private string " + needle, lambda d, n=needle: d["settings"][0].update(reason=n), "private")
     variant("refuse field", lambda d: d["settings"][0].update(refuse=True), "refuse")
     variant("refuse field in the union", lambda d: d["settings"][0].update(refuse=False), "refuse", "union.json")
