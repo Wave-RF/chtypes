@@ -27,8 +27,8 @@ use std::sync::Arc;
 
 use serde_json::{Map, Value as Json};
 
-use crate::abi1::calls_gen::{BlockHandle, FilterHandle, SchemaHandle};
-use crate::abi1::vocab_gen::{DocFlags, EXPORT_NONE, Format};
+use crate::abi2::calls_gen::{BlockHandle, FilterHandle, SchemaHandle};
+use crate::abi2::vocab_gen::{DocFlags, EXPORT_NONE, Format};
 use crate::decode;
 use crate::error::{Error, Result};
 use crate::library::Library;

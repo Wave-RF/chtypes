@@ -5,13 +5,25 @@
 //!
 //! It packages the `ok` stub library as an OCI layout signed with the fetch
 //! fixtures' test key (`tests/fixtures/fetch-v1/test-key/`), seeds it as the
-//! cache's `index.json`, and asks a [`chtypes::Registry`] for the version with
+//! cache's `index.json`, and asks a [`crate::Registry`] for the version with
 //! that key trusted. The fetch layer's own `resolve_installed` then verifies the
 //! signed statement, unpacks the library and hands back `Resolved`; the registry
 //! adapts it and runs loader steps 1 to 7 against the stub. A second layout
 //! whose signed statement disagrees with the library must be refused at step 5.
 //!
-//! `CHTYPES_ABI1_STUBS` unset: this suite skips LOUDLY by name and passes.
+//! WHY A UNIT TEST. This 2.0.0-dev SDK honors no trust override (rule r6,
+//! spec/abi-v2/docs.md): the test key is reachable only through the fetch
+//! layer's test-only seam (`channel::allow_overrides_for_tests`, which exists
+//! under `cfg(test)` alone), and an integration test links the crate as an
+//! ordinary dependency, where no seam exists. So this suite is a unit-test
+//! module of the crate (src/lib.rs declares it with `#[path]`), kept under
+//! tests/unit/ so that cargo does not build it as an integration test of its own.
+//! The layout is written where the fetch layer reads the explicit cache: its
+//! `v2-dev` subroot (rule r5), asked of the fetch layer itself. The last test
+//! drops the seam and proves the dev channel exactly as a user gets it refuses
+//! the same layout, the test key named as an option notwithstanding.
+//!
+//! `CHTYPES_ABI2_STUBS` unset: this suite skips LOUDLY by name and passes.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -21,9 +33,10 @@ use ed25519_dalek::{Signer, SigningKey};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use chtypes::{Error, FetchOptions, Registry, RegistryOptions};
+use crate::ocifetch::channel;
+use crate::{Error, FetchOptions, Registry, RegistryOptions};
 
-const ENV_STUBS: &str = "CHTYPES_ABI1_STUBS";
+const ENV_STUBS: &str = "CHTYPES_ABI2_STUBS";
 
 const MEDIA_INDEX: &str = "application/vnd.oci.image.index.v1+json";
 const MEDIA_MANIFEST: &str = "application/vnd.oci.image.manifest.v1+json";
@@ -37,9 +50,6 @@ const STATEMENT_TYPE: &str = "https://in-toto.io/Statement/v1";
 const PREDICATE_TYPE: &str = "https://artifacts.wavehouse.dev/spec/artifact/v1";
 const LIBRARY_NAME: &str = "libchtypes.so";
 const TEST_KEYID: &str = "6c3468e4ec653ac0";
-/// The same key's public half (`constants.json`'s `test_keys`): the trust list
-/// a test names, since the default trust is the release key alone.
-const TEST_KEY_HEX: &str = "b9b314491f92f6c4b93fc69f932164739a619965ed79dbbcea7a4ae2da611ce2";
 
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -108,15 +118,34 @@ fn put_blob(root: &Path, bytes: &[u8]) -> (String, u64) {
     (format!("sha256:{hex}"), bytes.len() as u64)
 }
 
-/// Package `library` as a one-platform OCI layout under `cache`, signed with the
-/// test key over `predicate`, and seed the cache's `index.json` with it.
+/// Where the fetch layer reads the explicit cache `cache`: under the ABI v2 dev
+/// channel its subroot `<cache>/v2-dev` (rule r5), asked of the fetch layer
+/// itself rather than spelled here.
+fn layout_root(cache: &Path) -> PathBuf {
+    let root = crate::ocifetch::layout::cache_root(Some(&cache.to_string_lossy()))
+        .expect("the fetch layer names a cache root");
+    assert_eq!(
+        root,
+        cache.join(channel::DEV_CACHE_DIR),
+        "the fetch layer reads the explicit cache {} at {}, not its v2-dev subroot (rule r5)",
+        cache.display(),
+        root.display()
+    );
+    root
+}
+
+/// Package `library` as a one-platform OCI layout where the fetch layer reads
+/// the explicit cache `explicit`, signed with the test key over `predicate`,
+/// and seed that layout's `index.json` with it.
 fn package(
-    cache: &Path,
+    explicit: &Path,
     library: &[u8],
     predicate: &Value,
     key: &SigningKey,
     keyid: &str,
 ) -> Layout {
+    let cache = layout_root(explicit);
+    let cache = cache.as_path();
     std::fs::create_dir_all(cache).expect("create cache");
     // The layer: a tar holding the one library, zstd-framed (uncompressed).
     let mut tar_bytes = Vec::new();
@@ -203,19 +232,19 @@ fn package(
     )
     .unwrap();
     Layout {
-        cache: cache.to_path_buf(),
+        cache: explicit.to_path_buf(),
         manifest_digest,
     }
 }
 
-fn registry_over(layout: &Layout, platform: &str) -> Registry {
+fn registry_over(layout: &Layout, platform: &str, trusted: &str) -> Registry {
     Registry::new(RegistryOptions {
         fetch: FetchOptions {
             platform: Some(platform.to_string()),
             cache_dir: Some(layout.cache.to_string_lossy().into_owned()),
             system_dirs: Some(Vec::new()),
             offline: true,
-            trusted_keys: Some(vec![TEST_KEY_HEX.to_string()]),
+            trusted_keys: Some(vec![trusted.to_string()]),
             ..Default::default()
         },
         autofetch: Some(false),
@@ -226,9 +255,12 @@ fn registry_over(layout: &Layout, platform: &str) -> Registry {
 
 #[test]
 fn a_signed_layout_resolves_adapts_and_loads_and_a_mismatch_is_refused() {
+    // The dev channel with the base, trust and unsigned overrides honored on
+    // this test's thread, and nothing else changed.
+    let _overrides = channel::allow_overrides_for_tests();
     let Some(dir) = std::env::var_os(ENV_STUBS).map(PathBuf::from) else {
         eprintln!(
-            "SKIPPED (loudly): api_v1_registry needs {ENV_STUBS} (the v1-abi-stubs directory); nothing was exercised"
+            "SKIPPED (loudly): registry_stub_tests needs {ENV_STUBS} (the ABI v2 stub directory); nothing was exercised"
         );
         return;
     };
@@ -271,13 +303,13 @@ fn a_signed_layout_resolves_adapts_and_loads_and_a_mismatch_is_refused() {
 
     // --- the good statement: resolve, adapt, load ------------------------------
     let good = package(&work.join("good"), &library, &predicate, &key, &keyid);
-    let registry = registry_over(&good, &platform);
+    let registry = registry_over(&good, &platform, &public_hex);
     assert!(
         registry.libraries().is_empty(),
         "construction opens nothing"
     );
 
-    // The default trust is the release key alone: without the opt-in the test
+    // The default trust is the staging key alone: without the opt-in the test
     // key is refused, which is how the fetch layer reports an unverifiable
     // statement (nothing installed answers the request).
     let untrusting = Registry::new(RegistryOptions {
@@ -332,7 +364,7 @@ fn a_signed_layout_resolves_adapts_and_loads_and_a_mismatch_is_refused() {
         manifest_digest: String::new(),
     };
     std::fs::create_dir_all(&empty.cache).unwrap();
-    let missing = registry_over(&empty, &platform)
+    let missing = registry_over(&empty, &platform, &public_hex)
         .for_version("1.1")
         .unwrap_err();
     let Error::ArtifactMissing(message) = &missing else {
@@ -347,7 +379,7 @@ fn a_signed_layout_resolves_adapts_and_loads_and_a_mismatch_is_refused() {
     let mut lying = predicate.clone();
     lying["inputs_sha256"] = json!("d".repeat(64));
     let bad = package(&work.join("bad"), &library, &lying, &key, &keyid);
-    let err = registry_over(&bad, &platform)
+    let err = registry_over(&bad, &platform, &public_hex)
         .for_version(&minor)
         .unwrap_err();
     let Error::ArtifactCorrupt(refusal) = &err else {
@@ -362,7 +394,7 @@ fn a_signed_layout_resolves_adapts_and_loads_and_a_mismatch_is_refused() {
             cache_dir: Some(good.cache.to_string_lossy().into_owned()),
             system_dirs: Some(Vec::new()),
             offline: true,
-            trusted_keys: Some(vec![TEST_KEY_HEX.to_string()]),
+            trusted_keys: Some(vec![public_hex.clone()]),
             ..Default::default()
         },
         autofetch: Some(true),
@@ -376,7 +408,7 @@ fn a_signed_layout_resolves_adapts_and_loads_and_a_mismatch_is_refused() {
             cache_dir: Some(empty.cache.to_string_lossy().into_owned()),
             system_dirs: Some(Vec::new()),
             offline: true,
-            trusted_keys: Some(vec![TEST_KEY_HEX.to_string()]),
+            trusted_keys: Some(vec![public_hex.clone()]),
             ..Default::default()
         },
         autofetch: Some(true),
@@ -388,5 +420,67 @@ fn a_signed_layout_resolves_adapts_and_loads_and_a_mismatch_is_refused() {
         "preload never fetches, even with autofetch on: {missing_preload:?}"
     );
 
+    let _ = std::fs::remove_dir_all(&work);
+}
+
+/// Rule r6, as a user gets it: under the dev channel exactly (no test seam),
+/// the `trusted_keys` option naming the test key is IGNORED, with one warning,
+/// so the layout the test above opens is refused as untrusted (nothing
+/// installed answers the request).
+#[test]
+fn the_dev_channel_honors_no_trust_override() {
+    let _dev = channel::use_dev_channel_for_tests();
+    channel::capture_warnings_for_tests();
+    let Some(dir) = std::env::var_os(ENV_STUBS).map(PathBuf::from) else {
+        eprintln!(
+            "SKIPPED (loudly): the_dev_channel_honors_no_trust_override needs {ENV_STUBS} (the v1-abi-stubs directory); nothing was exercised"
+        );
+        return;
+    };
+    let manifest: Value =
+        serde_json::from_slice(&std::fs::read(dir.join("stubs.json")).expect("read stubs.json"))
+            .expect("parse stubs.json");
+    let ok = &manifest["variants"]["ok"];
+    let library = std::fs::read(
+        dir.join(
+            Path::new(ok["path"].as_str().expect("ok path"))
+                .file_name()
+                .expect("file name"),
+        ),
+    )
+    .expect("read the ok stub");
+    let mut predicate = ok["predicate"].clone();
+    let fields = predicate.as_object_mut().expect("predicate is an object");
+    fields.insert("library".into(), json!(LIBRARY_NAME));
+    fields.insert("library_sha256".into(), json!(sha256_hex(&library)));
+    fields.insert("library_bytes".into(), json!(library.len()));
+    if fields["os"] == "linux" {
+        fields.entry("glibc_floor").or_insert(json!("2.17"));
+    }
+    let platform = format!(
+        "{}-{}",
+        predicate["os"].as_str().unwrap(),
+        predicate["arch"].as_str().unwrap()
+    );
+    let minor = predicate["clickhouse_minor"].as_str().unwrap().to_string();
+    let (key, public_hex, keyid) = test_signing_key();
+    let work = std::env::temp_dir().join(format!(
+        "chtypes_dev_no_trust_override_{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&work);
+    let layout = package(&work.join("good"), &library, &predicate, &key, &keyid);
+    let err = registry_over(&layout, &platform, &public_hex)
+        .for_version(&minor)
+        .unwrap_err();
+    assert!(
+        matches!(err, Error::ArtifactMissing(_)),
+        "the dev channel honored the trusted_keys option: a 2.0.0-dev SDK trusts only the staging key ({err:?})"
+    );
+    assert!(
+        channel::warned_for_tests().contains(&"the trusted_keys option".to_string()),
+        "the ignored trusted_keys option was not warned about: {:?}",
+        channel::warned_for_tests()
+    );
     let _ = std::fs::remove_dir_all(&work);
 }

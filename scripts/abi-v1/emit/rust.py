@@ -48,6 +48,24 @@ Every output is piped through the installed `rustfmt` before being returned
 `cargo fmt --check` (plan §2.3: "the emitters write formatted code") — this
 emitter's own string templates make no attempt to match rustfmt's line-width
 and wrapping rules by hand.
+
+ABI V2 (`MAJORS`, run for the ONE major spec/binding-majors.json gives rust;
+emit/__init__.py). The same five files, under rust/src/abi2: ABI v1's
+`decls.rs`, `invoke_gen.rs`, `calls_gen.rs` and `errmap_gen.rs` text with
+every major-specific spelling moved by `_MAJOR_SPELLINGS` (each of which must
+occur, so a renamed spelling fails generation instead of leaking a v1 name
+into v2), plus `CHS_ABI_STABILITY` in `decls.rs` (the description's
+`stability`; the loader's fingerprint message depends on it, rule r6).
+`vocab_gen.rs` is v2's own (`render_vocab_v2`): rule r3 (spec/abi-v2/docs.md)
+gives every vocabulary an explicit `Unknown` member carrying the raw value, an
+unlisted value decodes to it for that field alone and never fails the
+document, a fallback names only whose facts `Unknown` reports, `value_src`
+and `transform_reason` become types of their own (`Source`, `Reason`), the
+call status gains a `Status` type, `discover_query_param` gains
+`DiscoverQueryParam`, and `DESCRIBED_VOCABULARIES` with
+`described_vocabulary` reaches every enum the description defines, for the
+r3 tests, without a hand-kept list. ABI v1's outputs are produced by the
+untouched v1 path, byte for byte as before.
 """
 
 from __future__ import annotations
@@ -59,7 +77,8 @@ from model import BUF_HANDLE, ERROR_HANDLE, SCALARS, STATUS_ENUM
 
 from . import Output, banner, stub
 
-BINDING = "rust"  # runs for the major spec/binding-majors.json gives rust (emit/__init__.py)
+BINDING = "rust"  # runs for the ONE major spec/binding-majors.json gives rust (emit/__init__.py)
+MAJORS = (1, 2)
 
 
 def _rustfmt(text: str) -> str:
@@ -1343,6 +1362,545 @@ def render_vocab(model) -> str:
     return "\n".join(out)
 
 
+# ---------------------------------------------------------- vocab_gen.rs, v2
+
+# Each enum the description defines: its Rust type in ABI v2's vocab_gen.rs and
+# whether its raw value is an integer, for `described_vocabulary` (rule r3). A
+# described enum missing here fails generation.
+_RUST_VOCAB = {
+    "chs_status": ("Status", "int"),
+    "chs_format": ("Format", "int"),
+    "transform_reason": ("Reason", "string"),
+    "value_src": ("Source", "string"),
+    "row_outcome": ("Outcome", "string"),
+    "batch_outcome": ("Outcome", "string"),
+    "filter_outcome": ("FilterOutcome", "string"),
+    "filter_verdict": ("Verdict", "string"),
+    "discover_query_param": ("DiscoverQueryParam", "string"),
+    "default_kind": ("DefaultKind", "string"),
+}
+
+_UNKNOWN_STRING_DOC = (
+    "A value the description does not list, carrying its exact spelling (rule r3,\n"
+    "spec/abi-v2/docs.md): a reader keeps it, for this field alone, and decodes on."
+)
+
+
+def _string_enum_v2(
+    model, name: str, type_name: str, *, variant, doc: str, default: str | None = None, facts=(), unknown_doc: str = ""
+) -> list[str]:
+    """ABI v2: a string vocabulary as a Rust enum with an explicit
+    `Unknown(String)` member (rule r3). `default` is the value `#[default]`
+    marks (the description's fallback), or None. `facts` is
+    [(field, unknown_value, doc)]: one boolean method per described fact, and
+    what `Unknown` reports for it."""
+    enum = model.enums[name]
+    out: list[str] = []
+    out += _doc(doc)
+    out.append("#[derive(Debug, Clone, PartialEq, Eq, Hash" + (", Default)]" if default is not None else ")]"))
+    out.append("#[non_exhaustive]")
+    out.append(f"pub enum {type_name} {{")
+    for v in enum.values:
+        if default is not None and v.value == default:
+            out.append("    #[default]")
+        out.append(f"    /// The wire value `{v.value}`.")
+        out.append(f"    {variant(v.value)},")
+    out += _doc(unknown_doc or _UNKNOWN_STRING_DOC, "    ")
+    out.append("    Unknown(String),")
+    out += ["}", "", f"impl {type_name} {{"]
+    out += [
+        "    /// The wire spelling: the description's, or the raw value `Unknown` carries.",
+        "    pub fn as_str(&self) -> &str {",
+        "        match self {",
+    ]
+    for v in enum.values:
+        out.append(f"            {type_name}::{variant(v.value)} => {_rust_str_any(v.value)},")
+    out.append(f"            {type_name}::Unknown(raw) => raw.as_str(),")
+    out += ["        }", "    }", ""]
+    out += [
+        "    /// Read one wire value. One the description does not list is `Unknown`,",
+        "    /// carrying it (rule r3): it never fails the document.",
+        "    pub fn from_wire(s: &str) -> Self {",
+        "        match s {",
+    ]
+    for v in enum.values:
+        out.append(f"            {_rust_str_any(v.value)} => {type_name}::{variant(v.value)},")
+    out.append(f"            _ => {type_name}::Unknown(s.to_string()),")
+    out += ["        }", "    }", ""]
+    out += [
+        "    /// Whether the description lists this value: false exactly for `Unknown`.",
+        "    pub fn is_known(&self) -> bool {",
+        f"        !matches!(self, {type_name}::Unknown(_))",
+        "    }",
+    ]
+    for field, unknown_value, fdoc in facts:
+        out += ["", *_doc(fdoc, "    "), f"    pub fn {field}(&self) -> bool {{", "        match self {"]
+        for v in enum.values:
+            out.append(f"            {type_name}::{variant(v.value)} => {'true' if v.fields[field] else 'false'},")
+        out.append(f"            {type_name}::Unknown(_) => {'true' if unknown_value else 'false'},")
+        out += ["        }", "    }"]
+    out += ["}", ""]
+    out += [
+        "/// The wire spelling (`as_str`), padded to a width the format asks for.",
+        f"impl std::fmt::Display for {type_name} {{",
+        "    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {",
+        "        f.pad(self.as_str())",
+        "    }",
+        "}",
+        "",
+    ]
+    return out
+
+
+def _vocab_v2_format(model) -> list[str]:
+    fmt = model.enums["chs_format"]
+    names = [(_words(v.name[len("CHS_") :]), v) for v in fmt.values]
+    out = [
+        "/// The input (and export) encoding of a body, as the `chs_format` integer.",
+        "/// **The numbers are part of the ABI** (frozen) and are never renumbered.",
+        "/// Each carries `ch_name`, ClickHouse's own name for the format, which is how",
+        "/// a build's `capabilities` lists it. An integer the description does not",
+        "/// list is `Format::Unknown(n)` (rule r3): it crosses the boundary unchanged,",
+        "/// and the library answers it.",
+        "#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]",
+        "#[non_exhaustive]",
+        "pub enum Format {",
+    ]
+    for ident, v in names:
+        out += [f"    /// `{v.fields['ch_name']}` (`{v.name}`, {v.value}).", f"    {ident},"]
+    out += [
+        "    /// A `chs_format` integer the description does not list, carrying it (rule r3).",
+        "    Unknown(i32),",
+        "}",
+        "",
+        "impl Format {",
+        "    /// Every format the description lists, in numeric order.",
+        f"    pub const ALL: [Format; {len(names)}] = [",
+    ]
+    for ident, _ in names:
+        out.append(f"        Format::{ident},")
+    out += [
+        "    ];",
+        "",
+        "    /// ClickHouse's own name for this format, as `capabilities` lists it;",
+        "    /// `None` for `Unknown`, which the description names nothing for.",
+        "    pub fn ch_name(self) -> Option<&'static str> {",
+        "        match self {",
+    ]
+    for ident, v in names:
+        out.append(f"            Format::{ident} => Some({_rust_str_any(v.fields['ch_name'])}),")
+    out += [
+        "            Format::Unknown(_) => None,",
+        "        }",
+        "    }",
+        "",
+        "    /// The `chs_format` value that crosses the C boundary.",
+        "    pub fn code(self) -> i32 {",
+        "        match self {",
+    ]
+    for ident, v in names:
+        out.append(f"            Format::{ident} => {v.value},")
+    out += [
+        "            Format::Unknown(code) => code,",
+        "        }",
+        "    }",
+        "",
+        "    /// The format a `chs_format` integer names; one the description does not",
+        "    /// list is `Unknown`, carrying it (rule r3).",
+        "    pub fn from_code(code: i32) -> Format {",
+        "        match code {",
+    ]
+    for ident, v in names:
+        out.append(f"            {v.value} => Format::{ident},")
+    out += [
+        "            _ => Format::Unknown(code),",
+        "        }",
+        "    }",
+        "",
+        "    /// Whether the description lists this format: false exactly for `Unknown`.",
+        "    pub fn is_known(self) -> bool {",
+        "        !matches!(self, Format::Unknown(_))",
+        "    }",
+        "}",
+        "",
+    ]
+    return out
+
+
+def _vocab_v2_status(model) -> list[str]:
+    values = [(_words(v.name[len("CHS_") :]), v) for v in model.enums[STATUS_ENUM].values]
+    out = [
+        "/// The call statuses, as the `chs_status` integers (D3, frozen). A call error",
+        "/// carries the raw status; compare it with these, or read it as a `Status`.",
+        "pub mod status {",
+    ]
+    for _, v in values:
+        out += [f"    /// `{v.name}`.", f"    pub const {v.name[len('CHS_'):]}: i32 = {v.value};"]
+    out += [
+        "}",
+        "",
+        "/// One `chs_status` value, read. A value outside the closed set is",
+        "/// `Status::Unknown(n)` (rule r3), and the call that answered it still fails,",
+        "/// as an internal error naming it: a status a binding cannot read is never a",
+        "/// success.",
+        "#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]",
+        "#[non_exhaustive]",
+        "pub enum Status {",
+    ]
+    for ident, v in values:
+        out += [f"    /// `{v.name}` ({v.value}).", f"    {ident},"]
+    out += [
+        "    /// A `chs_status` value outside the closed set, carrying it (rule r3).",
+        "    Unknown(i32),",
+        "}",
+        "",
+        "impl Status {",
+        "    /// The status a `chs_status` integer names; one outside the closed set is",
+        "    /// `Unknown`, carrying it.",
+        "    pub fn from_code(code: i32) -> Status {",
+        "        match code {",
+    ]
+    for ident, v in values:
+        out.append(f"            {v.value} => Status::{ident},")
+    out += [
+        "            _ => Status::Unknown(code),",
+        "        }",
+        "    }",
+        "",
+        "    /// The raw `chs_status` integer.",
+        "    pub fn code(self) -> i32 {",
+        "        match self {",
+    ]
+    for ident, v in values:
+        out.append(f"            Status::{ident} => {v.value},")
+    out += [
+        "            Status::Unknown(code) => code,",
+        "        }",
+        "    }",
+        "",
+        "    /// Whether the description lists this status: false exactly for `Unknown`.",
+        "    pub fn is_known(self) -> bool {",
+        "        !matches!(self, Status::Unknown(_))",
+        "    }",
+        "}",
+        "",
+        "/// The constant's own name (`CHS_REJECTED`, ...), or `unknown(<n>)` for a value",
+        "/// the description does not list (rule r3).",
+        "impl std::fmt::Display for Status {",
+        "    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {",
+        "        match self {",
+    ]
+    for ident, v in values:
+        out.append(f"            Status::{ident} => f.pad({_rust_str_any(v.name)}),")
+    out += [
+        '            Status::Unknown(code) => f.pad(&format!("unknown({code})")),',
+        "        }",
+        "    }",
+        "}",
+        "",
+    ]
+    return out
+
+
+def _vocab_v2_described(model) -> list[str]:
+    names = list(model.enums)
+    missing = [n for n in names if n not in _RUST_VOCAB]
+    if missing:
+        raise ValueError(f"emit/rust.py: enum(s) {missing} have no Rust type; teach _RUST_VOCAB about them")
+    out = [
+        "/// Every enum the description defines, in its own order: rule r3's tests reach",
+        "/// each one through [`described_vocabulary`], so a new enum is covered without",
+        "/// a hand-kept list.",
+        "pub(crate) const DESCRIBED_VOCABULARIES: &[&str] = &[",
+    ]
+    for n in names:
+        out.append(f"    {_rust_str_any(n)},")
+    out += [
+        "];",
+        "",
+        "/// Build the value of the described enum `name` whose raw spelling is `raw` (an",
+        "/// integer for an `int32` enum), and report whether the description lists it",
+        "/// and its raw spelling read back. `None` for a name the description does not",
+        "/// define, or for a raw value of an `int32` enum that is not an integer.",
+        "pub(crate) fn described_vocabulary(name: &str, raw: &str) -> Option<(bool, String)> {",
+        "    match name {",
+    ]
+    for n in names:
+        rust_type, kind = _RUST_VOCAB[n]
+        out.append(f"        {_rust_str_any(n)} => {{")
+        if kind == "int":
+            out.append(f"            let v = {rust_type}::from_code(raw.parse::<i32>().ok()?);")
+            out.append("            Some((v.is_known(), v.code().to_string()))")
+        else:
+            out.append(f"            let v = {rust_type}::from_wire(raw);")
+            out.append("            Some((v.is_known(), v.as_str().to_string()))")
+        out.append("        }")
+    out += ["        _ => None,", "    }", "}", ""]
+    return out
+
+
+def render_vocab_v2(model) -> str:
+    """ABI v2's vocab_gen.rs: every vocabulary with its explicit `Unknown`
+    member (rule r3). See this module's docstring."""
+    major = model.major
+    out: list[str] = [
+        f"// {banner(model)}",
+        "//",
+        "// Every vocabulary of the description, as Rust: the `chs_format` and",
+        "// `chs_status` numbers, the document vocabularies (outcomes, verdicts,",
+        "// reasons with their `lossy` fact, sources with their `is_stored` fact,",
+        "// default kinds, the discovery query's parameters), and the document-group",
+        "// flags. No binding keeps a copy of its own. Rule r3",
+        f"// (spec/abi-v{major}/docs.md): every vocabulary has an explicit `Unknown`",
+        "// member carrying the raw value, and a reader maps a value the description",
+        "// does not list to it, for that field alone, and decodes on: an unlisted",
+        "// value never fails the document, the row or the batch. A fallback names only",
+        "// whose facts `Unknown` reports, so the fail-closed reading stays: an unknown",
+        "// outcome is never accepted, and an unknown verdict is never an answer. See",
+        "// scripts/abi-v1/emit/rust.py.",
+        "",
+        "// ----------------------------------------------------------------- format",
+        "",
+    ]
+    out += _vocab_v2_format(model)
+    out += ["// ----------------------------------------------------------------- status", ""]
+    out += _vocab_v2_status(model)
+
+    row = model.enums["row_outcome"]
+    out += _string_enum_v2(
+        model,
+        "row_outcome",
+        "Outcome",
+        variant=_words,
+        doc=(
+            "A row's or a batch's outcome, as the library's document states it (already final: the library applies\n"
+            "every promotion). A value the description does not list is `Unknown`, never accepted; the description's\n"
+            f"fallback, `{row.fallback}`, is what a defaulted value carries."
+        ),
+        default=row.fallback,
+    )
+    fo = model.enums["filter_outcome"]
+    out += _string_enum_v2(
+        model,
+        "filter_outcome",
+        "FilterOutcome",
+        variant=_words,
+        doc=(
+            "A filter evaluation's outcome. A value the description does not list is `Unknown`, never `ok`; the\n"
+            f"description's fallback, `{fo.fallback}`, is what a defaulted value carries."
+        ),
+        default=fo.fallback,
+    )
+    verdict = model.enums["filter_verdict"]
+    assert {v.value for v in verdict.values} == set(VERDICT_NAMES), "filter_verdict changed; update VERDICT_NAMES"
+    vfb = next(v for v in verdict.values if v.value == verdict.fallback)
+    out += _string_enum_v2(
+        model,
+        "filter_verdict",
+        "Verdict",
+        variant=lambda w: VERDICT_NAMES[w],
+        doc=(
+            "One row's filter verdict. `answered` says which are answers; `Error` and `Decline` are never answers,\n"
+            "and a caller enforcing visibility fails closed on both. A character the description does not list is\n"
+            f"`Unknown`, and reports the fallback's (`{verdict.fallback}`) facts: never an answer."
+        ),
+        default=verdict.fallback,
+        facts=[
+            (
+                "answered",
+                vfb.fields["answered"],
+                "The description's `answered` fact for this verdict; `Unknown` reports the fallback's.",
+            )
+        ],
+        unknown_doc=(
+            "A verdict character the description does not list, carrying it (rule r3): never an\n"
+            "answer, and a reader decodes the other rows on."
+        ),
+    )
+    out += [
+        "impl Verdict {",
+        "    /// The document character: `t`, `f`, `e` or `d`, or the one `Unknown` carries",
+        "    /// (`?` only for an `Unknown` built empty, which no document carries).",
+        "    pub fn as_char(&self) -> char {",
+        "        match self {",
+    ]
+    for v in verdict.values:
+        out.append(f"            Verdict::{VERDICT_NAMES[v.value]} => '{v.value}',")
+    out += ["            Verdict::Unknown(raw) => raw.chars().next().unwrap_or('?'),", "        }", "    }", "}", ""]
+
+    out += _string_enum_v2(
+        model,
+        "default_kind",
+        "DefaultKind",
+        variant=lambda w: _words(w) if w else "None",
+        doc=(
+            "What a column's DEFAULT clause is. The empty wire value is `None`. A kind the description does not\n"
+            "list is `Unknown`, and the column decodes on (rule r3)."
+        ),
+    )
+
+    reason = model.enums["transform_reason"]
+    rfb = next(v for v in reason.values if v.value == reason.fallback)
+    out += _string_enum_v2(
+        model,
+        "transform_reason",
+        "Reason",
+        variant=_words,
+        doc=(
+            "The `transform_reason` vocabulary: why a stored value differs from the supplied one, and the `lossy`\n"
+            "fact the description gives each. A reason the description does not list is `Unknown`, and reports\n"
+            f"the fallback's (`{reason.fallback}`) facts, so it reads as lossy."
+        ),
+        default=reason.fallback,
+        facts=[
+            (
+                "lossy",
+                rfb.fields["lossy"],
+                "The description's `lossy` fact for this reason; `Unknown` reports the fallback's.",
+            )
+        ],
+    )
+
+    out += [
+        "/// The `transform_reason` wire spellings, as `Reason::as_str` gives them, and",
+        "/// the `lossy` fact by spelling: the 1.x surface (docs/reference/bindings-v1.md),",
+        "/// kept beside the `Reason` type that `Transform::reason` carries.",
+        "pub mod reason {",
+    ]
+    for v in reason.values:
+        out += [f"    /// `{v.value}`.", f"    pub const {_upper_snake(v.value)}: &str = {_rust_str_any(v.value)};"]
+    out += [
+        "",
+        "    /// The description's `lossy` fact for a reason spelling; one the description",
+        "    /// does not list is `Reason::Unknown`, which reports the fallback's (rule r3).",
+        "    pub fn is_lossy(reason: &str) -> bool {",
+        "        super::Reason::from_wire(reason).lossy()",
+        "    }",
+        "}",
+        "",
+    ]
+
+    out += _string_enum_v2(
+        model,
+        "value_src",
+        "Source",
+        variant=_words,
+        doc=(
+            "The `value_src` vocabulary: where a column's value came from, and whether the description says it is\n"
+            "stored. A source the description does not list is `Unknown`; the description does not yet say what\n"
+            "its `is_stored` reports (rule r3, \"Facts without a fallback\"), and until it does, `false`."
+        ),
+        facts=[
+            (
+                "is_stored",
+                False,
+                "The description's `is_stored` fact for this source; `false` for `Unknown` until the description\n"
+                "says otherwise.",
+            )
+        ],
+    )
+
+    src = model.enums["value_src"]
+    out += [
+        "/// The `value_src` wire spellings, as `Source::as_str` gives them, and the",
+        "/// `is_stored` fact by spelling: the 1.x surface (docs/reference/bindings-v1.md),",
+        "/// kept beside the `Source` type that `Value::source` carries.",
+        "pub mod source {",
+    ]
+    for v in src.values:
+        out += [f"    /// `{v.value}`.", f"    pub const {_upper_snake(v.value)}: &str = {_rust_str_any(v.value)};"]
+    out += [
+        "",
+        "    /// The description's `is_stored` fact for a source spelling; one the",
+        "    /// description does not list is `Source::Unknown`, `false` until the",
+        "    /// description says otherwise (rule r3).",
+        "    pub fn is_stored(src: &str) -> bool {",
+        "        super::Source::from_wire(src).is_stored()",
+        "    }",
+        "}",
+        "",
+    ]
+
+    dqp = model.enums["discover_query_param"]
+    out += _string_enum_v2(
+        model,
+        "discover_query_param",
+        "DiscoverQueryParam",
+        variant=_words,
+        doc=(
+            "A query parameter of the SQL `chs_discover_query` returns, which the caller binds when it runs the\n"
+            "query. A parameter the description does not list is `Unknown` (rule r3)."
+        ),
+    )
+    out += [
+        "impl DiscoverQueryParam {",
+        "    /// The parameter's ClickHouse type, as the description gives it; `None` for",
+        "    /// `Unknown`.",
+        "    pub fn ch_type(&self) -> Option<&'static str> {",
+        "        match self {",
+    ]
+    for v in dqp.values:
+        out.append(f"            DiscoverQueryParam::{_words(v.value)} => Some({_rust_str_any(v.fields['ch_type'])}),")
+    out += ["            DiscoverQueryParam::Unknown(_) => None,", "        }", "    }", "}", ""]
+
+    flags = [(c.name, c.value) for c in model.constants.values() if c.name.startswith("CHS_DOC_")]
+    out += [
+        "/// Which groups a `rows` document carries: values (`cols`), transformations",
+        "/// and defaults. Combine with `|`.",
+        "#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]",
+        "pub struct DocFlags(u32);",
+        "",
+        "impl DocFlags {",
+    ]
+    for fname, value in flags:
+        out += [f"    /// `{fname}`.", f"    pub const {fname[len('CHS_DOC_'):]}: DocFlags = DocFlags({value});"]
+    out += [
+        "",
+        "    /// The raw bitmask, as it crosses the C boundary.",
+        "    pub fn bits(self) -> u32 {",
+        "        self.0",
+        "    }",
+        "",
+        "    /// A mask from raw bits, unvalidated on purpose: an unknown bit reaches the",
+        "    /// library, which refuses it loudly.",
+        "    pub fn from_bits(bits: u32) -> DocFlags {",
+        "        DocFlags(bits)",
+        "    }",
+        "}",
+        "",
+        "impl std::ops::BitOr for DocFlags {",
+        "    type Output = DocFlags;",
+        "    fn bitor(self, rhs: DocFlags) -> DocFlags {",
+        "        DocFlags(self.0 | rhs.0)",
+        "    }",
+        "}",
+        "",
+        "impl std::ops::BitOrAssign for DocFlags {",
+        "    fn bitor_assign(&mut self, rhs: DocFlags) {",
+        "        self.0 |= rhs.0;",
+        "    }",
+        "}",
+        "",
+    ]
+    export_none = model.constants["CHS_EXPORT_NONE"].value
+    out += [
+        "/// `export_format` when no export is asked for.",
+        f"pub(crate) const EXPORT_NONE: i32 = {export_none};",
+        "",
+        "/// The `byte_strings` rule: a data-derived string `F` is the member `F` when its",
+        "/// bytes are valid UTF-8, and otherwise `F` is absent and `F` plus this suffix",
+        "/// carries the standard base64 of the raw bytes.",
+        f"pub(crate) const BYTES_SUFFIX: &str = {_rust_str_any(model.byte_strings['suffix'])};",
+        "",
+        "/// The member that carries the raw bytes of a scalar `String` or `FixedString`",
+        "/// value, beside its rendering.",
+        f"pub(crate) const VALUE_BYTES: &str = {_rust_str_any(model.byte_strings['value'])};",
+        "",
+    ]
+    out += _vocab_v2_described(model)
+    return "\n".join(out)
+
+
 # -------------------------------------------------------------- errmap_gen.rs
 
 
@@ -1407,11 +1965,75 @@ def render_errmap(model) -> str:
     return "\n".join(out)
 
 
+def paths(major: int) -> tuple[str, str, str, str, str]:
+    """(decls, invoke_gen, calls_gen, vocab_gen, errmap_gen) for one major."""
+    v1 = (DECLS_PATH, INVOKE_PATH, CALLS_PATH, VOCAB_PATH, ERRMAP_PATH)
+    if major == 1:
+        return v1
+    return tuple(p.replace("rust/src/abi1/", f"rust/src/abi{major}/") for p in v1)  # type: ignore[return-value]
+
+
+# Every spelling of ABI v1's Rust layer that names its major, in the order they
+# are applied to decls.rs, invoke_gen.rs, calls_gen.rs and errmap_gen.rs. Each
+# must occur in the v1 text at least once (a spelling that moved in the v1 path
+# would otherwise silently stop being moved). `scripts/abi-v1/` is never one:
+# the generator keeps its name at every major.
+_MAJOR_SPELLINGS = (
+    ("a v1 artifact's", "a v{n} artifact's"),
+    ("spec/abi-v1/", "spec/abi-v{n}/"),
+    ("declaration in `abi1/`", "declaration in `abi{n}/`"),
+    ("rust/src/abi1/", "rust/src/abi{n}/"),
+    ("tests/fixtures/abi-v1/", "tests/fixtures/abi-v{n}/"),
+)
+
+
+def _respell(text: str, major: int) -> str:
+    for old, new in _MAJOR_SPELLINGS:
+        text = text.replace(old, new.replace("{n}", str(major)))
+    return text
+
+
+def _respell_all(texts: list[str], major: int) -> list[str]:
+    joined = "\0".join(texts)
+    missing = [old for old, _ in _MAJOR_SPELLINGS if old not in joined]
+    if missing:
+        raise ValueError(f"emit/rust.py: ABI v1's Rust layer no longer spells {missing}; update _MAJOR_SPELLINGS")
+    return [_respell(x, major) for x in texts]
+
+
+def _v2_decls_additions(major: int, stability: str | None, decls: str) -> str:
+    """What ABI v2's decls.rs carries beyond the respelled v1 text: the
+    description's stability, which the loader's fingerprint refusal reads
+    (rule r6)."""
+    anchor = "pub(crate) const CHS_ABI_FINGERPRINT: &str = "
+    i = decls.index(anchor)
+    j = decls.index("\n", i) + 1
+    const = (
+        "\n"
+        "/// `CHS_ABI_STABILITY`: the description's stability, `\"unstable\"` while this\n"
+        "/// generation is being designed (so `CHS_ABI_FINGERPRINT` moves with every\n"
+        f"/// change) and `\"locked\"` after (spec/abi-v{major}/docs.md, rule r6). A dev SDK\n"
+        "/// refuses any other fingerprint with the dev message.\n"
+        f"pub(crate) const CHS_ABI_STABILITY: &str = {_rust_str(stability or '')};\n"
+    )
+    return decls[:j] + const + decls[j:]
+
+
 def outputs(model) -> list[Output]:
-    return [
-        Output(DECLS_PATH, content=_rustfmt(render_decls(model))),
-        Output(INVOKE_PATH, content=_rustfmt(render_invoke(model))),
-        Output(CALLS_PATH, content=_rustfmt(render_calls(model))),
-        Output(VOCAB_PATH, content=_rustfmt(render_vocab(model))),
-        Output(ERRMAP_PATH, content=_rustfmt(render_errmap(model))),
-    ]
+    if model.major == 1:
+        return [
+            Output(DECLS_PATH, content=_rustfmt(render_decls(model))),
+            Output(INVOKE_PATH, content=_rustfmt(render_invoke(model))),
+            Output(CALLS_PATH, content=_rustfmt(render_calls(model))),
+            Output(VOCAB_PATH, content=_rustfmt(render_vocab(model))),
+            Output(ERRMAP_PATH, content=_rustfmt(render_errmap(model))),
+        ]
+    # The banner (first line of each) is the model's own and already names the
+    # major; respelling never touches it (it carries none of _MAJOR_SPELLINGS'
+    # v1 spellings: "scripts/abi-v1/gen.py --major 2 from spec/abi-v2/abi.json").
+    decls, invoke, calls, errmap = _respell_all(
+        [render_decls(model), render_invoke(model), render_calls(model), render_errmap(model)], model.major
+    )
+    decls = _v2_decls_additions(model.major, model.stability, decls)
+    texts = [decls, invoke, calls, render_vocab_v2(model), errmap]
+    return [Output(path, content=_rustfmt(text)) for path, text in zip(paths(model.major), texts, strict=True)]

@@ -53,7 +53,11 @@ serves every binding of a major (the conformance cases, the stub) sets
 
     SHARED = True
 
-and runs for each major in its MAJORS that at least one binding speaks.
+and runs for each major in its MAJORS that at least one binding speaks, and
+for ABI v1 always: generation 1 is frozen, so its committed shared outputs
+(the conformance cases spec/abi-v1/ cites) stay once every binding has moved
+on. Its stubs are still built only for a major some binding speaks
+(build-stubs.sh).
 
 BUILD-TIME FILES. An emitter may also define
 
@@ -136,7 +140,8 @@ def discover(major: int = 1, majors=None) -> list[ModuleType]:
     """Every emitter that generates for `major`: by its MAJORS (default (1,)),
     and, for a binding's emitter (BINDING), only when `majors` (a
     majors.Majors; None reads every binding as ABI v1) gives that binding
-    `major`; a SHARED emitter only when some binding speaks `major`."""
+    `major`; a SHARED emitter only when some binding speaks `major`, or
+    `major` is 1 (frozen; its shared outputs stay)."""
     by_binding = majors.by_binding if majors is not None else None
     spoken = set(by_binding.values()) if by_binding is not None else {1}
     mods = []
@@ -158,7 +163,11 @@ def discover(major: int = 1, majors=None) -> list[ModuleType]:
                     )
                 mods.append(mod)
             continue
-        if getattr(mod, "SHARED", False) and major not in spoken:
+        # ABI v1 is the exception: generation 1 is frozen, and its shared
+        # outputs (the conformance cases spec/abi-v1/ cites) stay generated in
+        # the tree after every binding has moved on, as on the `v2` branch once
+        # all four have converted (public issue #511).
+        if getattr(mod, "SHARED", False) and major not in spoken and major != 1:
             continue
         if major in listed:
             mods.append(mod)

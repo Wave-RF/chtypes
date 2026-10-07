@@ -92,7 +92,8 @@ V1_DIRS = [bmajors.layer_dir(b, n) for b in bmajors.BINDINGS for n in abimodel.M
     # The TS binding's ABI tests, at every major (ts/test/abi2 once ts speaks ABI v2).
     *[f"ts/test/abi{n}" for n in abimodel.MAJORS],
 ]
-V1_GLOBS = [("rust/tests", "abi1_*.rs")]
+# The Rust conformance runner of every major (rust/tests/abi<N>_conformance.rs).
+V1_GLOBS = [("rust/tests", f"abi{n}_*.rs") for n in abimodel.MAJORS]
 ALL_DIRS = ["go", "python/src", "python/tests", "ts/src", "ts/test", "rust/src", "rust/tests"]
 # build and dist are walked on purpose: see the exemption note in the module docstring.
 SKIP = frozenset({"node_modules", "target", ".venv", "__pycache__", ".pytest_cache"})

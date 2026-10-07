@@ -1,5 +1,6 @@
 //! The v1 fetch layer: OCI distribution plus zstd (docs/guides/fetch-v1.md,
-//! plan §1). This module is **not** re-exported from the crate root — it is
+//! plan §1), narrowed by this 2.0.0-dev SDK to the ABI v2 dev channel
+//! ([`channel`]; spec/abi-v2/docs.md, rules r5 and r6). This module is **not** re-exported from the crate root — it is
 //! wired in behind `#[cfg(feature = "fetch-v1")]` and built/tested on its
 //! own (`cargo test --features fetch-v1 --test ocifetch_conformance`).
 //!
@@ -32,6 +33,8 @@
 // tests/ocifetch_conformance.rs's `#[path]` recompilation of this same file.
 #[rustfmt::skip]
 pub mod constants;
+// The fetch contract this build speaks: the ABI v2 dev channel (channel.rs).
+pub mod channel;
 pub mod dsse;
 pub mod ensure;
 pub mod error;

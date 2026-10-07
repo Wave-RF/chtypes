@@ -365,10 +365,16 @@ jobs:
         run: cd rust && cargo build --locked && cargo clippy --locked --all-targets -- -D warnings && cargo fmt --check
       - name: --no-default-features — the configuration docs/install.md tells a consumer to build
         run: cd rust && cargo test --locked --no-default-features && cargo clippy --locked --all-targets --no-default-features -- -D warnings
-      - name: the ABI major this job tests, derived and asserted against the rust binding's compiled-in layer
+      # The compiled-in identity, as the crate's own test binary prints it
+      # (src/lib.rs, abi_identity), asserted against the map and the
+      # description at this commit: never the map's word for itself.
+      - name: the ABI major this job tests, derived and asserted against the rust binding's compiled-in identity
         run: |
           python3 scripts/abi-v1/majors.py announce rust --what "suite, no artifacts"
           python3 scripts/abi-v1/majors.py assert-layer rust
+          (cd rust && cargo test --locked --lib -- --exact abi_identity::chtypes_abi_identity --nocapture) > "$RUNNER_TEMP/abi-identity.log"
+          cat "$RUNNER_TEMP/abi-identity.log"
+          python3 scripts/abi-v1/majors.py assert-identity rust "$RUNNER_TEMP/abi-identity.log"
       - name: suite — the artifact tests skip by name, the rest runs
         run: scripts/check-suite.sh --no-artifacts rust
       - name: CLI parity — this binding's chtypes command line matches the shared expectation

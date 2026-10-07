@@ -8,6 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
+use super::channel;
 use super::constants;
 use super::error::{Error, Result, unwritable};
 
@@ -52,10 +53,11 @@ fn is_digest(s: &str) -> bool {
 
 impl VerifiedRecord {
     /// The canonical `verified.json`: every member present, `null` where the
-    /// schema allows it.
+    /// schema allows it, and `schema` the contract's (2 under the dev channel,
+    /// rule r5, so no released 1.x reader ever reads it).
     pub fn to_json_bytes(&self) -> Result<Vec<u8>> {
         let doc = serde_json::json!({
-            "schema": 1,
+            "schema": channel::active().record_schema,
             "platform": self.platform,
             "version": self.version,
             "channel": self.channel,
@@ -76,10 +78,11 @@ impl VerifiedRecord {
         Ok(serde_json::to_vec(&doc)?)
     }
 
-    /// Accept exactly the canonical schema-1 record. Anything else (not
-    /// JSON, another schema, a missing member, a member of the wrong type,
-    /// a broken rule) is an `Err`, which every caller treats as an ABSENT
-    /// record, never as a failure by itself.
+    /// Accept exactly the canonical record of the contract's schema (1 for
+    /// v1; 2 under the dev channel, rule r5, so neither reads the other's).
+    /// Anything else (not JSON, another schema, a missing member, a member of
+    /// the wrong type, a broken rule) is an `Err`, which every caller treats as
+    /// an ABSENT record, never as a failure by itself.
     pub fn from_json_bytes(bytes: &[u8]) -> std::result::Result<Self, String> {
         let doc: serde_json::Value = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
         let obj = doc.as_object().ok_or("not an object")?;
@@ -108,8 +111,9 @@ impl VerifiedRecord {
                 return Err(format!("missing digests member {key:?}"));
             }
         }
-        if obj["schema"].as_u64() != Some(1) {
-            return Err("schema is not 1".to_string());
+        let schema = channel::active().record_schema;
+        if obj["schema"].as_u64() != Some(schema) {
+            return Err(format!("schema is not {schema}"));
         }
         let text = |name: &str| -> std::result::Result<String, String> {
             obj[name]
@@ -188,17 +192,25 @@ impl VerifiedRecord {
     }
 }
 
-/// Resolve the layout root: `CHTYPES_CACHE` names the layout directory
-/// itself; otherwise `${XDG_CACHE_HOME:-$HOME/.cache}/chtypes/v1`
-/// (`constants::CACHE_ROOT_TEMPLATE`).
+/// Resolve the layout root. An explicit cache (`cache_env_override`, else
+/// `CHTYPES_CACHE`) is used through the contract's subroot: under the dev
+/// channel `<cache>/v2-dev`, never `<cache>` itself, which a 1.x binding uses
+/// as its whole layout (rule r5, a MUST). Otherwise
+/// `${XDG_CACHE_HOME:-$HOME/.cache}/chtypes/<leaf>`, `v2-dev` under the dev
+/// channel.
 pub fn cache_root(cache_env_override: Option<&str>) -> Result<PathBuf> {
-    if let Some(dir) = cache_env_override {
-        return Ok(PathBuf::from(dir));
-    }
-    if let Ok(dir) = std::env::var(constants::ENV_CACHE_NAME) {
-        if !dir.is_empty() {
-            return Ok(PathBuf::from(dir));
-        }
+    let contract = channel::active();
+    let explicit = cache_env_override.map(PathBuf::from).or_else(|| {
+        std::env::var(constants::ENV_CACHE_NAME)
+            .ok()
+            .filter(|dir| !dir.is_empty())
+            .map(PathBuf::from)
+    });
+    if let Some(dir) = explicit {
+        return Ok(match contract.subroot {
+            Some(subroot) => dir.join(subroot),
+            None => dir,
+        });
     }
     let base = std::env::var("XDG_CACHE_HOME")
         .ok()
@@ -214,7 +226,7 @@ pub fn cache_root(cache_env_override: Option<&str>) -> Result<PathBuf> {
                 "neither CHTYPES_CACHE, XDG_CACHE_HOME nor HOME is set".to_string(),
             )
         })?;
-    Ok(base.join("chtypes").join("v1"))
+    Ok(base.join("chtypes").join(contract.root_leaf))
 }
 
 /// Create the OCI image-layout skeleton (`oci-layout`, an empty `index.json`,
@@ -720,6 +732,9 @@ mod tests {
 
     #[test]
     fn foreign_and_malformed_records_are_refused() {
+        // The v1 contract's schema-1 record, with a schema-2 one as the foreign
+        // record (the dev channel's own case is the reverse: tests/devchannel.rs).
+        let _v1 = channel::use_fetch_v1_for_tests();
         let good = String::from_utf8(sample_record().to_json_bytes().unwrap()).unwrap();
         let old_flat = r#"{"platform":"linux-arm64","version":"26.8.15.10","build":"1","manifest_digest":"x"}"#;
         for doc in [

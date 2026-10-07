@@ -9,16 +9,17 @@
 //!
 //! **Bytes are bytes.** A column name, a message and a rendered value are
 //! [`RawText`]: the bytes are authoritative and the UTF-8 view is fallible.
-//! The only strings are the ASCII the ABI promises (a source or reason
-//! spelling, a setting name, a default kind spelling) and one lossy display
-//! form per error.
+//! The only strings are the ASCII the ABI promises (a setting name, a
+//! capability) and one lossy display form per error; every vocabulary value is
+//! its generated type, whose `Unknown` member keeps a value the description
+//! does not list (rule r3).
 //!
 //! The result types are `#[non_exhaustive]`: a later minor can add a document
 //! field without breaking a caller.
 
 use std::collections::BTreeMap;
 
-use crate::abi1::vocab_gen::{DefaultKind, FilterOutcome, Outcome, Verdict};
+use crate::abi2::vocab_gen::{DefaultKind, FilterOutcome, Outcome, Reason, Source, Verdict};
 use crate::raw::RawText;
 
 /// A byte range of the input (or of an export): `off` and `len`.
@@ -32,7 +33,7 @@ pub struct Span {
 }
 
 /// One column's entry of a row document (`cols`).
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Value {
     /// The column's name (from `name` or `name_b64`).
@@ -43,10 +44,11 @@ pub struct Value {
     /// Whether the stored value is NULL: the library decides it, poison
     /// included.
     pub null: bool,
-    /// Where the value came from (`src`, a `value_src` value; see
-    /// [`crate::source`]).
-    pub source: String,
-    /// The description's `is_stored` fact for [`Value::source`].
+    /// Where the value came from (`src`, a `value_src` value). One the
+    /// description does not list is [`Source::Unknown`] (rule r3).
+    pub source: Source,
+    /// The description's `is_stored` fact for [`Value::source`]; `false` for
+    /// an unknown source.
     pub is_stored: bool,
     /// The raw bytes of a scalar `String` or `FixedString` value (from
     /// `value_b64`), whether or not they are valid UTF-8; `None` otherwise. A
@@ -64,9 +66,11 @@ pub struct Transform {
     pub input: RawText,
     /// What was stored.
     pub stored: RawText,
-    /// A `transform_reason` value; see [`crate::reason`].
-    pub reason: String,
-    /// The description's `lossy` fact for [`Transform::reason`].
+    /// A `transform_reason` value. One the description does not list is
+    /// [`Reason::Unknown`] (rule r3).
+    pub reason: Reason,
+    /// The description's `lossy` fact for [`Transform::reason`]; an unknown
+    /// reason reports its fallback's, lossy.
     pub lossy: bool,
     /// The row's index in the body; 0 in a single-row result.
     pub row: u64,

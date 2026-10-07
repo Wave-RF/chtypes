@@ -1,4 +1,4 @@
-//! The ABI v1 loader: plan §3.2's steps 1-7, hand-written (nothing here is
+//! The ABI v2 loader: plan §3.2's steps 1-7, hand-written (nothing here is
 //! generated; `decls.rs` is the generated layer this calls into).
 //!
 //! # Safety invariants this module owns
@@ -22,7 +22,7 @@
 //!   with the recorded zone, then `chs_set_defaults` when there are defaults.
 //!   A non-OK status from either is that call's own error ([`RawCallError`]),
 //!   mapped by the D3 status table in the public layer, never a refusal reason.
-//! * **Errors stay abi1-local**: [`Refusal`] carries the same fields
+//! * **Errors stay abi2-local**: [`Refusal`] carries the same fields
 //!   `sdk.json`'s loader-refusal table promises (`reason`, `path`,
 //!   `want`/`got`); the public layer maps it onto its own `Error`.
 
@@ -102,8 +102,37 @@ impl Refusal {
     }
 }
 
+/// Rule r6's exact refusal of a library whose fingerprint is not this dev SDK's
+/// (spec/abi-v2/docs.md): `sdk` is the SDK's own fingerprint and `library` the
+/// library's, both full `sha256:` spellings.
+pub(crate) fn dev_fingerprint_message(sdk: &str, library: &str) -> String {
+    format!(
+        "this SDK speaks dev fingerprint {sdk}; the library has {library} — update your dev SDK"
+    )
+}
+
+impl Refusal {
+    /// The refusal's complete message when the description is unstable and the
+    /// library's fingerprint is not this SDK's: rule r6's exact text
+    /// (`this SDK speaks dev fingerprint X; the library has Y — update your dev
+    /// SDK`), which is then this refusal's whole display. `None` for every other
+    /// refusal.
+    pub fn dev_message(&self) -> Option<String> {
+        if self.reason != "fingerprint" || decls::CHS_ABI_STABILITY != "unstable" {
+            return None;
+        }
+        Some(dev_fingerprint_message(
+            self.want.as_deref()?,
+            self.got.as_deref()?,
+        ))
+    }
+}
+
 impl std::fmt::Display for Refusal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(message) = self.dev_message() {
+            return f.write_str(&message);
+        }
         write!(f, "{}: {}", self.path.display(), self.reason)?;
         if let (Some(want), Some(got)) = (&self.want, &self.got) {
             write!(f, " (want {want}, got {got})")?;
@@ -547,6 +576,35 @@ mod tests {
         let err = parse_build_info(b"{\"schema\":1,\"x\":\"\xc3\x28\"}", p).unwrap_err();
         assert_eq!(err.reason, "build_info_malformed");
         assert_eq!(err.detail.as_deref(), Some("not ASCII"));
+    }
+
+    /// Rule r6, the mapping alone: a fingerprint refusal of this dev SDK reads
+    /// exactly as the rule spells it, X the SDK's fingerprint and Y the
+    /// library's; every other refusal keeps its own shape. The message is
+    /// spelled out here, not taken from the code under test.
+    #[test]
+    fn a_dev_fingerprint_refusal_is_rule_r6_exactly() {
+        assert_eq!(
+            decls::CHS_ABI_STABILITY,
+            "unstable",
+            "the dev message applies only while the description is unstable"
+        );
+        let other = format!("sha256:{}", "0".repeat(64));
+        let r = Refusal::naming(
+            "fingerprint",
+            Path::new("/p"),
+            decls::CHS_ABI_FINGERPRINT,
+            other.as_str(),
+        );
+        let want = format!(
+            "this SDK speaks dev fingerprint {}; the library has {other} — update your dev SDK",
+            decls::CHS_ABI_FINGERPRINT
+        );
+        assert_eq!(r.dev_message().as_deref(), Some(want.as_str()));
+        assert_eq!(r.to_string(), want);
+        let r = Refusal::naming("abi_version", Path::new("/p"), "2", "1");
+        assert_eq!(r.dev_message(), None);
+        assert_eq!(r.to_string(), "/p: abi_version (want 2, got 1)");
     }
 
     #[test]

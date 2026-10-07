@@ -296,7 +296,11 @@ jobs:
             # here too, in the same no-network sandbox.
             ts) (cd ts && pnpm exec vitest run test/ocifetch/conformance.test.ts \
                   && if [ "$(python3 ../scripts/abi-v1/majors.py get ts)" != "1" ]; then pnpm exec vitest run test/ocifetch/devchannel.test.ts; fi) ;;
-            rust) (cd rust && cargo test --locked --offline --features fetch-v1 --test ocifetch_conformance) ;;
+            # At ABI v2 the Rust binding's dev channel narrows the contract
+            # these cases specify (spec/abi-v2/docs.md r5, r6): its own tests
+            # (tests/devchannel.rs) run here too, in the same sandbox.
+            rust) (cd rust && cargo test --locked --offline --features fetch-v1 --test ocifetch_conformance \
+                  && if [ "$(python3 ../scripts/abi-v1/majors.py get rust)" != "1" ]; then cargo test --locked --offline --features fetch-v1 --test devchannel; fi) ;;
           esac
           SCRIPT
           chmod +x "$RUNNER_TEMP/run-conformance.sh"
@@ -802,6 +806,14 @@ jobs:
               echo "v1-cache-interop: $b speaks ABI v$(python3 scripts/abi-v1/majors.py get "$b"): not a 1.x cache participant (r5); its isolation is the next step"
             fi
           done
+          # Once every binding speaks ABI v2 (the `v2` branch after all four
+          # convert, public issue #511) no CLI shares the 1.x cache contract:
+          # the 1.x rows have no participant, said so by name, never run empty.
+          # The next step still proves each ABI v2 CLI's r5 isolation.
+          if [ "${#clis[@]}" -eq 0 ]; then
+            echo "v1-cache-interop: SKIPPED the 1.x rows by name: no binding speaks ABI v1 at this commit (spec/binding-majors.json); the r5 isolation step below runs" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           python3 scripts/fetch-v1/cache-interop.py "${clis[@]}" \
             --other-user nobody \
             --system-dir /opt/chtypes/v1
@@ -817,6 +829,9 @@ jobs:
         run: |
           src=tests/fixtures/fetch-v1/layouts/cache-record-canonical
           version=$(python3 -c 'import json,glob,sys; print(json.load(open(glob.glob(sys.argv[1] + "/unpacked/sha256/*/verified.json")[0]))["version"])' "$src")
+          # The control without a 1.x CLI (none once every binding speaks ABI v2):
+          # the fixture's record is the schema-1 record every 1.x reader accepts.
+          python3 -c 'import json,glob,sys; r=json.load(open(glob.glob(sys.argv[1] + "/unpacked/sha256/*/verified.json")[0])); sys.exit(0 if r["schema"] == 1 else "the fixture is not a 1.x (schema-1) cache record")' "$src"
           v2=0
           for b in go python ts rust; do
             major="$(python3 scripts/abi-v1/majors.py get "$b")"
