@@ -9,6 +9,12 @@ Two more reasons `rows` is the unit rather than a loop over `row`:
 - **Row separation is format-specific.** A quoted CSV field can contain a newline. Splitting on `\n` yourself produces a different parse from the one the server performs.
 - **One batch is one clock instant.** Every volatile DEFAULT in a body resolves to the same value, by construction. A loop over `row` gives each record its own `now()`.
 
+## One record, or a whole body
+
+`row` (`chs_preview_row`) previews **one record**. Given a body that holds several, it does not pick the first record out and ignore the rest: it reads the whole input as the server's `INSERT` of that body would, and answers with the first row's verdict. So a later record in the same body can decide it. For example, a `LowCardinality(String)` column whose dictionary for the body also holds another row's too-long key makes `toFixedString(lc, 2)` fail with 131 for a first row whose own value fits, because the server's `INSERT` of that body refuses it with 131 too.
+
+To preview a record as its own one-row `INSERT`, pass that record alone. For each record's own verdict in a multi-record body, call `rows` (`chs_preview_batch`): its `rows` carry per-record outcomes, and a record's own verdict there does not depend on a later record's value.
+
 ## A plain CSV/TSV body can still have a header
 
 `CSV` and `TSV` bodies are read by ClickHouse's own vendored row readers — not just `CSVWithNames`/`TSVWithNames` — so a first line that spells the column names is detected and consumed as a header under `input_format_csv_detect_header` / `input_format_tsv_detect_header`, honored exactly as the setting is set for that call, following ClickHouse's own default when it is not. That shifts row counts and verdict indices by one, and a data row that happens to repeat the column names can be swallowed as a header the same way it would be on a real server. Set either setting to `0` to force positional reading of every line.
