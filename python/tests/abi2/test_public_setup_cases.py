@@ -19,6 +19,7 @@ from chtypes import (
     ArtifactCorruptError,
     ArtifactIncompatibleError,
     FetchOptions,
+    Format,
     InternalError,
     Registry,
     SchemaError,
@@ -83,6 +84,8 @@ def test_setup_case(
     current = None
     servers: dict = {}
     schemas: dict = {}
+    filters: dict = {}
+    batch_rows_passed: int | None = None
 
     def image(variant: str | None) -> str:
         """The case's one fresh copy of `variant` (the case's own by default)."""
@@ -107,6 +110,9 @@ def test_setup_case(
         if step["op"] == "schema_close":
             schemas[step["schema"]].close()
             continue
+        if step["op"] == "filter_close":
+            filters[step["filter"]].close()
+            continue
         if step["op"] == "live":
             # The stub's own live-handle counts, not a value the case sets by hand.
             got = current.live_handles()
@@ -114,7 +120,16 @@ def test_setup_case(
                 assert got[kind] == want, f"step {i}: live {kind} = {got[kind]}, want {want}: {got}"
             continue
         try:
-            if step["op"] == "server_new":
+            if step["op"] == "filter_new":
+                filters[step["as"]] = schemas[step["schema"]].compile_filter(step["expression"])
+            elif step["op"] == "rows":
+                batch_rows_passed = None
+                row_filter = filters[step["filter"]] if "filter" in step else None
+                batch = schemas[step["schema"]].rows(
+                    Format.CSV, step["body"].encode(), row_filter=row_filter
+                )
+                batch_rows_passed = batch.rows_passed
+            elif step["op"] == "server_new":
                 servers[step["as"]] = current.new_server(ServerProfile(timezone="UTC"))
             elif step["op"] == "compile":
                 kwargs = {"server": servers[step["server"]]} if "server" in step else {}
@@ -157,6 +172,11 @@ def test_setup_case(
         if opened is not None:
             current = opened
         diff = _outcome(step["expect"], error)
+        if not diff and "rows_passed" in step and step["rows_passed"] != batch_rows_passed:
+            diff = (
+                f"rows_passed {batch_rows_passed}, want {step['rows_passed']}: "
+                "the stub says whether the filter reached the library"
+            )
         if not diff and "image_zone" in step["expect"]:
             zone = opened.validate_type(IMAGE_ZONE_PROBE)
             want_zone = step["expect"]["image_zone"]

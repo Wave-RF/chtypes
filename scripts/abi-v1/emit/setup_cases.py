@@ -306,11 +306,54 @@ def _closed_server_case(model) -> dict | None:
     }
 
 
+def _closed_filter_case(model) -> dict | None:
+    """Rule r7 for chs_preview_batch's `filter`, whose NULL is no filter.
+
+    A batch call mints no handle, so no live count shows whether a filter
+    reached it. The stub variant "filter-observable" (emit/stub.py,
+    _stubshared.FILTER_OBSERVABLE_DOCS) answers `rows_passed` 1 when the
+    filter reached it and 0 when it received NULL; the case reads that
+    through the public result, never a hand-set value. A closed filter must
+    be refused with the usage error: a binding that passed NULL instead would
+    return a result with `rows_passed` 0.
+
+    Rust cannot express it: a Filter is an owned value freed only on Drop."""
+    if model.major < 2:
+        return None
+    misuse = {"class": _class_of(model, "CHS_INVALID_ARGUMENT")}
+    rows = {"op": "rows", "schema": "schema", "format": "CSV", "body": "1\n"}
+    return {
+        "id": "filter.a_closed_filter_is_never_passed_as_null",
+        "variant": "filter-observable",
+        "rule": "r7",
+        "not_expressible": {
+            "rust": "a freed handle is unreachable: a Filter is an owned value that frees only on Drop",
+        },
+        "steps": [
+            {"op": "open", "expect": OK},
+            {"op": "compile", "statement": SERVER_CASE_STATEMENT, "as": "schema", "expect": OK},
+            {"op": "filter_new", "schema": "schema", "expression": "k > 1", "as": "open_filter", "expect": OK},
+            # Control 1: an OPEN filter reaches the library as non-NULL.
+            {**rows, "filter": "open_filter", "expect": OK, "rows_passed": 1},
+            # Control 2: with NO filter the library receives NULL.
+            {**rows, "expect": OK, "rows_passed": 0},
+            # The rule: a CLOSED filter is refused with the usage error.
+            {"op": "filter_close", "filter": "open_filter"},
+            {**rows, "filter": "open_filter", "expect": misuse},
+            # And the refusal leaves the schema usable, with no filter.
+            {**rows, "expect": OK, "rows_passed": 0},
+            {"op": "schema_close", "schema": "schema"},
+            {"op": "live", "live": {"chs_schema": 0, "chs_filter": 0}},
+        ],
+    }
+
+
 def build_cases(model) -> list[dict]:
     cases = [_latch_case(model), _retry_case(model)]
-    closed = _closed_server_case(model)
-    if closed is not None:
-        cases.append(closed)
+    for build in (_closed_server_case, _closed_filter_case):
+        case = build(model)
+        if case is not None:
+            cases.append(case)
     return cases
 
 

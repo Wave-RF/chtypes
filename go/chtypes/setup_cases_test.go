@@ -43,6 +43,12 @@ type setupCaseStep struct {
 	Schema    string         `json:"schema"`
 	Statement string         `json:"statement"`
 	Live      map[string]int `json:"live"`
+	// The filter ops (rule r7): the named schema and filter, the expression,
+	// the body (CSV), and the rows_passed a batch result must report.
+	Filter     string `json:"filter"`
+	Expression string `json:"expression"`
+	Body       string `json:"body"`
+	RowsPassed *int   `json:"rows_passed"`
 }
 
 type setupCasesDoc struct {
@@ -179,6 +185,8 @@ func TestSetupCases(t *testing.T) {
 			var current *Library
 			servers := map[string]*Server{}
 			schemas := map[string]*Schema{}
+			filters := map[string]*Filter{}
+			var rowsPassed *uint64
 			for i, s := range c.Steps {
 				var err error
 				var lib *Library
@@ -193,6 +201,26 @@ func TestSetupCases(t *testing.T) {
 						t.Fatalf("step %d: closing schema %q: %v", i, s.Schema, err)
 					}
 					continue
+				case s.Op == "filter_close":
+					if err := filters[s.Filter].Close(); err != nil {
+						t.Fatalf("step %d: closing filter %q: %v", i, s.Filter, err)
+					}
+					continue
+				case s.Op == "filter_new":
+					var f *Filter
+					f, err = schemas[s.Schema].CompileFilter(s.Expression)
+					filters[s.As] = f
+				case s.Op == "rows":
+					var opts []RowsOption
+					if s.Filter != "" {
+						opts = append(opts, WithRowFilter(filters[s.Filter]))
+					}
+					var res BatchResult
+					res, err = schemas[s.Schema].Rows(CSV, []byte(s.Body), opts...)
+					rowsPassed = nil
+					if err == nil {
+						rowsPassed = &res.RowsPassed
+					}
 				case s.Op == "live":
 					// The stub's own live-handle counts, not a value the case
 					// sets by hand.
@@ -241,6 +269,9 @@ func TestSetupCases(t *testing.T) {
 					current = lib
 				}
 				diff := setupStepOutcome(s.Expect, err)
+				if diff == "" && s.RowsPassed != nil && (rowsPassed == nil || *rowsPassed != uint64(*s.RowsPassed)) {
+					diff = fmt.Sprintf("rows_passed differs from %d (or the call failed): the stub says whether the filter reached the library", *s.RowsPassed)
+				}
 				if diff == "" && s.Expect.ImageZone != nil {
 					zone, perr := lib.ValidateType(doc.ImageZoneProbe)
 					switch {

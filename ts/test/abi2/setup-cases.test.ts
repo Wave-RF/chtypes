@@ -16,10 +16,13 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   ArtifactCorruptError,
   ArtifactIncompatibleError,
+  type Filter,
+  Format,
   InternalError,
   type Library,
   openUnverified,
   Registry,
+  type Schema,
   SchemaError,
   Status,
   setup,
@@ -57,6 +60,11 @@ interface Step {
   readonly schema?: string;
   readonly statement?: string;
   readonly live?: Readonly<Record<string, number>>;
+  /** The filter ops (rule r7): the expression, the body (CSV), and the `rowsPassed` a batch result must report. */
+  readonly expression?: string;
+  readonly body?: string;
+  readonly filter?: string;
+  readonly rows_passed?: number;
 }
 
 interface SetupCase {
@@ -142,7 +150,9 @@ describe.skipIf(!stubsAvailable)('the shared setup cases, through the public API
     // The case's open library, and the servers and schemas its server ops (rule r7) name.
     let current: Library | undefined;
     const servers = new Map<string, ReturnType<Library['newServer']>>();
-    const schemas = new Map<string, ReturnType<Library['compileTable']>>();
+    const schemas = new Map<string, Schema>();
+    const filters = new Map<string, Filter>();
+    let batchRowsPassed: number | undefined;
     try {
       for (const [i, step] of c.steps.entries()) {
         let error: unknown;
@@ -155,6 +165,10 @@ describe.skipIf(!stubsAvailable)('the shared setup cases, through the public API
           schemas.get(step.schema as string)?.close();
           continue;
         }
+        if (step.op === 'filter_close') {
+          filters.get(step.filter as string)?.close();
+          continue;
+        }
         if (step.op === 'live') {
           // The stub's own live-handle counts, not a value the case sets by hand.
           const got = (current as Library).liveHandles();
@@ -164,7 +178,14 @@ describe.skipIf(!stubsAvailable)('the shared setup cases, through the public API
           continue;
         }
         try {
-          if (step.op === 'server_new') servers.set(step.as as string, (current as Library).newServer({ timezone: 'UTC' }));
+          if (step.op === 'filter_new') filters.set(step.as as string, (schemas.get(step.schema as string) as Schema).compileFilter(step.expression as string));
+          else if (step.op === 'rows') {
+            batchRowsPassed = undefined;
+            const rowFilter = step.filter === undefined ? undefined : filters.get(step.filter);
+            const schema = schemas.get(step.schema as string) as Schema;
+            const batch = schema.rows(Format.CSV, new TextEncoder().encode(step.body as string), rowFilter === undefined ? {} : { rowFilter });
+            batchRowsPassed = batch.rowsPassed;
+          } else if (step.op === 'server_new') servers.set(step.as as string, (current as Library).newServer({ timezone: 'UTC' }));
           else if (step.op === 'compile') {
             const server = step.server === undefined ? undefined : servers.get(step.server);
             const made = (current as Library).compileTable(step.statement as string, server === undefined ? {} : { server });
@@ -184,6 +205,9 @@ describe.skipIf(!stubsAvailable)('the shared setup cases, through the public API
         }
         if (opened !== undefined) current = opened;
         let diff = outcome(step.expect, error);
+        if (diff === '' && step.rows_passed !== undefined && step.rows_passed !== batchRowsPassed) {
+          diff = `rowsPassed ${String(batchRowsPassed)}, want ${step.rows_passed}: the stub says whether the filter reached the library`;
+        }
         if (diff === '' && step.expect.image_zone !== undefined) {
           const zone = (opened as Library).validateType(setupDoc.image_zone_probe).toString('utf8');
           if (zone !== step.expect.image_zone) diff = `the image was set up with zone ${JSON.stringify(zone)}, want ${JSON.stringify(step.expect.image_zone)}`;

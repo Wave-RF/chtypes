@@ -4081,6 +4081,14 @@
     },
     {
       "expect": {
+        "reason": "accepted"
+      },
+      "id": "loader.filter-observable",
+      "kind": "loader",
+      "variant": "filter-observable"
+    },
+    {
+      "expect": {
         "reason": "fingerprint"
       },
       "id": "loader.fingerprint-other-missing-symbol",

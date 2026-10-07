@@ -1324,6 +1324,30 @@ def _r2_members(model, fn) -> list[str]:
     ]
 
 
+def _filter_observable(model, fn) -> list[str]:
+    """Generation 2, rule r7: under CHS_STUB_FILTER_OBSERVABLE (variant
+    "filter-observable", see _stubshared.FILTER_OBSERVABLE_DOCS) a call that
+    takes a nullable handle and answers a batch document says, in
+    `rows_passed`, whether that handle reached it: 1 for a non-NULL filter, 0
+    for NULL. chs_preview_batch mints no handle, so no live count can show it;
+    this is the one observable that does. Emitted after the input checks and
+    the status injection."""
+    if model.abi < 2 or fn.name != "chs_preview_batch":
+        return []
+    out, others = _doc_out(fn)
+    flt = next((p for p in fn.params if p.kind == "handle" and p.nullable), None)
+    if out is None or flt is None or out.content != "document:batch":
+        raise ValueError(f"{fn.name}: the shape _filter_observable answers has changed")
+    seen, none = (_c_str(_stubshared.FILTER_OBSERVABLE_DOCS[k]) for k in ("filter", "none"))
+    return [
+        "#if defined(CHS_STUB_FILTER_OBSERVABLE)",
+        "    {",
+        *_answer_doc(out, others, f"({flt.name} != NULL ? {seen} : {none})"),
+        "    }",
+        "#endif",
+    ]
+
+
 def _r3_values(model, fn) -> list[str]:
     """Generation 2, rule r3: under CHS_STUB_R3_VALUES, see
     _stubshared.R3_MUTATIONS. Emitted after the input checks and the status
@@ -1402,6 +1426,7 @@ def _gen_generic(model, fn) -> str:
     body += _document_mode(model, fn)
     body += _r2_members(model, fn)
     body += _r3_values(model, fn)
+    body += _filter_observable(model, fn)
     body += _fill_outputs(model, fn)
     err_param = next((p for p in fn.params if p.kind == "out_error"), None)
     if err_param is not None:
