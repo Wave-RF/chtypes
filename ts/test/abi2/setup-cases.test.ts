@@ -51,12 +51,20 @@ interface Step {
   readonly request?: string;
   readonly allow?: boolean;
   readonly expect: Expect;
+  /** The server ops (rule r7): a name a later step uses, the statement to compile, the named server it compiles on (none when absent), the named schema to close, and the live-handle counts to require. */
+  readonly as?: string;
+  readonly server?: string;
+  readonly schema?: string;
+  readonly statement?: string;
+  readonly live?: Readonly<Record<string, number>>;
 }
 
 interface SetupCase {
   readonly id: string;
   readonly variant: string;
   readonly steps: readonly Step[];
+  /** The bindings that cannot express the case, and why. */
+  readonly not_expressible?: Readonly<Record<string, string>>;
 }
 
 const setupDoc = JSON.parse(readFileSync(SETUP_CASES_PATH, 'utf8')) as { image_zone_probe: string; cases: SetupCase[] };
@@ -108,6 +116,11 @@ describe('the setup cases file', () => {
 describe.skipIf(!stubsAvailable)('the shared setup cases, through the public API', () => {
   it.each(setupCases.map((c) => [c.id, c] as const))('%s', async (_id, c) => {
     expect(c.steps.length).toBeGreaterThan(0);
+    const why = c.not_expressible?.ts;
+    if (why !== undefined) {
+      console.info(`SKIPPED (loudly): ${c.id} is not expressible in TypeScript: ${why}`);
+      return;
+    }
     const dir = mkdtempSync(path.join(os.tmpdir(), 'setup-case-'));
     const images = new Map<string, string>();
     /** The case's one fresh copy of `variant` (the case's own by default). */
@@ -126,12 +139,37 @@ describe.skipIf(!stubsAvailable)('the shared setup cases, through the public API
     const saved = process.env.CHTYPES_ALLOW_UNVERIFIED_LIBRARY;
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     process.env.CHTYPES_ALLOW_UNVERIFIED_LIBRARY = '1';
+    // The case's open library, and the servers and schemas its server ops (rule r7) name.
+    let current: Library | undefined;
+    const servers = new Map<string, ReturnType<Library['newServer']>>();
+    const schemas = new Map<string, ReturnType<Library['compileTable']>>();
     try {
       for (const [i, step] of c.steps.entries()) {
         let error: unknown;
         let opened: Library | undefined;
+        if (step.op === 'server_close') {
+          servers.get(step.server as string)?.close();
+          continue;
+        }
+        if (step.op === 'schema_close') {
+          schemas.get(step.schema as string)?.close();
+          continue;
+        }
+        if (step.op === 'live') {
+          // The stub's own live-handle counts, not a value the case sets by hand.
+          const got = (current as Library).liveHandles();
+          for (const [kind, want] of Object.entries(step.live ?? {})) {
+            expect(got[kind], `step ${i}: live ${kind} in ${JSON.stringify(got)}`).toBe(want);
+          }
+          continue;
+        }
         try {
-          if (step.op === 'setup') setup({ timezone: step.timezone ?? '' });
+          if (step.op === 'server_new') servers.set(step.as as string, (current as Library).newServer({ timezone: 'UTC' }));
+          else if (step.op === 'compile') {
+            const server = step.server === undefined ? undefined : servers.get(step.server);
+            const made = (current as Library).compileTable(step.statement as string, server === undefined ? {} : { server });
+            if (step.as !== undefined) schemas.set(step.as, made);
+          } else if (step.op === 'setup') setup({ timezone: step.timezone ?? '' });
           else if (step.op === 'open' && step.request !== undefined) {
             // A registry over an empty cache, offline, autofetch off.
             const cacheDir = mkdtempSync(path.join(dir, 'cache-'));
@@ -144,6 +182,7 @@ describe.skipIf(!stubsAvailable)('the shared setup cases, through the public API
           if (!known) throw err;
           error = err;
         }
+        if (opened !== undefined) current = opened;
         let diff = outcome(step.expect, error);
         if (diff === '' && step.expect.image_zone !== undefined) {
           const zone = (opened as Library).validateType(setupDoc.image_zone_probe).toString('utf8');

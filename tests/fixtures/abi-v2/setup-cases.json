@@ -144,6 +144,126 @@
         }
       ],
       "variant": "ok"
+    },
+    {
+      "id": "server.a_closed_server_is_never_passed_as_null",
+      "not_expressible": {
+        "rust": "a freed handle is unreachable: Server frees on its last Drop, and a compile borrows it"
+      },
+      "rule": "r7",
+      "steps": [
+        {
+          "expect": {
+            "ok": true
+          },
+          "op": "open"
+        },
+        {
+          "live": {
+            "chs_schema": 0,
+            "chs_server": 0
+          },
+          "op": "live"
+        },
+        {
+          "as": "open_server",
+          "expect": {
+            "ok": true
+          },
+          "op": "server_new"
+        },
+        {
+          "as": "on_server",
+          "expect": {
+            "ok": true
+          },
+          "op": "compile",
+          "server": "open_server",
+          "statement": "CREATE TABLE t (k UInt8) ENGINE = Memory"
+        },
+        {
+          "op": "server_close",
+          "server": "open_server"
+        },
+        {
+          "live": {
+            "chs_schema": 1,
+            "chs_server": 1
+          },
+          "op": "live"
+        },
+        {
+          "op": "schema_close",
+          "schema": "on_server"
+        },
+        {
+          "live": {
+            "chs_schema": 0,
+            "chs_server": 0
+          },
+          "op": "live"
+        },
+        {
+          "as": "closed_server",
+          "expect": {
+            "ok": true
+          },
+          "op": "server_new"
+        },
+        {
+          "op": "server_close",
+          "server": "closed_server"
+        },
+        {
+          "live": {
+            "chs_schema": 0,
+            "chs_server": 0
+          },
+          "op": "live"
+        },
+        {
+          "expect": {
+            "class": "usage"
+          },
+          "op": "compile",
+          "server": "closed_server",
+          "statement": "CREATE TABLE t (k UInt8) ENGINE = Memory"
+        },
+        {
+          "live": {
+            "chs_schema": 0,
+            "chs_server": 0
+          },
+          "op": "live"
+        },
+        {
+          "as": "no_server",
+          "expect": {
+            "ok": true
+          },
+          "op": "compile",
+          "statement": "CREATE TABLE t (k UInt8) ENGINE = Memory"
+        },
+        {
+          "live": {
+            "chs_schema": 1,
+            "chs_server": 0
+          },
+          "op": "live"
+        },
+        {
+          "op": "schema_close",
+          "schema": "no_server"
+        },
+        {
+          "live": {
+            "chs_schema": 0,
+            "chs_server": 0
+          },
+          "op": "live"
+        }
+      ],
+      "variant": "ok"
     }
   ],
   "image_zone_probe": "!Z:",

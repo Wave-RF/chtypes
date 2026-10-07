@@ -71,7 +71,8 @@ pub(crate) fn server_profile_json(profile: &ServerProfile) -> Result<Vec<u8>> {
 /// It is immutable, `Clone + Send + Sync + 'static`, and a clone shares one
 /// handle, freed when the last clone drops. A schema compiled on the server
 /// holds its own counted reference inside the library, so a server and its
-/// schemas drop in any order. There is no closed server in Rust: a call
+/// schemas drop in any order. There is no closed server in Rust (rule r7 holds
+/// by construction, and the shared case records it as not expressible): a call
 /// borrows the handle, so `Drop` cannot precede it. A server from another
 /// library is that library's own `CHS_INVALID_ARGUMENT` ([`Error::Usage`]).
 #[derive(Clone)]

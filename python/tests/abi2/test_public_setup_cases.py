@@ -22,6 +22,7 @@ from chtypes import (
     InternalError,
     Registry,
     SchemaError,
+    ServerProfile,
     Status,
     UnsupportedError,
     UsageError,
@@ -74,7 +75,14 @@ def _outcome(want: dict, error: BaseException | None) -> str:
 def test_setup_case(
     setup_case: dict, stubs_dir, stubs_manifest, tmp_path, clean_process, monkeypatch
 ) -> None:
+    if "python" in setup_case.get("not_expressible", {}):
+        pytest.skip(f"not expressible in Python: {setup_case['not_expressible']['python']}")
     images: dict[str, str] = {}
+    # The case's open library, and the servers and schemas its server ops
+    # (rule r7) name.
+    current = None
+    servers: dict = {}
+    schemas: dict = {}
 
     def image(variant: str | None) -> str:
         """The case's one fresh copy of `variant` (the case's own by default)."""
@@ -93,8 +101,27 @@ def test_setup_case(
     for i, step in enumerate(steps):
         error: BaseException | None = None
         opened = None
+        if step["op"] == "server_close":
+            servers[step["server"]].close()
+            continue
+        if step["op"] == "schema_close":
+            schemas[step["schema"]].close()
+            continue
+        if step["op"] == "live":
+            # The stub's own live-handle counts, not a value the case sets by hand.
+            got = current.live_handles()
+            for kind, want in step["live"].items():
+                assert got[kind] == want, f"step {i}: live {kind} = {got[kind]}, want {want}: {got}"
+            continue
         try:
-            if step["op"] == "setup":
+            if step["op"] == "server_new":
+                servers[step["as"]] = current.new_server(ServerProfile(timezone="UTC"))
+            elif step["op"] == "compile":
+                kwargs = {"server": servers[step["server"]]} if "server" in step else {}
+                made = current.compile_table(step["statement"].encode(), **kwargs)
+                if "as" in step:
+                    schemas[step["as"]] = made
+            elif step["op"] == "setup":
                 setup(timezone=step["timezone"])
             elif step["op"] == "open" and "request" in step:
                 # A registry over an empty cache, offline, autofetch off.
@@ -127,6 +154,8 @@ def test_setup_case(
             ArtifactCorruptError,
         ) as exc:
             error = exc
+        if opened is not None:
+            current = opened
         diff = _outcome(step["expect"], error)
         if not diff and "image_zone" in step["expect"]:
             zone = opened.validate_type(IMAGE_ZONE_PROBE)

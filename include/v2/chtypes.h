@@ -4,7 +4,7 @@
  *
  * This header is generated from `spec/abi-v2/abi.json` by `scripts/abi-v1/gen.py --major 2`. Edit
  * the description and regenerate; never edit this file. `docs/reference/abi-v2.md` is the normative
- * reference, and the rules generation 2 is written under (r1 to r6) are in it.
+ * reference, and the rules generation 2 is written under (r1 to r7) are in it.
  *
  * Stability. Generation 2 is UNSTABLE: its description is still being designed, so
  * `CHS_ABI_FINGERPRINT` moves with every change until the description is locked. Nothing built from

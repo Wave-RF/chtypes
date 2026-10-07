@@ -255,6 +255,13 @@ fn setup_cases() {
     let mut failures = Vec::new();
     for case in &cases {
         let id = case["id"].as_str().expect("case id");
+        // A case this binding cannot express is SKIPPED loudly, with the
+        // case's own reason, never passed silently (rule r7: a freed handle
+        // is unreachable in Rust, so there is nothing to refuse).
+        if let Some(why) = case["not_expressible"]["rust"].as_str() {
+            eprintln!("setup case {id}: SKIPPED (loudly), not expressible in Rust: {why}");
+            continue;
+        }
         let out = Command::new(&exe)
             .args([TEST_NAME, "--exact", "--nocapture", "--test-threads=1"])
             .env(ENV_CASE, id)
