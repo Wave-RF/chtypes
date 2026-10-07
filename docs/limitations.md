@@ -93,6 +93,8 @@ An entry disappears when an artifact stops diverging, or when the disagreement t
 
 ⚠️ **"A real server" means a real table engine** — a MergeTree table, the kind a tenant writes to. A `CREATE TEMPORARY TABLE` is `ENGINE=Memory`, has no parts, and accepts values that every ordinary table refuses at part-write time. If you reproduce an entry against a temporary table you will not get the answer recorded here, and the temporary table is the one that is wrong about your production write.
 
+⚠️ **What a verdict models.** A row preview (`chs_preview_row`) answers as a one-row `INSERT` of that row would. A batch preview (`chs_preview_batch`) answers as one synchronous `INSERT` of the whole batch would. So a row that a batch refuses because of another row in the same batch is not a divergence, and an entry below names which preview it concerns.
+
 Every entry here has a machine-checkable twin in [`docs/divergences.json`](divergences.json). The v0 job that drove each one against loaded artifacts is retired with the v0 registry layout, so nothing checks these entries until a v1 replacement lands; treat each as a claim about the build named, and re-measure before relying on it.
 
 **What gets an entry here, and when.** A divergence that changes the verdict or the stored value at default settings (an over-accept, an over-reject, or a row both sides accept but store differently) is listed as soon as the server's answer has been measured on each line it affects, and not before, because a wrong entry is worse than a late one. A divergence that is only a different error code, or that needs a non-default setting to reach, is listed if a published build still shows it seven days after it was found. Until then it's tracked with the artifact producer, whose comparison against real servers keeps finding such cases, and it's usually fixed in the next relink. Every entry is removed on the relink that fixes it.
@@ -244,6 +246,47 @@ Until then, on `26.3`, if the server query a filter stands for reads a table tha
 **Measured**: by the artifact producer, against a library built from the same core commit as the production library build `20261006.220511`, on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64. The production artifact itself is not measured; it is expected to behave the same (`inferred`: the same source). A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
 
 Until then, do not read an `e` with 131 from a `toFixedString` filter over a `LowCardinality` column as the server's answer.
+
+### A query-level setting in a CREATE's storage SETTINGS is refused, where a real server applies it and creates the table
+
+**Over-reject, on every supported line, at schema creation.** A `SETTINGS` clause on a `MergeTree` table that holds a query-level setting is refused with error **115** as an unknown MergeTree setting. A real server applies that setting to the CREATE's own query context, creates the table, and does not store the setting with it. For example:
+
+```sql
+CREATE TABLE t (k Int32) ENGINE = MergeTree ORDER BY k SETTINGS max_threads = 1
+```
+
+|               |                                                                     |
+| ------------- | ------------------------------------------------------------------- |
+| this library  | refuses the CREATE with error **115**                               |
+| a real server | creates the table; `SHOW CREATE TABLE` does not carry `max_threads` |
+
+A mixed clause (`SETTINGS max_threads = 1, index_granularity = 8192`) behaves the same way.
+
+**Measured**: by the artifact producer, against the production library build `20261006.220511` on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64. A library change (declining such a CREATE) is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
+
+Until then, do not read a refusal with 115 for a query-level setting in a table's `SETTINGS` as the server's answer.
+
+### The row preview refuses a row with 131 when a LowCardinality column's dictionary holds another row's too-long key
+
+**Over-reject, on every supported line, through the row preview only.** When a `CHECK` or `MATERIALIZED` expression applies `toFixedString` to a `LowCardinality(String)` column, `chs_preview_row` refuses a row whose own value fits, with error **131**, if the column's dictionary for that body also holds another row's value that does not fit. A one-row `INSERT` of that row is accepted. For example, with either:
+
+```sql
+CREATE TABLE t (id UInt32, lc LowCardinality(String), x UInt8, m String MATERIALIZED toString(toFixedString(lc, 2))) ENGINE = MergeTree ORDER BY id
+CREATE TABLE t (id UInt32, lc LowCardinality(String), x UInt8, CONSTRAINT c CHECK toFixedString(lc, 2) != 'zz') ENGINE = MergeTree ORDER BY id
+```
+
+and the `Values` body `(1,'k1',1),(2,'k2',2),(3,'toolong',3)`, the row preview refuses the `'k1'` row:
+
+|                           |                                           |
+| ------------------------- | ----------------------------------------- |
+| this library, row preview | refuses the `'k1'` row with error **131** |
+| a one-row INSERT          | accepts it                                |
+
+The same happens in `JSONEachRow` to a row after a skipped row that carried the too-long value, under `input_format_allow_errors_num`. The batch preview's 131 for the whole body matches a synchronous `INSERT`, so it is not part of this entry.
+
+**Measured**: by the artifact producer, against the production library build `20261006.220511` on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64; the one-row `INSERT` half against live servers. No library change is in progress yet. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
+
+Until then, do not read a row preview's refusal with 131 on such a table as the server's answer for that row alone.
 
 ## Known gaps in 1.0
 
