@@ -120,6 +120,30 @@ This still reproduces on library build `20261007.120436`, on `26.3` only.
 
 Until then, on `26.3`, if the server query a filter stands for reads a table that declares a projection, or aggregates over a MergeTree table, do not treat a verdict for a non-`UInt8` `WHERE` as the server's answer.
 
+### The row preview refuses a row with 131 when a LowCardinality column's dictionary holds another row's too-long key
+
+**Over-reject, on every supported line, through the row preview only.** When a `CHECK` or `MATERIALIZED` expression applies `toFixedString` to a `LowCardinality(String)` column, `chs_preview_row` refuses a row whose own value fits, with error **131**, if the column's dictionary for that body also holds another row's value that does not fit. A one-row `INSERT` of that row is accepted. For example, with either:
+
+```sql
+CREATE TABLE t (id UInt32, lc LowCardinality(String), x UInt8, m String MATERIALIZED toString(toFixedString(lc, 2))) ENGINE = MergeTree ORDER BY id
+CREATE TABLE t (id UInt32, lc LowCardinality(String), x UInt8, CONSTRAINT c CHECK toFixedString(lc, 2) != 'zz') ENGINE = MergeTree ORDER BY id
+```
+
+and the `Values` body `(1,'k1',1),(2,'k2',2),(3,'toolong',3)`, the row preview refuses the `'k1'` row:
+
+|                           |                                           |
+| ------------------------- | ----------------------------------------- |
+| this library, row preview | refuses the `'k1'` row with error **131** |
+| a one-row INSERT          | accepts it                                |
+
+The same happens in `JSONEachRow` to a row after a skipped row that carried the too-long value, under `input_format_allow_errors_num`. The batch preview's 131 for the whole body matches a synchronous `INSERT`, so it is not part of this entry.
+
+**Measured**: by the artifact producer, against the production library build `20261006.220511` on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64; the one-row `INSERT` half against live servers. No library change is in progress yet. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
+
+It still reproduces on build `20261007.120436` through the row preview over a multi-row body (measured with released Python 1.1.0, all four lines); the batch preview's per-row verdict for the same row is accepted from that build on.
+
+Until then, do not read a row preview's refusal with 131 on such a table as the server's answer for that row alone.
+
 ## Known gaps in 1.0
 
 Each item is a place where 1.0 does less than you might expect, or answers differently from a server. None of them returns a wrong answer without saying so, and every one is planned. Each entry says what happens, what to do today, and that a fix is planned.
