@@ -65,6 +65,11 @@ on:
         required: false
         type: string
         default: ""
+      interop_rounds:
+        description: "v1-cache-interop's ABI v2 matrix: rounds per concurrency set, at each clock (8 installs of the ~51 MB staging layer per round; 5 sets per clock). Empty: the driver's defaults (3 and 3)."
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -921,6 +926,7 @@ jobs:
         env:
           X: /tmp/cli-prefix
           V2: ${{ steps.mode.outputs.v2 }}
+          ROUNDS: ${{ inputs.interop_rounds }}
         run: |
           if [ -z "$V2" ]; then
             echo "v1-cache-interop: SKIPPED the ABI v2 matrix by name: no binding speaks ABI v2 at this commit (spec/binding-majors.json)" | tee -a "$GITHUB_STEP_SUMMARY"
@@ -928,6 +934,10 @@ jobs:
           fi
           clis=()
           for b in $V2; do clis+=(--cli "$b=$X/bin/cli-$b"); done
+          if [ -n "$ROUNDS" ]; then
+            case "$ROUNDS" in *[!0-9]* | 0*) echo "::error::interop_rounds must be a positive integer, got: $ROUNDS"; exit 1 ;; esac
+            clis+=(--rounds "$ROUNDS" --coarse-rounds "$ROUNDS")
+          fi
           python3 scripts/fetch-v1/cache-interop.py --abi 2 "${clis[@]}" \
             --other-user nobody \
             --coarse-clock

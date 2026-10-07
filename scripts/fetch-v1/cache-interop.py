@@ -141,7 +141,7 @@ no 0.x past (part 2), and its cache faults (part 7) are not yet rows here.
      `verify` must pass on the final cache. Failures are counted per binding
      with their exact error code.
      THE COARSE-CLOCK LEG (--coarse-clock, Linux; #516). The same sets,
-     --coarse-rounds (2) rounds each, with scripts/fetch-v1/coarse-clock.c
+     --coarse-rounds (3) rounds each, with scripts/fetch-v1/coarse-clock.c
      preloaded into every CLI, rounding CLOCK_REALTIME and gettimeofday()
      down to 100 µs. Its control runs first, or every row is INVALID: under
      the shim 20000 clock readings in a probe are all multiples of 100 µs and
@@ -1077,7 +1077,7 @@ def main_run(
 # itself, the record's shape from spec/fetch-v1/schema/verified.schema.json.
 
 V2_ROUNDS = 3  # natural-clock rounds per concurrency set
-V2_COARSE_ROUNDS = 2  # coarse-clock rounds per concurrency set
+V2_COARSE_ROUNDS = 3  # coarse-clock rounds per concurrency set
 COARSE_GRAIN_NS = 100_000  # 100 µs, the grain the install-race probe used (public PR #516)
 SHIM_SOURCE = ROOT / "scripts" / "fetch-v1" / "coarse-clock.c"
 CHANNEL_SCRIPT = ROOT / "scripts" / "release-channel.sh"
