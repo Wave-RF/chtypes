@@ -180,9 +180,9 @@ For a TSV `String` that contains a raw NUL byte, the third detector can report `
 
 ### A time-dependent TTL in a CREATE comes back as an internal error
 
-`TTL now() + INTERVAL 1 DAY` in a `CREATE TABLE` returns an `InternalError` (`CHS_INTERNAL`) where a server refuses the statement with its own error. Measured against the 26.9.8.3 library (`measured`).
+Fixed in production build `20261007.162307`. `TTL now() + INTERVAL 1 DAY` in a `CREATE TABLE` returned an `InternalError` (`CHS_INTERNAL`) where a server refuses the statement with its own error. On that build, released Python 1.1.0 in a fresh cache raises a `SchemaError` (`BAD_ARGUMENTS`, code 36, "TTL expression now() + toIntervalDay(1) does not depend on any of the columns of the table") on every served line that was measured (26.3.38.2, 26.8.15.10 and 26.9.8.3), with the build asserted on each (`measured`). Earlier builds still return the internal error.
 
-**Workaround:** treat an internal error from a CREATE whose TTL does not reference a column as that refusal. **Planned:** fixed in 1.0.x.
+**Workaround:** on an earlier build, treat an internal error from a CREATE whose TTL does not reference a column as that refusal.
 
 ### A Replicated table assumes the server has Keeper
 

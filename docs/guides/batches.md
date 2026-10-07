@@ -122,6 +122,8 @@ Given the body
 
 the batch is **accepted**, `rows_read` is 3, `rows_skipped` is 1, and `rows` holds all three input records in input order: the survivors as `accepted` with their coerced values, and the bad one in its own place as `skipped`, carrying the exact error the vendored reader caught before resyncing.
 
+`rows_skipped` counts only rows skipped under an `input_format_allow_errors_*` allowance. A strict batch (no allowance) that is rejected reports `rows_skipped` 0 from artifact build `20261007.162307` on; earlier builds reported 1 for the aborting row.
+
 Bad rows are skipped with the server's own machinery — resync is line-based and byte-matched to real servers across every supported version — and **itemized**, which a real server does not do. ClickHouse's `IRowInputFormat::generate` computes the error for every skip and then logs only a count; reporting it invents nothing, it just keeps what was already computed.
 
 So one `rows` call answers, per input record and in input order: accepted with its stored values, or skipped with ClickHouse's own code and message. **A skipped row is never stored** — filter on the row's own `outcome` when rendering survivors, not on the batch's.

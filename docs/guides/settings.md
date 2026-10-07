@@ -137,7 +137,7 @@ Three are **per-process**, settable only through the `defaults` of `setup`:
 
 The functions a DEFAULT expression cannot use at all are listed, with the reason for each, in [`declined-functions.md`](../reference/declined-functions.md).
 
-**Sending a per-process key on a per-call map is a decline, never an admission.** It comes back in the result's `unsupported_settings`, and the row is promoted to the `unsupported` outcome (the library applies that promotion itself in 1.0; no binding does). Do not score such a row as agreement: chtypes did not answer it.
+**Sending a per-process key on a per-call map is a decline, never an admission.** It comes back in the result's `unsupported_settings`, and every row reads `unsupported` with the setting named in its own `unsupported_settings` (the library applies that itself in 1.0; no binding does). From artifact build `20261007.162307` the whole batch reads `unsupported` too, filter rows read `d`, and no export bytes are produced. Earlier builds could report the batch `accepted` while its rows were `unsupported`, and could emit an export. Do not score such a row as agreement: chtypes did not answer it.
 
 ## Time zones are two things
 
