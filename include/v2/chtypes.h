@@ -857,10 +857,10 @@ CHS_API void chs_server_free(chs_server *server);
  * to its server, so the caller may free the server at any time.
  *
  * `timezone()` (and its alias `timeZone()`) in a DEFAULT, MATERIALIZED or CHECK expression is
- * admitted on a schema created on a server whose profile names a `timezone`, and its value is the
- * vendored `FunctionTimezone`'s under that zone. On a schema with no server, or on a server whose
- * profile names no `timezone`, it stays refused as a server constant. `serverTimezone()` stays
- * refused on every schema: it reads the zone of the process, which no profile describes.
+ * admitted on a schema created on a server whose profile names a `timezone`. It returns what that
+ * server's `timezone()` returns: the call's `session_timezone` if one is set, else the server's
+ * `timezone`. On a schema with no server, or a server whose profile names no `timezone`, it stays
+ * refused as a server constant. `serverTimezone()` is refused on every schema.
  *
  * `options` (`input:schema_options`) defines no member yet, so any key in it is
  * `CHS_INVALID_ARGUMENT`, naming the key.
