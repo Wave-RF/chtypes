@@ -263,3 +263,49 @@ fn every_override_is_ignored_and_named_once() {
     );
     let _ = std::fs::remove_dir_all(&base);
 }
+
+/// `where --all` lists every directory searched, the cache root through its
+/// v2-dev subroot first, one per line; the default output stays the root alone
+/// (public issues #530 and #527).
+#[test]
+fn where_all_lists_the_search_dirs() {
+    let base = scratch("where-all");
+    let c = base.to_str().unwrap();
+    let root = base.join(DEV);
+    let want = format!(
+        "{}\n/usr/local/share/chtypes/{DEV}\n/opt/chtypes/{DEV}\n",
+        root.display()
+    );
+    let (code, out, err) = run(&["where", "--all", "--cache", c]);
+    assert_eq!((code, out.as_str(), err.as_str()), (0, want.as_str(), ""));
+    let (code, out, _) = run(&["where", "--cache", c]);
+    assert_eq!((code, out), (0, format!("{}\n", root.display())));
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// CHTYPES_OFFLINE=1 is `--offline` (public issue #528): `list` asks the
+/// registry for nothing (no "published" line), and `fetch` with nothing
+/// installed is CHTYPES_ARTIFACT_MISSING, exit 1, not a network error, and no
+/// cache is made (every request follows the layout's creation). The installed
+/// build and the in-process mode are tests/offline_env.rs.
+#[test]
+fn offline_env_is_the_offline_flag() {
+    let base = scratch("offline-env");
+    let cache = base.join("cache");
+    let env = [
+        ("CHTYPES_CACHE", cache.to_str().unwrap()),
+        ("CHTYPES_OFFLINE", "1"),
+    ];
+    let (code, out, err) = run_env(&["list"], &env);
+    assert!(
+        code == 0 && !out.contains("published"),
+        "list under CHTYPES_OFFLINE=1: {code} {out:?} {err}"
+    );
+    let (code, out, err) = run_env(&["fetch", "26.8", "--platform", "linux-amd64"], &env);
+    assert!(
+        code == 1 && out.is_empty() && err.contains("CHTYPES_ARTIFACT_MISSING"),
+        "fetch under CHTYPES_OFFLINE=1: {code} {out:?} {err}"
+    );
+    assert!(!cache.exists(), "an offline fetch made {}", cache.display());
+    let _ = std::fs::remove_dir_all(&base);
+}

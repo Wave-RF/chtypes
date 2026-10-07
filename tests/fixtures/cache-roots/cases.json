@@ -1,0 +1,69 @@
+{
+  "_comment": "One table, read by all four bindings' cache-roots tests (public issue #530), with the v2 dev channel's expectations: the default root ends in chtypes/v2-dev, an explicit cache directory, from CHTYPES_CACHE or the binding's option, is used through its v2-dev subroot (spec/abi-v2/docs.md, rule r5, public issue #527), and the built-in system directories end in v2-dev. For the same environment and options, CacheRoot and SearchDirs answer the same list. <TMP> is a scratch directory the test makes; <CWD> is the process working directory at the call (a relative directory resolves against it, lexically, so `.` and `..` fold and no symlink is followed: public issue #541). env keys absent from a case are unset. cache_dir null means no explicit directory; system_dirs null means the built-in list and [] none.",
+  "defaults": ["/usr/local/share/chtypes/v2-dev", "/opt/chtypes/v2-dev"],
+  "cases": [
+    {
+      "name": "explicit-directory-wins",
+      "env": { "CHTYPES_CACHE": "<TMP>/env", "XDG_CACHE_HOME": "<TMP>/xdg", "HOME": "<TMP>/user" },
+      "cache_dir": "<TMP>/explicit",
+      "system_dirs": null,
+      "search_dirs": ["<TMP>/explicit/v2-dev", "/usr/local/share/chtypes/v2-dev", "/opt/chtypes/v2-dev"]
+    },
+    {
+      "name": "cache-dir-env",
+      "env": { "CHTYPES_CACHE": "<TMP>/env", "XDG_CACHE_HOME": "<TMP>/xdg", "HOME": "<TMP>/user" },
+      "cache_dir": null,
+      "system_dirs": null,
+      "search_dirs": ["<TMP>/env/v2-dev", "/usr/local/share/chtypes/v2-dev", "/opt/chtypes/v2-dev"]
+    },
+    {
+      "name": "xdg-cache-home",
+      "env": { "XDG_CACHE_HOME": "<TMP>/xdg", "HOME": "<TMP>/user" },
+      "cache_dir": null,
+      "system_dirs": null,
+      "search_dirs": ["<TMP>/xdg/chtypes/v2-dev", "/usr/local/share/chtypes/v2-dev", "/opt/chtypes/v2-dev"]
+    },
+    {
+      "name": "home-dot-cache",
+      "env": { "HOME": "<TMP>/user" },
+      "cache_dir": null,
+      "system_dirs": null,
+      "search_dirs": ["<TMP>/user/.cache/chtypes/v2-dev", "/usr/local/share/chtypes/v2-dev", "/opt/chtypes/v2-dev"]
+    },
+    {
+      "name": "custom-system-dirs-in-order",
+      "env": { "HOME": "<TMP>/user" },
+      "cache_dir": "<TMP>/explicit",
+      "system_dirs": ["<TMP>/sys-b", "<TMP>/sys-a"],
+      "search_dirs": ["<TMP>/explicit/v2-dev", "<TMP>/sys-b", "<TMP>/sys-a"]
+    },
+    {
+      "name": "empty-system-dirs-search-none",
+      "env": { "HOME": "<TMP>/user" },
+      "cache_dir": "<TMP>/explicit",
+      "system_dirs": [],
+      "search_dirs": ["<TMP>/explicit/v2-dev"]
+    },
+    {
+      "name": "relative-explicit-directory",
+      "env": { "HOME": "<TMP>/user" },
+      "cache_dir": "rel/explicit",
+      "system_dirs": [],
+      "search_dirs": ["<CWD>/rel/explicit/v2-dev"]
+    },
+    {
+      "name": "relative-cache-env",
+      "env": { "CHTYPES_CACHE": "rel/env", "HOME": "<TMP>/user" },
+      "cache_dir": null,
+      "system_dirs": [],
+      "search_dirs": ["<CWD>/rel/env/v2-dev"]
+    },
+    {
+      "name": "relative-dot-segments-fold",
+      "env": { "HOME": "<TMP>/user" },
+      "cache_dir": "rel/./a/../explicit",
+      "system_dirs": [],
+      "search_dirs": ["<CWD>/rel/explicit/v2-dev"]
+    }
+  ]
+}

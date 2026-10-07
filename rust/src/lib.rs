@@ -118,7 +118,7 @@ pub use error::{CacheFault, CallError, Error, Refusal, Result};
 pub use library::Library;
 pub use ocifetch::ensure::Resolved;
 pub use raw::RawText;
-pub use registry::{FetchOptions, Registry, RegistryOptions};
+pub use registry::{FetchOptions, Registry, RegistryOptions, cache_root, search_dirs};
 pub use result::{
     BatchResult, BuildInfo, Capabilities, Column, Computed, DiscoveredColumn, Discovery,
     EngineCell, ErrorCodeEntry, ErrorCodeTable, FilterResult, FilterRowError, Framing, Header,

@@ -13,7 +13,7 @@ import (
 
 func runCLI(t *testing.T, env map[string]string, args ...string) (code int, stdout, stderr string) {
 	t.Helper()
-	for _, k := range []string{"CHTYPES_ARTIFACTS_URL", "CHTYPES_CACHE", "CHTYPES_TRUSTED_KEYS", "CHTYPES_ALLOW_UNSIGNED", "CHTYPES_TARGET", "CHTYPES_CACHE_STRICT"} {
+	for _, k := range []string{"CHTYPES_ARTIFACTS_URL", "CHTYPES_CACHE", "CHTYPES_TRUSTED_KEYS", "CHTYPES_ALLOW_UNSIGNED", "CHTYPES_TARGET", "CHTYPES_CACHE_STRICT", "CHTYPES_OFFLINE"} {
 		t.Setenv(k, "")
 	}
 	for k, v := range env {
@@ -59,6 +59,20 @@ func TestWhereIsTheCacheRoot(t *testing.T) {
 	code, out, _ = runCLI(t, nil, "where", "--cache", dir)
 	if code != 0 || strings.TrimSpace(out) != dir {
 		t.Errorf("where --cache = %d %q", code, out)
+	}
+}
+
+// `where --all` lists every directory searched, the cache root first (#530);
+// the default output stays the root alone.
+func TestWhereAllListsTheSearchDirs(t *testing.T) {
+	dir := t.TempDir()
+	code, out, _ := runCLI(t, nil, "where", "--all", "--cache", dir)
+	want := dir + "\n/usr/local/share/chtypes/v1\n/opt/chtypes/v1\n"
+	if code != 0 || out != want {
+		t.Errorf("where --all = %d %q, want %q", code, out, want)
+	}
+	if code, out, _ := runCLI(t, nil, "where", "--cache", dir); code != 0 || out != dir+"\n" {
+		t.Errorf("where = %d %q, want the root alone", code, out)
 	}
 }
 

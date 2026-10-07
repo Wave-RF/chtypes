@@ -35,6 +35,7 @@ def dev_channel(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     for name in (C.ENV_BASES_NAME, C.ENV_TRUSTED_KEYS_NAME, C.ENV_ALLOW_UNSIGNED_NAME):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.delenv(C.ENV_CACHE_NAME, raising=False)
+    monkeypatch.delenv(_channel.ENV_OFFLINE_NAME, raising=False)
     try:
         yield
     finally:
@@ -59,6 +60,27 @@ def test_where_is_the_v2_dev_subroot(dev_channel, tmp_path, monkeypatch, capsys)
     )
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
     assert run(capsys, "where")[:2] == (0, f"{tmp_path / 'xdg' / 'chtypes' / 'v2-dev'}\n")
+
+
+def test_where_all_lists_the_subrooted_search_dirs(dev_channel, tmp_path, capsys) -> None:
+    """#530 and #527: the root through its v2-dev subroot first, then the v2-dev
+    system directories; plain `where` stays the root alone."""
+    cache = tmp_path / "c"
+    want = f"{cache / 'v2-dev'}\n/usr/local/share/chtypes/v2-dev\n/opt/chtypes/v2-dev\n"
+    assert run(capsys, "where", "--all", "--cache", str(cache))[:2] == (0, want)
+    assert run(capsys, "where", "--cache", str(cache))[:2] == (0, f"{cache / 'v2-dev'}\n")
+
+
+def test_offline_env_is_the_offline_flag(dev_channel, tmp_path, monkeypatch, capsys) -> None:
+    """#528: CHTYPES_OFFLINE=1 reads the cache only. `list` prints no "published"
+    line (it asks the registry for nothing) and `fetch` with nothing installed is
+    CHTYPES_ARTIFACT_MISSING, not a network error."""
+    monkeypatch.setenv(_channel.ENV_OFFLINE_NAME, "1")
+    cache = str(tmp_path / "cache")
+    code, out, _ = run(capsys, "list", "--cache", cache)
+    assert code == 0 and "published" not in out
+    code, out, err = run(capsys, "fetch", "26.8", "--cache", cache, "--platform", "linux-amd64")
+    assert code != 0 and out == "" and "CHTYPES_ARTIFACT_MISSING" in err
 
 
 def test_lock_frozen_and_update_are_refused_before_anything(

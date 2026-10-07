@@ -9,7 +9,7 @@ import { lstat, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { Registry } from '../../src/registry.js';
+import { Registry, searchDirs } from '../../src/registry.js';
 import { ArtifactMissingError } from '../../src/ocifetch/errors.js';
 import { ensure, listInstalled, missingNotes, resolveInstalled, verifyInstalled } from '../../src/ocifetch/ensure.js';
 import {
@@ -186,6 +186,20 @@ describe('one root order (public issue #486)', () => {
       ]);
     });
   }
+});
+
+describe('searchDirs is the order a lookup reads (public issue #530)', () => {
+  it('records seeded in the directories searchDirs names, last to first, are answered by the earliest', async () => {
+    const base = await tmp();
+    const fetch = { cacheDir: path.join(base, 'cache'), systemDirs: [path.join(base, 'a'), path.join(base, 'b')] };
+    const dirs = searchDirs(fetch);
+    expect(dirs).toEqual([fetch.cacheDir, ...fetch.systemDirs]);
+    for (let i = dirs.length - 1; i >= 1; i--) {
+      const entry = await writeRecord(dirs[i]!, '26.8.1.1', '20260801.000001');
+      const got = await resolveInstalled('26.8', 'linux-arm64', { ...fetch, platform: 'linux-arm64' as const });
+      expect({ dir: got?.dir, source: got?.source }).toEqual({ dir: entry, source: `system:${dirs[i]}` });
+    }
+  });
 });
 
 describe('read-only lookups create nothing (public issue #486)', () => {

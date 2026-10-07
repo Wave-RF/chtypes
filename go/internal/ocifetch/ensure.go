@@ -189,6 +189,15 @@ func resolveOptions(o *Options) (resolvedOptions, error) {
 		ro.cacheDir = dir
 	}
 
+	// A relative cache directory is the process cwd's at this call, resolved
+	// here once so every path derived from it is absolute, as
+	// docs/guides/fetch-v1.md section 9 says (public issue #541).
+	abs, err := filepath.Abs(ro.cacheDir)
+	if err != nil {
+		return ro, fmt.Errorf("chtypes: resolving the cache directory %q: %w", ro.cacheDir, err)
+	}
+	ro.cacheDir = abs
+
 	ro.systemDirs = o.SystemDirs
 	if ro.systemDirs == nil {
 		ro.systemDirs = append([]string(nil), ch.systemDirs...)
@@ -232,7 +241,10 @@ func resolveOptions(o *Options) (resolvedOptions, error) {
 	}
 
 	ro.allowUnsigned = ch.overridable && (o.AllowUnsigned || os.Getenv(EnvAllowUnsignedName) == "1")
-	ro.offline = o.Offline
+	// CHTYPES_OFFLINE=1 is the environment twin of the Offline option (rule
+	// r5/r6 prose, public issue #528): read once here, with the other
+	// environment variables; the option, when set, is the same answer.
+	ro.offline = o.Offline || os.Getenv(EnvOfflineName) == "1"
 	ro.frozen = o.Frozen
 	ro.lockWrite = o.LockWrite
 	ro.update = o.Update
@@ -262,6 +274,13 @@ func resolveOptions(o *Options) (resolvedOptions, error) {
 	ro.hookBeforeIndexRename = o.HookBeforeIndexRename
 	ro.onRequest = o.OnRequest
 	return ro, nil
+}
+
+// searchDirs is the one root order (docs/guides/fetch-v1.md section 1): the
+// user cache first, then each read-only system directory in order. Every
+// lookup walks it, and the public CacheRoot and SearchDirs report it.
+func (ro resolvedOptions) searchDirs() []string {
+	return append([]string{ro.cacheDir}, ro.systemDirs...)
 }
 
 func hostsOf(bases []string) []string {
@@ -816,7 +835,7 @@ func resolveInstalledInternal(ro resolvedOptions, req Request, platformKey strin
 		return nil, err
 	}
 	cacheLayout := newLayout(ro.cacheDir, false)
-	dirs := append([]string{ro.cacheDir}, ro.systemDirs...)
+	dirs := ro.searchDirs()
 	var best *installedEntry
 	var bestSource string
 	for i, dir := range dirs {
@@ -886,7 +905,7 @@ func ListInstalled(opts *Options) ([]Resolved, error) {
 	if err != nil {
 		return nil, err
 	}
-	dirs := append([]string{ro.cacheDir}, ro.systemDirs...)
+	dirs := ro.searchDirs()
 	var out []Resolved
 	for i, dir := range dirs {
 		readOnly := i > 0
@@ -915,7 +934,7 @@ func VerifyInstalled(opts *Options) ([]VerifyResult, error) {
 	if _, err := probeRoots(ro); err != nil {
 		return nil, err
 	}
-	dirs := append([]string{ro.cacheDir}, ro.systemDirs...)
+	dirs := ro.searchDirs()
 	var out []VerifyResult
 	for _, dir := range dirs {
 		entries, err := listUnpacked(dir)

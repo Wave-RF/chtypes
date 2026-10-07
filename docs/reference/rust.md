@@ -38,6 +38,8 @@ Unix only: the loader is `dlopen`. Minimum supported Rust version 1.87. `cargo d
 
 `trusted_keys: Option<Vec<String>>` is the trust list: raw 32-byte ed25519 public keys, each as 64 hex digits. A non-empty list REPLACES the default trust (the release key); `None` reads `CHTYPES_TRUSTED_KEYS` (comma-separated), and the release key is used when neither names a key. A list never appends to the default, so trusting the SDK's fixture key means naming it (and the release key too, if both should verify). A key that is not 64 hex digits is `Error::Usage`.
 
+`chtypes::cache_root(&FetchOptions) -> Result<PathBuf>` and `chtypes::search_dirs(&FetchOptions) -> Result<Vec<PathBuf>>` return the resolved cache root and the ordered directories searched (the root, then each system directory). They are the fetch layer's own resolution, read-only, and create nothing (public issue #530).
+
 ## The `chtypes` command
 
 The crate ships a `chtypes` binary over the fetch layer (`cargo install chtypes`). Progress and warnings go to stderr and results to stdout. Exit statuses come from the fetch layer's error table ([`fetch-v1.md`](../guides/fetch-v1.md) section 8); a usage error exits 2.
@@ -48,7 +50,7 @@ The crate ships a `chtypes` binary over the fetch layer (`cargo install chtypes`
 | `chtypes fetch --all [...]`                                                               | the same for every line (two-part tag) the registry publishes                                                                                           |
 | `chtypes verify`                                                                          | re-hash every installed library against its verified record                                                                                             |
 | `chtypes list [--offline]`                                                                | the installed builds, then, unless `--offline`, the version spellings the registry publishes (`tags/list`, filtered to two-, three- and four-part tags) |
-| `chtypes where`                                                                           | the v1 cache root                                                                                                                                       |
+| `chtypes where [--all]`                                                                   | the v1 cache root; `--all` prints every directory searched, the root first, one per line                                                                |
 
 `--lock F` writes the lock after a fetch, `--frozen` fetches exactly what the lock pins (default file `chtypes.lock`) with no discovery, `--offline` reads the cache only, and `--update` re-resolves and rewrites the lock. The environment variables are `CHTYPES_ARTIFACTS_URL`, `CHTYPES_CACHE`, `CHTYPES_DOWNLOAD_TOKEN`, `CHTYPES_TRUSTED_KEYS` and `CHTYPES_ALLOW_UNSIGNED`.
 

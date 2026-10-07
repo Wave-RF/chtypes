@@ -29,6 +29,7 @@ use crate::error::{Error, Refusal, Result};
 use crate::library::{Library, open_image, settle_failed_open};
 use crate::ocifetch::constants::ENV_AUTOFETCH_NAME;
 use crate::ocifetch::ensure::{self, Options, Resolved};
+use crate::ocifetch::layout;
 use crate::ocifetch::oci::VersionRequest;
 use crate::setup;
 
@@ -59,7 +60,8 @@ pub struct FetchOptions {
     /// Read-only system directories, searched after the cache. `None` is the
     /// built-in list.
     pub system_dirs: Option<Vec<PathBuf>>,
-    /// Never touch the network; read the cache only.
+    /// Never touch the network; read the cache only. `CHTYPES_OFFLINE=1` is the
+    /// same mode (public issue #528); this plain `bool` can only turn it on.
     pub offline: bool,
     /// Perform no discovery: fetch exactly the lock's pinned digests.
     pub frozen: bool,
@@ -109,6 +111,33 @@ impl FetchOptions {
             before_index_rename: None,
         }
     }
+}
+
+/// The cache root a fetch, list or `chtypes where` with `options` would use:
+/// `options.cache_dir`, else `CHTYPES_CACHE` (each used through its `v2-dev`
+/// subroot, `spec/abi-v2/docs.md` rule r5), else
+/// `${XDG_CACHE_HOME:-~/.cache}/chtypes/v2-dev`.
+///
+/// It is the fetch layer's own resolution and the first entry of
+/// [`search_dirs`]. It creates nothing and reads no cache.
+///
+/// # Errors
+/// [`Error::SourceIncompatible`] when no directory can be named: no explicit
+/// directory, no `CHTYPES_CACHE`, no `XDG_CACHE_HOME` and no `HOME`.
+pub fn cache_root(options: &FetchOptions) -> Result<PathBuf> {
+    Ok(layout::cache_root(options.cache_dir.as_deref())?)
+}
+
+/// Every directory a lookup reads for installed builds, in the order it reads
+/// them: the cache root first, then each read-only system directory
+/// (`options.system_dirs`; `None` is the built-in list, an empty list none).
+/// The order is the fetch layer's own, and on a tie the earlier directory wins.
+/// It creates nothing and touches no file.
+///
+/// # Errors
+/// As [`cache_root`].
+pub fn search_dirs(options: &FetchOptions) -> Result<Vec<PathBuf>> {
+    Ok(ensure::search_dirs(&options.to_options())?)
 }
 
 /// What a [`Registry`] is constructed with.

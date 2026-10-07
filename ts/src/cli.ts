@@ -11,7 +11,7 @@
  *   chtypes fetch <version>... | --all  [--frozen] [--offline] [--lock <file>] [--update] [--strict]
  *   chtypes verify                      re-hash every installed library against its verified record
  *   chtypes list                        what is installed, and the versions the registry publishes
- *   chtypes where                       the v1 cache root
+ *   chtypes where [--all]               the v1 cache root; --all: every directory searched
  *
  * Options per cli-common: `fetch` takes `--platform`, `--cache`, `--lock`, `--frozen`,
  * `--offline`, `--update`; `verify`, `list` and `where` take `--cache` (`list` also
@@ -56,10 +56,12 @@ import {
   listInstalled,
   listTags,
   missingNotes,
+  offlineMode,
   PinningRefusedError,
   type PlatformKey,
   pinningRequested,
   probeCache,
+  searchDirs,
   verifyInstalled,
 } from './ocifetch/index.js';
 
@@ -82,12 +84,12 @@ const USAGE = `usage: chtypes <command> [options]
   chtypes fetch <version>... | --all  [--frozen] [--offline] [--lock <file>] [--update] [--strict]
   chtypes verify [--strict]
   chtypes list [--strict]
-  chtypes where [--strict]
+  chtypes where [--strict] [--all]
 
   <version>   a ClickHouse version: 26.8, 26.8.15 or 26.8.15.10 (no "v", no channel suffix)
-  --all       every line (two-part version) the registry publishes for the platform
+  --all       every line (two-part version) the registry publishes for the platform; with 'where', every directory searched (the cache root first)
   --frozen    fetch exactly what the lock file pins, by digest; refuse anything it does not (default lock: chtypes.lock)
-  --offline   never touch the network: an installed, verified build is fine, anything else fails
+  --offline   never touch the network: an installed, verified build is fine, anything else fails (or set CHTYPES_OFFLINE=1)
   --lock      record what was installed into this lock file
   --update    re-resolve every request the lock holds and rewrite it (requires --lock; not with --frozen or --offline)
   --platform  <os>-<arch>: linux-amd64, linux-arm64 or darwin-arm64 (default: this host, or CHTYPES_TARGET)
@@ -213,7 +215,7 @@ function fetchOptions(values: Values, forFetch: boolean): FetchV1Options {
     ...(values.strict === true ? { strictCache: true } : {}),
     ...(forFetch
       ? {
-          offline: values.offline === true,
+          ...(values.offline === true ? { offline: true } : {}),
           frozen: values.frozen === true,
           update: values.update === true,
           lockWrite: lockPath !== undefined && values.frozen !== true && values.update !== true,
@@ -265,7 +267,7 @@ async function cmdFetch(requests: readonly string[], values: Values, io: CliIo):
 
 /** Every line: the two-part spellings the registry publishes (or, offline, the lines already installed for the platform). */
 async function allLines(options: FetchV1Options): Promise<readonly string[]> {
-  if (options.offline === true) {
+  if (offlineMode(options.offline)) {
     const platform = options.platform ?? hostPlatformKey(os.platform(), os.arch());
     const lines = new Set<string>();
     for (const r of await listInstalled(options)) if (r.platform === platform) lines.add(r.predicate.clickhouse_minor);
@@ -308,7 +310,7 @@ async function cmdList(rest: readonly string[], values: Values, io: CliIo): Prom
   const installed = await listInstalled(options);
   for (const r of installed) io.stdout(`installed ${r.version} ${r.platform} ${r.dir}\n`);
   await sayNotes(io, options);
-  if (values.offline) return EXIT_OK;
+  if (offlineMode(values.offline === true ? true : undefined)) return EXIT_OK;
   for (const t of await listTags(options)) io.stdout(`published ${t} support unknown\n`);
   return EXIT_OK;
 }
@@ -318,6 +320,11 @@ async function cmdWhere(rest: readonly string[], values: Values, io: CliIo): Pro
   const options = fetchOptions(values, false);
   // Strict mode checks the root before naming it.
   if (strictMode(options.strictCache)) await probeCache(options);
+  // --all: every directory searched (the cache root first), one per line (public issue #530).
+  if (values.all) {
+    for (const dir of searchDirs(options)) io.stdout(`${dir}\n`);
+    return EXIT_OK;
+  }
   io.stdout(`${cacheRoot(options.cacheDir)}\n`);
   return EXIT_OK;
 }

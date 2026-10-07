@@ -164,7 +164,7 @@ export interface FetchV1Options {
   readonly allowUnsigned?: boolean;
   /** Sent as `Authorization: Bearer <token>` to configured base hosts only. */
   readonly token?: string;
-  /** `resolve_installed`'s mode for `ensure`: cache/system dirs only, no network. */
+  /** `resolve_installed`'s mode for `ensure`: cache/system dirs only, no network. Unset reads `CHTYPES_OFFLINE` ("1" is on); an explicit true or false wins over the variable (public issue #528). */
   readonly offline?: boolean;
   /** Skip resolution; fetch the lock's pinned digests directly. */
   readonly frozen?: boolean;

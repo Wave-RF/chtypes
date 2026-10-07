@@ -54,6 +54,12 @@ const (
 	DevABIGeneration = 2
 )
 
+// EnvOfflineName is the environment twin of the Offline option: CHTYPES_OFFLINE=1
+// reads the cache only and makes no request (public issue #528). It names no
+// source, so rule r6 holds. A fetch layer constant, not a generated one: the
+// generated set is the v1 fetch contract's.
+const EnvOfflineName = `CHTYPES_OFFLINE`
+
 // PinningRefused is the message every lock, frozen or update request gets
 // from a 2.0.0-dev SDK, before any network call (rule r6).
 const PinningRefused = "--lock, --frozen and --update are refused by a 2.0.0-dev SDK: a dev build is replaceable, " +

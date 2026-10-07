@@ -69,6 +69,10 @@ DEV_KEY_ID: Final = "824345f9bcf8e5bf"
 DEV_KEY_HEX: Final = "5cd30c53c65a1ebc2d85836a41deb06661bb0ae7b658adb9eb116ec2db8e9b1c"
 # The dev channel's cache directory name: the default root's last element and
 # an explicit cache's subroot (rule r5).
+# The environment twin of the offline option (public issue #528): CHTYPES_OFFLINE=1
+# reads the cache only and makes no request. It names no source, so rule r6 holds.
+# Not a generated constant: the generated set is the v1 fetch contract's.
+ENV_OFFLINE_NAME: Final = "CHTYPES_OFFLINE"
 DEV_CACHE_DIR: Final = "v2-dev"
 # The verified.json schema the dev channel writes, and the only one it reads (rule r5).
 DEV_RECORD_SCHEMA: Final = 2

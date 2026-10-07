@@ -33,6 +33,34 @@ func TestDevWhereIsTheSubroot(t *testing.T) {
 	}
 }
 
+// #530 and #527: `where --all` lists the search directories, the root through
+// its v2-dev subroot first, and the built-in system directories are v2-dev's.
+func TestDevWhereAllListsTheSubrootedSearchDirs(t *testing.T) {
+	t.Cleanup(ocifetch.UseDevChannelForTests())
+	dir := t.TempDir()
+	want := filepath.Join(dir, "v2-dev") + "\n/usr/local/share/chtypes/v2-dev\n/opt/chtypes/v2-dev\n"
+	if code, out, _ := runCLI(t, nil, "where", "--all", "--cache", dir); code != 0 || out != want {
+		t.Errorf("where --all = %d %q, want %q", code, out, want)
+	}
+}
+
+// #528: CHTYPES_OFFLINE=1 is `--offline`: `list` prints what is installed and
+// asks the registry for nothing (no "published" line), and `fetch` with
+// nothing installed is CHTYPES_ARTIFACT_MISSING, not a network error. The
+// zero-request count is in internal/ocifetch (TestDevOfflineEnv...).
+func TestDevOfflineEnvIsTheOfflineFlag(t *testing.T) {
+	t.Cleanup(ocifetch.UseDevChannelForTests())
+	dir := t.TempDir()
+	env := map[string]string{"CHTYPES_CACHE": dir, "CHTYPES_OFFLINE": "1"}
+	if code, out, errs := runCLI(t, env, "list"); code != 0 || strings.Contains(out, "published") {
+		t.Errorf("list under CHTYPES_OFFLINE=1 = %d %q %q; want exit 0 and no published lines", code, out, errs)
+	}
+	code, _, errs := runCLI(t, env, "fetch", "26.8", "--platform", "linux-amd64")
+	if code == 0 || !strings.Contains(errs, "CHTYPES_ARTIFACT_MISSING") {
+		t.Errorf("fetch under CHTYPES_OFFLINE=1 = %d %q; want CHTYPES_ARTIFACT_MISSING", code, errs)
+	}
+}
+
 func TestDevRefusesLockFrozenAndUpdate(t *testing.T) {
 	t.Cleanup(ocifetch.UseDevChannelForTests())
 	lock := filepath.Join(t.TempDir(), "chtypes.lock")

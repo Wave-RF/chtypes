@@ -14,7 +14,7 @@
 //! chtypes fetch <spelling>... | --all  [--platform <key>] [--cache <dir>] [--lock <file>] [--frozen] [--offline] [--update] [--strict]
 //! chtypes verify [--cache <dir>] [--strict]       re-verify the installed cache
 //! chtypes list [--cache <dir>] [--offline] [--strict]   installed builds, and the published lines unless --offline
-//! chtypes where [--cache <dir>] [--strict]        the cache root (the v2-dev one)
+//! chtypes where [--cache <dir>] [--strict] [--all]  the cache root (the v2-dev one); --all: every directory searched
 //! ```
 //!
 //! Progress and warnings go to stderr; results go to stdout. Exit statuses
@@ -45,7 +45,7 @@ chtypes: fetch, verify and list ClickHouse artifacts for the chtypes SDKs
   chtypes fetch --all         [--platform <os-arch>] [--cache <dir>] [--lock <file>] [--frozen] [--offline] [--update] [--strict]
   chtypes verify [--cache <dir>] [--strict]            re-verify the installed cache
   chtypes list [--cache <dir>] [--offline] [--strict]  installed builds; without --offline, published lines too
-  chtypes where [--cache <dir>] [--strict]             the cache root (<dir>/v2-dev)
+  chtypes where [--cache <dir>] [--strict] [--all]     the cache root (<dir>/v2-dev); --all: every directory searched
   chtypes --version                         chtypes <version>
   chtypes -h | --help                       this text
 
@@ -53,13 +53,14 @@ A <spelling> is a two-, three- or four-part version (26.8, 26.8.15, 26.8.15.10):
 no 'v' prefix and no channel suffix. --all fetches every line (two-part tag)
 the registry publishes. --lock writes the lock after a fetch; --frozen fetches
 exactly what the lock pins (default file chtypes.lock) and does no discovery;
---offline reads the cache only; --update re-resolves every locked request and
+--offline (or CHTYPES_OFFLINE=1) reads the cache only; --update re-resolves every locked request and
 rewrites the lock (it requires --lock). `fetch` prints each installed directory.
 --strict (or CHTYPES_CACHE_STRICT=1): a cache that cannot be read is
 CHTYPES_CACHE_UNUSABLE, never not-installed.
 
 Environment: CHTYPES_CACHE (this 2.0.0-dev SDK uses its subroot
-<CHTYPES_CACHE>/v2-dev), CHTYPES_DOWNLOAD_TOKEN, CHTYPES_CACHE_STRICT.
+<CHTYPES_CACHE>/v2-dev), CHTYPES_DOWNLOAD_TOKEN, CHTYPES_CACHE_STRICT,
+CHTYPES_OFFLINE=1 (the same as --offline).
 
 2.0.0-dev: UNSTABLE, staging only, not for production. Fetches only from the
 staging dev channel and trusts only its key; --lock, --frozen and --update are
@@ -333,7 +334,7 @@ fn cmd_list(args: &Args) -> Result<u8, Usage> {
         Err(e) => return Ok(report(&e)),
     }
     print_notes(args);
-    if args.offline {
+    if ocifetch::channel::offline_mode(args.offline) {
         return Ok(0);
     }
     match ocifetch::tags::published_versions(&options(args)) {
@@ -349,7 +350,7 @@ fn cmd_list(args: &Args) -> Result<u8, Usage> {
 
 fn cmd_where(args: &Args) -> Result<u8, Usage> {
     no_platform("where", args)?;
-    if !args.spellings.is_empty() || args.all {
+    if !args.spellings.is_empty() {
         return Err(Usage("where takes no arguments".into()));
     }
     if ocifetch::faults::strict_mode(options(args).strict_cache) {
@@ -357,6 +358,18 @@ fn cmd_where(args: &Args) -> Result<u8, Usage> {
         if let Err(e) = ensure::probe_cache(options(args)) {
             return Ok(report(&e));
         }
+    }
+    if args.all {
+        // Every directory searched, the cache root first (public issue #530).
+        return match ensure::search_dirs(&options(args)) {
+            Ok(dirs) => {
+                for dir in dirs {
+                    println!("{}", dir.display());
+                }
+                Ok(0)
+            }
+            Err(e) => Ok(report(&e)),
+        };
     }
     match ocifetch::layout::cache_root(args.cache.as_deref()) {
         Ok(root) => {

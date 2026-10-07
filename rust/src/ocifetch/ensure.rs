@@ -236,7 +236,7 @@ pub fn ensure(request: &str, mut options: Options) -> Result<Resolved> {
         None => None,
     };
 
-    if options.offline {
+    if channel::offline_mode(options.offline) {
         return resolve_offline(&res, &version_request, request, &options, lock.as_ref());
     }
     if res.strict {
@@ -738,10 +738,17 @@ fn probe(res: &Resources) -> Result<Vec<String>> {
 }
 
 fn probe_as(res: &Resources, strict: bool) -> Result<Vec<String>> {
-    let roots: Vec<&Path> = std::iter::once(res.root.as_path())
-        .chain(res.system_dirs.iter().map(PathBuf::as_path))
-        .collect();
+    let owned = layout::search_roots(&res.root, &res.system_dirs);
+    let roots: Vec<&Path> = owned.iter().map(PathBuf::as_path).collect();
     faults::probe_roots(&roots, strict)
+}
+
+/// Every directory a lookup with `options` reads, in the order it reads them:
+/// the cache root, then each system directory (docs/guides/fetch-v1.md §1, one
+/// root order). It creates and reads nothing (public issue #530).
+pub fn search_dirs(options: &Options) -> Result<Vec<PathBuf>> {
+    let root = layout::cache_root(options.cache_dir.as_deref())?;
+    Ok(layout::search_roots(&root, &options.system_dirs))
 }
 
 /// Check the cache `options` names, and its system dirs, by the mode
@@ -761,9 +768,8 @@ pub fn missing_notes(options: &Options) -> Vec<String> {
     let Ok(root) = layout::cache_root(options.cache_dir.as_deref()) else {
         return Vec::new();
     };
-    let roots: Vec<&Path> = std::iter::once(root.as_path())
-        .chain(options.system_dirs.iter().map(PathBuf::as_path))
-        .collect();
+    let owned = layout::search_roots(&root, &options.system_dirs);
+    let roots: Vec<&Path> = owned.iter().map(PathBuf::as_path).collect();
     let mut notes = faults::probe_roots(&roots, false).unwrap_or_default();
     notes.extend(layout::zero_x_hint(&root));
     notes
@@ -1608,6 +1614,53 @@ mod cache_roots_tests {
             assert_eq!(verified, vec![(cache_entry, true), (sys_entry, true)]);
             let _ = std::fs::remove_dir_all(&base);
         }
+    }
+
+    /// `search_dirs` is the order a lookup reads (public issue #530): records
+    /// seeded, last to first, in the directories it names are answered by the
+    /// earliest of them (a tie goes to the earlier root).
+    #[test]
+    fn search_dirs_is_the_order_a_lookup_reads() {
+        let base = scratch("search-dirs");
+        let (cache, a, b) = (base.join("cache"), base.join("a"), base.join("b"));
+        let opts = || options(&cache, vec![a.clone(), b.clone()]);
+        let dirs = search_dirs(&opts()).unwrap();
+        assert_eq!(dirs, vec![cache.clone(), a.clone(), b.clone()]);
+        for dir in dirs.iter().skip(1).rev() {
+            let entry = write_record(dir, "26.8.1.1", "20260801.000001");
+            let got = resolve_installed("26.8", "linux-arm64", opts())
+                .unwrap()
+                .expect("a record answers 26.8");
+            assert_eq!(
+                (&got.dir, &got.source),
+                (&entry, &format!("system:{}", dir.display()))
+            );
+        }
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A relative cache directory is resolved against the cwd once, so the
+    /// answer's `dir` and `library_path` are absolute (public issue #541).
+    #[test]
+    fn relative_cache_dir_resolves_to_absolute() {
+        let base = scratch("relative");
+        write_record(&base.join("cache"), "26.8.1.1", "20260801.000001");
+        // Reach the seeded cache by a path relative to the cwd (`..` up to the
+        // root, then down), so the test needs no process-wide chdir.
+        let depth = std::env::current_dir().unwrap().components().count() - 1;
+        let mut relative = PathBuf::new();
+        for _ in 0..depth {
+            relative.push("..");
+        }
+        relative.push(base.strip_prefix("/").unwrap().join("cache"));
+        assert!(relative.is_relative());
+        let got = resolve_installed("26.8", "linux-arm64", options(&relative, Vec::new()))
+            .unwrap()
+            .expect("a record answers 26.8");
+        assert!(got.dir.is_absolute(), "{:?}", got.dir);
+        assert!(got.library_path.is_absolute(), "{:?}", got.library_path);
+        assert!(!got.dir.components().any(|c| c.as_os_str() == ".."));
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// Every path under `root` with its size, or `None` when `root` is absent.
