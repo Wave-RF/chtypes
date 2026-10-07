@@ -51,6 +51,7 @@ _FETCH_CLASSES: dict[str, type[errors.ArtifactError]] = {
     errors.CODE_SOURCE_FORBIDDEN: errors.SourceForbiddenError,
     errors.CODE_SOURCE_INCOMPATIBLE: errors.SourceIncompatibleError,
     errors.CODE_CACHE_UNUSABLE: errors.CacheUnusableError,
+    errors.CODE_SOURCE_RETIRED: errors.SourceRetiredError,
 }
 
 

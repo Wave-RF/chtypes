@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "source": {
-    "generator_commit": "629ff5cdd37cad3d91c33ec16122d01cdf843451",
+    "generator_commit": "a557e52fafd98aec4a083c488d38c2c4f7047c7c",
     "go_sum_sha256": "e998462ee1660f7d0b42c45fd0e16ddef8c688e81aaa22c466ada3c69565eec9"
   },
   "cases": [
@@ -51,7 +51,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -99,7 +101,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -148,7 +152,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -196,7 +202,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -244,7 +252,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -292,7 +302,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -340,7 +352,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -388,7 +402,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -436,7 +452,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -484,7 +502,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -531,7 +551,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -578,7 +600,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -626,7 +650,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -674,7 +700,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -722,7 +750,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -770,7 +800,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -818,7 +850,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -866,7 +900,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -914,7 +950,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -962,7 +1000,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -1010,7 +1050,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -1058,7 +1100,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -1106,7 +1150,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -1156,7 +1202,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -1205,7 +1253,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -1253,7 +1303,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -1301,7 +1353,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -1349,7 +1403,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -1397,7 +1453,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -1445,7 +1503,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -1493,7 +1553,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -1541,7 +1603,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -1589,7 +1653,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -1637,7 +1703,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -1685,7 +1753,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -1733,7 +1803,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -1781,7 +1853,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -1829,7 +1903,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -1877,7 +1953,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -1925,7 +2003,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -1973,7 +2053,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -2021,7 +2103,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -2069,7 +2153,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -2117,7 +2203,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -2165,7 +2253,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -2215,7 +2305,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -2265,7 +2357,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -2315,7 +2409,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -2363,7 +2459,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -2411,7 +2509,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -2459,7 +2559,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -2507,7 +2609,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -2555,7 +2659,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -2603,7 +2709,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -2651,7 +2759,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -2699,7 +2809,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -2747,7 +2859,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -2795,7 +2909,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -2843,7 +2959,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -2891,7 +3009,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -2939,7 +3059,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -2987,7 +3109,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -3035,7 +3159,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -3083,7 +3209,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -3131,7 +3259,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -3179,7 +3309,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -3227,7 +3359,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -3275,7 +3409,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -3323,7 +3459,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -3371,7 +3509,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -3419,7 +3559,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -3467,7 +3609,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -3515,7 +3659,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -3563,7 +3709,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -3613,7 +3761,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -3661,7 +3811,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -3711,7 +3863,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -3759,7 +3913,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -3807,7 +3963,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -3855,7 +4013,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -3903,7 +4063,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -3951,7 +4113,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -3999,7 +4163,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -4047,7 +4213,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -4095,7 +4263,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -4143,7 +4313,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -4191,7 +4363,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -4239,7 +4413,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -4287,7 +4463,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -4335,7 +4513,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -4383,7 +4563,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -4431,7 +4613,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -4479,7 +4663,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -4529,7 +4715,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -4579,7 +4767,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -4629,7 +4819,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -4679,7 +4871,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -4728,7 +4922,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -4776,7 +4972,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -4824,7 +5022,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -4872,7 +5072,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -4924,7 +5126,9 @@
         },
         "lock_after": "lock-write-all-platforms",
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -4972,7 +5176,9 @@
         },
         "lock_after": "update-re-resolves",
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -5021,7 +5227,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -5069,7 +5277,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -5119,7 +5329,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -5168,7 +5380,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -5217,7 +5431,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -5266,7 +5482,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -5315,7 +5533,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -5362,7 +5582,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -5414,7 +5636,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -5461,7 +5685,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -5508,7 +5734,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -5555,7 +5783,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -5604,7 +5834,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -5653,7 +5885,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -5702,7 +5936,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -5751,7 +5987,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -5798,7 +6036,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -5851,7 +6091,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -5899,7 +6141,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -5949,7 +6193,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -5997,7 +6243,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -6046,7 +6294,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -6093,7 +6343,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -6141,7 +6393,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -6189,7 +6443,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -6237,7 +6493,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -6285,7 +6543,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -6333,7 +6593,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -6381,7 +6643,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -6429,7 +6693,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -6477,7 +6743,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -6525,7 +6793,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -6575,7 +6845,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -6625,7 +6897,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -6675,7 +6949,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -6723,7 +6999,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -6773,7 +7051,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -6823,7 +7103,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -6873,7 +7155,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -6927,7 +7211,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -6977,7 +7263,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -7032,7 +7320,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -7084,7 +7374,9 @@
         "tags": null,
         "records_intact": [
           "sha256:04c5dc762ea2d565054ccd112c279bfeb6de9b41afc83863ae8f9a829263e529"
-        ]
+        ],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -7134,7 +7426,9 @@
         "tags": null,
         "records_intact": [
           "sha256:04c5dc762ea2d565054ccd112c279bfeb6de9b41afc83863ae8f9a829263e529"
-        ]
+        ],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -7184,7 +7478,9 @@
         "tags": null,
         "records_intact": [
           "sha256:04c5dc762ea2d565054ccd112c279bfeb6de9b41afc83863ae8f9a829263e529"
-        ]
+        ],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -7234,7 +7530,9 @@
         "tags": null,
         "records_intact": [
           "sha256:04c5dc762ea2d565054ccd112c279bfeb6de9b41afc83863ae8f9a829263e529"
-        ]
+        ],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -7282,7 +7580,9 @@
         },
         "lock_after": null,
         "tags": null,
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
       }
     },
     {
@@ -7333,7 +7633,362 @@
           "26.8",
           "26.9"
         ],
-        "records_intact": []
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
+      }
+    },
+    {
+      "id": "retired-410-message",
+      "tree": "http-retired",
+      "transports": [
+        "http"
+      ],
+      "http_script": "retired-410-message",
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null
+      },
+      "request": {
+        "spelling": "26.12",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_SOURCE_RETIRED",
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": 1,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": "chtypes/v1 is retired: use chtypes/v2 (this registry no longer serves chtypes/v1)",
+        "message_excludes": []
+      }
+    },
+    {
+      "id": "retired-410-no-fallthrough",
+      "tree": "http-retired-mirror",
+      "transports": [
+        "http"
+      ],
+      "http_script": "retired-410-no-fallthrough",
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null
+      },
+      "request": {
+        "spelling": "26.12",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}",
+          "{base}/mirror"
+        ],
+        "own_fingerprint": null
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_SOURCE_RETIRED",
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": 1,
+          "none_matching": [
+            "GET .*/mirror/"
+          ],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": "chtypes/v1 is retired: use chtypes/v2 (this registry no longer serves chtypes/v1)",
+        "message_excludes": []
+      }
+    },
+    {
+      "id": "retired-410-dev-alias",
+      "tree": "dev-alias",
+      "transports": [
+        "http"
+      ],
+      "http_script": "retired-410-dev-alias",
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null
+      },
+      "request": {
+        "spelling": "26.8",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d"
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_SOURCE_RETIRED",
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": 1,
+          "none_matching": [
+            "GET .*/manifests/26.8$"
+          ],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": "chtypes/v1 is retired: use chtypes/v2 (this registry no longer serves chtypes/v1)",
+        "message_excludes": []
+      }
+    },
+    {
+      "id": "list-tags-retired-410",
+      "tree": "http-retired",
+      "transports": [
+        "http"
+      ],
+      "http_script": "list-tags-retired-410",
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null
+      },
+      "request": {
+        "spelling": "26.12",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_SOURCE_RETIRED",
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": 1,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": "chtypes/v1 is retired: use chtypes/v2 (this registry no longer serves chtypes/v1)",
+        "message_excludes": []
+      }
+    },
+    {
+      "id": "retired-410-blob",
+      "tree": "http-retired",
+      "transports": [
+        "http"
+      ],
+      "http_script": "retired-410-blob",
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null
+      },
+      "request": {
+        "spelling": "26.12",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_SOURCE_RETIRED",
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": null,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": "chtypes/v1 is retired: use chtypes/v2 (this registry no longer serves chtypes/v1)",
+        "message_excludes": []
+      }
+    },
+    {
+      "id": "retired-410-sanitized",
+      "tree": "http-retired",
+      "transports": [
+        "http"
+      ],
+      "http_script": "retired-410-sanitized",
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null
+      },
+      "request": {
+        "spelling": "26.12",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_SOURCE_RETIRED",
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": 1,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": "[1;31mchtypes/v1 is retired[0m: use chtypes/v2 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------…",
+        "message_excludes": []
+      }
+    },
+    {
+      "id": "retired-410-no-body",
+      "tree": "http-retired",
+      "transports": [
+        "http"
+      ],
+      "http_script": "retired-410-no-body",
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null
+      },
+      "request": {
+        "spelling": "26.12",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_SOURCE_RETIRED",
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": 1,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": "/s-retired-410-no-body/chtypes/v1/manifests/26.12",
+        "message_excludes": [
+          "null",
+          "undefined",
+          "None",
+          "\u003cnil\u003e"
+        ]
       }
     }
   ]

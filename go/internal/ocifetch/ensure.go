@@ -1243,9 +1243,15 @@ func FetchSigned(ctx context.Context, repositorySuffix, ref, predicateType strin
 		return nil, newError(CodeArtifactCorrupt, ref, "", layerResult.url, verr, "layer: %v", verr)
 	}
 
-	candidates := s.findReferrers(ctx, bases, manifestDigest, MediaTypeBundle)
+	candidates, err := s.findReferrers(ctx, bases, manifestDigest, MediaTypeBundle)
+	if err != nil {
+		return nil, err
+	}
 	for _, cand := range candidates {
 		body, bundleDigest, bundleManifestDigest, ferr := s.fetchReferrerContent(ctx, bases, cand)
+		if isRetired(ferr) {
+			return nil, ferr
+		}
 		if ferr != nil {
 			continue
 		}

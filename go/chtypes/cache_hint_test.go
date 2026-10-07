@@ -2,6 +2,8 @@ package chtypes
 
 import (
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -64,5 +66,29 @@ func TestStrictCacheIsTheCacheUnusableClass(t *testing.T) {
 	}
 	if _, err := r.Installed(); !errors.Is(err, ErrCacheUnusable) {
 		t.Fatalf("Installed on a 0.x registry in strict mode = %v", err)
+	}
+}
+
+// TestARetiredRepositoryIsTheSourceRetiredCode: a registry open that fetches
+// from a retired repository (every route answers 410 Gone) is an
+// *ArtifactError with CodeSourceRetired, errors.Is matches ErrSourceRetired,
+// and the message carries the registry's own (fetch-v1.md section 2, public
+// issue #571).
+func TestARetiredRepositoryIsTheSourceRetiredCode(t *testing.T) {
+	t.Cleanup(ocifetch.UseFetchV1ForTests())
+	const message = "chtypes/v1 is retired: use chtypes/v2"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusGone)
+		_, _ = w.Write([]byte(`{"errors":[{"code":"DENIED","message":"` + message + `"}]}`))
+	}))
+	defer srv.Close()
+	r, err := NewRegistry(WithFetchOptions(FetchOptions{Bases: []string{srv.URL + "/chtypes/v1"}, CacheDir: t.TempDir(), SystemDirs: []string{}}), WithAutoFetch(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = r.For("26.9")
+	var ae *ArtifactError
+	if !errors.As(err, &ae) || !errors.Is(err, ErrSourceRetired) || ae.Code != CodeSourceRetired || !strings.Contains(ae.Msg, message) {
+		t.Fatalf("For on a retired repository = %#v", err)
 	}
 }

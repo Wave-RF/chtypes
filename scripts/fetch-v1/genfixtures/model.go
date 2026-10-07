@@ -82,6 +82,14 @@ type Expect struct {
 	// directory must be byte for byte the same after the call as before it
 	// (aliascases.go: another fingerprint's build in a shared cache).
 	RecordsIntact []string `json:"records_intact"`
+	// MessageContains is text the failed call's error message must contain
+	// exactly: a retired repository's sanitized message (retiredcases.go).
+	// nil for every other case.
+	MessageContains *string `json:"message_contains"`
+	// MessageExcludes is text the failed call's error message must not
+	// contain anywhere (retiredcases.go: no `null` or `undefined` where a
+	// registry sent no message). Empty for every other case.
+	MessageExcludes []string `json:"message_excludes"`
 }
 
 // newCase returns a Case with every schema-required array/object field
@@ -108,10 +116,11 @@ func newCase(id, tree string, transports ...string) Case {
 		},
 		Env: map[string]string{},
 		Expect: Expect{
-			OK:            true,
-			Sleeps:        []float64{},
-			Warnings:      []string{},
-			RecordsIntact: []string{},
+			OK:              true,
+			Sleeps:          []float64{},
+			Warnings:        []string{},
+			RecordsIntact:   []string{},
+			MessageExcludes: []string{},
 			Requests: ExpectRequests{
 				NoneMatching: []string{},
 			},

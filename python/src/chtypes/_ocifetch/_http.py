@@ -29,6 +29,7 @@ from email.utils import parsedate_to_datetime
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
 from chtypes._ocifetch import _constants as C
+from chtypes._ocifetch._retired import retired_text
 
 __all__ = [
     "USER_AGENT",
@@ -38,6 +39,7 @@ __all__ = [
     "HttpResponse",
     "NotFoundHttpError",
     "OversizeHttpError",
+    "RetiredHttpError",
     "RetryPolicy",
     "TransportError",
     "UnauthorizedHttpError",
@@ -118,6 +120,13 @@ class UnreachableHttpError(TransportError):
 
 class OversizeHttpError(TransportError):
     """A response body exceeded the caller's declared size cap."""
+
+
+class RetiredHttpError(TransportError):
+    """A retired repository (`RETIRED_STATUSES`, a 410; docs/guides/fetch-v1.md
+    §2): permanent, so never retried and never a reason to try the next base.
+    Its text names the URL that answered and carries the registry's message,
+    made safe to print (`_retired.retired_message`)."""
 
 
 class Clock:
@@ -228,7 +237,16 @@ def _single_request(
             )
     except urllib.error.HTTPError as e:
         try:
-            body = _read_capped(e, max_bytes) if e.code not in _REDIRECT_CODES else b""
+            if e.code in C.RETIRED_STATUSES:
+                # Only the registry's message is wanted from a retired
+                # repository's answer: at most RETIRED_BODY_MAX_BYTES of it,
+                # and a body that fails part way is no body.
+                try:
+                    body = e.read(C.RETIRED_BODY_MAX_BYTES)
+                except (OSError, ValueError, AttributeError):
+                    body = b""
+            else:
+                body = _read_capped(e, max_bytes) if e.code not in _REDIRECT_CODES else b""
         finally:
             e.close()
         return HttpResponse(status=e.code, headers=dict(e.headers or {}), body=body, url=url)
@@ -380,6 +398,11 @@ def _http_get_once(
             headers.pop("Authorization", None)
             continue
 
+        if resp.status in C.RETIRED_STATUSES:
+            # A retired repository: permanent, never retried, and the
+            # exception ends fetch_from_bases's loop over bases.
+            raise RetiredHttpError(retired_text(current_url, resp.status, resp.body))
+
         if resp.status == 401:
             if not tried_anon_flow and not policy.token:
                 challenge = resp.headers.get("WWW-Authenticate") or resp.headers.get(
@@ -523,6 +546,10 @@ def fetch_from_bases(
     404, some unreachable — the outcome follows the LAST base tried, since
     bases are an explicit preference order and the last one is the final
     word a caller configured.
+
+    In every mode a retired repository (`RetiredHttpError`, a 410) ends the
+    loop on the base that answered it: it is permanent, never a reason to try
+    the next base, and in `alias` mode never a reason to fall back to the tag.
     """
     if not bases:
         raise UnreachableHttpError("no base URLs configured")

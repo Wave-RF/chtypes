@@ -21,7 +21,7 @@ func thisFile() string {
 
 // cases.go — assembles every tree, http-script, lock and case built by the
 // category files (resolve.go, trust.go, bytescases.go, cachecases.go,
-// lockcases.go, httpcases.go, genericcases.go, aliascases.go) into the final FileSet and
+// lockcases.go, httpcases.go, genericcases.go, aliascases.go, retiredcases.go) into the final FileSet and
 // cases.json, per the v1 fetch-layer plan's §3.2/§3.3.
 
 // allCases accumulates across every category file via collectCases; each
@@ -41,6 +41,7 @@ func buildAll() *FileSet {
 	cases = append(cases, buildHTTPCases(fs)...)
 	cases = append(cases, buildGenericCases(fs)...)
 	cases = append(cases, buildAliasCases(fs)...)
+	cases = append(cases, buildRetiredCases(fs)...)
 
 	checkUniqueIDs(cases)
 	checkOnlineTagsExist(cases)

@@ -74,7 +74,8 @@
     "retry_after_statuses": [429, 503],
     "retry_after_over_budget": "refuse",
     "digest_404": "next_base_then_retry_on_last",
-    "tag_404": "next_base_then_unpublished"
+    "tag_404": "next_base_then_unpublished",
+    "retired_statuses": [410]
   },
   "timeouts": {
     "connect_s": 30,
@@ -88,7 +89,9 @@
     "max_referrers": 16,
     "max_redirects": 5,
     "max_unpacked_bytes": 4294967296,
-    "zstd_window_log_max": 27
+    "zstd_window_log_max": 27,
+    "retired_body_bytes": 65536,
+    "retired_message_code_points": 256
   },
   "cache": {
     "root_template": "${XDG_CACHE_HOME:-$HOME/.cache}/chtypes/v1",
@@ -115,6 +118,7 @@
     "CHTYPES_SOURCE_FORBIDDEN": 6,
     "CHTYPES_SOURCE_INCOMPATIBLE": 7,
     "CHTYPES_ARTIFACT_INCOMPATIBLE": 8,
-    "CHTYPES_CACHE_UNUSABLE": 9
+    "CHTYPES_CACHE_UNUSABLE": 9,
+    "CHTYPES_SOURCE_RETIRED": 10
   }
 }

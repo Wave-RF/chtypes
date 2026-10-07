@@ -68,6 +68,9 @@ pub fn published_versions(options: &Options) -> Result<Vec<String>> {
                     &format!("{base}: unexpected status {status} listing tags"),
                 ));
             }
+            // A retired repository (a 410, §2) is permanent: never a reason
+            // to try the next base.
+            Err(e @ Error::SourceRetired(_)) => return Err(e),
             Err(e) => last = Some(e),
         }
     }

@@ -241,7 +241,8 @@ var errAliasNotFound = errors.New("chtypes: no base has the alias tag")
 // base; a single verification failure on content successfully fetched is
 // never cause to try another base — that check happens after this function
 // returns, in the caller (docs/guides/fetch-v1.md §2: "never on a
-// verification failure").
+// verification failure"). Nor is a retired repository (a 410): it ends the
+// loop with CHTYPES_SOURCE_RETIRED on the base that answered it.
 func (s *session) fetchAcrossBases(ctx context.Context, bases []string, suffix string, policy notFoundPolicy, opts requestOptions) (*httpResult, string, error) {
 	if len(bases) == 0 {
 		return nil, "", errors.New("chtypes: no base URL is configured")
@@ -258,6 +259,12 @@ func (s *session) fetchAcrossBases(ctx context.Context, bases []string, suffix s
 			reqOpts.extraRetryStatuses = append(append([]int{}, opts.extraRetryStatuses...), http.StatusNotFound)
 		}
 		result, err := s.client.doGet(ctx, u, reqOpts)
+		if isRetired(err) {
+			// A retired repository (§2) is permanent: it is the answer, never
+			// a reason to try the next base, and under the alias policy never
+			// a reason to fall back to the tag.
+			return nil, "", err
+		}
 		if err != nil {
 			// doGet only returns an error once its retry schedule is
 			// exhausted: a transport failure, repeated 5xx, or — on the

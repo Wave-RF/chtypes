@@ -13,7 +13,7 @@ Unix only: the loader is `dlopen`. Minimum supported Rust version 1.87. `cargo d
 
 **Four call classes, peers of each other.** `Error::Schema` (ClickHouse itself would refuse), `Error::Unsupported` (this build declines; a server might accept), `Error::Usage` (misuse) and `Error::Internal` (a library bug) each carry a `CallError`: `status`, `ch_code`, `ch_name`, `message` and `column`, verbatim from the library. A decline is neither an acceptance nor a rejection: fall back to the server. `Error::call_error()` reads the five fields from any of the four.
 
-**One family with the artifact errors.** `Error::ArtifactIncompatible` and `Error::ArtifactCorrupt` carry a `Refusal` (`reason`, `path`, `want`, `got`); the fetch layer's codes are one variant each (`ArtifactMissing`, `ArtifactUntrusted`, `ArtifactPinned`, `ArtifactUnpublished`, `SourceUnreachable`, `SourceUnauthorized`, `SourceForbidden`, `SourceIncompatible`), and `Error::code()` names the `CHTYPES_*` code.
+**One family with the artifact errors.** `Error::ArtifactIncompatible` and `Error::ArtifactCorrupt` carry a `Refusal` (`reason`, `path`, `want`, `got`); the fetch layer's codes are one variant each (`ArtifactMissing`, `ArtifactUntrusted`, `ArtifactPinned`, `ArtifactUnpublished`, `SourceUnreachable`, `SourceUnauthorized`, `SourceForbidden`, `SourceIncompatible`, `CacheUnusable`, `SourceRetired`), and `Error::code()` names the `CHTYPES_*` code.
 
 **Bytes are bytes.** A column name, a statement, a message and a rendered value come back as `RawText`: `as_bytes()` is authoritative, `as_str()` is `None` for bytes that are not UTF-8, and `Display` is the one lossy form. Inputs are `impl AsRef<[u8]>`, so `&str`, `&[u8]` and `Vec<u8>` all work. An export is a `Vec<u8>`.
 

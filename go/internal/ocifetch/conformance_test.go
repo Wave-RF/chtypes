@@ -76,6 +76,11 @@ type confExpect struct {
 	LockAfter     *string            `json:"lock_after"`
 	Tags          *[]string          `json:"tags"` // a list-tags- case's listing
 	RecordsIntact []string           `json:"records_intact"`
+	// MessageContains and MessageExcludes are checked against a failed call's
+	// error text: what it must contain exactly (a retired repository's
+	// sanitized message), and what it must not contain anywhere.
+	MessageContains *string  `json:"message_contains"`
+	MessageExcludes []string `json:"message_excludes"`
 }
 
 type confRequestsExpect struct {
@@ -683,6 +688,17 @@ func compareOutcome(expect confExpect, runErr error, version, build *string, man
 		}
 		if string(fe.Code) != *expect.Code {
 			return fmt.Sprintf("code = %s, want %s: %v", fe.Code, *expect.Code, runErr)
+		}
+	}
+	if !expect.OK && runErr != nil {
+		text := runErr.Error()
+		if expect.MessageContains != nil && !strings.Contains(text, *expect.MessageContains) {
+			return fmt.Sprintf("the error %q does not contain %q", text, *expect.MessageContains)
+		}
+		for _, bad := range expect.MessageExcludes {
+			if strings.Contains(text, bad) {
+				return fmt.Sprintf("the error %q contains %q", text, bad)
+			}
 		}
 	}
 	if expect.Sleeps != nil {

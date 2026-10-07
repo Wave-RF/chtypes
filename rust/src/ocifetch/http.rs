@@ -14,6 +14,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use super::constants;
 use super::error::{Error, Result};
+use super::retired;
 use super::url::Url;
 
 /// An injectable source of time and sleep, so the conformance suite can
@@ -199,6 +200,15 @@ impl Client {
             }
             let resp = self.raw_request(&url, &headers, max_bytes)?;
 
+            // A retired repository (docs/guides/fetch-v1.md §2): permanent, so
+            // Fatal, which `get` returns without a retry and every base loop
+            // returns at once.
+            if retired::is_retired_status(resp.status) {
+                return Err(TransportOutcome::Fatal(Error::SourceRetired(
+                    retired::retired_text(&url.to_string(), resp.status, &resp.body),
+                )));
+            }
+
             if resp.status == 401 && bearer.is_none() {
                 if let Some(challenge) = resp.header("WWW-Authenticate") {
                     if let Some(token) = self.anonymous_token(challenge, max_bytes)? {
@@ -315,16 +325,32 @@ impl Client {
                             .map(|v| (name.as_str().to_string(), v.to_string()))
                     })
                     .collect();
-                let body = resp
-                    .body_mut()
-                    .with_config()
-                    .limit(max_bytes)
-                    .read_to_vec()
-                    .map_err(|e| {
-                        TransportOutcome::Fatal(Error::ArtifactCorrupt(format!(
-                            "response body from {url} exceeded {max_bytes} bytes or failed to read: {e}"
-                        )))
-                    })?;
+                let body = if retired::is_retired_status(status) {
+                    // Only the registry's message is wanted from a retired
+                    // repository's answer: at most RETIRED_BODY_MAX_BYTES of
+                    // it, and a body that fails part way is no body.
+                    use std::io::Read;
+                    let mut buf = Vec::new();
+                    match resp
+                        .body_mut()
+                        .as_reader()
+                        .take(constants::RETIRED_BODY_MAX_BYTES)
+                        .read_to_end(&mut buf)
+                    {
+                        Ok(_) => buf,
+                        Err(_) => Vec::new(),
+                    }
+                } else {
+                    resp.body_mut()
+                        .with_config()
+                        .limit(max_bytes)
+                        .read_to_vec()
+                        .map_err(|e| {
+                            TransportOutcome::Fatal(Error::ArtifactCorrupt(format!(
+                                "response body from {url} exceeded {max_bytes} bytes or failed to read: {e}"
+                            )))
+                        })?
+                };
                 Ok(HttpResponse {
                     status,
                     headers,
@@ -581,6 +607,64 @@ mod tests {
         assert_eq!(resp.status, 200);
         let agents = handle.join().unwrap();
         assert_eq!(agents, vec![user_agent(), user_agent()]);
+    }
+
+    /// A clock that records every sleep instead of sleeping.
+    struct RecordingClock(std::sync::Arc<std::sync::Mutex<Vec<f64>>>);
+
+    impl Clock for RecordingClock {
+        fn now(&self) -> SystemTime {
+            SystemTime::now()
+        }
+
+        fn sleep(&self, seconds: f64) {
+            self.0.lock().unwrap().push(seconds);
+        }
+    }
+
+    /// A retired repository (docs/guides/fetch-v1.md §2, public issue #571):
+    /// a 410 is `SourceRetired` with the URL and the registry's message,
+    /// read past the request's own byte cap, and is never retried.
+    #[test]
+    fn a_410_is_retired_and_never_retried() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let body =
+            r#"{"errors":[{"code":"DENIED","message":"chtypes/v1 is retired: use chtypes/v2"}]}"#;
+        let handle = std::thread::spawn(move || {
+            let (mut sock, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 4096];
+            let n = sock.read(&mut buf).unwrap();
+            assert!(n > 0, "the client sent nothing");
+            let resp = format!(
+                "HTTP/1.1 410 Gone\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            sock.write_all(resp.as_bytes()).unwrap();
+        });
+        let sleeps = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let client = Client::with_clock(Box::new(RecordingClock(sleeps.clone())));
+        let url = format!("http://127.0.0.1:{port}/v2/chtypes/v1/manifests/26.9");
+        let err = client
+            .get(&url, &[], &AuthConfig::default(), 16)
+            .err()
+            .expect("a 410 is an error");
+        handle.join().unwrap();
+        let Error::SourceRetired(message) = &err else {
+            panic!("want SourceRetired, got {err:?}");
+        };
+        assert_eq!(
+            message,
+            &format!(
+                "{url} answered 410 Gone: the repository is retired; the registry says: chtypes/v1 is retired: use chtypes/v2"
+            )
+        );
+        assert_eq!(err.code(), "CHTYPES_SOURCE_RETIRED");
+        assert_eq!(err.exit_code(), Some(10));
+        assert!(sleeps.lock().unwrap().is_empty(), "a 410 was retried");
     }
 
     #[test]

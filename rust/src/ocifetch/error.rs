@@ -64,6 +64,12 @@ pub enum Error {
     /// strict mode refuses (`CHTYPES_CACHE_UNUSABLE`): never "not installed"
     /// and never the network's `SourceUnreachable`.
     CacheUnusable(CacheFault),
+    /// A source answered 410 Gone: a retired repository, which is permanent,
+    /// so the request was never retried and never sent to the next base
+    /// (`CHTYPES_SOURCE_RETIRED`; docs/guides/fetch-v1.md §2, public issue
+    /// #571). The message names the URL that answered and carries the
+    /// registry's own message, made safe to print (`retired.rs`).
+    SourceRetired(String),
 }
 
 impl Error {
@@ -81,6 +87,7 @@ impl Error {
             Error::SourceForbidden(_) => "CHTYPES_SOURCE_FORBIDDEN",
             Error::SourceIncompatible(_) | Error::InvalidInput(_) => "CHTYPES_SOURCE_INCOMPATIBLE",
             Error::CacheUnusable(_) => "CHTYPES_CACHE_UNUSABLE",
+            Error::SourceRetired(_) => "CHTYPES_SOURCE_RETIRED",
         }
     }
 
@@ -105,7 +112,8 @@ impl Error {
             | Error::SourceUnauthorized(m)
             | Error::SourceForbidden(m)
             | Error::SourceIncompatible(m)
-            | Error::InvalidInput(m) => m,
+            | Error::InvalidInput(m)
+            | Error::SourceRetired(m) => m,
             Error::CacheUnusable(f) => &f.message,
         }
     }

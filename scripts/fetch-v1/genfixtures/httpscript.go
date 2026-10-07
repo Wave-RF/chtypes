@@ -35,4 +35,7 @@ type httpResponse struct {
 	Status       *int              `json:"status,omitempty"`
 	Headers      map[string]string `json:"headers,omitempty"`
 	BodyFromTree bool              `json:"body_from_tree,omitempty"`
+	// Body, when set, is the response body as text (a registry's error
+	// document: retiredcases.go's 410 Gone). Never together with BodyFromTree.
+	Body *string `json:"body,omitempty"`
 }

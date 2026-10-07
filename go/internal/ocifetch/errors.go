@@ -1,7 +1,7 @@
 package ocifetch
 
 // errors.go — the v1 shared error vocabulary (docs/guides/fetch-v1.md §8),
-// eleven codes instead of v0's six. CHTYPES_ARTIFACT_INCOMPATIBLE is reserved
+// twelve codes instead of v0's six. CHTYPES_ARTIFACT_INCOMPATIBLE is reserved
 // for the FFI/loader layer (constants_gen.go's comment on ErrorExitCodes);
 // this package's own code never constructs it.
 
@@ -34,6 +34,11 @@ const (
 	// public issue #486). Its FetchError names the Path, the Reason and the
 	// OSError.
 	CodeCacheUnusable ErrorCode = "CHTYPES_CACHE_UNUSABLE"
+	// CodeSourceRetired is a source that answered 410 Gone: a retired
+	// repository, which is permanent, so it is never retried and never sends
+	// the request to the next base (§2, "A retired repository"; public issue
+	// #571). Its message names the URL and carries the registry's own message.
+	CodeSourceRetired ErrorCode = "CHTYPES_SOURCE_RETIRED"
 )
 
 // Sentinel errors. errors.Is(err, ocifetch.ErrArtifactCorrupt) is true for
@@ -49,6 +54,7 @@ var (
 	ErrSourceForbidden     = errors.New(string(CodeSourceForbidden))
 	ErrSourceIncompatible  = errors.New(string(CodeSourceIncompatible))
 	ErrCacheUnusable       = errors.New(string(CodeCacheUnusable))
+	ErrSourceRetired       = errors.New(string(CodeSourceRetired))
 )
 
 // Sentinel returns the errors.Is target for this code, or nil for a code
@@ -75,6 +81,8 @@ func (c ErrorCode) Sentinel() error {
 		return ErrSourceIncompatible
 	case CodeCacheUnusable:
 		return ErrCacheUnusable
+	case CodeSourceRetired:
+		return ErrSourceRetired
 	}
 	return nil
 }

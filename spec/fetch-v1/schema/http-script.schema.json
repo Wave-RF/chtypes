@@ -69,6 +69,10 @@
             "body_from_tree": {
               "type": "boolean",
               "description": "When true, the response body is the named route tree's bytes for this path; otherwise the body is empty."
+            },
+            "body": {
+              "type": "string",
+              "description": "The response body, sent as this text's UTF-8 bytes: a registry's error document, such as a retired repository's 410 (docs/guides/fetch-v1.md §2). Never together with body_from_tree."
             }
           }
         }

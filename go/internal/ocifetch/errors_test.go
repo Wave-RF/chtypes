@@ -42,6 +42,8 @@ func TestExitCodeTable(t *testing.T) {
 		{CodeSourceForbidden, 6},
 		{CodeSourceIncompatible, 7},
 		{CodeArtifactIncompatible, 8},
+		{CodeCacheUnusable, 9},
+		{CodeSourceRetired, 10},
 	}
 	for _, c := range cases {
 		if got := c.code.ExitCode(); got != c.want {

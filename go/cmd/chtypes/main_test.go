@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -83,7 +85,7 @@ func TestExitStatusIsTheGeneratedTable(t *testing.T) {
 		ocifetch.CodeArtifactMissing: 1, ocifetch.CodeArtifactUntrusted: 1, ocifetch.CodeArtifactCorrupt: 1,
 		ocifetch.CodeArtifactPinned: 1, ocifetch.CodeArtifactUnpublished: 4, ocifetch.CodeSourceUnreachable: 3,
 		ocifetch.CodeSourceUnauthorized: 5, ocifetch.CodeSourceForbidden: 6, ocifetch.CodeSourceIncompatible: 7,
-		ocifetch.CodeArtifactIncompatible: 8, ocifetch.CodeCacheUnusable: 9,
+		ocifetch.CodeArtifactIncompatible: 8, ocifetch.CodeCacheUnusable: 9, ocifetch.CodeSourceRetired: 10,
 	}
 	if len(want) != len(ocifetch.ErrorExitCodes) {
 		t.Fatalf("the generated table has %d codes, this test %d", len(ocifetch.ErrorExitCodes), len(want))
@@ -168,6 +170,29 @@ func TestFetchVerifyListAgainstTheFixtureTree(t *testing.T) {
 	env["CHTYPES_CACHE"] = t.TempDir()
 	if code, _, errText = runCLI(t, env, "fetch", "26.8"); code != 1 || !strings.Contains(errText, "CHTYPES_ARTIFACT_UNTRUSTED") {
 		t.Errorf("an untrusted tree = %d %q", code, errText)
+	}
+}
+
+// A retired repository (fetch-v1.md section 2, public issue #571): every
+// route answers 410 with the registry's document, so fetch and list print the
+// registry's own message and exit 10, after one request each.
+func TestFetchAndListAgainstARetiredRepository(t *testing.T) {
+	const message = "chtypes/v1 is retired: use chtypes/v2 (this registry no longer serves chtypes/v1)"
+	var requests []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusGone)
+		_, _ = w.Write([]byte(`{"errors":[{"code":"DENIED","message":"` + message + `"}]}`))
+	}))
+	defer srv.Close()
+	env := map[string]string{"CHTYPES_ARTIFACTS_URL": srv.URL + "/chtypes/v1", "CHTYPES_CACHE": t.TempDir(), "CHTYPES_TARGET": "linux-arm64"}
+	for _, args := range [][]string{{"fetch", "26.9"}, {"list"}} {
+		requests = nil
+		code, out, errText := runCLI(t, env, args...)
+		if code != 10 || out != "" || !strings.Contains(errText, "CHTYPES_SOURCE_RETIRED") || !strings.Contains(errText, message) || len(requests) != 1 {
+			t.Errorf("%v = exit %d, stdout %q, stderr %q, %d request(s) %v; want exit 10, the registry's message, one request", args, code, out, errText, len(requests), requests)
+		}
 	}
 }
 

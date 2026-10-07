@@ -165,6 +165,11 @@ pub enum Error {
     /// ([`crate::FetchOptions::strict_cache`]) refuses. Never "not
     /// installed", never the network's [`Error::SourceUnreachable`].
     CacheUnusable(CacheFault),
+    /// `CHTYPES_SOURCE_RETIRED`: a source answered 410 Gone, a retired
+    /// repository. It is permanent, so the request was never retried and
+    /// never sent to the next source; the message names the URL that
+    /// answered and carries the registry's own message, made safe to print.
+    SourceRetired(String),
 }
 
 /// A `Result` whose error is this crate's [`Error`].
@@ -203,6 +208,7 @@ impl Error {
             Error::SourceForbidden(_) => "CHTYPES_SOURCE_FORBIDDEN",
             Error::SourceIncompatible(_) => "CHTYPES_SOURCE_INCOMPATIBLE",
             Error::CacheUnusable(_) => "CHTYPES_CACHE_UNUSABLE",
+            Error::SourceRetired(_) => "CHTYPES_SOURCE_RETIRED",
             _ => return None,
         })
     }
@@ -268,7 +274,8 @@ impl fmt::Display for Error {
             | Error::SourceUnreachable(m)
             | Error::SourceUnauthorized(m)
             | Error::SourceForbidden(m)
-            | Error::SourceIncompatible(m) => {
+            | Error::SourceIncompatible(m)
+            | Error::SourceRetired(m) => {
                 write!(f, "{}: {m}", self.code().unwrap_or_default())
             }
             Error::CacheUnusable(c) => write!(f, "{}: {c}", self.code().unwrap_or_default()),
@@ -297,6 +304,7 @@ impl From<crate::ocifetch::error::Error> for Error {
             F::SourceUnauthorized(m) => Error::SourceUnauthorized(m),
             F::SourceForbidden(m) => Error::SourceForbidden(m),
             F::SourceIncompatible(m) => Error::SourceIncompatible(m),
+            F::SourceRetired(m) => Error::SourceRetired(m),
             // A refused version spelling, an unreadable cache or lock file:
             // misuse, which carries no fetch code of its own.
             F::InvalidInput(m) => Error::usage(m),
@@ -458,6 +466,14 @@ mod tests {
         assert_eq!(
             Error::from(F::SourceUnreachable("down".into())).code(),
             Some("CHTYPES_SOURCE_UNREACHABLE")
+        );
+        // A retired repository (fetch-v1.md section 2, public issue #571)
+        // keeps its code and its whole message.
+        let retired = Error::from(F::SourceRetired("u answered 410 Gone".into()));
+        assert_eq!(retired.code(), Some("CHTYPES_SOURCE_RETIRED"));
+        assert_eq!(
+            retired.to_string(),
+            "CHTYPES_SOURCE_RETIRED: u answered 410 Gone"
         );
     }
 }

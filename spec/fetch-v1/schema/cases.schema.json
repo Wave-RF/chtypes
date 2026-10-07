@@ -92,7 +92,8 @@
           "type": "object",
           "additionalProperties": false,
           "required": ["ok", "version", "build", "manifest", "library_sha256", "code", "sleeps",
-                       "warnings", "requests", "lock_after", "tags", "records_intact"],
+                       "warnings", "requests", "lock_after", "tags", "records_intact",
+                       "message_contains", "message_excludes"],
           "properties": {
             "ok": {"type": "boolean"},
             "version": {"type": ["string", "null"]},
@@ -105,7 +106,8 @@
                        "CHTYPES_ARTIFACT_CORRUPT", "CHTYPES_ARTIFACT_PINNED",
                        "CHTYPES_ARTIFACT_UNPUBLISHED", "CHTYPES_SOURCE_UNREACHABLE",
                        "CHTYPES_SOURCE_UNAUTHORIZED", "CHTYPES_SOURCE_FORBIDDEN",
-                       "CHTYPES_SOURCE_INCOMPATIBLE", "CHTYPES_ARTIFACT_INCOMPATIBLE"]
+                       "CHTYPES_SOURCE_INCOMPATIBLE", "CHTYPES_ARTIFACT_INCOMPATIBLE",
+                       "CHTYPES_SOURCE_RETIRED"]
             },
             "sleeps": {
               "type": "array",
@@ -137,6 +139,16 @@
               "items": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
               "uniqueItems": true,
               "description": "Installed manifests whose cache directory (unpacked/sha256/<hex>/, every file in it) must be byte for byte the same after the call as before it: another ABI fingerprint's build in a cache the dev channel shares (docs/guides/fetch-v1.md §3). The runner snapshots each after its pre-install step and compares after the call."
+            },
+            "message_contains": {
+              "type": ["string", "null"],
+              "description": "Text the failed call's error message must contain, exactly (for a CHTYPES_SOURCE_RETIRED case, the registry's sanitized message: docs/guides/fetch-v1.md §2, \"A retired repository\"). null in every other case."
+            },
+            "message_excludes": {
+              "type": "array",
+              "items": {"type": "string", "minLength": 1},
+              "uniqueItems": true,
+              "description": "Text the failed call's error message must not contain anywhere (a retired repository with no message must not print `null` or `undefined` in its place). Empty in every other case."
             }
           }
         }

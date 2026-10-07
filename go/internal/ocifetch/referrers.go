@@ -36,14 +36,19 @@ import (
 // error: by the time trust discovery runs, the subject manifest itself has
 // already been fetched successfully, so the honest outcome of finding
 // nothing at all is CHTYPES_ARTIFACT_UNTRUSTED from the caller, not a fetch
-// error blamed on this lookup.
-func (s *session) fetchAuxIndex(ctx context.Context, bases []string, suffix, accept string) (*ReferrersIndex, bool) {
+// error blamed on this lookup. The one exception is a retired repository (a
+// 410, §2): it is permanent, so it is returned at once, never passed over for
+// the next base or the fallback tag.
+func (s *session) fetchAuxIndex(ctx context.Context, bases []string, suffix, accept string) (*ReferrersIndex, bool, error) {
 	for _, base := range bases {
 		u, err := buildRequestURL(base, suffix)
 		if err != nil {
 			continue
 		}
 		result, err := s.client.doGet(ctx, u, requestOptions{maxBytes: ManifestMaxBytes, accept: accept})
+		if isRetired(err) {
+			return nil, false, err
+		}
 		if err != nil || result.status != http.StatusOK {
 			continue
 		}
@@ -51,33 +56,41 @@ func (s *session) fetchAuxIndex(ctx context.Context, bases []string, suffix, acc
 		if uerr := strictUnmarshal(result.body, &idx); uerr != nil {
 			continue
 		}
-		return &idx, true
+		return &idx, true, nil
 	}
-	return nil, false
+	return nil, false, nil
 }
 
 // findReferrers returns every referrer descriptor of artifactType for
 // subjectDigest: the referrers API's matches, and — whenever that set comes
 // up empty, for any reason — also the fallback tag's matches. Capped at
-// MaxReferrers.
-func (s *session) findReferrers(ctx context.Context, bases []string, subjectDigest Digest, artifactType string) []Descriptor {
+// MaxReferrers. The error is only ever a retired repository's (fetchAuxIndex).
+func (s *session) findReferrers(ctx context.Context, bases []string, subjectDigest Digest, artifactType string) ([]Descriptor, error) {
 	var matches []Descriptor
 	// The referrers API is not a manifests/<ref> GET, so it carries no
 	// Accept header requirement here.
-	if idx, ok := s.fetchAuxIndex(ctx, bases, "referrers/"+string(subjectDigest), ""); ok {
+	idx, ok, err := s.fetchAuxIndex(ctx, bases, "referrers/"+string(subjectDigest), "")
+	if err != nil {
+		return nil, err
+	}
+	if ok {
 		matches = appendMatchingArtifactType(matches, idx, artifactType)
 	}
 	if len(matches) == 0 {
 		// The fallback tag IS a manifests/<ref> GET (ref being the
 		// sha256-<hex> tag), so it sends manifestAccept like every other one.
-		if idx, ok := s.fetchAuxIndex(ctx, bases, "manifests/"+fallbackTag(subjectDigest), manifestAccept); ok {
+		idx, ok, err := s.fetchAuxIndex(ctx, bases, "manifests/"+fallbackTag(subjectDigest), manifestAccept)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
 			matches = appendMatchingArtifactType(matches, idx, artifactType)
 		}
 	}
 	if len(matches) > MaxReferrers {
 		matches = matches[:MaxReferrers]
 	}
-	return matches
+	return matches, nil
 }
 
 func appendMatchingArtifactType(into []Descriptor, idx *ReferrersIndex, artifactType string) []Descriptor {
@@ -137,10 +150,16 @@ func (s *session) fetchReferrerContentMax(ctx context.Context, bases []string, d
 // returns the accepted statement, or warnings and a nil statement when
 // allowUnsigned let it through unsigned.
 func (s *session) verifyManifestTrust(ctx context.Context, bases []string, manifestDigest, layerDigest Digest, platform Platform, request string, trustedKeys []ed25519.PublicKey, allowUnsigned bool) (*verifiedStatement, []string, error) {
-	candidates := s.findReferrers(ctx, bases, manifestDigest, MediaTypeBundle)
+	candidates, err := s.findReferrers(ctx, bases, manifestDigest, MediaTypeBundle)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	for _, cand := range candidates {
 		body, bundleDigest, bundleManifestDigest, ferr := s.fetchReferrerContent(ctx, bases, cand)
+		if isRetired(ferr) {
+			return nil, nil, ferr
+		}
 		if ferr != nil {
 			continue
 		}

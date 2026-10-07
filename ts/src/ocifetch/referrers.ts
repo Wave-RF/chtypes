@@ -20,7 +20,7 @@
 
 import { asString, field, items, type Json, parseJsonValue } from '../json.js';
 import { MANIFEST_MAX_BYTES, MAX_REFERRERS } from './constants.gen.js';
-import { ArtifactCorruptError } from './errors.js';
+import { ArtifactCorruptError, SourceRetiredError } from './errors.js';
 import { type RequestOptions, readFileUrl, requestBuffered } from './http.js';
 import { endpointUrl, MANIFEST_ACCEPT_HEADER } from './types.js';
 
@@ -111,7 +111,10 @@ export async function discoverReferrers(
         if (d.artifactType === artifactType) fromApi.push(d);
       }
     }
-  } catch {
+  } catch (err) {
+    // A retired repository (a 410, guide §2) is permanent: never read as "no
+    // candidates here", and never a reason to try the fallback tag.
+    if (err instanceof SourceRetiredError) throw err;
     // The referrers API is not guaranteed on every host (mirrors) — read as
     // "no candidates here", exactly as an empty or goldens-only answer would.
   }

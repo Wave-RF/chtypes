@@ -86,6 +86,10 @@ interface ConformanceCase {
     readonly tags: readonly string[] | null;
     /** Installed manifests whose cache directory must be byte for byte the same after the call. */
     readonly records_intact: readonly string[];
+    /** Text a failed call's error must contain exactly (a retired repository's sanitized message, guide §2). */
+    readonly message_contains: string | null;
+    /** Text a failed call's error must not contain anywhere. */
+    readonly message_excludes: readonly string[];
   };
 }
 
@@ -434,7 +438,7 @@ async function runEnsure(c: ConformanceCase, baseOptions: EnsureOptions, lockPat
     if (c.expect.code !== null && code !== c.expect.code) {
       return `code ${code} != expected ${c.expect.code} (${err instanceof Error ? err.message : String(err)})`;
     }
-    return '';
+    return messageDetail(c, err);
   }
 }
 
@@ -453,7 +457,7 @@ async function runListTags(c: ConformanceCase, baseOptions: EnsureOptions): Prom
     if (c.expect.code !== null && code !== c.expect.code) {
       return `code ${code} != expected ${c.expect.code} (${err instanceof Error ? err.message : String(err)})`;
     }
-    return '';
+    return messageDetail(c, err);
   }
 }
 
@@ -484,8 +488,20 @@ async function runGenericFetch(c: ConformanceCase, bases: readonly string[], bas
     if (c.expect.code !== null && code !== c.expect.code) {
       return `code ${code} != expected ${c.expect.code} (${err instanceof Error ? err.message : String(err)})`;
     }
-    return '';
+    return messageDetail(c, err);
   }
+}
+
+/** `expect.message_contains`/`message_excludes` against a failed call's error text (a retired repository's sanitized message, guide §2). */
+function messageDetail(c: ConformanceCase, err: unknown): string {
+  const text = err instanceof Error ? err.message : String(err);
+  if (c.expect.message_contains !== null && !text.includes(c.expect.message_contains)) {
+    return `the error ${JSON.stringify(text)} does not contain ${JSON.stringify(c.expect.message_contains)}`;
+  }
+  for (const bad of c.expect.message_excludes) {
+    if (text.includes(bad)) return `the error ${JSON.stringify(text)} contains ${JSON.stringify(bad)}`;
+  }
+  return '';
 }
 
 // --------------------------------------------------------------- records_intact

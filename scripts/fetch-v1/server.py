@@ -23,7 +23,10 @@ fetch-v1.md §10). Python stdlib only.
         per-case (two different case ids never see each other's requests);
         and a request whose User-Agent is not `chtypes-<binding>/<version>`
         (urllib's default, or none) is answered 400 while a conforming one
-        is served, and the log records the agent either way.
+        is served, and the log records the agent either way; and a scripted
+        status with a `body` (a retired repository's 410 and its error
+        document) is sent with exactly those bytes, and one without a body
+        with none.
         Exits nonzero and prints which assertion failed, same discipline
         as every other --selftest in this repository.
 
@@ -338,6 +341,10 @@ class Handler(BaseHTTPRequestHandler):
         filtered = False
         if resp.get("body_from_tree"):
             body, filtered = self._referrers_filter(self._tree_bytes_for_request())
+        elif "body" in resp:
+            # A registry's own error document, sent as given (a retired
+            # repository's 410: docs/guides/fetch-v1.md §2).
+            body = resp["body"].encode("utf-8")
         self.send_response(status)
         for k, v in headers.items():
             self.send_header(k, v)
@@ -545,6 +552,27 @@ def _run_selftest(tmp: Path) -> None:
             }
         )
     )
+    gone_body = '{"errors":[{"code":"DENIED","message":"retired \\u001b[31m\u00e9"}]}'
+    (http_dir / "gone.json").write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "id": "gone",
+                "tree": "basic",
+                "routes": [
+                    {
+                        "method": "GET",
+                        "path": "/v2/chtypes/v1/manifests/26.8",
+                        "responses": [
+                            {"status": 410, "headers": {"Content-Type": "application/json"}, "body": gone_body},
+                            {"status": 410},
+                        ],
+                    }
+                ],
+                "second_origin_routes": [],
+            }
+        )
+    )
     (http_dir / "closer.json").write_text(
         json.dumps(
             {
@@ -594,7 +622,7 @@ def _run_selftest(tmp: Path) -> None:
                             "lock_after": None,
                         },
                     }
-                    for cid in ("retry-then-ok", "redirect-case", "closer", "no-script")
+                    for cid in ("retry-then-ok", "redirect-case", "closer", "no-script", "gone")
                 ],
             }
         )
@@ -671,6 +699,18 @@ def _run_selftest(tmp: Path) -> None:
                 assert len(got) == want, f"referrers {query!r}: expected {want}, got {len(got)}"
                 has = r.headers.get("OCI-Filters-Applied") == "artifactType"
                 assert has == applied, f"referrers {query!r}: OCI-Filters-Applied={has}, want {applied}"
+
+        # 8. A scripted body is sent as exactly its UTF-8 bytes, with the
+        # scripted status; a status with no body sends none.
+        url = f"http://127.0.0.1:{port1}/v2/s-gone/chtypes/v1/manifests/26.8"
+        for want_body in (gone_body.encode("utf-8"), b""):
+            try:
+                get(url)
+                raise AssertionError("expected a 410")
+            except urllib.error.HTTPError as e:
+                assert e.code == 410, f"expected 410, got {e.code}"
+                got_body = e.read()
+                assert got_body == want_body, f"expected body {want_body!r}, got {got_body!r}"
 
         log_ua = json.loads(get(f"http://127.0.0.1:{port1}/_log/s-no-script").read())
         agents = [e["user_agent"] for e in log_ua]

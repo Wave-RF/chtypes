@@ -4,6 +4,8 @@ verdict (docs/guides/fetch-v1.md §10, "The staging run"). Python stdlib only.
 
     scripts/fetch-v1/staging.py --selftest
     scripts/fetch-v1/staging.py emit --out <dir> --trust-test-key <hex>
+                                     [--table retired [--serving-base <url>]]
+    scripts/fetch-v1/staging.py summary --derived <dir> --binding <b> --report <file>
     scripts/fetch-v1/staging.py verdict --derived <dir> --reports-dir <dir>
 
 WHAT IT IS FOR. `.github/workflows/v1.yml`'s dispatch-only `v1-staging` job
@@ -36,6 +38,23 @@ anything unless it is given the test key's own public hex on the command line
 tests/fixtures/fetch-v1/test-key/public.hex. The opt-in is therefore an
 explicit argument in the workflow step, recorded in the sidecar, and absent
 from every other job.
+
+THE RETIRED TABLE (`--table retired`; public issue #571). A retired
+repository answers every route with 410 Gone and the registry's own error
+document. `emit --table retired` derives, instead of the table above, the
+`registry`-transport twins of three http cases, run against `registry_base`,
+which must be the retired repository: `retired-410-message` (the tag answers
+410: CHTYPES_SOURCE_RETIRED with the registry's message),
+`retired-410-no-fallthrough` (its second base is `--serving-base`, a base that
+serves the request, so a binding that moved on to it everywhere would not
+answer RETIRED; without one the case is excluded, loudly) and
+`list-tags-retired-410` (the listing). Each asks for RETIRED_SPELLING, which
+the serving base serves. A real host exposes no request log, so each keeps
+only `requests.max: 1`, which the Go and Python runners check against their
+own client-side log on every transport (TypeScript's and Rust's read only the
+fixture server's, so for them it is vacuous and the code is the proof). The
+message each expects is the real registry's, recorded in RETIRED_OVERRIDES
+with its reason. Every other case is excluded.
 
 PER-CASE DIFFERENCES. `OVERRIDES` maps a case id to `{"expect": {...},
 "reason": "..."}` for a case whose expected outcome differs on the real host;
@@ -84,6 +103,35 @@ NOTES: dict[str, str] = {
         "unchanged (inferred; the first run settles it)"
     ),
     "unpublished-line": "the host answers an unpublished line's tag with a 404, like the fixture tree",
+}
+
+# The retired table (`--table retired`; the module docstring): the three http
+# cases whose registry twins it derives, in this order.
+RETIRED_CASES = ("retired-410-message", "retired-410-no-fallthrough", "list-tags-retired-410")
+# What each twin asks for: a line the serving base serves (measured 2026-10-07:
+# staging chtypes/v2-dev answers manifests/26.8 with 200).
+RETIRED_SPELLING = "26.8"
+# The message the staging registry's retired chtypes/v1 sends (measured
+# 2026-10-07, every route: 410, cache-control: no-store,
+# {"errors":[{"code":"DENIED","message":<this>,"detail":{...}}]}).
+RETIRED_REGISTRY_MESSAGE = "chtypes/v1 is retired: use chtypes/v2 (this registry no longer serves chtypes/v1)"
+RETIRED_OVERRIDES: dict[str, dict[str, Any]] = {
+    cid: {
+        "expect": {"message_contains": RETIRED_REGISTRY_MESSAGE},
+        "reason": (
+            "the message the staging registry's retired chtypes/v1 sends (measured 2026-10-07); "
+            "the fixture's contract body was copied from it, so the text is the same"
+        ),
+    }
+    for cid in RETIRED_CASES
+}
+RETIRED_NOTES = {
+    "retired-410-no-fallthrough": (
+        "base 2 serves the request, so a binding that moved on to it for every request would answer "
+        "with a build or another code, never CHTYPES_SOURCE_RETIRED; one that moved on for some "
+        "requests only is caught by requests.max 1 in the Go and Python runners, and by the http "
+        "case's request log in all four"
+    ),
 }
 
 
@@ -143,16 +191,70 @@ def derive(cases_doc: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, An
     return derived, included, excluded
 
 
-def emit(out: Path, fixtures: Path, trust_hex: str) -> dict[str, Any]:
+def derive_retired(
+    cases_doc: dict[str, Any], serving_base: str
+) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, str]]]:
+    """The retired table's registry twins (the module docstring)."""
+    by_id = {c["id"]: c for c in cases_doc["cases"]}
+    kept: list[dict[str, Any]] = []
+    included: list[dict[str, Any]] = []
+    excluded: list[dict[str, str]] = []
+    for cid in RETIRED_CASES:
+        if cid not in by_id:
+            raise SystemExit(f"staging.py: cases.json has no {cid!r}, which the retired table derives")
+        c = copy.deepcopy(by_id[cid])
+        c["transports"] = ["registry"]
+        c["http_script"] = None
+        c["request"]["spelling"] = RETIRED_SPELLING
+        c["request"]["bases"] = ["{base}"]
+        if cid == "retired-410-no-fallthrough":
+            if not serving_base:
+                excluded.append({"id": cid, "reason": "retired table: no --serving-base to be its second base"})
+                continue
+            c["request"]["bases"] = ["{base}", serving_base]
+        # One request, by the client's own count: Go's and Python's runners keep
+        # a client-side request log on every transport, while TypeScript's and
+        # Rust's read only the fixture server's, so for them this is vacuous
+        # here and the code is the proof. No path pattern: the host's paths
+        # are not the fixture server's.
+        c["expect"]["requests"] = {"max": 1, "none_matching": [], "auth_on_second_origin": False}
+        if c["expect"]["code"] != "CHTYPES_SOURCE_RETIRED":
+            raise SystemExit(f"staging.py: {cid!r} no longer expects CHTYPES_SOURCE_RETIRED")
+        ov = RETIRED_OVERRIDES[cid]
+        c["expect"].update(ov["expect"])
+        entry: dict[str, Any] = {"id": cid, "override": {"expect": ov["expect"], "reason": ov["reason"]}}
+        if cid in RETIRED_NOTES:
+            entry["note"] = RETIRED_NOTES[cid]
+        kept.append(c)
+        included.append(entry)
+    for c in cases_doc["cases"]:
+        if c["id"] not in RETIRED_CASES:
+            excluded.append({"id": c["id"], "reason": "retired table: not one of its three registry twins"})
+    derived = copy.deepcopy(cases_doc)
+    derived["cases"] = kept
+    return derived, included, excluded
+
+
+def emit(out: Path, fixtures: Path, trust_hex: str, table: str = "served", serving_base: str = "") -> dict[str, Any]:
     want = (fixtures / "test-key" / "public.hex").read_text(encoding="utf-8").strip()
     if trust_hex.strip() != want:
         raise SystemExit(
             "staging.py: --trust-test-key must be the SDK test key's own public hex "
             f"({want[:8]}…); refusing to emit a table that trusts anything else."
         )
+    if table not in ("served", "retired"):
+        raise SystemExit(f"staging.py: --table must be served or retired, not {table!r}")
+    if serving_base and (table != "retired" or not serving_base.startswith("https://") or serving_base.endswith("/")):
+        raise SystemExit(
+            "staging.py: --serving-base is for --table retired only, and must be https://<host>/<repository path> "
+            f"with no trailing slash, not {serving_base!r}"
+        )
     cases_path = fixtures / "cases.json"
     doc = json.loads(cases_path.read_text(encoding="utf-8"))
-    derived, included, excluded = derive(doc)
+    if table == "retired":
+        derived, included, excluded = derive_retired(doc, serving_base)
+    else:
+        derived, included, excluded = derive(doc)
     if not derived["cases"]:
         raise SystemExit("staging.py: no case applies to a staging host; refusing to emit an empty table")
     if out.exists() and any(out.iterdir()):
@@ -166,6 +268,8 @@ def emit(out: Path, fixtures: Path, trust_hex: str) -> dict[str, Any]:
     cases_out.write_text(json.dumps(derived, indent=2) + "\n", encoding="utf-8")
     manifest = {
         "schema": 1,
+        "table": table,
+        "serving_base": serving_base,
         "source_cases_sha256": sha256_of(cases_path),
         "derived_cases_sha256": sha256_of(cases_out),
         "trust_test_key": want,
@@ -211,6 +315,9 @@ def verdict(derived_dir: Path, reports_dir: Path, enrolled_dir: Path, registry_b
     lines = ["### v1-staging verdict (information only; never gates a PR)", ""]
     if registry_base:
         lines.append(f"registry base: `{registry_base}`")
+    lines.append(f"table: `{manifest.get('table', 'served')}`")
+    if manifest.get("serving_base"):
+        lines.append(f"serving base (the no-fallthrough case's second): `{manifest['serving_base']}`")
     lines.append(f"derived cases: {len(ids)} of {len(ids) + len(manifest['excluded'])}, sha256 `{derived_sha}`")
     lines.append(f"enrolled: {', '.join(sorted(enrolled)) if enrolled else '(none)'}")
     lines.append(f"test key trusted by explicit opt-in: `{manifest['trust_test_key'][:8]}…`")
@@ -248,6 +355,33 @@ def verdict(derived_dir: Path, reports_dir: Path, enrolled_dir: Path, registry_b
         lines += ["", "problems:"] + [f"- {p}" for p in problems]
     lines += ["", "excluded, with the rule that excluded each:"]
     lines += [f"- `{e['id']}`: {e['reason']}" for e in manifest["excluded"]]
+    return "\n".join(lines)
+
+
+def binding_summary(derived_dir: Path, binding: str, report_path: Path) -> str:
+    """One binding's own staging leg, for that leg's job summary: every derived
+    case, its verdict and detail, and the overrides' reasons."""
+    manifest = json.loads((derived_dir / SIDECAR).read_text(encoding="utf-8"))
+    ids = [e["id"] for e in manifest["included"]]
+    reasons = {e["id"]: (e.get("override") or {}).get("reason", "") for e in manifest["included"]}
+    lines = [f"### v1-staging ({binding}), table `{manifest.get('table', 'served')}`", ""]
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        return "\n".join([*lines, f"NO REPORT: {report_path}: {e}"])
+    if report.get("cases_sha256") != manifest["derived_cases_sha256"]:
+        lines.append(f"STALE: the report's cases_sha256 is not the derived table's ({report.get('cases_sha256')!r})")
+    got = {
+        r.get("id"): r
+        for r in report.get("results", [])
+        if r.get("transport") == "registry"
+    }
+    lines += ["| case | verdict | detail | override |", "| --- | --- | --- | --- |"]
+    for i in ids:
+        r = got.get(i)
+        verdict_text = "missing" if r is None else str(r.get("verdict", "?"))
+        detail = "" if r is None else str(r.get("detail", ""))
+        lines.append(f"| {i} | {verdict_text} | {detail.replace('|', '/')} | {reasons[i].replace('|', '/')} |")
     return "\n".join(lines)
 
 
@@ -345,6 +479,57 @@ def selftest() -> None:
         (rep / "a.json").write_text(json.dumps({"schema": 1, "binding": "go", "toolchain": "x", "cases_sha256": "0" * 64, "results": res}))
         assert "stale" in verdict(out, rep, en)
         assert "no report was uploaded" in verdict(out, t / "none", en)
+
+        # The retired table: exactly the three registry twins, each asking for
+        # RETIRED_SPELLING with no request-log assertion and the real
+        # registry's message; the no-fallthrough twin's second base is the
+        # serving base, and without one it is excluded, loudly.
+        key = (FIXTURES / "test-key" / "public.hex").read_text().strip()
+        serving = "https://registry.example/chtypes/v2-dev"
+        rout = t / "retired"
+        rm = emit(rout, FIXTURES, key, table="retired", serving_base=serving)
+        rdoc = json.loads((rout / "cases.json").read_text())
+        assert [c["id"] for c in rdoc["cases"]] == list(RETIRED_CASES), rdoc["cases"]
+        by = {c["id"]: c for c in rdoc["cases"]}
+        for c in rdoc["cases"]:
+            assert c["transports"] == ["registry"] and c["http_script"] is None
+            assert c["request"]["spelling"] == RETIRED_SPELLING
+            assert c["expect"]["code"] == "CHTYPES_SOURCE_RETIRED"
+            assert c["expect"]["message_contains"] == RETIRED_REGISTRY_MESSAGE
+            assert c["expect"]["requests"] == {"max": 1, "none_matching": [], "auth_on_second_origin": False}
+        assert by["retired-410-no-fallthrough"]["request"]["bases"] == ["{base}", serving]
+        assert by["retired-410-message"]["request"]["bases"] == ["{base}"]
+        assert rm["table"] == "retired" and all(e.get("override") for e in rm["included"])
+        assert len(rm["excluded"]) == len(json.loads((FIXTURES / "cases.json").read_text())["cases"]) - 3
+        rv = verdict(rout, t / "none", en)
+        assert "table: `retired`" in rv and serving in rv, rv
+        rout2 = t / "retired-no-serving"
+        rm2 = emit(rout2, FIXTURES, key, table="retired")
+        assert [e["id"] for e in rm2["included"]] == ["retired-410-message", "list-tags-retired-410"], rm2
+        assert any(e["id"] == "retired-410-no-fallthrough" and "serving-base" in e["reason"] for e in rm2["excluded"])
+        for bad_table, bad_serving in (("served", serving), ("retired", "http://x/y"), ("retired", serving + "/"), ("odd", "")):
+            try:
+                emit(t / f"bad-{bad_table}", FIXTURES, key, table=bad_table, serving_base=bad_serving)
+            except SystemExit:
+                pass
+            else:
+                raise AssertionError(f"emit accepted table={bad_table!r} serving_base={bad_serving!r}")
+
+        # One binding's summary: a pass, a fail with its detail, a missing case,
+        # a stale report and no report at all.
+        rep_path = t / "rep-retired.json"
+        rsha = rm["derived_cases_sha256"]
+        rres = [
+            {"id": "retired-410-message", "transport": "registry", "verdict": "pass", "detail": ""},
+            {"id": "list-tags-retired-410", "transport": "registry", "verdict": "fail", "detail": "code a|b"},
+        ]
+        rep_path.write_text(json.dumps({"schema": 1, "binding": "go", "toolchain": "x", "cases_sha256": rsha, "results": rres}))
+        st = binding_summary(rout, "go", rep_path)
+        assert "| retired-410-message | pass |" in st and "| list-tags-retired-410 | fail | code a/b |" in st, st
+        assert "| retired-410-no-fallthrough | missing |" in st and "STALE" not in st, st
+        rep_path.write_text(json.dumps({"schema": 1, "binding": "go", "toolchain": "x", "cases_sha256": "0" * 64, "results": rres}))
+        assert "STALE" in binding_summary(rout, "go", rep_path)
+        assert "NO REPORT" in binding_summary(rout, "go", t / "absent.json")
     print("staging.py --selftest: OK")
 
 
@@ -356,6 +541,12 @@ def main() -> int:
     e.add_argument("--out", type=Path, required=True)
     e.add_argument("--fixtures", type=Path, default=FIXTURES)
     e.add_argument("--trust-test-key", default="", help="the SDK test key's public hex: the explicit opt-in")
+    e.add_argument("--table", default="served", help="served (the staged fixture tree) or retired (a 410 Gone)")
+    e.add_argument("--serving-base", default="", help="--table retired: the no-fallthrough case's second base")
+    s = sub.add_parser("summary")
+    s.add_argument("--derived", type=Path, required=True)
+    s.add_argument("--binding", required=True)
+    s.add_argument("--report", type=Path, required=True)
     v = sub.add_parser("verdict")
     v.add_argument("--derived", type=Path, required=True)
     v.add_argument("--reports-dir", type=Path, required=True)
@@ -367,9 +558,17 @@ def main() -> int:
         selftest()
         return 0
     if args.cmd == "emit":
-        m = emit(args.out, args.fixtures, args.trust_test_key)
-        print(f"staging: {len(m['included'])} case(s) derived, {len(m['excluded'])} excluded -> {args.out}")
+        m = emit(args.out, args.fixtures, args.trust_test_key, args.table, args.serving_base)
+        print(f"staging: {m['table']} table, {len(m['included'])} case(s) derived, {len(m['excluded'])} excluded -> {args.out}")
         return 0
+    if args.cmd == "summary":
+        text = binding_summary(args.derived, args.binding, args.report)
+        print(text)
+        step_summary = os.environ.get("GITHUB_STEP_SUMMARY")
+        if step_summary:
+            with open(step_summary, "a", encoding="utf-8") as f:
+                f.write(text + "\n")
+        return 0  # information only, like the verdict
     if args.cmd == "verdict":
         text = verdict(args.derived, args.reports_dir, args.enrolled_dir, args.registry_base)
         print(text)

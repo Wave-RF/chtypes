@@ -564,6 +564,14 @@ def _run_case(
             mismatches.append(
                 f"expected ok={expect['ok']} code={expect['code']!r}, got {type(e).__name__}: {e}"
             )
+        # What the failed call's error text must and must not contain (a
+        # retired repository's sanitized message: docs/guides/fetch-v1.md §2).
+        text = str(e)
+        if expect["message_contains"] is not None and expect["message_contains"] not in text:
+            mismatches.append(f"the error {text!r} does not contain {expect['message_contains']!r}")
+        for bad in expect["message_excludes"]:
+            if bad in text:
+                mismatches.append(f"the error {text!r} contains {bad!r}")
     except ValueError as e:
         # A client-side refusal (e.g. a bad spelling) has no `code`.
         if expect["ok"] or expect["code"] is not None:

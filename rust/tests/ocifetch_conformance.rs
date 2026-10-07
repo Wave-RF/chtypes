@@ -138,6 +138,35 @@ struct Expect {
     /// Installed manifests whose cache directory must be byte for byte the
     /// same after the call as before it.
     records_intact: Vec<String>,
+    /// Text a failed call's error must contain exactly (a retired
+    /// repository's sanitized message, docs/guides/fetch-v1.md §2).
+    message_contains: Option<String>,
+    /// Text a failed call's error must not contain anywhere.
+    message_excludes: Vec<String>,
+}
+
+/// `expect.code`, `expect.message_contains` and `expect.message_excludes`
+/// against a failed call's error. `code: null` is a refusal that is
+/// deliberately not one of the shared CHTYPES_* codes (a refused spelling):
+/// any error is the expected code, exactly as the Go runner reads it.
+fn check_failure(expect: &Expect, e: &ocifetch::error::Error) -> Result<(), String> {
+    if let Some(want_code) = &expect.code {
+        if e.code() != want_code {
+            return Err(format!("error code = {}, want {want_code}: {e}", e.code()));
+        }
+    }
+    let text = e.to_string();
+    if let Some(want) = &expect.message_contains {
+        if !text.contains(want.as_str()) {
+            return Err(format!("the error {text:?} does not contain {want:?}"));
+        }
+    }
+    for bad in &expect.message_excludes {
+        if text.contains(bad.as_str()) {
+            return Err(format!("the error {text:?} contains {bad:?}"));
+        }
+    }
+    Ok(())
 }
 
 #[derive(Deserialize, Clone)]
@@ -654,7 +683,7 @@ fn check_listing(
             expect.code
         )),
         (true, Err(e)) => Err(format!("expected ok, got {e} ({})", e.code())),
-        (false, Err(_)) => Ok(()),
+        (false, Err(e)) => check_failure(expect, &e),
     }
 }
 
@@ -771,18 +800,7 @@ fn check_expectation(
             // function only sees the resolve outcome.
             Ok(())
         }
-        (false, Err(e)) => {
-            // `code: null` is a refusal that is deliberately not one of the
-            // shared CHTYPES_* codes (a refused spelling): any error is the
-            // expected outcome, exactly as the Go runner reads it.
-            let Some(want_code) = &expect.code else {
-                return Ok(());
-            };
-            if e.code() != want_code {
-                return Err(format!("error code = {}, want {want_code}: {e}", e.code()));
-            }
-            Ok(())
-        }
+        (false, Err(e)) => check_failure(expect, &e),
         (true, Err(e)) => Err(format!("expected ok, got {e} ({})", e.code())),
         (false, Ok(resolved)) => Err(format!(
             "expected failure {:?}, got ok (version {})",
@@ -844,18 +862,7 @@ fn check_generic_expectation(
             }
             Ok(())
         }
-        (false, Err(e)) => {
-            // `code: null` is a refusal that is deliberately not one of the
-            // shared CHTYPES_* codes (a refused spelling): any error is the
-            // expected outcome, exactly as the Go runner reads it.
-            let Some(want_code) = &expect.code else {
-                return Ok(());
-            };
-            if e.code() != want_code {
-                return Err(format!("error code = {}, want {want_code}: {e}", e.code()));
-            }
-            Ok(())
-        }
+        (false, Err(e)) => check_failure(expect, &e),
         (true, Err(e)) => Err(format!("expected ok, got {e} ({})", e.code())),
         (false, Ok(_)) => Err(format!("expected failure {:?}, got ok", expect.code)),
     }

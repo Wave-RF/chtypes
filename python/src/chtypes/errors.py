@@ -31,6 +31,7 @@ __all__ = [
     "CODE_CACHE_UNUSABLE",
     "CODE_SOURCE_FORBIDDEN",
     "CODE_SOURCE_INCOMPATIBLE",
+    "CODE_SOURCE_RETIRED",
     "CODE_SOURCE_UNAUTHORIZED",
     "CODE_SOURCE_UNREACHABLE",
     "ArtifactCorruptError",
@@ -47,6 +48,7 @@ __all__ = [
     "SchemaError",
     "SourceForbiddenError",
     "SourceIncompatibleError",
+    "SourceRetiredError",
     "SourceUnauthorizedError",
     "SourceUnreachableError",
     "UnsupportedError",
@@ -66,6 +68,7 @@ CODE_SOURCE_UNAUTHORIZED = "CHTYPES_SOURCE_UNAUTHORIZED"
 CODE_SOURCE_FORBIDDEN = "CHTYPES_SOURCE_FORBIDDEN"
 CODE_SOURCE_INCOMPATIBLE = "CHTYPES_SOURCE_INCOMPATIBLE"
 CODE_CACHE_UNUSABLE = "CHTYPES_CACHE_UNUSABLE"
+CODE_SOURCE_RETIRED = "CHTYPES_SOURCE_RETIRED"
 
 # `chs_status` value of CHS_INVALID_ARGUMENT. The binding's own misuse errors
 # carry it so a handler sees one shape whichever side caught the misuse. It is
@@ -256,6 +259,15 @@ class SourceIncompatibleError(ArtifactError):
     """The source served something this fetcher cannot read."""
 
     code = CODE_SOURCE_INCOMPATIBLE
+
+
+class SourceRetiredError(ArtifactError):
+    """The source answered 410 Gone: a retired repository, which is permanent,
+    so the request was never retried and never sent to the next base. The
+    message names the URL that answered and carries the registry's own
+    message, made safe to print."""
+
+    code = CODE_SOURCE_RETIRED
 
 
 class CacheUnusableError(ArtifactError):
