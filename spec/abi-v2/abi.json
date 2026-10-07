@@ -251,6 +251,17 @@
         }
       ]
     },
+    "merge_reason": {
+      "repr": "string",
+      "values": [
+        {
+          "value": "ttl_delete"
+        },
+        {
+          "value": "ttl_column_reset"
+        }
+      ]
+    },
     "value_src": {
       "repr": "string",
       "fields": {
@@ -1365,9 +1376,12 @@
         "engine_rows[][].stored",
         "storage_transforms[].column",
         "storage_transforms[].stored",
+        "at_merge[].column",
+        "at_merge[].stored",
         "transformed[].column",
         "transformed[].input",
         "transformed[].stored",
+        "unsupported_settings[].name",
         "framing.header.names[].name"
       ],
       "value_entries": [
@@ -2140,6 +2154,99 @@
                 ]
               }
             ]
+          },
+          "at_merge": {
+            "type": "object",
+            "required": [
+              "row",
+              "reason"
+            ],
+            "properties": {
+              "row": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "reason": {
+                "type": "string"
+              },
+              "column": {
+                "type": "string"
+              },
+              "column_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "stored": {
+                "type": "string"
+              },
+              "stored_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "input_rows": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              }
+            },
+            "allOf": [
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "column"
+                    ],
+                    "properties": {
+                      "column_b64": false
+                    }
+                  },
+                  {
+                    "required": [
+                      "column_b64"
+                    ],
+                    "properties": {
+                      "column": false
+                    }
+                  },
+                  {
+                    "properties": {
+                      "column": false,
+                      "column_b64": false
+                    }
+                  }
+                ]
+              },
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "stored"
+                    ],
+                    "properties": {
+                      "stored_b64": false
+                    }
+                  },
+                  {
+                    "required": [
+                      "stored_b64"
+                    ],
+                    "properties": {
+                      "stored": false
+                    }
+                  },
+                  {
+                    "properties": {
+                      "stored": false,
+                      "stored_b64": false
+                    }
+                  }
+                ]
+              }
+            ]
           }
         },
         "type": "object",
@@ -2155,6 +2262,12 @@
               "$ref": "#/$defs/row"
             }
           },
+          "unsupported_settings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/named"
+            }
+          },
           "engine_rows": {
             "type": "array",
             "items": {
@@ -2168,6 +2281,12 @@
             "type": "array",
             "items": {
               "$ref": "#/$defs/storage_transform"
+            }
+          },
+          "at_merge": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/at_merge"
             }
           },
           "transformed": {

@@ -1083,6 +1083,7 @@ _PY_VOCAB = {
     "filter_verdict": "Verdict",
     "discover_query_param": "DiscoverQueryParam",
     "default_kind": "DefaultKind",
+    "merge_reason": "MergeReason",
 }
 
 _KNOWN_PROPERTY = (
@@ -1187,10 +1188,10 @@ def render_vocab_v2(model: Model) -> str:
     parts.append(
         f'"""The Python binding\'s generated vocabularies, from spec/abi-v{model.major}/abi.json: the C\n'
         "enums (`Format`, `Status`), the document vocabularies (`Outcome`, `FilterOutcome`,\n"
-        "`Verdict`, `DefaultKind`, `Reason`, `Source`, `DiscoverQueryParam`) with the facts the\n"
-        "description attaches to each value (`Format.ch_name`, `Reason` lossy, `Source`\n"
-        "is_stored, `Verdict.answered`), and the `DocFlags` groups. No other file in this\n"
-        "package keeps a copy of any of it.\n"
+        "`Verdict`, `DefaultKind`, `MergeReason`, `Reason`, `Source`, `DiscoverQueryParam`) with the\n"
+        "facts the description attaches to each value (`Format.ch_name`, `Reason` lossy,\n"
+        "`Source` is_stored, `Verdict.answered`), and the `DocFlags` groups. No other file in\n"
+        "this package keeps a copy of any of it.\n"
         "\n"
         f"Rule r3 (spec/abi-v{model.major}/docs.md): every vocabulary has an unknown(n) member, and a\n"
         "value the description does not list reads as it, carrying the raw value, for that\n"
@@ -1304,6 +1305,17 @@ def render_vocab_v2(model: Model) -> str:
             "DefaultKind",
             "default_kind",
             "A column's default kind, `\"\"` meaning none.",
+        )
+    )
+    parts.append("")
+    parts.append("")
+    parts.append(
+        _str_enum_v2(
+            model,
+            "MergeReason",
+            "merge_reason",
+            "What a merge would do to one row of the part an INSERT writes, as a batch's\n"
+            "    `at_merge` reports it.",
         )
     )
     parts.append("")

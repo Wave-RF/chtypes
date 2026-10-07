@@ -2,7 +2,7 @@
  "schema": "https://artifacts.wavehouse.dev/spec/goldens/v1",
  "by": "the Go runner's stub self-check (hand-written; not a release's goldens)",
  "abi": 2,
- "abi_fingerprint": "sha256:d87e91be2bbe75b985c38224268c2f7dc5d8236dab0a4b4d61357c6dfdc1a232",
+ "abi_fingerprint": "sha256:4129dccc3f4e698dedb0e99cae413f5240085f633c5a1244e2c55bf7a7bb6c3a",
  "clickhouse_version": "99.1.2.3",
  "build": "20990101.000000",
  "revision": 1,

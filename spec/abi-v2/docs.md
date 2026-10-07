@@ -6,7 +6,7 @@ Prose is deliberately outside the fingerprint: editing this file never changes `
 
 Each section is copied into a C comment, so it may not contain a comment opener or closer, or two question marks in a row.
 
-**UNSTABLE.** `spec/abi-v2/abi.json` declares `stability` `unstable`: generation 2 is being designed, and its fingerprint moves with every change to the description until the lock. It was seeded as generation 1's surface at generation 2; the additions land one pull request at a time. The first is the server profile: the `chs_server` handle, `chs_server_create` and `chs_server_free`, a server and an options document on `chs_schema_create`, and the `server` and `replicated` members of `schema_description`. What generation 2 adds, and what the lock needs, are in public issue #511.
+**UNSTABLE.** `spec/abi-v2/abi.json` declares `stability` `unstable`: generation 2 is being designed, and its fingerprint moves with every change to the description until the lock. It was seeded as generation 1's surface at generation 2; the additions land one pull request at a time. The first is the server profile: the `chs_server` handle, `chs_server_create` and `chs_server_free`, a server and an options document on `chs_schema_create`, and the `server` and `replicated` members of `schema_description`. The second is the batch document's `at_merge` list, with its `merge_reason` vocabulary, and a top-level `unsupported_settings` (public issue #544). What generation 2 adds, and what the lock needs, are in public issue #511.
 
 ## Rules
 
@@ -127,6 +127,10 @@ The input and export formats, numbered as they have been since the first release
 
 The reason a stored value differs from the supplied one, as the library reports it per column. `lossy` says whether information was lost; exactly four reasons are lossless (a representation change, a value filled from a DEFAULT or the type's zero, and a DEFAULT the library resolved from its own clock), and they are still reported because a preview must show what the table will hold. A binding reads `lossy` from here and never keeps a list of its own.
 
+### merge_reason
+
+What a merge would do to one row of the part an `INSERT` writes, as the batch document's `at_merge` reports it: `ttl_delete`, the table's rows TTL removes the row; `ttl_column_reset`, a column's TTL resets the column's value. A reason added later is a new value, which a reader reads as its `unknown(n)` (rule r3).
+
 ### default_kind
 
 A column's default kind, as ClickHouse names it: `DEFAULT`, `MATERIALIZED`, `ALIAS` or `EPHEMERAL`, or the empty string for a column with none. The schema description carries one per column.
@@ -204,7 +208,21 @@ One row's verdict and, as the flags ask, its columns' stored values, provenance 
 
 ### document:batch
 
-A body's verdict, counts and per-row documents (each a row document, with its own `input_span`), and, when an export was asked for, where each accepted row sits in the export bytes. `engine_rows`, present when the table's engine merges rows at insert, is a list of rows, each a list of cells: `{name, stored, null}`, plus `value_b64` for a String or FixedString value. `storage_transforms` entries carry `row`, `column`, `reason` and `stored`, plus `value_b64`; `transformed` entries carry `row`, `column`, `input`, `stored`, `reason` and `lossy`. Every name, rendering, `err` and `export_declined` follows the rule for byte strings in JSON. Two further fields come from the vendored reader's own state, never from a tokenizer of the library's:
+A body's verdict, counts and per-row documents (each a row document, with its own `input_span`), and, when an export was asked for, where each accepted row sits in the export bytes. `engine_rows`, present when the table's engine merges rows at insert, is a list of rows, each a list of cells: `{name, stored, null}`, plus `value_b64` for a String or FixedString value. `storage_transforms` entries carry `row`, `column`, `reason` and `stored`, plus `value_b64`; `transformed` entries carry `row`, `column`, `input`, `stored`, `reason` and `lossy`. Every name, rendering, `err` and `export_declined` follows the rule for byte strings in JSON.
+
+`unsupported_settings`, at the top level, is a list of name objects with the same shape as a row document's: the call's own settings that the library declined.
+
+`at_merge` lists what an `OPTIMIZE TABLE ... FINAL` of the part this `INSERT` writes would do, at the call's clock instant. It is absent when nothing would happen. `engine_rows` stays exactly what the `INSERT` writer produces, so the two never contradict each other. Each entry is `{row, reason, column, stored, input_rows}`:
+
+- `row` indexes `engine_rows`: the part's row, not the input body's. An engine's insert-time merge (Collapsing, Replacing, Summing, Aggregating) runs first, inside the `INSERT` writer, so `engine_rows` already excludes the rows it merged away, and after a Summing or Aggregating merge the part's rows do not map one to one to the input's.
+- `reason` is a `merge_reason` value: `ttl_delete` (the rows TTL removes the row) or `ttl_column_reset` (a column TTL resets the column's value). A row that is removed and also carries column resets lists only `ttl_delete`: it is removed in the same merge pass, so its column values are never observable.
+- `column` names the column, by the rule for byte strings in JSON, and is present only for `ttl_column_reset`.
+- `stored` is the column's value after the reset, by the same rule. It is present when that value is decided at the `INSERT`: the column's `DEFAULT` is a constant or a deterministic expression of the row, or the column has no `DEFAULT` (the type's default). It is absent when the `DEFAULT` reads the clock (`now()`) or a generator (`rand()`, `generateUUIDv4()`), and the entry then means that the value is reset at the merge and decided then.
+- `input_rows`, when present, lists the input rows, each by its index in the body, that formed the part's row.
+
+The list is "at least these", not "only these": a later background merge can remove more rows as more of them expire. Under `ttl_only_drop_parts = 1`, `ttl_delete` is still reported per row against `OPTIMIZE TABLE ... FINAL`, which drops an expired row from a part that also holds rows that have not expired (measured by the artifact producer). Whether a background merge does the same under that setting is unverified, and the reference stays `OPTIMIZE TABLE ... FINAL`.
+
+Two further fields come from the vendored reader's own state, never from a tokenizer of the library's:
 
 - `unconsumed`: the byte ranges `{off, len}` of the input that the reader's error recovery skipped. It does not account for every record: a **skipped** row's `input_span` can cover more than one input record, when recovery resumed past the end of the record that failed, so the verdicts can be fewer than the body's records while `unconsumed` is empty (measured: one skipped row spanning a three-record body). A record can also be lost while the number of verdicts still equals the number of records, so comparing the verdict count with an independent count of the body's records can be fooled (measured in every format, for example with a multi-line quoted CSV field or a JSON object). In every masked body measured, `unconsumed` was non-empty. Until a batch-level signal from the reader's own framing exists (#478), a caller that needs every record accounted for declines a body that has any skipped row or any `unconsumed` range.
 - `framing`: `bom_skipped` (whether the reader skipped a leading byte-order mark), `container` (`array` or `stream` for JSONEachRow, `null` for every other format), and `header` (`{consumed, lines, names}`, `names` as name objects). `bom_skipped` and `header` are `null` where the vendored reader does not expose the decision, and there `null` means not observable, never "no header": the TSV, TSVWithNames and Values readers keep both private (measured by the artifact producer in the source at every supported line). CSV, JSONEachRow and JSONCompactEachRow fill both from the reader's own hooks.
@@ -365,7 +383,7 @@ Compiles exactly one `CREATE TABLE` statement (columns, engine, keys, TTL, setti
 
 `server` is the server the table is on (`chs_server_create`), or NULL. On a server, the schema's home zone is the server's `timezone`: its zone-less `DateTime` and `DateTime64` columns bind it, as a restarted server binds its own, and every call on the schema that names no `session_timezone` runs in it. The server's `settings` layer under the schema's own, and a Replicated engine's ZooKeeper path and replica name expand the server's `macros`. With `server` NULL the schema is on the image's own server, exactly as before servers existed: the image zone, no server settings layer, and macros unknown. A freed server, a handle of another kind or a server from another library image is `CHS_INVALID_ARGUMENT`. The schema holds a counted reference to its server, so the caller may free the server at any time.
 
-`timezone()` (and its alias `timeZone()`) in a DEFAULT, MATERIALIZED or CHECK expression is admitted on a schema created on a server whose profile names a `timezone`. It returns what that server's `timezone()` returns: the call's `session_timezone` if one is set, else the server's `timezone`. On a schema with no server, or a server whose profile names no `timezone`, it stays refused as a server constant. `serverTimezone()` is refused on every schema.
+`timezone()` (and its alias `timeZone()`) in a DEFAULT, MATERIALIZED or CHECK expression is admitted on a schema created on a server whose profile names a `timezone`. On a server schema, `timezone()` answers the server's zone when no session zone is in force; a session zone that would change the answer is declined (named in `unsupported_settings`). That applies equally to a profile whose `settings` carry `session_timezone`. On a schema with no server, or a server whose profile names no `timezone`, it stays refused as a server constant. `serverTimezone()` is refused on every schema.
 
 `options` (`input:schema_options`) defines no member yet, so any key in it is `CHS_INVALID_ARGUMENT`, naming the key.
 
