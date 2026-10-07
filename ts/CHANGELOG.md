@@ -6,6 +6,10 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+### Added
+
+- The public server handle (ABI v2): `lib.newServer(profile)` describes one ClickHouse server (`ServerProfile`: `timezone`, `settings`, `macros`), `compileTable(createTable, { server })` compiles a table on it, and `Server` has `close()` and `[Symbol.dispose]()`. A schema description carries `server` (`SchemaServer`) and `replicated` (`SchemaReplicated`: `zookeeperPath`, `replicaName`), each `undefined` when absent. Absent `macros` is not `{}`: absent means the server's macros are unknown, present (even `{}`) is its complete set. The binding validates nothing in the profile. Follows the Go binding.
+
 ## [1.1.0] — 2026-10-06
 
 ### Added

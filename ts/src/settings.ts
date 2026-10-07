@@ -89,3 +89,41 @@ export function encodeColumns(columns: readonly BytesIn[] | undefined): Buffer {
 export function validateDefaults(defaults: Settings): void {
   checkStrings('defaults', defaults);
 }
+
+/**
+ * One ClickHouse server, as `chs_server_create` takes it (`input:server_profile`).
+ * Every member is optional, and every value is passed through as given: the
+ * library validates the zone with DateLUT, each setting with the server's own
+ * SET check, and the macros with ClickHouse's own reader.
+ */
+export interface ServerProfile {
+  /** The server's zone, the one its `timezone()` returns. Absent or `''` omits it: the server does not describe it, and the image zone applies. */
+  readonly timezone?: string | undefined;
+  /** What the server's profile applies to every query. Absent omits it (no server settings layer); `{}` is sent as `{}`. */
+  readonly settings?: Settings | undefined;
+  /**
+   * The server's `<macros>`, which a Replicated engine's ZooKeeper path and
+   * replica name expand. ABSENT is not `{}`: absent means the server's macros
+   * are UNKNOWN, and a schema whose engine reads one is declined; present, even
+   * `{}`, is the server's COMPLETE set.
+   */
+  readonly macros?: Settings | undefined;
+}
+
+/** The profile document: an empty or absent zone, absent settings and absent macros are omitted; a present map is sent as given, `{}` when empty. */
+export function encodeServerProfile(profile: ServerProfile): Buffer {
+  const out: Record<string, unknown> = {};
+  if (profile.timezone !== undefined && profile.timezone !== '') {
+    if (typeof profile.timezone !== 'string') throw new TypeError(`chtypes: timezone must be a string, got ${typeof profile.timezone}`);
+    out.timezone = profile.timezone;
+  }
+  if (profile.settings !== undefined) {
+    checkStrings('settings', profile.settings);
+    out.settings = { ...profile.settings };
+  }
+  if (profile.macros !== undefined) {
+    checkStrings('macros', profile.macros);
+    out.macros = { ...profile.macros };
+  }
+  return Buffer.from(JSON.stringify(out), 'utf8');
+}

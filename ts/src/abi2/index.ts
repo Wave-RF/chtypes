@@ -6,7 +6,7 @@
  */
 
 export { type BuildInfo, type Capabilities, decodeBuildInfo } from './buildinfo.js';
-export { type BlockHandle, Calls, type FilterHandle, type SchemaHandle } from './calls.gen.js';
+export { type BlockHandle, Calls, type FilterHandle, type SchemaHandle, type ServerHandle } from './calls.gen.js';
 export { ABI_FINGERPRINT, ABI_STABILITY, ABI_VERSION, BUF_HANDLE, type FunctionSpec, type ParamSpec, type ReturnSpec } from './decls.gen.js';
 export { errorForStatus, type LoaderErrorClass, loaderErrorClassFor } from './errmap.gen.js';
 export {
