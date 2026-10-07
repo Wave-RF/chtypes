@@ -37,7 +37,9 @@ Each of these is `unsupported` — an `UnsupportedError`, `Error::Unsupported`, 
 - **TTL forms** that are not a plain rows TTL: `WHERE` and `GROUP BY` TTLs, `TO DISK` and `TO VOLUME` moves, `RECOMPRESS`, and any clock-reading TTL expression.
 - **A batch whose TTL throws when the merge applies it**, on 26.3 to 26.8. For example, `v Int32 DEFAULT intDiv(10, k) TTL d + INTERVAL 100 YEAR` with a row where `k` is 0: the server's INSERT stores the row, and only the part's later merge meets the error (153). What the part will hold is therefore declined, and the decline's message quotes the error. The row preview still answers, and on 26.9 the batch is accepted.
 - **MergeTree settings the server reads while it creates the table or inserts into it, declared at a non-default value**, and `disk` at any value. A setting only the storage layer reads, such as a part lifetime or a merge timeout, is accepted at any value, because the server stores the same rows with it as without it: `old_parts_lifetime = 100` compiles, while `index_granularity = 4096` is declined. An unknown _name_ is the server's own 115 and a value that does not parse is the server's own code (27 for `index_granularity = 'abc'`); both are rejections. A declined setting is never silently ignored. Library builds before `20261007.044112` declined every non-default value.
-- **Server- and session-property DEFAULTs** — `hostName()`, `currentUser()` and the rest. Their value is a property of the server, and there is no server here.
+- **Server- and session-property DEFAULTs** — `hostName()`, `currentUser()` and the rest — **and the same functions in a `MATERIALIZED` expression**, such as `timezone()`, `hostName()` and `version()`, along with any column whose DEFAULT reads such a column. Their value is a property of the server, and there is no server here: the decline's message says that resolving it here would store the gateway's answer.
+- **A `UNIQUE KEY`, with the feature enabled.** The server's INSERT into such a table runs the unique-key commit, which this build does not model. With the feature disabled, which is the default, the server's own refusal (344) is reported as a rejection; a `UNIQUE KEY` beside a `PROJECTION` is refused with 344 as well.
+- **A query-level setting in a MergeTree table's storage `SETTINGS`**, such as `max_threads = 1`. The server moves it out of the table's `SETTINGS` clause into the CREATE's own context, which this build does not model.
 - **DEFAULT expressions past the admission budgets** — 256 MiB and one second by default, both adjustable through the process-wide settings in [`guides/settings.md`](guides/settings.md). This is what bounds a blocking DEFAULT: `sleep` and `sleepEachRow` are not declined by name, so `DEFAULT sleep(0)` is admitted, while `DEFAULT sleep(1.5)` exceeds the one-second budget and is declined when the schema compiles.
 
 ## Constants are not payloads
@@ -100,25 +102,6 @@ Every entry here has a machine-checkable twin in [`docs/divergences.json`](diver
 
 **What gets an entry here, and when.** A divergence that changes the verdict or the stored value at default settings (an over-accept, an over-reject, or a row both sides accept but store differently) is listed as soon as the server's answer has been measured on each line it affects, and not before, because a wrong entry is worse than a late one. A divergence that is only a different error code, or that needs a non-default setting to reach, is listed if a published build still shows it seven days after it was found. Until then it's tracked with the artifact producer, whose comparison against real servers keeps finding such cases, and it's usually fixed in the next relink. Every entry is removed on the relink that fixes it.
 
-### A UNIQUE KEY is accepted at schema creation; a real server refuses the CREATE
-
-**Over-accept, on `26.7`, `26.8` and `26.9`, at schema creation.** This library ignores a `UNIQUE KEY` clause and compiles the table. A real server refuses the CREATE with error **344**, because the feature is disabled by default: the server's message names `allow_experimental_unique_key = 1` on `26.7` and `26.8`, and `enable_unique_key = 1` on `26.9`. For example:
-
-```sql
-CREATE TABLE t (k Int32, v Int32) ENGINE = MergeTree ORDER BY k UNIQUE KEY k
-```
-
-|               |                                       |
-| ------------- | ------------------------------------- |
-| this library  | creates the schema                    |
-| a real server | refuses the CREATE with error **344** |
-
-With the feature enabled, a `UNIQUE KEY` table that also has a `PROJECTION` is the same over-accept: the server refuses with 344 (projections are not supported with a `UNIQUE KEY`), and this library compiles it. On `26.3` both sides refuse the clause at parse, with error 62, so they agree.
-
-**Measured**: by the artifact producer, against the production library build `20261006.170903` on `26.7`, `26.8` and `26.9`, on linux-amd64 and linux-arm64. The current production build `20261006.220511` is not measured; it is expected to behave the same (`inferred`: nothing between the two builds touched this path). A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
-
-Until then, do not treat a successful schema creation as proof that the server will accept a CREATE with a `UNIQUE KEY`.
-
 ### On 26.3, a non-UInt8 filter is evaluated where that server's projection pass refuses it
 
 **Filter over-accept, on `26.3` only, where the server's query goes through its projection pass.** A filter whose `WHERE` expression has a type other than `UInt8`, for example `Float64` (`WHERE toFloat64(x) / 10 - 0.25`, `WHERE (toFloat64(x) - toFloat64(x)) / 0`), is answered `t` or `f` for every row. A `26.3` server answers such a filter the same way for a plain `SELECT … WHERE`, for `PREWHERE`, under the old analyzer and on a `Memory` table. It refuses the filter with error **59** only through its planner's projection pass: an aggregate over a MergeTree table that uses implicit projections, or a read of a table that declares a projection.
@@ -133,147 +116,9 @@ On `26.7`, `26.8` and `26.9` the server answers these filters in every case meas
 
 **Measured**: by the artifact producer, against a library built from the same core commit as the production library build `20261006.220511`, on all four supported lines, on linux-amd64 and linux-arm64; the narrowing to the projection pass in a later run on `26.3`. The production artifact itself is not measured; it is expected to behave the same (`inferred`: the same source). A library change (declining such a filter on `26.3`) awaits a ruling. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the change, never on a CI result.
 
+This still reproduces on library build `20261007.120436`, on `26.3` only.
+
 Until then, on `26.3`, if the server query a filter stands for reads a table that declares a projection, or aggregates over a MergeTree table, do not treat a verdict for a non-`UInt8` `WHERE` as the server's answer.
-
-### A toFixedString filter over a LowCardinality column answers 131 when the row's dictionary holds another row's key
-
-**Filter over-reject, on every supported line.** A filter such as `WHERE toFixedString(lc, 2) = 'k1'` over a `LowCardinality(String)` column answers `e` with error **131** for a row whose own value fits, when the column's dictionary for that row also holds a key from another row that does not fit. A real server answers `t` or `f` for that row. It occurs:
-
-- after a skipped row that carried a too-long key, in JSON and CSV input;
-- on every row of a `Values` or `Native` body in the measured corpus.
-
-|               |                                         |
-| ------------- | --------------------------------------- |
-| this library  | answers `e` (error **131**) for the row |
-| a real server | answers `t` or `f`                      |
-
-**Measured**: by the artifact producer, against a library built from the same core commit as the production library build `20261006.220511`, on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64. The production artifact itself is not measured; it is expected to behave the same (`inferred`: the same source). A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
-
-Until then, do not read an `e` with 131 from a `toFixedString` filter over a `LowCardinality` column as the server's answer.
-
-### A query-level setting in a CREATE's storage SETTINGS is refused, where a real server applies it and creates the table
-
-**Over-reject, on every supported line, at schema creation.** A `SETTINGS` clause on a `MergeTree` table that holds a query-level setting is refused with error **115** as an unknown MergeTree setting. A real server applies that setting to the CREATE's own query context, creates the table, and does not store the setting with it. For example:
-
-```sql
-CREATE TABLE t (k Int32) ENGINE = MergeTree ORDER BY k SETTINGS max_threads = 1
-```
-
-|               |                                                                     |
-| ------------- | ------------------------------------------------------------------- |
-| this library  | refuses the CREATE with error **115**                               |
-| a real server | creates the table; `SHOW CREATE TABLE` does not carry `max_threads` |
-
-A mixed clause (`SETTINGS max_threads = 1, index_granularity = 8192`) behaves the same way.
-
-**Measured**: by the artifact producer, against the production library build `20261006.220511` on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64. A library change (declining such a CREATE) is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
-
-Until then, do not read a refusal with 115 for a query-level setting in a table's `SETTINGS` as the server's answer.
-
-### The row preview refuses a row with 131 when a LowCardinality column's dictionary holds another row's too-long key
-
-**Over-reject, on every supported line, through the row preview only.** When a `CHECK` or `MATERIALIZED` expression applies `toFixedString` to a `LowCardinality(String)` column, `chs_preview_row` refuses a row whose own value fits, with error **131**, if the column's dictionary for that body also holds another row's value that does not fit. A one-row `INSERT` of that row is accepted. For example, with either:
-
-```sql
-CREATE TABLE t (id UInt32, lc LowCardinality(String), x UInt8, m String MATERIALIZED toString(toFixedString(lc, 2))) ENGINE = MergeTree ORDER BY id
-CREATE TABLE t (id UInt32, lc LowCardinality(String), x UInt8, CONSTRAINT c CHECK toFixedString(lc, 2) != 'zz') ENGINE = MergeTree ORDER BY id
-```
-
-and the `Values` body `(1,'k1',1),(2,'k2',2),(3,'toolong',3)`, the row preview refuses the `'k1'` row:
-
-|                           |                                           |
-| ------------------------- | ----------------------------------------- |
-| this library, row preview | refuses the `'k1'` row with error **131** |
-| a one-row INSERT          | accepts it                                |
-
-The same happens in `JSONEachRow` to a row after a skipped row that carried the too-long value, under `input_format_allow_errors_num`. The batch preview's 131 for the whole body matches a synchronous `INSERT`, so it is not part of this entry.
-
-**Measured**: by the artifact producer, against the production library build `20261006.220511` on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64; the one-row `INSERT` half against live servers. No library change is in progress yet. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
-
-Until then, do not read a row preview's refusal with 131 on such a table as the server's answer for that row alone.
-
-### For a TTL table, the batch document's engine rows show the state after a merge, not what the INSERT writes
-
-**Stored-value divergence, on every supported line, through the batch preview.** For a table with a rows `TTL` or a column `TTL`, `chs_preview_batch` reports `engine_rows` as they would be after a merge:
-
-- a row whose rows `TTL` has already expired is left out (with a `storage_transforms` entry, reason `ttl_expired`);
-- a column value whose column `TTL` has expired is reset to its `DEFAULT` (reason `ttl_column_expired`).
-
-A real server's synchronous `INSERT` writes a part that still holds that row with its values as inserted. The row is removed, and the column reset, only at a later merge or `OPTIMIZE … FINAL`. Verdicts are unaffected: only the reported stored content differs. For example:
-
-```sql
-CREATE TABLE t (k UInt32, d Date) ENGINE = MergeTree ORDER BY k TTL d + INTERVAL 1 DAY
-```
-
-with a row where `d = '2020-01-01'`:
-
-|                               |                                    |
-| ----------------------------- | ---------------------------------- |
-| this library, `engine_rows`   | leaves the row out (`ttl_expired`) |
-| a real server, after `INSERT` | its part holds the row as inserted |
-
-**Measured**: by the artifact producer, against the production library build `20261006.220511` on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64. A library change is in progress: `engine_rows` will match what the server's `INSERT` writes, and the two TTL reasons will no longer be reported. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the change, never on a CI result.
-
-Until then, for a table with a `TTL`, read `engine_rows` as the state after the next merge, not as the part the `INSERT` writes.
-
-### A DEFAULT that reads a Tuple or JSON subcolumn is refused, where a real server stores the row
-
-**Over-reject, on every supported line.** A `DEFAULT` that reads a subcolumn of a `Tuple` (`t.x`) or of a `JSON` column (`j.a`) makes every row, and the batch, fail with error **47** (`t.x` unknown). A real server stores every row. For example:
-
-```sql
-CREATE TABLE t (t Tuple(x UInt8, y String), tx UInt8 DEFAULT t.x, ty String DEFAULT t.y, tz String DEFAULT concat(t.y, '!', toString(t.x))) ENGINE = MergeTree ORDER BY tuple()
-```
-
-with the `JSONEachRow` rows `{"t":{"x":1,"y":"a"}}`, `{"t":{"x":2,"y":"b"},"tx":9}`, `{}`, `{"tx":5}` and `{"t":{"x":3,"y":""}}`:
-
-|               |                                                   |
-| ------------- | ------------------------------------------------- |
-| this library  | refuses every row and the batch with error **47** |
-| a real server | stores all five rows                              |
-
-The same holds for a `JSON` subcolumn, e.g. `a String DEFAULT toString(j.a)` over `j JSON`.
-
-**Measured**: by the artifact producer, against the production library build `20261006.220511` on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64, at default settings. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
-
-Until then, do not read a refusal with 47 for a `DEFAULT` over a subcolumn as the server's answer.
-
-### A MATERIALIZED server constant is accepted with its value missing, where a real server stores its own value
-
-**Stored-value divergence, on every supported line, on a schema with no server profile.** A `MATERIALIZED` expression that is a server constant, such as `timezone()`, `hostName()` or `version()`, is accepted, but its value is missing from the reported values (an earlier measurement saw it rendered as `null`). A real server stores its own value. This library, with no server profile, cannot know that value; the fix in progress makes such a schema declined (`unsupported`) rather than answered. For example:
-
-```sql
-CREATE TABLE t (id UInt32, z String MATERIALIZED timezone(), d String DEFAULT concat(z, '!')) ENGINE = MergeTree ORDER BY tuple()
-```
-
-with the rows `{"id":1}` and `{"id":2,"d":"x"}`:
-
-|               |                                        |
-| ------------- | -------------------------------------- |
-| this library  | accepts both rows; `z` is not reported |
-| a real server | stores `z` = its zone (`UTC` there)    |
-
-**Measured**: by the artifact producer, against the production library build `20261006.220511` on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64, at default settings. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
-
-Until then, do not rely on the values reported for a `MATERIALIZED` server constant, or for anything computed from it.
-
-### A DEFAULT over an EPHEMERAL Tuple's subcolumn is accepted, where a real server refuses the INSERT with no column list
-
-**Over-accept, on every supported line.** A `DEFAULT` that reads a subcolumn of an `EPHEMERAL` `Tuple` column is accepted. A real server `INSERT` with no column list does not read the `EPHEMERAL` column, so the subcolumn is unknown and the server refuses with error **47**. For example:
-
-```sql
-CREATE TABLE t (e Tuple(x UInt8, y String) EPHEMERAL, d UInt8 DEFAULT e.x, s String DEFAULT e.y, k UInt8) ENGINE = MergeTree ORDER BY tuple()
-```
-
-with the rows `{"e":{"x":1,"y":"a"},"k":1}`, `{"k":2}` and `{"e":{"x":3,"y":"c"},"d":9,"k":3}`, inserted with no column list:
-
-|               |                                      |
-| ------------- | ------------------------------------ |
-| this library  | accepts every row and the batch      |
-| a real server | refuses the INSERT with error **47** |
-
-**Measured**: by the artifact producer, against the production library build `20261006.220511` on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64, at default settings. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
-
-Until then, do not treat an accepted batch as proof the server accepts it when a `DEFAULT` reads an `EPHEMERAL` `Tuple`'s subcolumn.
 
 ## Known gaps in 1.0
 
