@@ -175,7 +175,7 @@ func blobExists(root, hex string) bool {
 // A system dir that does not exist is skipped in both, as a default list.
 func probeRoots(ro resolvedOptions) ([]string, error) {
 	var warnings []string
-	for i, dir := range append([]string{ro.cacheDir}, ro.systemDirs...) {
+	for i, dir := range ro.searchDirs() {
 		for _, f := range probeRoot(dir, i == 0) {
 			if ro.strict {
 				if i > 0 && !f.warns() {

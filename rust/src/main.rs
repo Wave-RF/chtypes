@@ -5,7 +5,7 @@
 //! chtypes fetch <spelling>... | --all  [--platform <key>] [--cache <dir>] [--lock <file>] [--frozen] [--offline] [--update] [--strict]
 //! chtypes verify [--cache <dir>] [--strict]       re-verify the installed cache
 //! chtypes list [--cache <dir>] [--offline] [--strict]   installed builds, and the published lines unless --offline
-//! chtypes where [--cache <dir>] [--strict]        the v1 cache root
+//! chtypes where [--cache <dir>] [--strict] [--all]  the v1 cache root; --all: every directory searched
 //! ```
 //!
 //! Progress and warnings go to stderr; results go to stdout. Exit statuses
@@ -36,7 +36,7 @@ chtypes: fetch, verify and list ClickHouse artifacts for the chtypes SDKs
   chtypes fetch --all         [--platform <os-arch>] [--cache <dir>] [--lock <file>] [--frozen] [--offline] [--update] [--strict]
   chtypes verify [--cache <dir>] [--strict]            re-verify the installed cache
   chtypes list [--cache <dir>] [--offline] [--strict]  installed builds; without --offline, published lines too
-  chtypes where [--cache <dir>] [--strict]             the v1 cache root
+  chtypes where [--cache <dir>] [--strict] [--all]     the v1 cache root; --all: every directory searched
   chtypes --version                         chtypes <version>
   chtypes -h | --help                       this text
 
@@ -330,7 +330,7 @@ fn cmd_list(args: &Args) -> Result<u8, Usage> {
 
 fn cmd_where(args: &Args) -> Result<u8, Usage> {
     no_platform("where", args)?;
-    if !args.spellings.is_empty() || args.all {
+    if !args.spellings.is_empty() {
         return Err(Usage("where takes no arguments".into()));
     }
     if ocifetch::faults::strict_mode(options(args).strict_cache) {
@@ -338,6 +338,18 @@ fn cmd_where(args: &Args) -> Result<u8, Usage> {
         if let Err(e) = ensure::probe_cache(options(args)) {
             return Ok(report(&e));
         }
+    }
+    if args.all {
+        // Every directory searched, the cache root first (public issue #530).
+        return match ensure::search_dirs(&options(args)) {
+            Ok(dirs) => {
+                for dir in dirs {
+                    println!("{}", dir.display());
+                }
+                Ok(0)
+            }
+            Err(e) => Ok(report(&e)),
+        };
     }
     match ocifetch::layout::cache_root(args.cache.as_deref()) {
         Ok(root) => {

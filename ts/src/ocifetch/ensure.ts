@@ -190,6 +190,11 @@ function searchRoots(options: FetchV1Options): readonly { readonly root: string;
   return [{ root: cacheRoot(options.cacheDir), source: 'cache' }, ...systemDirs(options.systemDirs).map((d) => ({ root: d, source: `system:${d}` }))];
 }
 
+/** The directories every lookup reads, in order: the cache root, then each system directory (public issue #530). It reads and creates nothing. */
+export function searchDirs(options: FetchV1Options = {}): readonly string[] {
+  return searchRoots(options).map((r) => r.root);
+}
+
 /** Two records by (version, build): the version numerically, part by part, then the fixed-width build. */
 function compareRecords(a: VerifiedRecord, b: VerifiedRecord): number {
   const av = a.version.split('.').map(Number);

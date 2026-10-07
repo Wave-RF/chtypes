@@ -6,7 +6,7 @@
  *   chtypes fetch <version>... | --all  [--frozen] [--offline] [--lock <file>] [--update] [--strict]
  *   chtypes verify                      re-hash every installed library against its verified record
  *   chtypes list                        what is installed, and the versions the registry publishes
- *   chtypes where                       the v1 cache root
+ *   chtypes where [--all]               the v1 cache root; --all: every directory searched
  *
  * Options per cli-common: `fetch` takes `--platform`, `--cache`, `--lock`, `--frozen`,
  * `--offline`, `--update`; `verify`, `list` and `where` take `--cache` (`list` also
@@ -49,6 +49,7 @@ import {
   missingNotes,
   type PlatformKey,
   probeCache,
+  searchDirs,
   verifyInstalled,
 } from './ocifetch/index.js';
 
@@ -71,10 +72,10 @@ const USAGE = `usage: chtypes <command> [options]
   chtypes fetch <version>... | --all  [--frozen] [--offline] [--lock <file>] [--update] [--strict]
   chtypes verify [--strict]
   chtypes list [--strict]
-  chtypes where [--strict]
+  chtypes where [--strict] [--all]
 
   <version>   a ClickHouse version: 26.8, 26.8.15 or 26.8.15.10 (no "v", no channel suffix)
-  --all       every line (two-part version) the registry publishes for the platform
+  --all       every line (two-part version) the registry publishes for the platform; with `where`, every directory searched (the cache root first)
   --frozen    fetch exactly what the lock file pins, by digest; refuse anything it does not (default lock: chtypes.lock)
   --offline   never touch the network: an installed, verified build is fine, anything else fails
   --lock      record what was installed into this lock file
@@ -295,6 +296,11 @@ async function cmdWhere(rest: readonly string[], values: Values, io: CliIo): Pro
   const options = fetchOptions(values, false);
   // Strict mode checks the root before naming it.
   if (strictMode(options.strictCache)) await probeCache(options);
+  // --all: every directory searched (the cache root first), one per line (public issue #530).
+  if (values.all) {
+    for (const dir of searchDirs(options)) io.stdout(`${dir}\n`);
+    return EXIT_OK;
+  }
   io.stdout(`${cacheRoot(options.cacheDir)}\n`);
   return EXIT_OK;
 }

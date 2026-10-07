@@ -217,6 +217,16 @@ pub fn cache_root(cache_env_override: Option<&str>) -> Result<PathBuf> {
     Ok(base.join("chtypes").join("v1"))
 }
 
+/// The one root order every lookup reads (docs/guides/fetch-v1.md §1): the
+/// cache root, then each read-only system directory in order. The public
+/// `chtypes::search_dirs` and the CLI's `where --all` report exactly this
+/// (public issue #530).
+pub fn search_roots(root: &Path, system_dirs: &[PathBuf]) -> Vec<PathBuf> {
+    std::iter::once(root.to_path_buf())
+        .chain(system_dirs.iter().cloned())
+        .collect()
+}
+
 /// Create the OCI image-layout skeleton (`oci-layout`, an empty `index.json`,
 /// `blobs/sha256/`) if it does not already exist. Idempotent.
 pub fn ensure_layout(root: &Path) -> Result<()> {

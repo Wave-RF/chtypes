@@ -217,6 +217,13 @@ func resolveOptions(o *Options) (resolvedOptions, error) {
 	return ro, nil
 }
 
+// searchDirs is the one root order (docs/guides/fetch-v1.md §1): the user
+// cache first, then each read-only system directory in order. Every lookup
+// walks it, and the public CacheRoot and SearchDirs report it.
+func (ro resolvedOptions) searchDirs() []string {
+	return append([]string{ro.cacheDir}, ro.systemDirs...)
+}
+
 func hostsOf(bases []string) []string {
 	var hosts []string
 	for _, b := range bases {
@@ -769,7 +776,7 @@ func resolveInstalledInternal(ro resolvedOptions, req Request, platformKey strin
 		return nil, err
 	}
 	cacheLayout := newLayout(ro.cacheDir, false)
-	dirs := append([]string{ro.cacheDir}, ro.systemDirs...)
+	dirs := ro.searchDirs()
 	var best *installedEntry
 	var bestSource string
 	for i, dir := range dirs {
@@ -839,7 +846,7 @@ func ListInstalled(opts *Options) ([]Resolved, error) {
 	if err != nil {
 		return nil, err
 	}
-	dirs := append([]string{ro.cacheDir}, ro.systemDirs...)
+	dirs := ro.searchDirs()
 	var out []Resolved
 	for i, dir := range dirs {
 		readOnly := i > 0
@@ -868,7 +875,7 @@ func VerifyInstalled(opts *Options) ([]VerifyResult, error) {
 	if _, err := probeRoots(ro); err != nil {
 		return nil, err
 	}
-	dirs := append([]string{ro.cacheDir}, ro.systemDirs...)
+	dirs := ro.searchDirs()
 	var out []VerifyResult
 	for _, dir := range dirs {
 		entries, err := listUnpacked(dir)

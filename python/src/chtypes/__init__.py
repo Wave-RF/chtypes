@@ -86,7 +86,7 @@ from .errors import (
     UsageError,
 )
 from .library import Block, Filter, Library, Schema, open_unverified
-from .registry import FetchOptions, Registry, Resolved, TrustedKey
+from .registry import FetchOptions, Registry, Resolved, TrustedKey, cache_root, search_dirs
 from .results import (
     BatchResult,
     BuildInfo,
@@ -178,7 +178,9 @@ __all__ = [
     "UsageError",
     "Value",
     "Verdict",
+    "cache_root",
     "open_unverified",
+    "search_dirs",
     "setup",
 ]
 

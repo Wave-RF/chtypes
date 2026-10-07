@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from chtypes import FetchOptions, Registry
+from chtypes import FetchOptions, Registry, search_dirs
 from chtypes import errors as public_errors
 from chtypes._ocifetch import _constants as C
 from chtypes._ocifetch._dsse import TrustedKey
@@ -186,3 +186,18 @@ def test_missing_carries_the_zero_x_hint(tmp_path: Path) -> None:
     with pytest.raises(public_errors.ArtifactMissingError) as raised:
         registry.for_version("26.1")
     assert f"{zero_x} {HINT_TAIL}" in str(raised.value)
+
+
+def test_search_dirs_is_the_order_a_lookup_reads(tmp_path: Path) -> None:
+    """Records seeded in the directories `search_dirs` names, from the last to
+    the first: a tie goes to the earlier directory, so the answer walks forward."""
+    cache, sys_a, sys_b = tmp_path / "cache", tmp_path / "a", tmp_path / "b"
+    fetch = FetchOptions(cache_dir=cache, system_dirs=[sys_a, sys_b])
+    dirs = search_dirs(fetch)
+    assert dirs == (cache, sys_a, sys_b)
+    options = Options(cache_dir=cache, system_dirs=(sys_a, sys_b), platform="linux-arm64")
+    for i in range(len(dirs) - 1, 0, -1):
+        entry = _write_record(dirs[i], "26.8.1.1", "20260801.000001")
+        got = resolve_installed(Request("26.8"), "linux-arm64", options)
+        assert got is not None
+        assert (got.dir, got.source) == (entry, f"system:{dirs[i]}")

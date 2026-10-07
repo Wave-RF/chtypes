@@ -62,6 +62,20 @@ func TestWhereIsTheCacheRoot(t *testing.T) {
 	}
 }
 
+// `where --all` lists every directory searched, the cache root first (#530);
+// the default output stays the root alone.
+func TestWhereAllListsTheSearchDirs(t *testing.T) {
+	dir := t.TempDir()
+	code, out, _ := runCLI(t, nil, "where", "--all", "--cache", dir)
+	want := dir + "\n/usr/local/share/chtypes/v1\n/opt/chtypes/v1\n"
+	if code != 0 || out != want {
+		t.Errorf("where --all = %d %q, want %q", code, out, want)
+	}
+	if code, out, _ := runCLI(t, nil, "where", "--cache", dir); code != 0 || out != dir+"\n" {
+		t.Errorf("where = %d %q, want the root alone", code, out)
+	}
+}
+
 // The exit status of every shared code is the generated table's, so this
 // asserts the table is what the CLI reads, one code at a time.
 func TestExitStatusIsTheGeneratedTable(t *testing.T) {

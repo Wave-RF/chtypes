@@ -56,6 +56,19 @@ func (o FetchOptions) internal() *ocifetch.Options {
 	}
 }
 
+// CacheRoot is the cache root a fetch, list or `chtypes where` with o would
+// use: o.CacheDir, else CHTYPES_CACHE, else `${XDG_CACHE_HOME:-~/.cache}/chtypes/v1`
+// (docs/guides/fetch-v1.md §1). It is the very resolution the fetch layer runs,
+// and it creates nothing and reads no cache. It is the first entry of SearchDirs.
+func CacheRoot(o FetchOptions) (string, error) { return ocifetch.CacheRoot(o.internal()) }
+
+// SearchDirs is the ordered list of directories a lookup reads for installed
+// builds: the cache root first, then each read-only system directory
+// (o.SystemDirs, else the built-in list; an empty non-nil slice means none).
+// The order is the fetch layer's own, and on a tie the earlier directory wins.
+// It creates nothing and touches no file.
+func SearchDirs(o FetchOptions) ([]string, error) { return ocifetch.SearchDirs(o.internal()) }
+
 type registryConfig struct {
 	fetch     FetchOptions
 	autofetch *bool

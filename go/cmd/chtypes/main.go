@@ -7,8 +7,8 @@
 //	                                    re-verify the installed cache
 //	chtypes list   [--cache <dir>] [--offline] [--strict]
 //	                                    what is installed, and what is published
-//	chtypes where  [--cache <dir>] [--strict]
-//	                                    the cache root
+//	chtypes where  [--cache <dir>] [--strict] [--all]
+//	                                    the cache root; --all: every search directory
 //
 // Run it without installing anything:
 //
@@ -49,8 +49,8 @@ const usageText = `usage:
                                       re-verify the installed cache
   chtypes list   [--cache <dir>] [--offline] [--strict]
                                       what is installed, and what is published
-  chtypes where  [--cache <dir>] [--strict]
-                                      the cache root
+  chtypes where  [--cache <dir>] [--strict] [--all]
+                                      the cache root; --all: every directory searched, in order
   chtypes --version
 
 --strict (or CHTYPES_CACHE_STRICT=1): a cache that cannot be read is CHTYPES_CACHE_UNUSABLE, never "not installed"
@@ -420,6 +420,7 @@ func cmdWhere(args []string, stdout, stderr io.Writer) error {
 	fs := newFlagSet("where", stderr)
 	var cf commonFlags
 	cf.bind(fs, false, false)
+	all := fs.Bool("all", false, "print every directory searched (the cache root first, then the system directories), one per line")
 	if rest, err := parseInterleaved(fs, args); err != nil {
 		return err
 	} else if len(rest) > 0 {
@@ -435,6 +436,16 @@ func cmdWhere(args []string, stdout, stderr io.Writer) error {
 		if _, err := ocifetch.ProbeCache(opts); err != nil {
 			return err
 		}
+	}
+	if *all {
+		dirs, err := ocifetch.SearchDirs(opts)
+		if err != nil {
+			return err
+		}
+		for _, d := range dirs {
+			fmt.Fprintln(stdout, d)
+		}
+		return nil
 	}
 	fmt.Fprintln(stdout, root)
 	return nil
