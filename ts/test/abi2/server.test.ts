@@ -142,7 +142,7 @@ describe.skipIf(!stubsAvailable)('the server handle over the stub library', () =
     const { image, library } = openStub('ok');
     const spy = vi.spyOn(image.calls, 'serverCreate');
     library.newServer({ timezone: 'UTC', macros: {} }).close();
-    library.newServer().close();
+    library.newServer({}).close();
     const first = spy.mock.calls[0] as unknown as Buffer[];
     expect(first[0]?.toString()).toBe('{"timezone":"UTC","macros":{}}');
     expect(first[1]?.length).toBe(0);

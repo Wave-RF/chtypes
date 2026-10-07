@@ -105,7 +105,7 @@ export class Library {
    * `UnsupportedError`). The binding checks none of it first. No server option is
    * defined yet, so the options document is empty.
    */
-  newServer(profile: ServerProfile = {}): Server {
+  newServer(profile: ServerProfile): Server {
     return new Server(this.#calls.serverCreate(encodeServerProfile(profile), Buffer.alloc(0)));
   }
 
