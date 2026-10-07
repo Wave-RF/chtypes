@@ -8,13 +8,14 @@ come from ClickHouse's own C++ (vendored per release into a shared library
 behind the frozen chs_* C ABI), which is why they are exact rather than
 approximately right.
 
-This file is a tutorial you RUN. Seventeen numbered sections walk the public
+This file is a tutorial you RUN. Eighteen numbered sections walk the public
 API of the Python SDK (docs/reference/bindings-v1.md), from setting up the
 process to teardown, each with a comment saying what it demonstrates, why an
-ingest pipeline cares, and what to look at in the output. The same seventeen
-sections, with the same numbering, schemas and rows, exist in the Go,
-TypeScript and Rust tours, so you can diff two tours and see only the language
-idioms differ.
+ingest pipeline cares, and what to look at in the output. The same sections,
+with the same numbering, schemas and rows, exist in the Go, TypeScript and Rust
+tours, so you can diff two tours and see only the language idioms differ;
+section 18, the server profile, lands in Go and Python first and in the other
+two in their own pull requests.
 
 Nothing here needs a ClickHouse server. It needs one installed artifact: fetch
 it once with `chtypes fetch 26.8` (or `python -m chtypes fetch 26.8`), or set
@@ -118,6 +119,7 @@ def main() -> None:
     section15(lib)
     section16(lib)
     section17(lib)
+    section18(lib)
     blank()
     print("Done. Every value above was measured by this run.")
 
@@ -1225,6 +1227,57 @@ def section17(lib: chtypes.Library) -> None:
 
     note("`columns=None` is the no-list shape; a column name is BYTES-capable: pass bytes")
     note("for a name that is not UTF-8")
+
+
+# ---------------------------------------------------------------------------
+# SECTION 18 - The server profile
+#
+# WHAT: describe one ClickHouse server (its timezone; its settings and macros
+# can be given too) with lib.new_server, then compile a table ON it with
+# compile_table(server=). The schema's home zone is the server's, as on the
+# server.
+# WHY: the same table on a Tokyo server and a UTC server fills a timezone()
+# DEFAULT, and binds a zone-less DateTime, differently. Without a server the
+# library refuses timezone() as a server constant it cannot know.
+# LOOK FOR: the row fed only `k`, and `tz` filled by the server's own zone; the
+# description naming the server. A build that does not compile on a server yet
+# DECLINES, and this section then says SKIPPED by name.
+# C API: chs_server_create, chs_server_free, and chs_schema_create's server.
+# ---------------------------------------------------------------------------
+def section18(lib: chtypes.Library) -> None:
+    section(18, "The server profile")
+
+    # Every profile field is optional and passed through as given: the library
+    # validates the zone with DateLUT, the settings with the server's own SET
+    # check and the macros with ClickHouse's own reader.
+    try:
+        server = lib.new_server(chtypes.ServerProfile(timezone="Asia/Tokyo"))
+    except chtypes.UnsupportedError as e:
+        kv("SKIPPED", "section 18: this build declines a server profile")
+        note(truncate(str(e), 66))
+        return
+    with server:
+        kv("server", 'ServerProfile(timezone="Asia/Tokyo")')
+
+        ddl = "CREATE TABLE t (k UInt8, tz String DEFAULT timezone()) ENGINE = MergeTree ORDER BY k"
+        try:
+            schema = lib.compile_table(ddl, server=server)
+        except chtypes.UnsupportedError as e:
+            kv("SKIPPED", "section 18: this build declines a table on a server")
+            note(truncate(str(e), 66))
+            note("a build that compiles on a server prints the filled tz here; until")
+            note("then the decline is the answer (a real server accepts the table)")
+            return
+        with schema:
+            kv("schema", ddl)
+            desc = schema.describe()
+            if desc.server is not None:
+                kv("description's server", "timezone " + desc.server.timezone)
+            result = schema.row(Format.JSON_EACH_ROW, b'{"k":1}')
+            for value in result.values:
+                kv("  " + show(value.column), f"{text_or(value):<20} ({value.source})")
+            note("tz came from the server's own timezone(): Asia/Tokyo, not the image")
+            note("zone. The schema holds the server, so closing either first is safe.")
 
 
 # ------------------------------------------------------------------- plumbing

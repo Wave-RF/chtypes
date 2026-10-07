@@ -12,10 +12,11 @@ from __future__ import annotations
 import base64
 import json
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 
 from .errors import misuse
 
-__all__ = ["BytesIn", "Settings"]
+__all__ = ["BytesIn", "ServerProfile", "Settings"]
 
 BytesIn = bytes | str
 Settings = Mapping[str, str]
@@ -107,3 +108,43 @@ def columns_json(columns: Sequence[BytesIn] | None) -> bytes | None:
         except UnicodeDecodeError:
             names.append({"name_b64": base64.b64encode(raw).decode("ascii")})
     return _dump(names)
+
+
+@dataclass(frozen=True, slots=True)
+class ServerProfile:
+    """One ClickHouse server, as the library's `input:server_profile` describes
+    it. Every field is optional and passed through as given: the library
+    validates the zone with DateLUT, each setting with the server's own SET
+    check, and the macros with ClickHouse's own reader. The binding validates
+    nothing in it.
+
+    `timezone` is the server's zone, the one its `timezone()` returns; None or
+    "" leaves it undescribed (omitted) and the image zone applies. `settings` is
+    what the server's profile applies to every query, layered under a schema's
+    and a call's own; None omits it, and `{}` is sent as `{}`. `macros` is the
+    server's `<macros>`: None omits it, and the server's macros are UNKNOWN (a
+    schema whose engine reads one is declined); a mapping, even an empty one, is
+    sent (`{}` when empty) and is the server's COMPLETE set."""
+
+    timezone: str | None = None
+    settings: Settings | None = None
+    macros: Settings | None = None
+
+
+def server_profile_json(profile: ServerProfile) -> bytes:
+    """The profile document: an empty or absent zone and an absent map are
+    omitted; a present map is sent as given, `{}` when empty. Absent `macros` is
+    not empty `macros`."""
+    if not isinstance(profile, ServerProfile):
+        raise TypeError(f"profile must be a ServerProfile, not {type(profile).__name__}")
+    doc: dict[str, object] = {}
+    if profile.timezone is not None:
+        if not isinstance(profile.timezone, str):
+            raise TypeError(f"timezone must be str, not {type(profile.timezone).__name__}")
+        if profile.timezone != "":
+            doc["timezone"] = profile.timezone
+    if profile.settings is not None:
+        doc["settings"] = _string_map(profile.settings, "settings")
+    if profile.macros is not None:
+        doc["macros"] = _string_map(profile.macros, "macros")
+    return _dump(doc)
