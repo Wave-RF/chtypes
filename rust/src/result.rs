@@ -266,6 +266,41 @@ pub struct Column {
 pub struct SchemaDescription {
     /// The columns, in declared order.
     pub columns: Vec<Column>,
+    /// The server the schema was compiled on, from `server`: `None` when the
+    /// document carries none.
+    pub server: Option<SchemaServer>,
+    /// The ZooKeeper path and replica name of a Replicated engine on a server,
+    /// from `replicated`: `None` when the document carries none.
+    pub replicated: Option<SchemaReplicated>,
+}
+
+/// The server a schema was compiled on, as the library holds it. Its strings
+/// are the caller's own profile values given back, so they are plain text, not
+/// data-derived.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub struct SchemaServer {
+    /// The zone the schema's types bind: the profile's, or else the image zone
+    /// (`setup`'s), exactly as `chs_initialize` spelled it.
+    pub timezone: String,
+    /// The server's settings as the profile gave them; empty when it gave none.
+    pub settings: BTreeMap<String, String>,
+    /// The server's macro set: `None` exactly when the profile carried no
+    /// macros (unknown), and `Some`, even of an empty map, when it did (the
+    /// complete set).
+    pub macros: Option<BTreeMap<String, String>>,
+}
+
+/// What ClickHouse's own `TableZnodeInfo` resolved for a Replicated engine,
+/// fully expanded, to compare with the server's own `system.replicas`. Both
+/// expand DDL bytes, so both are byte strings.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub struct SchemaReplicated {
+    /// The ZooKeeper path.
+    pub zookeeper_path: RawText,
+    /// The replica name.
+    pub replica_name: RawText,
 }
 
 /// One column read from a server's `system.columns` row.

@@ -33,7 +33,7 @@ use crate::raw::RawText;
 use crate::result::{
     BatchResult, BuildInfo, Capabilities, Column, Computed, DiscoveredColumn, Discovery,
     EngineCell, ErrorCodeEntry, ErrorCodeTable, FilterResult, FilterRowError, Framing, Header,
-    RowResult, SchemaDescription, Span, Transform, Value,
+    RowResult, SchemaDescription, SchemaReplicated, SchemaServer, Span, Transform, Value,
 };
 
 // -------------------------------------------------------------- strict parse
@@ -249,6 +249,26 @@ impl<'a> Obj<'a> {
             None => Ok(None),
             Some(v) => Obj::of(self.doc, self.child(key), v).map(Some),
         }
+    }
+
+    /// An object whose values are plain JSON strings (a server's settings or
+    /// macros, the caller's own values given back): `None` when absent, `Some`,
+    /// even of an empty map, when present, so absent and `{}` stay apart.
+    fn string_map(&self, key: &str) -> Result<Option<BTreeMap<String, String>>> {
+        let Some(o) = self.object(key)? else {
+            return Ok(None);
+        };
+        o.map
+            .iter()
+            .map(|(k, v)| match v {
+                Json::String(s) => Ok((k.clone(), s.clone())),
+                _ => Err(Error::internal(format!(
+                    "the {} document: {}.{k} is not a string",
+                    o.doc, o.at
+                ))),
+            })
+            .collect::<Result<BTreeMap<_, _>>>()
+            .map(Some)
     }
 
     fn strings(&self, key: &str) -> Result<Vec<String>> {
@@ -591,7 +611,28 @@ pub(crate) fn schema_description(bytes: &[u8]) -> Result<SchemaDescription> {
             default_expr: c.bytes("default_expression")?,
         });
     }
-    Ok(SchemaDescription { columns })
+    // Both are absent on a schema compiled without a server, so that document
+    // decodes exactly as it did before servers existed.
+    let server = match o.object("server")? {
+        None => None,
+        Some(sm) => Some(SchemaServer {
+            timezone: sm.string("timezone")?,
+            settings: sm.string_map("settings")?.unwrap_or_default(),
+            macros: sm.string_map("macros")?,
+        }),
+    };
+    let replicated = match o.object("replicated")? {
+        None => None,
+        Some(rm) => Some(SchemaReplicated {
+            zookeeper_path: rm.bytes("zookeeper_path")?,
+            replica_name: rm.bytes("replica_name")?,
+        }),
+    };
+    Ok(SchemaDescription {
+        columns,
+        server,
+        replicated,
+    })
 }
 
 /// Decode one `discovery` document.
@@ -929,6 +970,86 @@ mod tests {
         assert!(!d.columns[0].default_kind.is_known());
         assert_eq!(d.columns[0].r#type.as_bytes(), b"X");
         assert_eq!(d.columns[1].default_kind, DefaultKind::None);
+    }
+
+    #[test]
+    fn a_schema_description_reads_the_server_and_replicated_members() {
+        const COLS: &str =
+            r#""columns":[{"name":"k","type":"UInt8","default_kind":"","default_expression":""}]"#;
+        let doc = |extra: &str| schema_description(format!("{{{COLS}{extra}}}").as_bytes());
+        let map = |p: &[(&str, &str)]| -> BTreeMap<String, String> {
+            p.iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        };
+
+        // Absent: the document is the one from before servers existed.
+        let d = doc("").unwrap();
+        assert!(d.server.is_none() && d.replicated.is_none() && d.columns.len() == 1);
+
+        // A server described by {}: the image zone, settings {}, macros absent.
+        let d = doc(r#","server":{"timezone":"UTC","settings":{}}"#).unwrap();
+        let s = d.server.expect("server");
+        assert_eq!(s.timezone, "UTC");
+        assert!(s.settings.is_empty());
+        assert_eq!(s.macros, None, "absent macros are unknown, not empty");
+
+        // Macros present but empty: the complete set, empty; never read as absent.
+        let d = doc(
+            r#","server":{"timezone":"Asia/Tokyo","settings":{"max_threads":"8"},"macros":{}}"#,
+        )
+        .unwrap();
+        let s = d.server.expect("server");
+        assert_eq!(s.timezone, "Asia/Tokyo");
+        assert_eq!(s.settings, map(&[("max_threads", "8")]));
+        assert_eq!(s.macros, Some(BTreeMap::new()));
+
+        // Macros and a Replicated engine's resolved path, a name in its _b64
+        // form, and members no description names (rule r2), all ignored.
+        let d = doc(
+            r#","server":{"timezone":"UTC","settings":{},"macros":{"shard":"01","replica":"r1"},"x_future":1},
+            "replicated":{"zookeeper_path":"/clickhouse/tables/01/db/t","replica_name_b64":"/3Ix","x_future":{"a":[1]}},
+            "x_future_top":[1]"#,
+        )
+        .unwrap();
+        assert_eq!(
+            d.server.expect("server").macros,
+            Some(map(&[("shard", "01"), ("replica", "r1")]))
+        );
+        let r = d.replicated.expect("replicated");
+        assert_eq!(r.zookeeper_path.as_bytes(), b"/clickhouse/tables/01/db/t");
+        assert_eq!(r.replica_name.as_bytes(), b"\xffr1");
+
+        // Refusals: each an Error::Internal naming the document.
+        for (name, extra) in [
+            ("server not an object", r#","server":"UTC""#),
+            (
+                "a setting that is not a string",
+                r#","server":{"timezone":"UTC","settings":{"max_threads":8}}"#,
+            ),
+            (
+                "macros not an object",
+                r#","server":{"timezone":"UTC","settings":{},"macros":[]}"#,
+            ),
+            (
+                "timezone not a string",
+                r#","server":{"timezone":1,"settings":{}}"#,
+            ),
+            (
+                "a path in both forms",
+                r#","replicated":{"zookeeper_path":"/a","zookeeper_path_b64":"L2E=","replica_name":"r"}"#,
+            ),
+            (
+                "a replica name not base64",
+                r#","replicated":{"zookeeper_path":"/a","replica_name_b64":"*"}"#,
+            ),
+        ] {
+            let err = doc(extra).unwrap_err();
+            assert!(
+                matches!(err, Error::Internal(_)) && err.to_string().contains("schema_description"),
+                "{name}: {err:?}"
+            );
+        }
     }
 
     #[test]
