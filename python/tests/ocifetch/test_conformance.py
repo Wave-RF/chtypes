@@ -249,6 +249,17 @@ def _check_requests(log: _RequestLog, expect_requests: dict) -> str | None:
     return None
 
 
+def _snapshot_install(cache_dir: Path, manifest_digest: str) -> dict[str, str]:
+    """Every file under <cache>/unpacked/sha256/<hex>/, by relative path, as its
+    sha256: what `expect.records_intact` compares before and after a call."""
+    root = cache_dir / "unpacked" / "sha256" / parse_digest(manifest_digest)
+    return {
+        str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest()
+        for p in sorted(root.rglob("*"))
+        if p.is_file()
+    }
+
+
 def _check_registry_log(http_port: int, case_id: str, expect_requests: dict) -> str | None:
     """The same expectations, over http, against what the registry itself logged
     (`GET /_log/s-<case-id>`, docs/guides/fetch-v1.md §10), which every binding's
@@ -478,6 +489,13 @@ def _run_case(
             return "fail", f"unknown before_index_rename_hook {hook_name!r} — not implemented"
         before_index_rename = hook_factory(cache_dir)
 
+    # records_intact: each named install's directory, as the pre-install left
+    # it, compared after the call.
+    intact_before = {d: _snapshot_install(cache_dir, d) for d in expect["records_intact"]}
+    for d, snap in intact_before.items():
+        if not snap:
+            return "fail", f"records_intact: {d} is not installed before the call"
+
     clock = _FakeClock()
     request_log.clear()
     options = Options(
@@ -507,8 +525,8 @@ def _run_case(
     # The dev channel's alias step (docs/guides/fetch-v1.md §3), under the
     # case's fixture fingerprint; a null one leaves the v1 contract as it is.
     restore_alias = (
-        _channel.use_alias_fingerprint_for_tests(req["alias_fingerprint"])
-        if req["alias_fingerprint"] is not None
+        _channel.use_own_fingerprint_for_tests(req["own_fingerprint"])
+        if req["own_fingerprint"] is not None
         else None
     )
     saved_search_roots = _ensure_module.search_roots
@@ -591,6 +609,14 @@ def _run_case(
                     mismatches.append(
                         f"warnings: no warning contains {keyword!r}: {resolved.warnings}"
                     )
+
+    for d, snap in intact_before.items():
+        after = _snapshot_install(cache_dir, d)
+        if after != snap:
+            mismatches.append(
+                f"records_intact: the install of {d} changed "
+                f"({len(snap)} file(s) before, {len(after)} after)"
+            )
 
     if expect["tags"] is not None and not mismatches and listed != expect["tags"]:
         mismatches.append(f"listed {listed!r} != {expect['tags']!r}")

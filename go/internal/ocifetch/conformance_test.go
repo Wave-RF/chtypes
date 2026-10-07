@@ -57,10 +57,10 @@ type confRequest struct {
 	AllowUnsigned bool     `json:"allow_unsigned"`
 	Trust         string   `json:"trust"`
 	Bases         []string `json:"bases"`
-	// AliasFingerprint, when set, runs the case with the dev channel's
-	// alias step under that fixture fingerprint (UseAliasFingerprintForTests);
+	// OwnFingerprint, when set, runs the case with the dev channel's
+	// alias step under that fixture fingerprint (UseOwnFingerprintForTests);
 	// null runs it under the v1 contract exactly, which never tries an alias.
-	AliasFingerprint *string `json:"alias_fingerprint"`
+	OwnFingerprint *string `json:"own_fingerprint"`
 }
 
 type confExpect struct {
@@ -75,6 +75,7 @@ type confExpect struct {
 	Requests      confRequestsExpect `json:"requests"`
 	LockAfter     *string            `json:"lock_after"`
 	Tags          *[]string          `json:"tags"` // a list-tags- case's listing
+	RecordsIntact []string           `json:"records_intact"`
 }
 
 type confRequestsExpect struct {
@@ -333,6 +334,18 @@ func runOneCase(t *testing.T, fixturesDir string, port, port2 int, registryBase 
 		}
 	}
 
+	// records_intact: each named install's directory, as the pre-install left
+	// it, compared after the call.
+	intactBefore := map[string]map[string]string{}
+	for _, d := range c.Expect.RecordsIntact {
+		snap, err := snapshotInstall(cacheDir, d)
+		if err != nil || len(snap) == 0 {
+			row.Verdict, row.Detail = "fail", fmt.Sprintf("records_intact: %s is not installed before the call (%v)", d, err)
+			return row
+		}
+		intactBefore[d] = snap
+	}
+
 	var sleeps []time.Duration
 	clock := Clock{
 		Now: time.Now,
@@ -399,8 +412,8 @@ func runOneCase(t *testing.T, fixturesDir string, port, port2 int, registryBase 
 
 	// The dev channel's alias step (docs/guides/fetch-v1.md §3), under the
 	// case's fixture fingerprint; a null one leaves the v1 contract as it is.
-	if fp := c.Request.AliasFingerprint; fp != nil {
-		defer UseAliasFingerprintForTests(*fp)()
+	if fp := c.Request.OwnFingerprint; fp != nil {
+		defer UseOwnFingerprintForTests(*fp)()
 	}
 
 	for k, v := range c.Env {
@@ -477,6 +490,13 @@ func runOneCase(t *testing.T, fixturesDir string, port, port2 int, registryBase 
 	if detail := compareOutcome(c.Expect, runErr, resolvedVersion, resolvedBuild, resolvedManifest, resolvedLibrarySHA256, warnings, sleeps); detail != "" {
 		row.Verdict, row.Detail = "fail", detail
 		return row
+	}
+	for _, d := range c.Expect.RecordsIntact {
+		after, err := snapshotInstall(cacheDir, d)
+		if err != nil || !reflect.DeepEqual(after, intactBefore[d]) {
+			row.Verdict, row.Detail = "fail", fmt.Sprintf("records_intact: the install of %s changed (%d file(s) before, %d after, %v)", d, len(intactBefore[d]), len(after), err)
+			return row
+		}
 	}
 	if c.Expect.Tags != nil && runErr == nil && strings.Join(listedTags, " ") != strings.Join(*c.Expect.Tags, " ") {
 		row.Verdict, row.Detail = "fail", fmt.Sprintf("listed %q, want %q", listedTags, *c.Expect.Tags)
@@ -710,6 +730,31 @@ func checkRequests(expect confRequestsExpect, reqTexts []string, sawAuthOnSecond
 		return fmt.Sprintf("auth_on_second_origin = %v, want %v", sawAuthOnSecondOrigin, expect.AuthOnSecondOrigin)
 	}
 	return ""
+}
+
+// snapshotInstall is every file under <cache>/unpacked/sha256/<hex>/ for the
+// manifest digest d, by relative path, as its sha256: what records_intact
+// compares before and after a call.
+func snapshotInstall(cacheDir, d string) (map[string]string, error) {
+	root := filepath.Join(cacheDir, UnpackedDirName(), Digest(d).Hex())
+	out := map[string]string{}
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(root, path)
+		sum := sha256.Sum256(b)
+		out[rel] = hex.EncodeToString(sum[:])
+		return nil
+	})
+	return out, err
 }
 
 // serverRequestLog reads one case's request log from the fixture server

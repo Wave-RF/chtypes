@@ -1164,7 +1164,10 @@ fn check_artifact_statement(stmt: &dsse::VerifiedStatement, layer_digest: &str) 
 /// manifest) that is strictly newer than the candidate — the same version
 /// with a higher `build`, or a higher version still inside the request —
 /// or `None`. The monotonic check: such an install is kept rather than
-/// swapped for what the source now offers.
+/// swapped for what the source now offers. Under the dev channel only an
+/// install of its own fingerprint counts ([`channel::visible`]): a newer build
+/// of another fingerprint, installed by another dev SDK, is never kept over
+/// this one's own.
 fn newer_installed(
     res: &Resources,
     version_request: &VersionRequest,
@@ -1181,6 +1184,7 @@ fn newer_installed(
         if rec.platform != res.platform
             || rec.manifest_digest == candidate_manifest
             || !version_request.matches(&rec.version)
+            || !channel::visible(&rec.predicate)
         {
             continue;
         }
@@ -1247,7 +1251,11 @@ fn find_installed(
 ) -> Result<Option<(PathBuf, VerifiedRecord, String)>> {
     let mut best: Option<(PathBuf, VerifiedRecord, String)> = None;
     let mut consider = |dir: PathBuf, record: VerifiedRecord, source: String| {
-        if record.platform != platform || !version_request.matches(&record.version) {
+        // Under the dev channel, only its own fingerprint's builds (channel::visible).
+        if record.platform != platform
+            || !version_request.matches(&record.version)
+            || !channel::visible(&record.predicate)
+        {
             return;
         }
         let better = match &best {
@@ -1341,6 +1349,11 @@ fn install_preseeded(
         let Some(record) = layout::read_verified(&resolved.dir)? else {
             continue;
         };
+        // An entry installed before (by another SDK) is returned above without
+        // being re-verified, so the dev channel's filter is applied here too.
+        if !channel::visible(&record.predicate) {
+            continue;
+        }
         let better = match &best {
             None => true,
             Some((_, b)) => {
@@ -1405,6 +1418,13 @@ fn install_from_local_blobs_for(
         let stmt = referrers::find_local_referrer(layout_root, manifest_digest, trust)?;
         check_artifact_statement(&stmt, &layer.digest)?;
         validate_predicate(&stmt.predicate, platform, request)?;
+        // A lookup (one with a request) never installs another fingerprint's
+        // pre-seeded build (channel::visible).
+        if request.is_some() && !channel::visible(&stmt.predicate) {
+            return Err(Error::ArtifactMissing(format!(
+                "pre-seeded manifest {manifest_digest} is a build of another ABI fingerprint"
+            )));
+        }
         let (library_sha256, library_bytes, library_name) = library_fields(&stmt.predicate)?;
         let layer_bytes = layout::read_blob(layout_root, &layer.digest)?.ok_or_else(|| {
             Error::ArtifactMissing(format!("no local blob for layer {}", layer.digest))

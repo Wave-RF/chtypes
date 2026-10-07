@@ -521,7 +521,7 @@ func (s *session) resolveAndInstall(ctx context.Context, ro resolvedOptions, l *
 		if err := l.addIndexEntry(*desc, s.hookBeforeIndexRename); err != nil {
 			return nil, nil, err
 		}
-		if existing, found := newerAlreadyInstalled(l, platform.Key, req.Spelling, manifestDigest, rec.Version, rec.Build); found {
+		if existing, found := newerAlreadyInstalled(l, ro.ch, platform.Key, req.Spelling, manifestDigest, rec.Version, rec.Build); found {
 			warnings := []string{monotonicWarning(existing, rec.Version, rec.Build)}
 			return recordToResolved(&existing.rec, existing.dir, platform.Key, req.Spelling, indexDigest, true, base, warnings), idx, nil
 		}
@@ -546,7 +546,7 @@ func (s *session) resolveAndInstall(ctx context.Context, ro resolvedOptions, l *
 	if stmt != nil {
 		candidateVersion := stringPredicate(stmt.Statement.Predicate, "clickhouse_version")
 		candidateBuild := stringPredicate(stmt.Statement.Predicate, "build")
-		if existing, found := newerAlreadyInstalled(l, platform.Key, req.Spelling, manifestDigest, candidateVersion, candidateBuild); found {
+		if existing, found := newerAlreadyInstalled(l, ro.ch, platform.Key, req.Spelling, manifestDigest, candidateVersion, candidateBuild); found {
 			warnings = append(warnings, monotonicWarning(existing, candidateVersion, candidateBuild))
 			// The candidate manifest is discarded, never installed, so no
 			// blob and no index entry is written for it — only the
@@ -749,7 +749,11 @@ func (s *session) libraryPathFor(ctx context.Context, bases []string, manifest *
 // answered only by that exact version, so for it only a newer BUILD of the
 // same version counts. A request that is not a version spelling (an
 // arbitrary tag) names no range, so nothing is kept for it.
-func newerAlreadyInstalled(l *layout, platformKey, request string, excludeManifest Digest, version, build string) (*installedEntry, bool) {
+//
+// Under the dev channel only an install of its own fingerprint counts
+// (channel.visible): a newer build of another fingerprint, installed by
+// another dev SDK, is never kept over this one's own.
+func newerAlreadyInstalled(l *layout, ch *channel, platformKey, request string, excludeManifest Digest, version, build string) (*installedEntry, bool) {
 	if !spellingRegex.MatchString(request) {
 		return nil, false
 	}
@@ -759,7 +763,7 @@ func newerAlreadyInstalled(l *layout, platformKey, request string, excludeManife
 	}
 	var best *installedEntry
 	for i, e := range entries {
-		if e.rec.Platform != platformKey || e.rec.Digests.Manifest == excludeManifest {
+		if e.rec.Platform != platformKey || e.rec.Digests.Manifest == excludeManifest || !ch.visible(e.rec.Predicate) {
 			continue
 		}
 		if !versionWithin(request, e.rec.Version) {
@@ -847,7 +851,7 @@ func resolveInstalledInternal(ro resolvedOptions, req Request, platformKey strin
 		if err != nil {
 			continue
 		}
-		cand, ok := newestMatching(entries, platformKey, req.Spelling)
+		cand, ok := newestMatching(entries, platformKey, req.Spelling, ro.ch)
 		if !ok {
 			continue
 		}
@@ -871,7 +875,7 @@ func resolveInstalledInternal(ro resolvedOptions, req Request, platformKey strin
 			dst = cacheLayout
 			source = "system:" + dir + " (pre-seeded, installed into the cache)"
 		}
-		if res, err := verifyPreseededEntry(l, dst, req, platformKey, ro.trustedKeys, source); err == nil && res != nil {
+		if res, err := verifyPreseededEntry(l, dst, ro.ch, req, platformKey, ro.trustedKeys, source); err == nil && res != nil {
 			res.Warnings = append(warnings, res.Warnings...)
 			return res, nil
 		}
@@ -981,7 +985,7 @@ func verifyOne(e installedEntry) VerifyResult {
 // read-only system directory as the source and the user cache as the
 // destination (§1 of the guide: "read-only system directories … never
 // written to"). For the user cache itself, src and dst are the same layout.
-func verifyPreseededEntry(srcLayout, dstLayout *layout, req Request, platformKey string, trustedKeys []ed25519.PublicKey, source string) (*Resolved, error) {
+func verifyPreseededEntry(srcLayout, dstLayout *layout, ch *channel, req Request, platformKey string, trustedKeys []ed25519.PublicKey, source string) (*Resolved, error) {
 	platform, ok := platformByKey(platformKey)
 	if !ok {
 		return nil, nil
@@ -1013,6 +1017,9 @@ func verifyPreseededEntry(srcLayout, dstLayout *layout, req Request, platformKey
 		stmt := findLocalBundle(srcLayout, trustedKeys, manifestDigest, layerDesc.Digest, &platform, req.Spelling)
 		if stmt == nil {
 			continue
+		}
+		if !ch.visible(stmt.Statement.Predicate) {
+			continue // another fingerprint's build: neither the answer nor installed by this lookup
 		}
 		libraryRelPath, _ := predicateLibraryPath(stmt)
 		// The install begins here, and only here is anything created: a

@@ -115,7 +115,7 @@ struct Req {
     bases: Vec<String>,
     /// The dev channel's alias step under this fixture fingerprint
     /// (docs/guides/fetch-v1.md §3); `None` runs the v1 contract as it is.
-    alias_fingerprint: Option<String>,
+    own_fingerprint: Option<String>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -135,6 +135,9 @@ struct Expect {
     lock_after: Option<String>,
     /// A `list-tags-` case's listing, in order.
     tags: Option<Vec<String>>,
+    /// Installed manifests whose cache directory must be byte for byte the
+    /// same after the call as before it.
+    records_intact: Vec<String>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -440,6 +443,19 @@ fn execute_case(
         }
     }
 
+    // records_intact: each named install's directory, as the pre-install left
+    // it, compared after the call.
+    let mut intact_before = Vec::new();
+    for d in &case.expect.records_intact {
+        let snap = snapshot_install(cache_dir.path(), d);
+        if snap.is_empty() {
+            return Err(format!(
+                "records_intact: {d} is not installed before the call"
+            ));
+        }
+        intact_before.push((d.clone(), snap));
+    }
+
     for (k, v) in &case.env {
         // SAFETY: this test runs single-threaded per case via
         // `catch_unwind`'s synchronous call, and the conformance binary
@@ -466,9 +482,9 @@ fn execute_case(
     // contract as it is.
     let _alias = case
         .request
-        .alias_fingerprint
+        .own_fingerprint
         .as_deref()
-        .map(ocifetch::channel::use_alias_fingerprint_for_tests);
+        .map(ocifetch::channel::use_own_fingerprint_for_tests);
 
     let is_generic_fetch = case.id.starts_with("goldens-") || case.id.starts_with("fixtures-");
     let mut outcome = if is_generic_fetch {
@@ -578,7 +594,49 @@ fn execute_case(
         }
     }
 
+    if outcome.is_ok() {
+        for (d, before) in &intact_before {
+            if snapshot_install(cache_dir.path(), d) != *before {
+                outcome = Err(format!("records_intact: the install of {d} changed"));
+                break;
+            }
+        }
+    }
+
     outcome
+}
+
+/// Every file under `<cache>/unpacked/sha256/<hex>/`, by relative path, as its
+/// sha256: what `expect.records_intact` compares before and after a call.
+fn snapshot_install(
+    cache_root: &Path,
+    manifest_digest: &str,
+) -> std::collections::BTreeMap<String, String> {
+    fn walk(dir: &Path, root: &Path, out: &mut std::collections::BTreeMap<String, String>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, root, out);
+            } else if let Ok(bytes) = std::fs::read(&path) {
+                let rel = path
+                    .strip_prefix(root)
+                    .unwrap_or(&path)
+                    .display()
+                    .to_string();
+                out.insert(rel, ocifetch::oci::sha256_hex(&bytes));
+            }
+        }
+    }
+    let hex = manifest_digest
+        .strip_prefix("sha256:")
+        .unwrap_or(manifest_digest);
+    let root = cache_root.join("unpacked").join("sha256").join(hex);
+    let mut out = std::collections::BTreeMap::new();
+    walk(&root, &root, &mut out);
+    out
 }
 
 /// A `list-tags-` case: the listing must equal `expect.tags`, in order.

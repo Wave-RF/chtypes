@@ -310,7 +310,7 @@ func TestDevOfflineEnvMakesNoRequestAndLoadsAnInstalledBuild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	entry := writeRecordRoot(t, root, "26.8.1.1", "20260801.000001")
+	entry := writeDevRecordRoot(t, root, "26.8.1.1", "20260801.000001")
 	res, err := Ensure(context.Background(), req, o())
 	if err != nil || res == nil || res.Dir != entry {
 		t.Fatalf("Ensure under CHTYPES_OFFLINE=1 with a build installed = %v, %v; want %s", res, err, entry)
@@ -416,5 +416,51 @@ func TestDevChannelResolvesItsOwnAliasFirst(t *testing.T) {
 				t.Errorf("requested %q, want %q", paths, tc.wantPaths)
 			}
 		})
+	}
+}
+
+// writeDevRecordRoot is writeRecordRoot for a build of this SDK's own ABI: its
+// predicate names the generated fingerprint, as a dev artifact's signed
+// predicate does, so the dev channel's record filter sees it.
+func writeDevRecordRoot(t *testing.T, root, version, build string) string {
+	t.Helper()
+	entry := writeRecordRoot(t, root, version, build)
+	path := filepath.Join(entry, CacheVerifiedRecord)
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := decodeRecord(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec.Predicate["abi_fingerprint"] = DevABIFingerprint
+	if b, err = encodeRecord(*rec); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return entry
+}
+
+// The record filter (docs/guides/fetch-v1.md §3): the dev channel sees only a
+// record whose signed abi_fingerprint is its own generated fingerprint; the v1
+// contract sees every record.
+func TestDevChannelSeesOnlyItsOwnFingerprintsRecords(t *testing.T) {
+	devChannelForTest(t)
+	other := "sha256:" + strings.Repeat("0", 64)
+	if !active().visible(map[string]any{"abi_fingerprint": DevABIFingerprint}) {
+		t.Errorf("the dev channel does not see a record of its own fingerprint %s", DevABIFingerprint)
+	}
+	for _, pred := range []map[string]any{{"abi_fingerprint": other}, {}, {"abi_fingerprint": strings.TrimPrefix(DevABIFingerprint, "sha256:")}} {
+		if active().visible(pred) {
+			t.Errorf("the dev channel sees a record with predicate %v", pred)
+		}
+	}
+	restore := UseFetchV1ForTests()
+	defer restore()
+	if !active().visible(map[string]any{"abi_fingerprint": other}) || !active().visible(map[string]any{}) {
+		t.Errorf("the v1 contract filters records by fingerprint")
 	}
 }

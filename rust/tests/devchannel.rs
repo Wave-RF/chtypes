@@ -522,3 +522,27 @@ fn the_dev_channel_requests_its_own_alias_first() {
         let _ = std::fs::remove_dir_all(&cache);
     }
 }
+
+/// The record filter (docs/guides/fetch-v1.md §3): the dev channel sees only a
+/// record whose signed `abi_fingerprint` is its own generated fingerprint; the
+/// v1 contract (the control, under its seam) sees every record.
+#[test]
+fn the_dev_channel_sees_only_its_own_fingerprints_records() {
+    let own = ocifetch::abi_fingerprint::DEV_ABI_FINGERPRINT;
+    let other = format!("sha256:{}", "0".repeat(64));
+    assert!(channel::visible(
+        &serde_json::json!({ "abi_fingerprint": own })
+    ));
+    assert!(!channel::visible(
+        &serde_json::json!({ "abi_fingerprint": other })
+    ));
+    assert!(!channel::visible(&serde_json::json!({})));
+    assert!(!channel::visible(
+        &serde_json::json!({ "abi_fingerprint": own.trim_start_matches("sha256:") })
+    ));
+    let _v1 = channel::use_fetch_v1_for_tests();
+    assert!(channel::visible(
+        &serde_json::json!({ "abi_fingerprint": other })
+    ));
+    assert!(channel::visible(&serde_json::json!({})));
+}

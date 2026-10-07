@@ -160,7 +160,7 @@ func TestNewestMatchingPicksHighestVersionThenBuild(t *testing.T) {
 		{dir: "c", rec: verifiedRecord{Platform: "linux-arm64", Version: "26.8.15.10", Build: "20270101.000000"}},
 		{dir: "d", rec: verifiedRecord{Platform: "darwin-arm64", Version: "99.99.99.99", Build: "20280101.000000"}},
 	}
-	best, ok := newestMatching(entries, "linux-arm64", "26.8")
+	best, ok := newestMatching(entries, "linux-arm64", "26.8", active())
 	if !ok {
 		t.Fatalf("newestMatching found nothing")
 	}
@@ -174,11 +174,11 @@ func TestNewestMatchingFiltersByRequestAndPlatform(t *testing.T) {
 		{dir: "a", rec: verifiedRecord{Platform: "linux-arm64", Version: "25.3.1.1", Build: "1"}},
 		{dir: "b", rec: verifiedRecord{Platform: "linux-arm64", Version: "26.8.15.10", Build: "1"}},
 	}
-	best, ok := newestMatching(entries, "linux-arm64", "26.8")
+	best, ok := newestMatching(entries, "linux-arm64", "26.8", active())
 	if !ok || best.dir != "b" {
 		t.Fatalf("newestMatching should only match the 26.8 family: got %+v, ok=%v", best, ok)
 	}
-	if _, ok := newestMatching(entries, "darwin-arm64", "26.8"); ok {
+	if _, ok := newestMatching(entries, "darwin-arm64", "26.8", active()); ok {
 		t.Fatalf("newestMatching matched the wrong platform")
 	}
 }

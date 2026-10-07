@@ -13,7 +13,7 @@
 
 import { type ChildProcessByStdio, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { Readable } from 'node:stream';
@@ -24,7 +24,7 @@ import { ArtifactMissingError, type FetchV1ErrorCode } from '../../src/ocifetch/
 import { verifyAndInstallFromLocalBlobs } from '../../src/ocifetch/localverify.js';
 import { readLock, type LockFile } from '../../src/ocifetch/lock.js';
 import type { Clock, PlatformKey } from '../../src/ocifetch/types.js';
-import { channelName, useAliasFingerprintForTests, useFetchV1ForTests } from '../../src/ocifetch/channel.js';
+import { channelName, useOwnFingerprintForTests, useFetchV1ForTests } from '../../src/ocifetch/channel.js';
 
 // This file tests the v1 fetch contract that the ABI v2 dev channel narrows
 // (src/ocifetch/channel.ts): its fixtures name their own registry and key, and
@@ -68,7 +68,7 @@ interface ConformanceCase {
     readonly trust: 'release' | 'test';
     readonly bases: readonly string[];
     /** The dev channel's alias step under this fixture fingerprint (guide §3); null runs the v1 contract as it is. */
-    readonly alias_fingerprint: string | null;
+    readonly own_fingerprint: string | null;
   };
   readonly env: Readonly<Record<string, string>>;
   readonly expect: {
@@ -84,6 +84,8 @@ interface ConformanceCase {
     readonly lock_after: string | null;
     /** A `list-tags-` case's listing, in order. */
     readonly tags: readonly string[] | null;
+    /** Installed manifests whose cache directory must be byte for byte the same after the call. */
+    readonly records_intact: readonly string[];
   };
 }
 
@@ -333,9 +335,18 @@ async function runOne(
       ...(beforeIndexRename !== undefined ? { beforeIndexRename } : {}),
     };
 
+    // records_intact: each named install's directory, as the pre-install left
+    // it, compared after the call.
+    const intactBefore = new Map<string, string>();
+    for (const d of c.expect.records_intact) {
+      const snap = await snapshotInstall(cacheDir, d);
+      if (snap === '{}') return `records_intact: ${d} is not installed before the call`;
+      intactBefore.set(d, snap);
+    }
+
     // The dev channel's alias step (guide §3), under the case's fixture
     // fingerprint; a null one leaves the v1 contract as it is.
-    const restoreAlias = c.request.alias_fingerprint === null ? undefined : useAliasFingerprintForTests(c.request.alias_fingerprint);
+    const restoreAlias = c.request.own_fingerprint === null ? undefined : useOwnFingerprintForTests(c.request.own_fingerprint);
     let resultDetail: string;
     try {
       if (c.id.startsWith('goldens-') || c.id.startsWith('fixtures-')) {
@@ -349,6 +360,9 @@ async function runOne(
       restoreAlias?.();
     }
     if (resultDetail !== '') return resultDetail;
+    for (const [d, before] of intactBefore) {
+      if ((await snapshotInstall(cacheDir, d)) !== before) return `records_intact: the install of ${d} changed`;
+    }
 
     if (c.expect.sleeps.length > 0 || sleeps.length > 0) {
       if (sleeps.join(',') !== c.expect.sleeps.join(',')) {
@@ -472,6 +486,25 @@ async function runGenericFetch(c: ConformanceCase, bases: readonly string[], bas
     }
     return '';
   }
+}
+
+// --------------------------------------------------------------- records_intact
+
+/** Every file under `<cache>/unpacked/sha256/<hex>/`, by relative path, as its sha256, as one JSON string: what `expect.records_intact` compares before and after a call. */
+async function snapshotInstall(cacheDir: string, manifestDigest: string): Promise<string> {
+  const root = path.join(cacheDir, 'unpacked', 'sha256', manifestDigest.replace(/^sha256:/, ''));
+  const files: Record<string, string> = {};
+  let names: string[] = [];
+  try {
+    names = (await readdir(root, { recursive: true, withFileTypes: true }))
+      .filter((e) => e.isFile())
+      .map((e) => path.relative(root, path.join(e.parentPath, e.name)))
+      .sort();
+  } catch {
+    // Not installed: an empty snapshot.
+  }
+  for (const name of names) files[name] = createHash('sha256').update(await readFile(path.join(root, name))).digest('hex');
+  return JSON.stringify(files);
 }
 
 // --------------------------------------------------------------- the request log

@@ -274,7 +274,7 @@ def test_the_seams_are_test_only(monkeypatch: pytest.MonkeyPatch) -> None:
         _channel.use_fetch_v1_for_tests,
         _channel.allow_overrides_for_tests,
         _channel.use_dev_channel_for_tests,
-        lambda: _channel.use_alias_fingerprint_for_tests("0" * 64),
+        lambda: _channel.use_own_fingerprint_for_tests("0" * 64),
     ):
         with pytest.raises(RuntimeError, match="test-only"):
             seam()
@@ -317,6 +317,13 @@ def test_offline_env_with_an_installed_build_loads_it(
     cache = tmp_path / "cache"
     options = Options(cache_dir=cache, system_dirs=(), platform="linux-arm64")
     entry = _write_record(resolve_cache_root(cache), "26.8.1.1", "20260801.000001")
+    # A build of this SDK's own ABI: its predicate names the generated
+    # fingerprint, as a dev artifact's signed predicate does, so the dev
+    # channel's record filter sees it.
+    record_path = entry / C.CACHE_VERIFIED_RECORD
+    record = json.loads(record_path.read_text())
+    record["predicate"]["abi_fingerprint"] = CHS_ABI_FINGERPRINT
+    record_path.write_text(json.dumps(record))
     resolved = ensure(Request("26.8"), options)
     assert resolved.dir == entry
     assert no_network == []
@@ -391,3 +398,20 @@ def test_the_dev_channel_requests_its_own_alias_first(
         ensure(Request("26.9"), options)
     want = [alias] * attempts + ([api + "26.9"] if alias_status == 404 else [])
     assert seen == want
+
+
+def test_the_dev_channel_sees_only_its_own_fingerprints_records() -> None:
+    """The record filter (docs/guides/fetch-v1.md §3): the dev channel sees only a
+    record whose signed `abi_fingerprint` is its own generated fingerprint; the v1
+    contract sees every record."""
+    other = "sha256:" + "0" * 64
+    assert _channel.visible({"abi_fingerprint": CHS_ABI_FINGERPRINT})
+    assert not _channel.visible({"abi_fingerprint": other})
+    assert not _channel.visible({})
+    assert not _channel.visible({"abi_fingerprint": CHS_ABI_FINGERPRINT.removeprefix("sha256:")})
+    restore = _channel.use_fetch_v1_for_tests()
+    try:
+        assert _channel.visible({"abi_fingerprint": other})
+        assert _channel.visible({})
+    finally:
+        restore()

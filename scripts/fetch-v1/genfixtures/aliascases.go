@@ -13,12 +13,15 @@ import (
 // registry serves `<tag>--fp-<64 hex>`: the newest build OF THAT FINGERPRINT.
 // A dev SDK resolves its own fingerprint's alias first and falls back to the
 // tag only when no base has the alias; any other failure of the alias request
-// is that failure, never a fallback. A listing never shows an alias.
+// is that failure, never a fallback. A listing never shows an alias. And the
+// dev SDK's cache lookups see only records of its own fingerprint: in a cache
+// shared with a dev SDK of another fingerprint, the other's builds are never
+// returned, never kept by the monotonic rule, and never touched.
 //
-// Every case here carries request.alias_fingerprint: the runner hands that
-// fixture fingerprint to its binding's alias seam (the dev channel takes its
-// own from the generated constant instead), or, when it is null, runs the case
-// with no alias step at all, as the v1 contract does. Each verdict is what the
+// Every case here carries request.own_fingerprint: the runner hands that
+// fixture fingerprint to its binding's seam (the dev channel takes its own from
+// the generated constant instead), or, when it is null, runs the case with no
+// alias step and no record filter at all, as the v1 contract does. Each verdict is what the
 // tree served and what the request log shows: an expected manifest is the one
 // the served tag or alias names, and "the tag was never requested" is a
 // none_matching pattern anchored on the tag's own path.
@@ -29,9 +32,9 @@ const aliasSeparator = "--fp-"
 // no alias in any tree names (B), and the newer fingerprint every floating tag
 // here has moved on to (N). Fixture values, never a real ABI's.
 var (
-	aliasFingerprintA = fakeHex("fetch-v1 fixture abi fingerprint A", 64)
-	aliasFingerprintB = fakeHex("fetch-v1 fixture abi fingerprint B", 64)
-	aliasFingerprintN = fakeHex("fetch-v1 fixture abi fingerprint N (newer)", 64)
+	fixtureFingerprintA = fakeHex("fetch-v1 fixture abi fingerprint A", 64)
+	fixtureFingerprintB = fakeHex("fetch-v1 fixture abi fingerprint B", 64)
+	fixtureFingerprintN = fakeHex("fetch-v1 fixture abi fingerprint N (newer)", 64)
 )
 
 func aliasOf(tag, fingerprint string) string { return tag + aliasSeparator + fingerprint }
@@ -69,27 +72,27 @@ func buildAliasCases(fs *FileSet) []Case {
 
 	// Line 26.8: the floating tag names the newest build (fingerprint N); the
 	// alias for A names an OLDER build of the same line, signed under A.
-	floating268 := buildAliasIndex(tree, "26.8.15.10", "20261005.120000", aliasFingerprintN, []string{"26.8"}, all)
-	alias268 := buildAliasIndex(tree, "26.8.15.9", "20260920.120000", aliasFingerprintA, []string{aliasOf("26.8", aliasFingerprintA)}, all)
+	floating268 := buildAliasIndex(tree, "26.8.15.10", "20261005.120000", fixtureFingerprintN, []string{"26.8"}, all)
+	alias268 := buildAliasIndex(tree, "26.8.15.9", "20260920.120000", fixtureFingerprintA, []string{aliasOf("26.8", fixtureFingerprintA)}, all)
 
 	// The exact version 26.8.14.2, built twice: the exact tag floats to the
 	// newer build (N), its alias for A names the older one.
-	buildAliasIndex(tree, "26.8.14.2", "20260915.000000", aliasFingerprintN, []string{"26.8.14.2"}, all)
-	aliasExact := buildAliasIndex(tree, "26.8.14.2", "20260901.000000", aliasFingerprintA, []string{aliasOf("26.8.14.2", aliasFingerprintA)}, all)
+	buildAliasIndex(tree, "26.8.14.2", "20260915.000000", fixtureFingerprintN, []string{"26.8.14.2"}, all)
+	aliasExact := buildAliasIndex(tree, "26.8.14.2", "20260901.000000", fixtureFingerprintA, []string{aliasOf("26.8.14.2", fixtureFingerprintA)}, all)
 
 	// Line 26.7: the alias for A answers 200 with an index that has no
 	// linux-arm64 build (no build of this platform at that fingerprint),
 	// while the floating tag offers every platform.
-	buildAliasIndex(tree, "26.7.3.1", "20260910.000000", aliasFingerprintN, []string{"26.7"}, all)
-	buildAliasIndex(tree, "26.7.2.1", "20260901.000000", aliasFingerprintA, []string{aliasOf("26.7", aliasFingerprintA)},
+	buildAliasIndex(tree, "26.7.3.1", "20260910.000000", fixtureFingerprintN, []string{"26.7"}, all)
+	buildAliasIndex(tree, "26.7.2.1", "20260901.000000", fixtureFingerprintA, []string{aliasOf("26.7", fixtureFingerprintA)},
 		[]string{"linux-amd64", "darwin-arm64"})
 
 	// Line 26.6: the alias for A names a build of ANOTHER line (26.5), signed
 	// as such, while the floating tag is good. The alias is a pointer, never a
 	// credential: the signed version outside the request is refused with
 	// today's code, and the tag is not tried.
-	buildAliasIndex(tree, "26.6.1.1", "20260801.000000", aliasFingerprintN, []string{"26.6"}, all)
-	buildAliasIndex(tree, "26.5.9.1", "20260725.000000", aliasFingerprintA, []string{aliasOf("26.6", aliasFingerprintA)}, all)
+	buildAliasIndex(tree, "26.6.1.1", "20260801.000000", fixtureFingerprintN, []string{"26.6"}, all)
+	buildAliasIndex(tree, "26.5.9.1", "20260725.000000", fixtureFingerprintA, []string{aliasOf("26.6", fixtureFingerprintA)}, all)
 	flushTrees(fs, tree)
 
 	want := func(c *Case, art PlatformArtifact) {
@@ -105,25 +108,25 @@ func buildAliasCases(fs *FileSet) []Case {
 	newAliasCase := func(id, spelling string, fingerprint *string, transports ...string) Case {
 		c := newCase(id, "dev-alias", transports...)
 		c.Request.Spelling = spelling
-		c.Request.AliasFingerprint = fingerprint
+		c.Request.OwnFingerprint = fingerprint
 		return c
 	}
 
 	// 1. The alias exists and names an older build than the tag: the alias's
 	// build is installed, and the tag itself is never requested.
-	present := newAliasCase("dev-alias-line-present", "26.8", strp(aliasFingerprintA), "file", "http")
+	present := newAliasCase("dev-alias-line-present", "26.8", strp(fixtureFingerprintA), "file", "http")
 	want(&present, alias268["linux-arm64"])
 	present.Expect.Requests.NoneMatching = []string{tagPathPattern("26.8")}
 	cases = append(cases, present)
 
 	// The same for an exact version: its alias names the older build.
-	exact := newAliasCase("dev-alias-exact-present", "26.8.14.2", strp(aliasFingerprintA), "file", "http")
+	exact := newAliasCase("dev-alias-exact-present", "26.8.14.2", strp(fixtureFingerprintA), "file", "http")
 	want(&exact, aliasExact["linux-arm64"])
 	exact.Expect.Requests.NoneMatching = []string{tagPathPattern("26.8.14.2")}
 	cases = append(cases, exact)
 
 	// 2. No alias for this fingerprint (a 404): the tag answers, as today.
-	absent := newAliasCase("dev-alias-absent", "26.8", strp(aliasFingerprintB), "file", "http")
+	absent := newAliasCase("dev-alias-absent", "26.8", strp(fixtureFingerprintB), "file", "http")
 	want(&absent, floating268["linux-arm64"])
 	cases = append(cases, absent)
 
@@ -139,7 +142,7 @@ func buildAliasCases(fs *FileSet) []Case {
 	// that fingerprint: the error the tag path gives for a missing platform,
 	// and no fallback (the tag names another fingerprint, which this SDK
 	// would refuse anyway). One request: the alias.
-	noPlatform := newAliasCase("dev-alias-platform-absent", "26.7", strp(aliasFingerprintA), "file", "http")
+	noPlatform := newAliasCase("dev-alias-platform-absent", "26.7", strp(fixtureFingerprintA), "file", "http")
 	refused(&noPlatform, "CHTYPES_ARTIFACT_UNPUBLISHED")
 	noPlatform.Expect.Requests.Max = intp(1)
 	noPlatform.Expect.Requests.NoneMatching = []string{tagPathPattern("26.7")}
@@ -147,13 +150,13 @@ func buildAliasCases(fs *FileSet) []Case {
 
 	// The alias names a build whose signed version lies outside the request:
 	// refused exactly as from the tag (§4), and the tag is never tried.
-	wrongVersion := newAliasCase("dev-alias-signed-version-outside", "26.6", strp(aliasFingerprintA), "file", "http")
+	wrongVersion := newAliasCase("dev-alias-signed-version-outside", "26.6", strp(fixtureFingerprintA), "file", "http")
 	refused(&wrongVersion, "CHTYPES_ARTIFACT_CORRUPT")
 	wrongVersion.Expect.Requests.NoneMatching = []string{tagPathPattern("26.6")}
 	cases = append(cases, wrongVersion)
 
 	// --- scripted: the alias request's own failures, and more than one base.
-	aliasPath := "/v2/chtypes/v1/manifests/" + aliasOf("26.8", aliasFingerprintA)
+	aliasPath := "/v2/chtypes/v1/manifests/" + aliasOf("26.8", fixtureFingerprintA)
 	tagPath := "/v2/chtypes/v1/manifests/26.8"
 	putScript := func(id string, routes, secondOriginRoutes []httpRoute) {
 		validateLocationHeaders(id, routes)
@@ -171,7 +174,7 @@ func buildAliasCases(fs *FileSet) []Case {
 	// CHTYPES_SOURCE_UNREACHABLE), and no fallback: five requests, all of
 	// them the alias.
 	putScript("dev-alias-5xx-no-fallback", []httpRoute{{Method: "GET", Path: aliasPath, Responses: fiveFailures}}, nil)
-	fault := newAliasCase("dev-alias-5xx-no-fallback", "26.8", strp(aliasFingerprintA), "http")
+	fault := newAliasCase("dev-alias-5xx-no-fallback", "26.8", strp(fixtureFingerprintA), "http")
 	fault.HTTPScript = strp("dev-alias-5xx-no-fallback")
 	refused(&fault, "CHTYPES_SOURCE_UNREACHABLE")
 	fault.Expect.Sleeps = []float64{4, 8, 16, 32}
@@ -186,7 +189,7 @@ func buildAliasCases(fs *FileSet) []Case {
 	}, []httpRoute{
 		{Method: "GET", Path: aliasPath, Responses: []httpResponse{{FromTree: true}}},
 	})
-	secondBase := newAliasCase("dev-alias-second-base", "26.8", strp(aliasFingerprintA), "http")
+	secondBase := newAliasCase("dev-alias-second-base", "26.8", strp(fixtureFingerprintA), "http")
 	secondBase.HTTPScript = strp("dev-alias-second-base")
 	secondBase.Request.Bases = []string{"{base}", "{base2}"}
 	want(&secondBase, alias268["linux-arm64"])
@@ -203,7 +206,7 @@ func buildAliasCases(fs *FileSet) []Case {
 		{Method: "GET", Path: aliasPath, Responses: []httpResponse{{Status: intp(404)}}},
 		{Method: "GET", Path: tagPath, Responses: []httpResponse{{FromTree: true}}},
 	})
-	mixed := newAliasCase("dev-alias-5xx-then-404-no-fallback", "26.8", strp(aliasFingerprintA), "http")
+	mixed := newAliasCase("dev-alias-5xx-then-404-no-fallback", "26.8", strp(fixtureFingerprintA), "http")
 	mixed.HTTPScript = strp("dev-alias-5xx-then-404-no-fallback")
 	mixed.Request.Bases = []string{"{base}", "{base2}"}
 	refused(&mixed, "CHTYPES_SOURCE_UNREACHABLE")
@@ -211,18 +214,79 @@ func buildAliasCases(fs *FileSet) []Case {
 	mixed.Expect.Requests.NoneMatching = []string{tagPathPattern("26.8")}
 	cases = append(cases, mixed)
 
+	// --- a cache shared with a dev SDK of another fingerprint. Two layouts:
+	// the newest build of 26.8 (fingerprint N, a newer dev SDK's) installed
+	// alone, and that beside this SDK's own (fingerprint A, older). This SDK
+	// sees only its own record, and the other stays byte for byte as it was
+	// (records_intact: the runner snapshots its unpacked/ directory before
+	// the call and compares after).
+	foreign := floating268["linux-arm64"]
+	own := alias268["linux-arm64"]
+	foreignOnly := NewLayout("dev-alias-foreign-newer")
+	copyArtifactIntoLayout(foreignOnly, tree, foreign, "26.8")
+	foreignOnly.SetInstalled(foreign.ManifestDesc.Digest)
+	ownBeside := NewLayout("dev-alias-own-beside-foreign-newer")
+	copyArtifactIntoLayout(ownBeside, tree, own, "26.8")
+	copyArtifactIntoLayout(ownBeside, tree, foreign, "26.8")
+	ownBeside.SetInstalled(own.ManifestDesc.Digest, foreign.ManifestDesc.Digest)
+	foreignOnly.Flush(fs)
+	ownBeside.Flush(fs)
+
+	// (a) Only the other fingerprint's newer build is installed: online, this
+	// SDK fetches its own alias's build (the only manifest naming it is the
+	// alias's), and the monotonic rule does not keep the foreign one over it.
+	fetchesOwn := newAliasCase("dev-alias-foreign-newer-fetches-own", "26.8", strp(fixtureFingerprintA), "file", "http")
+	fetchesOwn.Setup.Cache = "dev-alias-foreign-newer"
+	want(&fetchesOwn, own)
+	fetchesOwn.Expect.Requests.NoneMatching = []string{tagPathPattern("26.8")}
+	fetchesOwn.Expect.RecordsIntact = []string{foreign.ManifestDesc.Digest}
+	cases = append(cases, fetchesOwn)
+
+	// ... and the lookup alone (what a registry open asks first) sees nothing.
+	foreignMiss := newAliasCase("resolve-installed-dev-alias-foreign-newer", "26.8", strp(fixtureFingerprintA), "file", "http")
+	foreignMiss.Setup.Cache = "dev-alias-foreign-newer"
+	refused(&foreignMiss, "CHTYPES_ARTIFACT_MISSING")
+	foreignMiss.Expect.Requests.Max = intp(0)
+	foreignMiss.Expect.RecordsIntact = []string{foreign.ManifestDesc.Digest}
+	cases = append(cases, foreignMiss)
+
+	// (b) This SDK's own build is installed beside the other's newer one: the
+	// lookup and the offline answer are its own, with no request at all.
+	ownLookup := newAliasCase("resolve-installed-dev-alias-own-beside-foreign-newer", "26.8", strp(fixtureFingerprintA), "file", "http")
+	ownLookup.Setup.Cache = "dev-alias-own-beside-foreign-newer"
+	want(&ownLookup, own)
+	ownLookup.Expect.Requests.Max = intp(0)
+	ownLookup.Expect.RecordsIntact = []string{foreign.ManifestDesc.Digest}
+	cases = append(cases, ownLookup)
+
+	ownOffline := newAliasCase("dev-alias-own-beside-foreign-newer-offline", "26.8", strp(fixtureFingerprintA), "file", "http")
+	ownOffline.Setup.Cache = "dev-alias-own-beside-foreign-newer"
+	ownOffline.Request.Offline = true
+	want(&ownOffline, own)
+	ownOffline.Expect.Requests.Max = intp(0)
+	ownOffline.Expect.RecordsIntact = []string{foreign.ManifestDesc.Digest}
+	cases = append(cases, ownOffline)
+
+	// The control: with no own fingerprint (the fetch-v1 channel), the same
+	// cache answers with the newest build of the line, whoever's it is.
+	v1Lookup := newAliasCase("resolve-installed-dev-alias-v1-channel-sees-all", "26.8", nil, "file", "http")
+	v1Lookup.Setup.Cache = "dev-alias-own-beside-foreign-newer"
+	want(&v1Lookup, foreign)
+	v1Lookup.Expect.Requests.Max = intp(0)
+	cases = append(cases, v1Lookup)
+
 	// 5. A registry whose tags/list carries aliases: the listing is that list
 	// less every alias, unchanged from a registry that serves none. Every
 	// non-alias tag here is a two-part line, which every binding's listing
 	// keeps, so the four give one answer.
 	listTree := NewTree("dev-alias-list")
-	buildAliasIndex(listTree, "26.8.15.10", "20261005.120000", aliasFingerprintN, []string{"26.8"}, all)
-	buildAliasIndex(listTree, "26.8.15.9", "20260920.120000", aliasFingerprintA, []string{aliasOf("26.8", aliasFingerprintA)}, all)
-	buildAliasIndex(listTree, "26.9.1.1", "20261006.000000", aliasFingerprintN, []string{"26.9", aliasOf("26.9", aliasFingerprintN)}, all)
-	buildAliasIndex(listTree, "26.9.0.4", "20260930.000000", aliasFingerprintA, []string{aliasOf("26.9", aliasFingerprintA)}, all)
+	buildAliasIndex(listTree, "26.8.15.10", "20261005.120000", fixtureFingerprintN, []string{"26.8"}, all)
+	buildAliasIndex(listTree, "26.8.15.9", "20260920.120000", fixtureFingerprintA, []string{aliasOf("26.8", fixtureFingerprintA)}, all)
+	buildAliasIndex(listTree, "26.9.1.1", "20261006.000000", fixtureFingerprintN, []string{"26.9", aliasOf("26.9", fixtureFingerprintN)}, all)
+	buildAliasIndex(listTree, "26.9.0.4", "20260930.000000", fixtureFingerprintA, []string{aliasOf("26.9", fixtureFingerprintA)}, all)
 	flushTrees(fs, listTree)
 	listing := newCase("list-tags-dev-alias", "dev-alias-list", "file", "http")
-	listing.Request.AliasFingerprint = strp(aliasFingerprintA)
+	listing.Request.OwnFingerprint = strp(fixtureFingerprintA)
 	listing.Expect.Tags = listingWithoutAliases(listTree)
 	cases = append(cases, listing)
 
@@ -271,7 +335,7 @@ func versionLessGen(a, b string) bool {
 // tag) names in the tree, not one computed some other way.
 func checkAliasCases(cases []Case) {
 	for _, c := range cases {
-		fp := c.Request.AliasFingerprint
+		fp := c.Request.OwnFingerprint
 		if fp != nil {
 			if n := len(aliasOf(c.Request.Spelling, *fp)); n > 128 {
 				panic(fmt.Sprintf("genfixtures: case %q's alias is %d characters, over OCI's 128", c.ID, n))

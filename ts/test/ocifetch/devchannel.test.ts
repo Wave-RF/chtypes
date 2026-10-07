@@ -33,6 +33,7 @@ import {
   PinningRefusedError,
   useDevChannelForTests,
   useFetchV1ForTests,
+  visibleToChannel,
 } from '../../src/ocifetch/channel.js';
 import { RELEASE_KEYS, TEST_KEYS } from '../../src/ocifetch/constants.gen.js';
 import { checkArtifactStatement, keyIdOfRawKey, parseStatement } from '../../src/ocifetch/dsse.js';
@@ -310,7 +311,10 @@ describe('public issue #528: CHTYPES_OFFLINE=1 is the environment twin of the of
       bundleDigest: null,
       bundleManifestDigest: null,
       signedBy: null,
-      predicate: { clickhouse_version: '26.8.1.1', build: '20260801.000001' } as unknown as ArtifactPredicate,
+      // A build of this SDK's own ABI: its predicate names the generated
+      // fingerprint, as a dev artifact's signed predicate does, so the dev
+      // channel's record filter sees it.
+      predicate: { clickhouse_version: '26.8.1.1', build: '20260801.000001', abi_fingerprint: ABI_FINGERPRINT } as unknown as ArtifactPredicate,
     };
     const entry = unpackedDir(root, hex);
     await mkdir(entry, { recursive: true });
@@ -391,4 +395,21 @@ describe('the alias step (guide §3): a dev SDK prefers the newest build of its 
       expect(paths).toEqual([...Array<string>(attempts).fill(alias), ...(aliasStatus === 404 ? [tag] : [])]);
     });
   }
+});
+
+describe('the record filter (guide §3): a dev SDK sees only its own fingerprint\'s records', () => {
+  it('sees a record of its own generated fingerprint and no other; the v1 contract sees every record', () => {
+    const other = `sha256:${'0'.repeat(64)}`;
+    expect(visibleToChannel({ abi_fingerprint: ABI_FINGERPRINT })).toBe(true);
+    expect(visibleToChannel({ abi_fingerprint: other })).toBe(false);
+    expect(visibleToChannel({})).toBe(false);
+    expect(visibleToChannel({ abi_fingerprint: ABI_FINGERPRINT.slice('sha256:'.length) })).toBe(false);
+    const restore = useFetchV1ForTests();
+    try {
+      expect(visibleToChannel({ abi_fingerprint: other })).toBe(true);
+      expect(visibleToChannel({})).toBe(true);
+    } finally {
+      restore();
+    }
+  });
 });
