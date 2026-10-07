@@ -99,86 +99,6 @@ Every entry here has a machine-checkable twin in [`docs/divergences.json`](diver
 
 **What gets an entry here, and when.** A divergence that changes the verdict or the stored value at default settings (an over-accept, an over-reject, or a row both sides accept but store differently) is listed as soon as the server's answer has been measured on each line it affects, and not before, because a wrong entry is worse than a late one. A divergence that is only a different error code, or that needs a non-default setting to reach, is listed if a published build still shows it seven days after it was found. Until then it's tracked with the artifact producer, whose comparison against real servers keeps finding such cases, and it's usually fixed in the next relink. Every entry is removed on the relink that fixes it.
 
-### A projection with no ORDER BY is accepted at schema creation; a real server refuses the CREATE
-
-**Over-accept, on every supported line, at schema creation, linux-amd64 only.** A table whose `PROJECTION` has no `ORDER BY` is accepted by `chs_schema_create`, and a preview then accepts rows for it. A real server refuses the CREATE with error **36** (`ORDER BY cannot be empty`).
-
-**Measured**: by the artifact producer, against the production library build `20261006.170903` and its predecessor `20261004.052404`, on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 only. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
-
-Until then, do not treat a successful schema creation as proof that the server will accept a CREATE whose projections have no `ORDER BY`.
-
-### The row preview skips the TTL step: a row whose TTL expression throws is accepted, where a real server refuses it
-
-**Over-accept, on every supported line, through the row preview only.** `chs_preview_row` (the row preview) does not evaluate a table's `TTL` expressions. A real server evaluates them during the INSERT, and one that throws on a row refuses the INSERT. For example, with `TTL toDate(s) + INTERVAL 100 YEAR` and a row where `s = 'abc'`:
-
-|                           |                                      |
-| ------------------------- | ------------------------------------ |
-| this library, row preview | accepts the row                      |
-| a real server             | refuses the INSERT with error **38** |
-
-The batch preview (`chs_preview_batch`) of the same row answers correctly, with 38.
-
-**Measured**: by the artifact producer, against the production library builds `20261004.052404` and `20261006.170903` on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
-
-Until then, use the batch preview, even for one row, on a table with a `TTL`.
-
-### The batch preview refuses a row with code 10 when a TTL expression reads a MATERIALIZED column
-
-**Over-reject, on every supported line, through the batch preview.** On a table whose `TTL` expression reads a `MATERIALIZED` column, `chs_preview_batch` (the batch preview) refuses the row with code **10** (`Not found column or subcolumn … in block`). A real server accepts it.
-
-|                             |                                  |
-| --------------------------- | -------------------------------- |
-| this library, batch preview | refuses the row with code **10** |
-| a real server               | accepts the row                  |
-
-**Measured**: by the artifact producer, against the production library build `20261006.170903` on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
-
-Until then, on such a table, do not read a batch preview's refusal with code 10 as the server's answer.
-
-### A column TTL that throws on a row the table's rows TTL expires is accepted, where a real server refuses it
-
-**Over-accept, on every supported line, through both previews.** A real server evaluates every `TTL` expression over every row of the INSERT, including a column `TTL` on a row that the table's rows `TTL` already expires, and refuses the INSERT if one throws. This library does not evaluate that column `TTL` there. For example:
-
-```sql
-CREATE TABLE t (k UInt32, d Date, s String, v UInt8 TTL toDate(s) + INTERVAL 100 YEAR)
-ENGINE = MergeTree ORDER BY k TTL d + INTERVAL 1 DAY
-```
-
-with the row `k = 1, d = '2020-01-01', s = 'abc', v = 1`, in JSONEachRow or CSV:
-
-|                             |                                      |
-| --------------------------- | ------------------------------------ |
-| this library, both previews | accepts the row                      |
-| a real server               | refuses the INSERT with error **38** |
-
-The row preview's acceptance is also the [row preview's skipped TTL step](#the-row-preview-skips-the-ttl-step-a-row-whose-ttl-expression-throws-is-accepted-where-a-real-server-refuses-it); this entry is the batch preview's.
-
-**Measured**: by the artifact producer, against the production library build `20261006.170903` on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
-
-Until then, do not trust an accepted row on a table with both a rows `TTL` and a column `TTL` whose expression can throw.
-
-### The batch preview evaluates a column's DEFAULT for a column TTL when the row supplies the column
-
-**Over-reject, on `26.3`, `26.7` and `26.8`, through the batch preview.** For a column with both a `DEFAULT` and a `TTL`, the batch preview evaluates the `DEFAULT` at insert time even when the row supplies the column, and refuses the row if it throws. A real server evaluates only the column `TTL` expression at insert; the `DEFAULT` runs only when a later merge resets an expired value. For example:
-
-```sql
-CREATE TABLE t (k Int32, d Date, v Int32 DEFAULT intDiv(10, k) TTL d + INTERVAL 100 YEAR)
-ENGINE = MergeTree ORDER BY k
-```
-
-with the row `k = 0, d = '2026-01-01', v = 5`, which supplies `v`:
-
-|                             |                                    |
-| --------------------------- | ---------------------------------- |
-| this library, batch preview | refuses the row with error **153** |
-| a real server               | accepts the row                    |
-
-The row preview accepts the row, agreeing with the server.
-
-**Measured**: by the artifact producer, against the production library build `20261006.170903` on `26.3`, `26.7` and `26.8`, on linux-amd64 and linux-arm64. `26.9` is not yet confirmed either way. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
-
-Until then, on such a table, do not read a batch preview's refusal with 153 as the server's answer when the row supplies the column.
-
 ### A UNIQUE KEY is accepted at schema creation; a real server refuses the CREATE
 
 **Over-accept, on `26.7`, `26.8` and `26.9`, at schema creation.** This library ignores a `UNIQUE KEY` clause and compiles the table. A real server refuses the CREATE with error **344**, because the feature is disabled by default: the server's message names `allow_experimental_unique_key = 1` on `26.7` and `26.8`, and `enable_unique_key = 1` on `26.9`. For example:
@@ -197,23 +117,6 @@ With the feature enabled, a `UNIQUE KEY` table that also has a `PROJECTION` is t
 **Measured**: by the artifact producer, against the production library build `20261006.170903` on `26.7`, `26.8` and `26.9`, on linux-amd64 and linux-arm64. The current production build `20261006.220511` is not measured; it is expected to behave the same (`inferred`: nothing between the two builds touched this path). A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
 
 Until then, do not treat a successful schema creation as proof that the server will accept a CREATE with a `UNIQUE KEY`.
-
-### Table SETTINGS on a Memory table are refused, where a real server accepts them
-
-**Over-reject, on every supported line, at schema creation.** This library loads a table's `SETTINGS` with the MergeTree settings loader whatever the engine, so a setting that belongs to another engine is refused as unknown. For example:
-
-```sql
-CREATE TABLE t (k UInt32, v String) ENGINE = Memory SETTINGS max_rows_to_keep = 10
-```
-
-|               |                                                                              |
-| ------------- | ---------------------------------------------------------------------------- |
-| this library  | refuses the CREATE with error **115** (`Unknown setting 'max_rows_to_keep'`) |
-| a real server | creates the table                                                            |
-
-**Measured**: by the artifact producer, against the production library build `20261006.170903` on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64. The current production build `20261006.220511` is not measured; it is expected to behave the same (`inferred`). A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
-
-Until then, do not read a refusal with 115 on a non-MergeTree table's `SETTINGS` as the server's answer.
 
 ### On 26.3, a non-UInt8 filter is evaluated where that server's projection pass refuses it
 
