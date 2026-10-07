@@ -32,6 +32,7 @@ from chtypes import (
     FilterOutcome,
     Format,
     InternalError,
+    MergeReason,
     Outcome,
     Reason,
     Source,
@@ -91,6 +92,12 @@ def test_r2_unknown_members_are_ignored(open_variant) -> None:
     assert batch.framing is not None and batch.framing.header is not None
     assert batch.framing.header.names == (b"s",)
     assert batch.payload == b'{"s":"abc"}\n'
+    # ABI v2's batch members (public issue #544): an unknown member inside either is ignored.
+    assert batch.unsupported_settings == (b"st",)
+    assert len(batch.at_merge) == 1
+    entry = batch.at_merge[0]
+    assert entry.reason is MergeReason.TTL_COLUMN_RESET and entry.column == b"s"
+    assert entry.stored == b"" and entry.input_rows == (0,)
 
     with schema.compile_filter("x > 1") as flt:
         res = flt.rows(JSON, b'{"x":1}')
@@ -161,6 +168,12 @@ def test_r3_unknown_values_are_kept(open_variant) -> None:
 
     # A member this binding does not read carries the unlisted reason: the batch stands.
     b = batch("batch.storage_transforms.reason")
+    assert b.outcome is Outcome.ACCEPTED and len(b.rows) == 1
+
+    b = batch("batch.at_merge.reason")
+    entry = b.at_merge[0]
+    assert entry.reason == "x_future_reason" and not entry.reason.known
+    assert isinstance(entry.reason, MergeReason) and entry.column == b"s"
     assert b.outcome is Outcome.ACCEPTED and len(b.rows) == 1
 
     # The schema's enum constrains the writer, never the reader (r3).

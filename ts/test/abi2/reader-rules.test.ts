@@ -39,6 +39,8 @@ import {
   Format,
   formatKnown,
   InternalError,
+  MergeReason,
+  mergeReasonKnown,
   Outcome,
   outcomeKnown,
   Reason,
@@ -117,6 +119,13 @@ describe.skipIf(!stubsAvailable)('r2: unknown members are ignored at every level
     expect(b.unconsumed).toHaveLength(1);
     expect(b.framing?.header?.names.map((n) => n.toString())).toEqual(['s']);
     expect(b.payload?.toString()).toBe('{"s":"abc"}\n');
+    // ABI v2's batch members (public issue #544): an unknown member inside either is ignored.
+    expect(b.unsupportedSettings.map((n) => n.toString())).toEqual(['st']);
+    expect(b.atMerge).toHaveLength(1);
+    expect(b.atMerge[0]?.reason).toBe(MergeReason.TtlColumnReset);
+    expect(b.atMerge[0]?.column?.toString()).toBe('s');
+    expect(b.atMerge[0]?.stored?.length).toBe(0);
+    expect(b.atMerge[0]?.inputRows).toEqual([0]);
 
     const filter = schema.compileFilter('x > 1');
     const f = filter.rows(Format.JSONEachRow, body('{"x":1}'));
@@ -176,7 +185,7 @@ describe.skipIf(!stubsAvailable)('r3: an unlisted value is kept as its unknown(n
     schema.close();
   });
 
-  it('the batch: its outcome, a row outcome, a column source, a transform reason, a reason it does not read, and the framing container', () => {
+  it('the batch: its outcome, a row outcome, a column source, a transform reason, a reason it does not read, an at_merge reason, and the framing container', () => {
     const lib = openStub('r3-unknown-values');
     const schema = lib.compileTable('CREATE TABLE t (x Int32)');
     const batch = (id: string) => schema.rows(Format.JSONEachRow, planted(id), { exportFormat: Format.JSONEachRow });
@@ -205,6 +214,13 @@ describe.skipIf(!stubsAvailable)('r3: an unlisted value is kept as its unknown(n
     const storage = batch('batch.storage_transforms.reason');
     expect(storage.outcome).toBe(BatchOutcome.Accepted);
     expect(storage.rows).toHaveLength(1);
+
+    const atMerge = batch('batch.at_merge.reason');
+    expect(atMerge.atMerge[0]?.reason).toBe('x_future_reason');
+    expect(mergeReasonKnown(atMerge.atMerge[0]?.reason ?? '')).toBe(false);
+    expect(atMerge.atMerge[0]?.column?.toString()).toBe('s');
+    expect(atMerge.outcome).toBe(BatchOutcome.Accepted);
+    expect(atMerge.rows).toHaveLength(1);
 
     // The schema's enum constrains the writer, never the reader (r3).
     expect(batch('batch.framing.container').framing?.container).toBe('x_future_container');

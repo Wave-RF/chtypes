@@ -530,6 +530,38 @@ type cellDoc struct {
 	Null      fBool   `json:"null"`
 }
 
+// atMergeDoc is one entry of at_merge (ABI v2).
+type atMergeDoc struct {
+	Row       fInt           `json:"row"`
+	Reason    fWord          `json:"reason"`
+	Column    fWord          `json:"column"`
+	ColumnB64 fB64           `json:"column_b64"`
+	Stored    fString        `json:"stored"`
+	StoredB64 fB64           `json:"stored_b64"`
+	InputRows fList[intSlot] `json:"input_rows"`
+}
+
+// intSlot is one element of a list of non-negative integers (input_rows). A
+// null element, or one the generic reader's int would refuse, declines, so
+// that reader judges it.
+type intSlot struct{ v int }
+
+func (s *intSlot) UnmarshalJSON(data []byte) error {
+	if isJSONNull(data) {
+		return errDeclined
+	}
+	txt, ok := intText(data)
+	if !ok {
+		return errDeclined
+	}
+	v, err := strconv.ParseInt(string(txt), 10, 64)
+	if err != nil || v < 0 || v > math.MaxInt32 {
+		return errDeclined
+	}
+	s.v = int(v)
+	return nil
+}
+
 type headerDoc struct {
 	Consumed fBool          `json:"consumed"`
 	Lines    fInt           `json:"lines"`
@@ -689,6 +721,40 @@ func transformsOf(list []transformDoc, present bool) ([]Transform, bool) {
 			Column: column, Input: input, Stored: stored,
 			Reason: reason, Lossy: reason.Lossy(), Row: t.Row.v,
 		})
+	}
+	return out, true
+}
+
+// atMergeOf is reader.atMerge.
+func atMergeOf(list []atMergeDoc, present bool) ([]AtMergeEntry, bool) {
+	if !present {
+		return nil, true
+	}
+	out := make([]AtMergeEntry, 0, len(list))
+	for i := range list {
+		a := &list[i]
+		e := AtMergeEntry{Row: a.Row.v, Reason: MergeReason(a.Reason.s)}
+		column, present, ok := byteOf(&a.Column.fString, &a.ColumnB64)
+		if !ok {
+			return nil, false
+		}
+		if present {
+			e.Column = &column
+		}
+		stored, present, ok := byteOf(&a.Stored, &a.StoredB64)
+		if !ok {
+			return nil, false
+		}
+		if present {
+			e.Stored = &stored
+		}
+		if a.InputRows.present() {
+			e.InputRows = make([]int, 0, len(a.InputRows.v))
+			for _, x := range a.InputRows.v {
+				e.InputRows = append(e.InputRows, x.v)
+			}
+		}
+		out = append(out, e)
 	}
 	return out, true
 }
@@ -895,6 +961,8 @@ const (
 	kFraming
 	kRows
 	kStorageTransforms
+	kUnsupportedSettings
+	kAtMerge
 )
 
 // decodeBatchFast reads a batch document; ok is false when the generic reader
@@ -924,6 +992,8 @@ func decodeBatchFast(raw, payload []byte) (res BatchResult, ok bool) {
 		engineRows            [][]cellDoc
 		framing               *framingDoc
 		storageTransforms     fIgnore
+		unsupportedSettings   fList[nameDoc]
+		atMerge               []atMergeDoc
 	}
 	var (
 		seen        uint32
@@ -978,6 +1048,10 @@ func decodeBatchFast(raw, payload []byte) (res BatchResult, ok bool) {
 			bit, err = kFraming, dec.Decode(&top.framing)
 		case "storage_transforms":
 			bit, err = kStorageTransforms, dec.Decode(&top.storageTransforms)
+		case "unsupported_settings":
+			bit, err = kUnsupportedSettings, dec.Decode(&top.unsupportedSettings)
+		case "at_merge":
+			bit, err = kAtMerge, dec.Decode(&top.atMerge)
 		case "rows":
 			bit = kRows
 			hint := 0
@@ -1017,6 +1091,12 @@ func decodeBatchFast(raw, payload []byte) (res BatchResult, ok bool) {
 	}
 	res.RowsPassed, res.RowsCut = top.rowsPassed.v, top.rowsCut.v
 	res.Unconsumed = top.unconsumed
+	if res.UnsupportedSettings, good = namesOf(&top.unsupportedSettings); !good {
+		return res, false
+	}
+	if res.AtMerge, good = atMergeOf(top.atMerge, top.atMerge != nil); !good {
+		return res, false
+	}
 	if rowsPresent {
 		res.Rows = rows
 	}

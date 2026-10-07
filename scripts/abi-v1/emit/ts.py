@@ -57,7 +57,7 @@ public API never spells a described name or a vocabulary value itself:
     spellings, facts and fallbacks: `Format`, `Status`, `Outcome`,
     `BatchOutcome`, `FilterOutcome`, `Verdict`, `Reason` (with `lossy`),
     `Source` (with `isStored`), `DefaultKind`, `DiscoverQueryParam`,
-    `DocFlags`. A fact is read by a generated function keyed by the value the
+    `DocFlags`, and from ABI v2 `MergeReason`. A fact is read by a generated function keyed by the value the
     document carries (`reasonLossy`, `sourceIsStored`, `verdictAnswered`),
     and an unlisted value reads as the vocabulary's own fallback; a
     vocabulary with no fallback answers `undefined`, which the decoder turns
@@ -637,6 +637,7 @@ TS_VOCAB_NAMES = {
     "value_src": "Source",
     "default_kind": "DefaultKind",
     "discover_query_param": "DiscoverQueryParam",
+    "merge_reason": "MergeReason",
 }
 TS_VALUE_NAMES = {
     "filter_verdict": {"t": "True", "f": "False", "e": "Error", "d": "Decline"},

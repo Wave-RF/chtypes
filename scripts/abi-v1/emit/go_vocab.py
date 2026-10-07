@@ -20,6 +20,9 @@ chtypes:
   Verdict                 filter_verdict, with `Answered()` the description's
                           own `answered` fact, and the same fallback rule
   DefaultKind             default_kind
+  MergeReason             merge_reason (ABI v2): what a merge would do to a row
+                          of the part an INSERT writes, the batch document's
+                          at_merge reason
 
 The identifier of a constant is derived from its value's spelling by the one
 mechanical rule below (`_pascal`), except for the four verdict letters, whose
@@ -245,6 +248,7 @@ _PREFIX = {
     "filter_outcome": "Filter",
     "filter_verdict": "Verdict",
     "default_kind": "Kind",
+    "merge_reason": "Merge",
 }
 
 
@@ -445,6 +449,20 @@ def _default_kind(model) -> list[str]:
     return out
 
 
+def _merge_reason(model) -> list[str]:
+    """ABI v2: merge_reason, the batch document's at_merge reason (r3: its unknown(n) too)."""
+    enum = model.enums["merge_reason"]
+    values = [(f"Merge{_value_ident(enum.name, v.value)}", v.value) for v in enum.values]
+    out = _string_type(
+        "MergeReason",
+        "MergeReason is merge_reason: what a merge would do to one row of the part an INSERT writes, as a\n"
+        "batch's AtMerge reports it. The spelling is the description's.",
+        values,
+    )
+    out += _known_method("MergeReason", [i for i, _ in values], "reason")
+    return out
+
+
 def _discover_query_param(model) -> list[str]:
     """ABI v2: discover_query_param's type (r3: every enum has its unknown(n))."""
     enum = model.enums["discover_query_param"]
@@ -472,6 +490,7 @@ _GO_VOCAB = {
     "filter_verdict": ("Verdict", "string"),
     "discover_query_param": ("DiscoverQueryParam", "string"),
     "default_kind": ("DefaultKind", "string"),
+    "merge_reason": ("MergeReason", "string"),
 }
 
 
@@ -529,7 +548,7 @@ def render_vocab_gen(model) -> str:
         _default_kind,
     ]
     if model.major >= 2:
-        parts += [_discover_query_param, _described]
+        parts += [_discover_query_param, _merge_reason, _described]
     for part in parts:
         out += part(model)
     while out and out[-1] == "":

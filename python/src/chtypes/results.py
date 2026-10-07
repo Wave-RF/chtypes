@@ -14,9 +14,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from ._abi2._vocab import DefaultKind, FilterOutcome, Outcome, Verdict
+from ._abi2._vocab import DefaultKind, FilterOutcome, MergeReason, Outcome, Verdict
 
 __all__ = [
+    "AtMergeEntry",
     "BatchResult",
     "BuildInfo",
     "Capabilities",
@@ -109,6 +110,31 @@ class EngineCell:
 
 
 @dataclass(frozen=True, slots=True)
+class AtMergeEntry:
+    """One thing an `OPTIMIZE TABLE ... FINAL` of the part the INSERT writes would do
+    to one of its rows, at the call's clock instant: an entry of the batch's
+    `at_merge` list (ABI v2). `engine_rows` stays exactly what the INSERT writer
+    produces, so the two never contradict each other.
+
+    `row` indexes `engine_rows`: the part's row, not the input body's. `reason` is
+    a `MergeReason`; one the description does not list is its unknown(n) member
+    (rule r3). `column` is the column a `ttl_column_reset` resets (from `column`
+    or `column_b64`), None when the entry names none. `stored` is the column's
+    value after the reset (from `stored` or `stored_b64`), None when the document
+    carries none, which it omits when the column's DEFAULT reads the clock or a
+    generator and the value is decided at the merge. `input_rows` is the input
+    rows, each by its index in the body, that formed the part's row, None when
+    the document carries none.
+    """
+
+    row: int
+    reason: MergeReason
+    column: bytes | None = None
+    stored: bytes | None = None
+    input_rows: tuple[int, ...] | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class RowResult:
     """The `row` document. `columns` is every `cols` entry in document order;
     `values` is the subset whose `is_stored` is true, in order."""
@@ -160,6 +186,12 @@ class BatchResult:
     can be fooled too. A caller that needs every record accounted for declines
     a body with any skipped row or any `unconsumed` range
     (docs/guides/batches.md).
+
+    `unsupported_settings` is the call's own settings the library declined, from
+    the batch's top-level list (ABI v2). `at_merge` is what an `OPTIMIZE TABLE ...
+    FINAL` of the part would do to its rows, at least: a later background merge
+    can remove more as more rows expire, and a row both removed and reset lists
+    only `ttl_delete`. Each is empty when the document carries none.
     """
 
     outcome: Outcome
@@ -178,6 +210,8 @@ class BatchResult:
     partition_count: int | None
     unconsumed: tuple[Span, ...]
     framing: Framing | None
+    unsupported_settings: tuple[bytes, ...] = ()
+    at_merge: tuple[AtMergeEntry, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

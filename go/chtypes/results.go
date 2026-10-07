@@ -64,6 +64,29 @@ type EngineCell struct {
 	Value *string
 }
 
+// AtMergeEntry is one thing an OPTIMIZE TABLE ... FINAL of the part the INSERT
+// writes would do to one of its rows, at the call's clock instant: an entry of
+// the batch's at_merge list. EngineRows stays exactly what the INSERT writer
+// produces, so the two never contradict each other.
+type AtMergeEntry struct {
+	// Row indexes EngineRows: the part's row, not the input body's.
+	Row int
+	// Reason is a merge_reason value. One the description does not list is its
+	// unknown(n), kept as it came (rule r3).
+	Reason MergeReason
+	// Column is the column a MergeTTLColumnReset resets, from column or
+	// column_b64; nil when the entry names none.
+	Column *string
+	// Stored is the column's value after the reset, from stored or stored_b64:
+	// nil when the document carries none, which it omits when the column's
+	// DEFAULT reads the clock or a generator and the value is decided at the
+	// merge.
+	Stored *string
+	// InputRows is the input rows, each by its index in the body, that formed
+	// the part's row; nil when the document carries none.
+	InputRows []int
+}
+
 // RowResult is one row's verdict and, as the flags ask, its columns.
 type RowResult struct {
 	// Outcome is final: the library applies every promotion.
@@ -116,9 +139,17 @@ type BatchResult struct {
 	// Transformed is every transform in the batch with its Row, as the
 	// library lists them.
 	Transformed []Transform
+	// UnsupportedSettings is the call's own settings the library declined,
+	// from the batch's top-level unsupported_settings; nil when it names none.
+	UnsupportedSettings []string
 	// EngineRows is each stored row after the engine's insert-time merge, a
 	// list of cells; nil when the document carries none.
 	EngineRows [][]EngineCell
+	// AtMerge is what an OPTIMIZE TABLE ... FINAL of the part would do to its
+	// rows, at least: a later background merge can remove more as more rows
+	// expire. A row both removed and reset lists only MergeTTLDelete. nil when
+	// the document carries none (nothing would happen).
+	AtMerge []AtMergeEntry
 	// Payload is the export buffer: nil when no export was asked for or it was
 	// declined, non-nil and empty for an accepted batch with zero rows.
 	Payload []byte

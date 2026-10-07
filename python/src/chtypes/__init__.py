@@ -53,6 +53,7 @@ from ._abi2._vocab import (
     DocFlags,
     FilterOutcome,
     Format,
+    MergeReason,
     Outcome,
     Reason,
     Source,
@@ -95,6 +96,7 @@ from .errors import (
 from .library import Block, Filter, Library, Schema, Server, open_unverified
 from .registry import FetchOptions, Registry, Resolved, TrustedKey, cache_root, search_dirs
 from .results import (
+    AtMergeEntry,
     BatchResult,
     BuildInfo,
     Capabilities,
@@ -138,6 +140,7 @@ __all__ = [
     "ArtifactPinnedError",
     "ArtifactUnpublishedError",
     "ArtifactUntrustedError",
+    "AtMergeEntry",
     "BatchResult",
     "Block",
     "BuildInfo",
@@ -166,6 +169,7 @@ __all__ = [
     "Header",
     "InternalError",
     "Library",
+    "MergeReason",
     "Outcome",
     "Reason",
     "Registry",

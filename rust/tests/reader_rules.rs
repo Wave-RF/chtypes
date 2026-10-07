@@ -29,7 +29,7 @@ use std::path::{Path, PathBuf};
 
 use chtypes::{
     CompileOptions, DefaultKind, Error, EvalOptions, FilterOptions, FilterOutcome, Format, Library,
-    Outcome, Reason, RowOptions, RowsOptions, Source, Status, Verdict,
+    MergeReason, Outcome, Reason, RowOptions, RowsOptions, Source, Status, Verdict,
 };
 use serde_json::Value;
 
@@ -170,6 +170,27 @@ fn r2_unknown_members_are_ignored(dir: &Path, variants: &serde_json::Map<String,
         .expect("framing with a header");
     assert_eq!(header.names.len(), 1, "{b:?}");
     assert_eq!(b.payload.as_deref(), Some(&b"{\"s\":\"abc\"}\n"[..]));
+    // ABI v2's batch members (public issue #544): an unknown member inside either is ignored.
+    let settings: Vec<&[u8]> = b
+        .unsupported_settings
+        .iter()
+        .map(|n| n.as_bytes())
+        .collect();
+    assert_eq!(settings, vec![&b"st"[..]], "{b:?}");
+    assert_eq!(b.at_merge.len(), 1, "{b:?}");
+    let entry = &b.at_merge[0];
+    assert_eq!(entry.reason, MergeReason::TtlColumnReset, "{b:?}");
+    assert_eq!(
+        entry.column.as_ref().map(|c| c.as_bytes()),
+        Some(&b"s"[..]),
+        "{b:?}"
+    );
+    assert_eq!(
+        entry.stored.as_ref().map(|c| c.as_bytes()),
+        Some(&b""[..]),
+        "{b:?}"
+    );
+    assert_eq!(entry.input_rows, Some(vec![0]), "{b:?}");
 
     let filter = schema
         .compile_filter("x > 1", &FilterOptions::default())
@@ -323,6 +344,24 @@ fn r3_unknown_values_are_kept(dir: &Path, variants: &serde_json::Map<String, Val
         (b.outcome.clone(), b.rows.len()),
         (Outcome::Accepted, 1),
         "an unlisted reason in a member this binding does not read must not fail the batch: {b:?}"
+    );
+
+    let b = batch("batch.at_merge.reason");
+    assert_eq!(
+        (b.at_merge.len(), b.outcome.clone(), b.rows.len()),
+        (1, Outcome::Accepted, 1),
+        "{b:?}"
+    );
+    assert_eq!(
+        b.at_merge[0].reason,
+        MergeReason::Unknown("x_future_reason".into()),
+        "{b:?}"
+    );
+    assert!(!b.at_merge[0].reason.is_known(), "{b:?}");
+    assert_eq!(
+        b.at_merge[0].column.as_ref().map(|c| c.as_bytes()),
+        Some(&b"s"[..]),
+        "the entry decodes on: {b:?}"
     );
 
     let b = batch("batch.framing.container");
