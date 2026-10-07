@@ -1262,8 +1262,11 @@ class V2Harness:
         argv = [*self.clis[binding], *args]
         if user is not None:
             argv = as_user(user, self.env, argv)
+        # Another uid starts in "/", not in this one's working directory, which a
+        # runner's home (macOS: mode 0750) can make unreachable to it.
         try:
-            return subprocess.run(argv, env=self.env, capture_output=True, text=True, timeout=timeout, check=False)
+            return subprocess.run(argv, env=self.env, cwd="/" if user is not None else None, capture_output=True, text=True,
+                                  timeout=timeout, check=False)
         except subprocess.TimeoutExpired:
             return subprocess.CompletedProcess(argv, 124, "", f"cache-interop: timed out after {timeout}s")
 

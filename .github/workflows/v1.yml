@@ -1097,13 +1097,18 @@ jobs:
           fi
           printf '#!/usr/bin/env bash\nexec "%s/py/bin/python" -m chtypes "$@"\n' "$X" > "$X/bin/cli-python"
           if published ts; then
+            cp "$(command -v node)" "$X/bin/node"
             npm install --prefix "$X/tsp" --no-save --no-audit --no-fund "$(scripts/release-channel.sh get NPM_PACKAGE)@$PUBLISHED"
-            printf '#!/usr/bin/env bash\nexec "%s" "%s/tsp/node_modules/%s/dist/cli.js" "$@"\n' \
-              "$(command -v node)" "$X" "$(scripts/release-channel.sh get NPM_PACKAGE)" > "$X/bin/cli-ts"
+            printf '#!/usr/bin/env bash\nexec "%s/bin/node" "%s/tsp/node_modules/%s/dist/cli.js" "$@"\n' \
+              "$X" "$X" "$(scripts/release-channel.sh get NPM_PACKAGE)" > "$X/bin/cli-ts"
           else
             (cd ts && pnpm install --frozen-lockfile && pnpm build)
             cp -a ts/dist ts/node_modules ts/package.json "$X/ts/"
-            printf '#!/usr/bin/env bash\nexec "%s" "%s/ts/dist/cli.js" "$@"\n' "$(command -v node)" "$X" > "$X/bin/cli-ts"
+            # The runner's node lives under its home directory, which `nobody`
+            # cannot traverse on macOS ("Permission denied" at exec): the cross-uid
+            # rows run the same node from the world-readable prefix.
+            cp "$(command -v node)" "$X/bin/node"
+            printf '#!/usr/bin/env bash\nexec "%s/bin/node" "%s/ts/dist/cli.js" "$@"\n' "$X" "$X" > "$X/bin/cli-ts"
           fi
           if is_v2 rust; then
             (cd rust && cargo build --locked --release --bin chtypes)
