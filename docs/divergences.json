@@ -46,7 +46,7 @@
     },
     {
       "id": "filter-float64-where-over-accept-26-3",
-      "heading": "A filter whose WHERE is a Float64 is evaluated on 26.3, where that server refuses it",
+      "heading": "On 26.3, a non-UInt8 filter is evaluated where that server's projection pass refuses it",
       "note": "no machine check is in this entry yet: the divergence is a filter's own verdict on one payload, which this register's schema could express (a filter through Filter.rows), but the retired v0 checker that drove such checks is not replaced, so a check written now would not run. The v1 replacement of the checker should add one for this case. Retirement: on the artifact producer's measured re-run against the production library build that ships the fix, never on CI.",
       "checks": []
     },

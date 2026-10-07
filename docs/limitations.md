@@ -213,20 +213,21 @@ CREATE TABLE t (k UInt32, v String) ENGINE = Memory SETTINGS max_rows_to_keep = 
 
 Until then, do not read a refusal with 115 on a non-MergeTree table's `SETTINGS` as the server's answer.
 
-### A filter whose WHERE is a Float64 is evaluated on 26.3, where that server refuses it
+### On 26.3, a non-UInt8 filter is evaluated where that server's projection pass refuses it
 
-**Filter over-accept, on `26.3` only.** A filter whose `WHERE` expression has type `Float64` is evaluated to a verdict (`t` or `f`) for every row. A `26.3` server refuses such a filter with error **59**. For example, `WHERE toFloat64(x) / 10 - 0.25` and `WHERE (toFloat64(x) - toFloat64(x)) / 0`:
+**Filter over-accept, on `26.3` only, where the server's query goes through its projection pass.** A filter whose `WHERE` expression has a type other than `UInt8`, for example `Float64` (`WHERE toFloat64(x) / 10 - 0.25`, `WHERE (toFloat64(x) - toFloat64(x)) / 0`), is answered `t` or `f` for every row. A `26.3` server answers such a filter the same way for a plain `SELECT … WHERE`, for `PREWHERE`, under the old analyzer and on a `Memory` table. It refuses the filter with error **59** only through its planner's projection pass: an aggregate over a MergeTree table that uses implicit projections, or a read of a table that declares a projection.
 
-|                       |                                      |
-| --------------------- | ------------------------------------ |
-| this library, on 26.3 | answers `t` or `f` for each row      |
-| a 26.3 server         | refuses the filter with error **59** |
+|                                            |                                      |
+| ------------------------------------------ | ------------------------------------ |
+| this library, on 26.3                      | answers `t` or `f` for each row      |
+| a 26.3 server, through the projection pass | refuses the filter with error **59** |
+| a 26.3 server, otherwise                   | answers `t` or `f`, as this library  |
 
-On `26.7`, `26.8` and `26.9` the server answers these filters, and this library agrees.
+On `26.7`, `26.8` and `26.9` the server answers these filters in every case measured, and this library agrees.
 
-**Measured**: by the artifact producer, against a library built from the same core commit as the production library build `20261006.220511`, on all four supported lines (`26.3` diverging; `26.7`, `26.8`, `26.9` agreeing), on linux-amd64 and linux-arm64. The production artifact itself is not measured; it is expected to behave the same (`inferred`: the same source). A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
+**Measured**: by the artifact producer, against a library built from the same core commit as the production library build `20261006.220511`, on all four supported lines, on linux-amd64 and linux-arm64; the narrowing to the projection pass in a later run on `26.3`. The production artifact itself is not measured; it is expected to behave the same (`inferred`: the same source). A library change (declining such a filter on `26.3`) awaits a ruling. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the change, never on a CI result.
 
-Until then, on `26.3`, do not treat a verdict for a `Float64` `WHERE` as the server's answer.
+Until then, on `26.3`, if the server query a filter stands for reads a table that declares a projection, or aggregates over a MergeTree table, do not treat a verdict for a non-`UInt8` `WHERE` as the server's answer.
 
 ### A toFixedString filter over a LowCardinality column answers 131 when the row's dictionary holds another row's key
 
