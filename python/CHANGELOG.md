@@ -12,7 +12,7 @@ The four bindings in this repository are released together and give one answer, 
 
 ### Fixed
 
-- An explicit or `CHTYPES_CACHE` relative cache directory is now resolved to an absolute path, as TypeScript already did, so a fetch's `dir` and library path are absolute as `fetch-v1.md` section 9 documents (#541).
+- An explicit or `CHTYPES_CACHE` relative cache directory is now resolved to an absolute path, as TypeScript already did, so a fetch's `dir` and library path are absolute as `fetch-v1.md` section 9 documents (#541). An empty explicit cache directory now counts as unset, as it already did in Go and TypeScript, where it used to mean the current directory.
 
 ## [1.1.0] — 2026-10-06
 
