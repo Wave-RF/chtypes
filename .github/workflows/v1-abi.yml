@@ -173,6 +173,13 @@ jobs:
       # above never read them, and these never read ABI v1's outputs.
       - name: every ABI v2 generated file matches spec/abi-v2/ (gen.py --major 2 --check)
         run: uv run --no-project --python 3.11 scripts/abi-v1/gen.py --major 2 --check
+      # The WHERE-affecting settings lists (spec/abi-v2/where-settings/) are
+      # data copied from the artifact producer, outside abi.json: this keeps a
+      # bad copy from landing. Selftest first, so the check is proven to fire.
+      - name: the WHERE-affecting settings lists — every rule fires on planted copies
+        run: uv run --no-project --python 3.11 scripts/abi-v2/check-where-settings.py --selftest
+      - name: the WHERE-affecting settings lists agree with their README and with each other
+        run: uv run --no-project --python 3.11 scripts/abi-v2/check-where-settings.py --check
       - name: ABI v2's fingerprint and canonical forms, recomputed by an independent RFC 8785 implementation
         run: |
           ours="$(uv run --no-project --python 3.11 scripts/abi-v1/gen.py --major 2 --fingerprint)"
