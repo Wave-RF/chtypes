@@ -29,6 +29,27 @@
 //	defer schema.Close()
 //	res, err := schema.Row(chtypes.JSONEachRow, []byte(`{"x": 256}`))
 //
+// # A server
+//
+// A table can be compiled on one ClickHouse server, which a profile
+// describes: its timezone, the settings its profile applies to every query,
+// and its macros. The schema then binds the server's zone, as a table on that
+// server does:
+//
+//	srv, err := lib.NewServer(chtypes.ServerProfile{Timezone: "Asia/Tokyo"})
+//	defer srv.Close()
+//	schema, err := lib.CompileTable(
+//		"CREATE TABLE t (k UInt8, tz String DEFAULT timezone()) ENGINE = MergeTree ORDER BY k",
+//		chtypes.OnServer(srv))
+//	res, err := schema.Row(chtypes.JSONEachRow, []byte(`{"k":1}`)) // tz is Asia/Tokyo
+//
+// Every profile field is optional and passed through as given; the library
+// judges the zone, the settings and the macros. A nil Macros means the
+// server's macros are unknown, and a non-nil one, even empty, is its complete
+// set. A Server is immutable, so it is safe for concurrent use, and a schema
+// holds its own reference to its server inside the library, so the two close
+// in any order. Schema.Describe reports the server a schema was compiled on.
+//
 // # Errors
 //
 // A call that ClickHouse refuses is a *SchemaError; one this build declines to
@@ -48,6 +69,6 @@
 // # Threads
 //
 // Everything here is safe for concurrent use. No call takes a lock; a
-// Schema, Filter or Block has a close guard, so Close waits for the calls
-// already inside that object, and a later call is a *UsageError.
+// Server, Schema, Filter or Block has a close guard, so Close waits for the
+// calls already inside that object, and a later call is a *UsageError.
 package chtypes

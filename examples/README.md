@@ -55,6 +55,7 @@ Read any tour top to bottom as a tutorial; every section carries a comment block
 15. **Export: bytes + spans** — serializing the batch's accepted rows to wire bytes, addressed per row by index-aligned spans, and the fail-closed export declines.
 16. **Filters: WHERE semantics at the edge** — one boolean expression compiled against the schema and evaluated per row, query parameters, and the block twin.
 17. **The INSERT column list** — a list naming an `EPHEMERAL` column whose value is read and feeds a DEFAULT but is never stored, then one refusal.
+18. **The server profile (ABI v2; Go first)** — a server described by its timezone, a table compiled on it, and a `timezone()` DEFAULT filled with the server's zone. A build that does not compile on a server yet declines, and the section says SKIPPED by name. Python, TypeScript and Rust add this section in their own pull requests; until all four have it, `chplay.sh` still counts seventeen.
 
 ## Where the SDKs deliberately differ
 

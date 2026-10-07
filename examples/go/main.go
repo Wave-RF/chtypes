@@ -9,12 +9,13 @@
 // the binding loads and speaks to over a C ABI, which is why they are exact
 // rather than approximately right.
 //
-// This file is a tutorial you RUN. Seventeen numbered sections walk the whole
+// This file is a tutorial you RUN. Eighteen numbered sections walk the whole
 // public API of the Go SDK, from opening a library to tearing down, each with
 // a comment saying what it demonstrates, why an ingest pipeline cares, and
-// what to look at in the output. The same seventeen sections exist in the
-// Python, TypeScript and Rust tours, so you can diff two tours and see only
-// the language idioms differ.
+// what to look at in the output. The same sections exist in the Python,
+// TypeScript and Rust tours, so you can diff two tours and see only the
+// language idioms differ; section 18, the server profile, lands in Go first
+// and in the other three in their own pull requests.
 //
 // Everything runs offline against an INSTALLED artifact: fetch one first,
 //
@@ -137,6 +138,7 @@ func main() {
 	section15(lib)
 	section16(lib)
 	section17(lib)
+	section18(lib)
 
 	blank()
 	line("Done. Every value above was measured by this run.")
@@ -1452,6 +1454,69 @@ func section17(lib *chtypes.Library) {
 	note("an absent or EMPTY list means exactly the same thing: today's no-list")
 	note("behavior, and NEVER renders as `INSERT INTO t () ...`: that statement")
 	note("is a syntax error on every server")
+}
+
+// ---------------------------------------------------------------------------
+// SECTION 18 — The server profile
+//
+// WHAT: describe one ClickHouse server (its timezone; its settings and macros
+// can be given too) with lib.NewServer, then compile a table ON it with
+// chtypes.OnServer. The schema's home zone is the server's, as on the server.
+// WHY: the same table on a Tokyo server and a UTC server fills a timezone()
+// DEFAULT, and binds a zone-less DateTime, differently. Without a server the
+// library refuses timezone() as a server constant it cannot know.
+// LOOK FOR: the row fed only `k`, and `tz` filled by the server's own zone;
+// the description naming the server. A build that does not compile on a
+// server yet DECLINES, and this section then says SKIPPED by name.
+// C API: chs_server_create, chs_server_free, and chs_schema_create's server.
+// ---------------------------------------------------------------------------
+func section18(lib *chtypes.Library) {
+	section(18, "The server profile")
+
+	// Every profile field is optional and passed through as given: the
+	// library validates the zone with DateLUT, the settings with the server's
+	// own SET check and the macros with ClickHouse's own reader.
+	srv, err := lib.NewServer(chtypes.ServerProfile{Timezone: "Asia/Tokyo"})
+	if declined(err) {
+		kv("SKIPPED", "section 18: this build declines a server profile")
+		note(truncate(err.Error(), 66))
+		return
+	}
+	must(err)
+	defer srv.Close()
+	kv("server", `ServerProfile{Timezone: "Asia/Tokyo"}`)
+
+	const ddl = "CREATE TABLE t (k UInt8, tz String DEFAULT timezone()) ENGINE = MergeTree ORDER BY k"
+	s, err := lib.CompileTable(ddl, chtypes.OnServer(srv))
+	if declined(err) {
+		kv("SKIPPED", "section 18: this build declines a table on a server")
+		note(truncate(err.Error(), 66))
+		note("a build that compiles on a server prints the filled tz here; until")
+		note("then the decline is the answer (a real server accepts the table)")
+		return
+	}
+	must(err)
+	defer s.Close()
+	kv("schema", ddl)
+
+	d, err := s.Describe()
+	must(err)
+	if d.Server != nil {
+		kv("description's server", "timezone "+d.Server.Timezone)
+	}
+	r, err := s.Row(chtypes.JSONEachRow, []byte(`{"k":1}`))
+	must(err)
+	for _, v := range r.Values {
+		kv("  "+v.Column, fmt.Sprintf("%-20s (%s)", textOr(v), v.Source))
+	}
+	note("tz came from the server's own timezone(): Asia/Tokyo, not the image")
+	note("zone. The schema holds the server, so closing either first is safe.")
+}
+
+// declined reports whether err is this build declining (*UnsupportedError).
+func declined(err error) bool {
+	var ue *chtypes.UnsupportedError
+	return errors.As(err, &ue)
 }
 
 // ---------------------------------------------------------------- plumbing

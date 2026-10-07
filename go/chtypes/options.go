@@ -15,6 +15,7 @@ type callConfig struct {
 	export      Format
 	docFlags    DocFlags
 	params      map[string]string
+	server      *Server
 }
 
 func newCallConfig() *callConfig {
@@ -112,6 +113,10 @@ type paramsOpt map[string]string
 
 func (o paramsOpt) applyFilter(c *callConfig) { c.params = o }
 
+type serverOpt struct{ s *Server }
+
+func (o serverOpt) applyCompile(c *callConfig) { c.server = o.s }
+
 // WithSettings sets the call's settings: a map of strings to strings,
 // serialized as a JSON object and passed verbatim. No value is ever rewritten.
 // On a compile it is the profile; on a filter compile the filter's own profile;
@@ -152,6 +157,21 @@ func WithDocFlags(flags DocFlags) RowsOption {
 // WithFilterParams sets the query parameters of a filter compile.
 func WithFilterParams(params map[string]string) FilterOption {
 	return paramsOpt(params)
+}
+
+// OnServer compiles the table on a server made by Library.NewServer
+// (chs_schema_create's server): the schema's home zone is the server's
+// timezone, the server's settings layer under the schema's own, and a
+// Replicated engine's ZooKeeper path and replica name expand the server's
+// macros. A closed server is a *UsageError, raised before any call; a server
+// from another Library is that library's own refusal, also a *UsageError.
+// OnServer(nil) is no server, the same as leaving the option out: the
+// schema is on the image's own server.
+//
+//	srv, err := lib.NewServer(chtypes.ServerProfile{Timezone: "Asia/Tokyo"})
+//	schema, err := lib.CompileTable(stmt, chtypes.OnServer(srv), chtypes.WithSettings(settings))
+func OnServer(s *Server) CompileOption {
+	return serverOpt{s}
 }
 
 func compileConfig(opts []CompileOption) *callConfig {

@@ -148,6 +148,30 @@ func byteField(m map[string]any, key, path string) (value string, present bool, 
 	return "", false, nil
 }
 
+// stringMap reads an object whose values are plain JSON strings (a server's
+// settings or macros, the caller's own values given back): nil when absent, a
+// non-nil map, even an empty one, when present, so absent and {} stay apart.
+func (r *reader) stringMap(m map[string]any, key, path string) map[string]string {
+	v := r.field(m, key)
+	if v == nil {
+		return nil
+	}
+	om := r.object(v, path+"."+key)
+	if om == nil {
+		return nil
+	}
+	out := make(map[string]string, len(om))
+	for k, e := range om {
+		s, ok := e.(string)
+		if !ok {
+			r.fail(path+"."+key+"."+k, "want a JSON string")
+			return nil
+		}
+		out[k] = s
+	}
+	return out
+}
+
 // nameList reads a list of names: each element a {"name"} or {"name_b64"}
 // object, never a bare string.
 func (r *reader) nameList(m map[string]any, key, path string) []string {
@@ -604,6 +628,25 @@ func decodeSchemaDescription(raw []byte) (SchemaDescription, error) {
 				DefaultKind: kind,
 				DefaultExpr: r.bytes(cm, "default_expression", p),
 			})
+		}
+	}
+	// Both are absent on a schema compiled without a server, so that document
+	// decodes exactly as it did before servers existed.
+	if v := r.field(m, "server"); v != nil {
+		if sm := r.object(v, "$.server"); sm != nil {
+			res.Server = &SchemaServer{
+				Timezone: r.text(sm, "timezone", "$.server"),
+				Settings: r.stringMap(sm, "settings", "$.server"),
+				Macros:   r.stringMap(sm, "macros", "$.server"),
+			}
+		}
+	}
+	if v := r.field(m, "replicated"); v != nil {
+		if rm := r.object(v, "$.replicated"); rm != nil {
+			res.Replicated = &SchemaReplicated{
+				ZooKeeperPath: r.bytes(rm, "zookeeper_path", "$.replicated"),
+				ReplicaName:   r.bytes(rm, "replica_name", "$.replicated"),
+			}
 		}
 	}
 	return res, r.err

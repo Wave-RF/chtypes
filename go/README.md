@@ -62,6 +62,40 @@ The row is **accepted** and `256` is silently stored as `0`. The library reports
 
 A DEFAULT that calls a random or UUID generator is drawn by the library and reported with `SourceDefaultGenerated`: to insert it, ask `Rows` for an export (`WithExport`) and insert the `Payload`, never the original body.
 
+## A server profile
+
+A table can be compiled on one ClickHouse server, described by a `ServerProfile`: its `Timezone`, the `Settings` its profile applies to every query, and its `Macros`. The schema then binds the server's zone, as the same table on that server does:
+
+```go
+srv, err := lib.NewServer(chtypes.ServerProfile{Timezone: "Asia/Tokyo"})
+if err != nil {
+	log.Fatal(err)
+}
+defer srv.Close()
+
+schema, err := lib.CompileTable(
+	"CREATE TABLE t (k UInt8, tz String DEFAULT timezone()) ENGINE = MergeTree ORDER BY k",
+	chtypes.OnServer(srv),
+)
+if err != nil {
+	log.Fatal(err)
+}
+defer schema.Close()
+
+row, err := schema.Row(chtypes.JSONEachRow, []byte(`{"k":1}`))
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println(row.Values[1].Text) // Asia/Tokyo    the server's timezone(), not the image zone
+```
+
+- **Every field is optional and passed through as given.** `""` and a nil map are left out of the profile. The library judges the zone (`DateLUT`), each setting (the server's own `SET` check) and the macros (ClickHouse's own reader); a refusal is its own error, and the binding validates nothing first.
+- **`Macros` nil is not `Macros` empty.** nil means the server's macros are unknown; a non-nil map, even an empty one, is the server's complete set, so a Replicated engine naming a macro it lacks is the server's own refusal.
+- **A `Server` is immutable** and safe for concurrent use. A schema holds its own reference to its server, so `srv.Close()` and `schema.Close()` run in any order; a closed server passed to `OnServer` is a `*UsageError`.
+- **`Schema.Describe` reports the server.** `SchemaDescription.Server` is nil exactly when the schema was compiled without one, and `SchemaDescription.Replicated` carries a Replicated engine's resolved ZooKeeper path and replica name.
+
+A build that does not compile on a server yet declines `OnServer` with an `*UnsupportedError`.
+
 ## Errors
 
 A bad **row** is a verdict, not an error: `Outcome` becomes `Rejected` with ClickHouse's own code and message. Go errors are for the call as a whole.
@@ -76,7 +110,7 @@ A bad **row** is a verdict, not an error: `Outcome` becomes `Rejected` with Clic
 
 ## Threads
 
-Everything is safe for concurrent use and no call takes a lock. A `Schema`, `Filter` or `Block` has a close guard: `Close` waits for the calls already inside that object, and a later call is a `*UsageError`.
+Everything is safe for concurrent use and no call takes a lock. A `Server`, `Schema`, `Filter` or `Block` has a close guard: `Close` waits for the calls already inside that object, and a later call is a `*UsageError`.
 
 ## The linked build
 
