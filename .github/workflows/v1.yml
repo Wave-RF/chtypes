@@ -922,7 +922,7 @@ jobs:
             --system-dir /opt/chtypes/v1
       # The ABI v2 matrix (scripts/fetch-v1/cache-interop.py, "ABI v2 MODE"):
       # the bindings at ABI v2, their real CLIs, the staging dev channel.
-      - name: "ABI v2: 4 x 4 through each writer's v2-dev subroot from the staging registry; writer x reader x line (#481); concurrent installs at the natural and a coarse clock (#482, #516); read-only commands and cross-uid reads (#486)"
+      - name: "ABI v2: 4 x 4 through each writer's v2-dev subroot from the staging registry; writer x reader x line (#481); concurrent installs at the natural and a coarse clock (#482, #516); read-only commands, cross-uid reads and writer x reader x fault x mode (#486, #558)"
         env:
           X: /tmp/cli-prefix
           V2: ${{ steps.mode.outputs.v2 }}
@@ -938,8 +938,14 @@ jobs:
             case "$ROUNDS" in *[!0-9]* | 0*) echo "::error::interop_rounds must be a positive integer, got: $ROUNDS"; exit 1 ;; esac
             clis+=(--rounds "$ROUNDS" --coarse-rounds "$ROUNDS")
           fi
+          # One of the v2-dev CLIs' default system dirs (r5): the fault rows
+          # fill it with a readable build to prove the default mode answers
+          # from it and strict mode never falls through to it, and leave it
+          # empty again.
+          sudo install -d -m 0755 -o "$(id -u)" -g "$(id -g)" /opt/chtypes/v2-dev
           python3 scripts/fetch-v1/cache-interop.py --abi 2 "${clis[@]}" \
             --other-user nobody \
+            --system-dir /opt/chtypes/v2-dev \
             --coarse-clock
       # r5, with the real CLIs: a cache a 1.x binding wrote (the committed
       # cache-record-canonical layout) is listed by every 1.x CLI (the
@@ -982,6 +988,182 @@ jobs:
             echo "$b (ABI v$major): lists nothing from the 1.x cache, its offline fetch is CHTYPES_ARTIFACT_MISSING, and the cache is unchanged (r5)"
           done
           echo "r5 isolation: $v2 binding(s) at ABI v2 checked" | tee -a "$GITHUB_STEP_SUMMARY"
+
+  # The ABI v2 matrix on the other two platforms the staging registry serves
+  # (public issue #558). v1-cache-interop above is the required context and
+  # stays linux-amd64 alone; these legs are separate check runs, named by
+  # platform, and not required. They run the same four real CLIs against the
+  # same staging registry, each through its own platform's build (the real
+  # library, ~300 MB unpacked), and print the same tables.
+  #
+  # The runner labels are the ones v1-abi.yml's stubs and conformance jobs use
+  # (ubuntu-24.04-arm, macos-latest). The coarse-clock leg is an LD_PRELOAD
+  # shim and so Linux's: linux-arm64 runs it, darwin-arm64 SKIPS IT BY NAME in
+  # the step below (macOS has no LD_PRELOAD and its libc ignores
+  # DYLD_INSERT_LIBRARIES for system binaries), never faked.
+  v1-cache-interop-platforms:
+    name: "v1-cache-interop (${{ matrix.platform }})"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-arm64
+            runner: ubuntu-24.04-arm
+          - platform: darwin-arm64
+            runner: macos-latest
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go/go.mod
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: "3.13"
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: ts/package.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: ts/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
+        with:
+          toolchain: stable
+      # Derived, printed and asserted, never assumed: `announce` names the
+      # major each binding is tested at, and `assert-layer` refuses unless the
+      # binding's compiled-in generated layer is that major's.
+      - name: "the mode: which bindings run the 1.x rows and which the ABI v2 matrix, from spec/binding-majors.json"
+        id: mode
+        run: |
+          v1=""
+          v2=""
+          for b in go python ts rust; do
+            python3 scripts/abi-v1/majors.py announce "$b" --what "cache interop"
+            python3 scripts/abi-v1/majors.py assert-layer "$b"
+            major="$(python3 scripts/abi-v1/majors.py get "$b")"
+            case "$major" in
+              1) v1="$v1 $b" ;;
+              2) v2="$v2 $b" ;;
+              *) echo "::error::v1-cache-interop: $b speaks ABI v$major, which no row set here covers"; exit 1 ;;
+            esac
+          done
+          v1="${v1# }"
+          v2="${v2# }"
+          echo "v1=$v1" >> "$GITHUB_OUTPUT"
+          echo "v2=$v2" >> "$GITHUB_OUTPUT"
+          echo "v1-cache-interop: mode: the 1.x rows for [${v1:-none}]; the ABI v2 matrix for [${v2:-none}]" | tee -a "$GITHUB_STEP_SUMMARY"
+      # One world-readable prefix outside the runner's home, so the cross-uid
+      # rows can run the same four CLIs as `nobody`: Go and Rust as binaries,
+      # Python in a venv over a uv-managed interpreter installed inside the
+      # prefix, TypeScript as its built dist with its node_modules (pnpm's
+      # links are relative, so `cp -a` keeps them working). A binding at ABI v2
+      # is built for release, as an installed CLI is: its cells unpack and hash
+      # the real ~300 MB library, which a debug build of the Rust decoder takes
+      # minutes over. On a dispatch naming `interop_published_version`, Go,
+      # TypeScript and Python come from their registries at that version
+      # instead, and each must say so in its --version.
+      - name: build the four CLIs (or install the published dev CLIs, on a dispatch that names a version)
+        env:
+          X: /tmp/cli-prefix
+          UV_PYTHON_INSTALL_DIR: /tmp/cli-prefix/python
+          V2: ${{ steps.mode.outputs.v2 }}
+          PUBLISHED: ${{ inputs.interop_published_version }}
+        run: |
+          mkdir -p "$X/bin" "$X/ts"
+          is_v2() { case " $V2 " in *" $1 "*) return 0 ;; esac; return 1; }
+          published() { [ -n "$PUBLISHED" ] && is_v2 "$1"; }
+          pep440=""
+          if [ -n "$PUBLISHED" ]; then
+            # The channel's version rule refuses anything else, so nothing
+            # below ever sees an arbitrary string; PyPI spells it by PEP 440.
+            scripts/release-channel.sh tag go "go/v$PUBLISHED" > /dev/null
+            pep440="$(printf '%s' "$PUBLISHED" | sed -E 's/-dev\.([0-9]+)$/.dev\1/')"
+            echo "v1-cache-interop: the PUBLISHED $PUBLISHED CLIs for go, ts and python (where at ABI v2); rust from this ref" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+          if published go; then
+            GOBIN="$X/gobin" go install "$(scripts/release-channel.sh get GO_MODULE)/cmd/chtypes@v$PUBLISHED"
+            cp "$X/gobin/chtypes" "$X/bin/cli-go"
+          else
+            (cd go && go build -o "$X/bin/cli-go" ./cmd/chtypes)
+          fi
+          uv venv --managed-python --python 3.13 "$X/py"
+          if published python; then
+            uv pip install --python "$X/py/bin/python" --link-mode copy "$(scripts/release-channel.sh get PYPI_PROJECT)==$pep440"
+          else
+            (cd python && UV_PROJECT_ENVIRONMENT="$X/py" uv sync --locked --no-dev --no-editable --link-mode copy)
+          fi
+          printf '#!/usr/bin/env bash\nexec "%s/py/bin/python" -m chtypes "$@"\n' "$X" > "$X/bin/cli-python"
+          if published ts; then
+            npm install --prefix "$X/tsp" --no-save --no-audit --no-fund "$(scripts/release-channel.sh get NPM_PACKAGE)@$PUBLISHED"
+            printf '#!/usr/bin/env bash\nexec "%s" "%s/tsp/node_modules/%s/dist/cli.js" "$@"\n' \
+              "$(command -v node)" "$X" "$(scripts/release-channel.sh get NPM_PACKAGE)" > "$X/bin/cli-ts"
+          else
+            (cd ts && pnpm install --frozen-lockfile && pnpm build)
+            cp -a ts/dist ts/node_modules ts/package.json "$X/ts/"
+            printf '#!/usr/bin/env bash\nexec "%s" "%s/ts/dist/cli.js" "$@"\n' "$(command -v node)" "$X" > "$X/bin/cli-ts"
+          fi
+          if is_v2 rust; then
+            (cd rust && cargo build --locked --release --bin chtypes)
+            cp rust/target/release/chtypes "$X/bin/cli-rust"
+          else
+            (cd rust && cargo build --locked --bin chtypes)
+            cp rust/target/debug/chtypes "$X/bin/cli-rust"
+          fi
+          chmod -R a+rX "$X"
+          chmod a+x "$X"/bin/cli-*
+          for b in go python ts rust; do "$X/bin/cli-$b" --version; done
+          if [ -n "$PUBLISHED" ]; then
+            for b in go python ts; do
+              published "$b" || continue
+              got="$("$X/bin/cli-$b" --version)"
+              case "$got" in
+                "chtypes $PUBLISHED" | "chtypes $pep440") echo "v1-cache-interop: $b is the published $got" ;;
+                *) echo "::error::v1-cache-interop: $b --version says '$got', not the published $PUBLISHED"; exit 1 ;;
+              esac
+            done
+          fi
+          # The same four, as `nobody`: a CLI it cannot run would read as an empty cache.
+          for b in go python ts rust; do sudo -n -u nobody "$X/bin/cli-$b" --version; done
+      - name: "selftest — the interop driver's own logic: the 1.x comparisons and tables, the ABI v2 matrix over stand-in CLIs with three planted defects, and the coarse-clock shim's control both ways"
+        run: python3 scripts/fetch-v1/cache-interop.py --selftest
+      # /opt/chtypes/v2-dev is one of the v2-dev CLIs' default system dirs
+      # (r5), as the required job's step fills it. The work directory is made
+      # under /tmp so the other uid can reach it (macOS's per-user temp
+      # directory is mode 0700, which no other uid can traverse).
+      - name: "ABI v2 on ${{ matrix.platform }}: 4 x 4 through each writer's v2-dev subroot from the staging registry; writer x reader x line (#481); concurrent installs (#482, #516); read-only commands, cross-uid reads and writer x reader x fault x mode (#486, #558)"
+        env:
+          X: /tmp/cli-prefix
+          V2: ${{ steps.mode.outputs.v2 }}
+          ROUNDS: ${{ inputs.interop_rounds }}
+          PLATFORM: ${{ matrix.platform }}
+          TMPDIR: /tmp
+        run: |
+          if [ -z "$V2" ]; then
+            echo "v1-cache-interop ($PLATFORM): SKIPPED the ABI v2 matrix by name: no binding speaks ABI v2 at this commit (spec/binding-majors.json)" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          clis=()
+          for b in $V2; do clis+=(--cli "$b=$X/bin/cli-$b"); done
+          if [ -n "$ROUNDS" ]; then
+            case "$ROUNDS" in *[!0-9]* | 0*) echo "::error::interop_rounds must be a positive integer, got: $ROUNDS"; exit 1 ;; esac
+            clis+=(--rounds "$ROUNDS" --coarse-rounds "$ROUNDS")
+          fi
+          coarse=(--coarse-clock)
+          case "$PLATFORM" in
+            darwin-*)
+              coarse=()
+              echo "v1-cache-interop ($PLATFORM): SKIPPED the coarse-clock leg by name: it is an LD_PRELOAD shim (scripts/fetch-v1/coarse-clock.c), which macOS does not have; the natural-clock concurrency rows run" | tee -a "$GITHUB_STEP_SUMMARY"
+              ;;
+          esac
+          sudo install -d -m 0755 -o "$(id -u)" -g "$(id -g)" /opt/chtypes/v2-dev
+          python3 scripts/fetch-v1/cache-interop.py --abi 2 "${clis[@]}" \
+            --platform "$PLATFORM" \
+            --other-user nobody \
+            --system-dir /opt/chtypes/v2-dev \
+            ${coarse[@]+"${coarse[@]}"}
 
   v1-refcheck:
     name: "v1-refcheck — reference verifiers agree with the fixture verdicts (report only)"
