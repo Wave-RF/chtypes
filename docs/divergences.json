@@ -67,6 +67,12 @@
       "heading": "The row preview refuses a row with 131 when a LowCardinality column's dictionary holds another row's too-long key",
       "note": "no machine check is expressible in this register's schema: a check drives one call tree (compile a schema, then a payload through the batch, or a filter through Filter.rows) and asserts that call's own outcome. This entry is the row preview's verdict, and the schema has no field that selects the row preview (chs_preview_row) rather than the batch preview. The v1 replacement of the checker must add one before this entry can carry a check. Retirement: on the artifact producer's measured re-run against the production library build that ships the fix, never on CI.",
       "checks": []
+    },
+    {
+      "id": "ttl-engine-rows-post-merge",
+      "heading": "For a TTL table, the batch document's engine rows show the state after a merge, not what the INSERT writes",
+      "note": "no machine check is in this entry yet: the divergence is the batch document's reported engine rows for one payload, which this register's schema could compare, but the retired v0 checker that drove such checks is not replaced, so a check written now would not run. The v1 replacement of the checker should add one for this case. Retirement: on the artifact producer's measured re-run against the production library build that ships the change, never on CI.",
+      "checks": []
     }
   ]
 }

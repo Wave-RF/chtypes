@@ -288,6 +288,30 @@ The same happens in `JSONEachRow` to a row after a skipped row that carried the 
 
 Until then, do not read a row preview's refusal with 131 on such a table as the server's answer for that row alone.
 
+### For a TTL table, the batch document's engine rows show the state after a merge, not what the INSERT writes
+
+**Stored-value divergence, on every supported line, through the batch preview.** For a table with a rows `TTL` or a column `TTL`, `chs_preview_batch` reports `engine_rows` as they would be after a merge:
+
+- a row whose rows `TTL` has already expired is left out (with a `storage_transforms` entry, reason `ttl_expired`);
+- a column value whose column `TTL` has expired is reset to its `DEFAULT` (reason `ttl_column_expired`).
+
+A real server's synchronous `INSERT` writes a part that still holds that row with its values as inserted. The row is removed, and the column reset, only at a later merge or `OPTIMIZE … FINAL`. Verdicts are unaffected: only the reported stored content differs. For example:
+
+```sql
+CREATE TABLE t (k UInt32, d Date) ENGINE = MergeTree ORDER BY k TTL d + INTERVAL 1 DAY
+```
+
+with a row where `d = '2020-01-01'`:
+
+|                               |                                    |
+| ----------------------------- | ---------------------------------- |
+| this library, `engine_rows`   | leaves the row out (`ttl_expired`) |
+| a real server, after `INSERT` | its part holds the row as inserted |
+
+**Measured**: by the artifact producer, against the production library build `20261006.220511` on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64. A library change is in progress: `engine_rows` will match what the server's `INSERT` writes, and the two TTL reasons will no longer be reported. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the change, never on a CI result.
+
+Until then, for a table with a `TTL`, read `engine_rows` as the state after the next merge, not as the part the `INSERT` writes.
+
 ## Known gaps in 1.0
 
 Each item is a place where 1.0 does less than you might expect, or answers differently from a server. None of them returns a wrong answer without saying so, and every one is planned. Each entry says what happens, what to do today, and that a fix is planned.
