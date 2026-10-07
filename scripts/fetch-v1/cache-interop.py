@@ -5,6 +5,7 @@ r"""scripts/fetch-v1/cache-interop.py — a cache one binding writes, every bind
     scripts/fetch-v1/cache-interop.py --cli go=<cmd> --cli python=<cmd> --cli ts=<cmd> --cli rust=<cmd>
                                       [--other-user <name>] [--system-dir <a default system dir>] [--faults-as-self]
     scripts/fetch-v1/cache-interop.py --abi 2 --cli <binding>=<cmd> ... [--other-user <name>] [--coarse-clock]
+                                      [--system-dir <a v2-dev system dir>] [--faults-as-self] [--only-faults]
                                       [--platform <os-arch>] [--processes N] [--rounds N] [--coarse-rounds N]
     scripts/fetch-v1/cache-interop.py --selftest
 
@@ -112,7 +113,8 @@ else). Every command names its cache with --cache, so each layout is the
 subroot <cache>/<subroot> (r5). The platform is this host's (linux) unless
 --platform names one. The two newest lines the registry lists are HIGH and
 LOW. The parts carry the numbers of the 1.x parts they mirror; a v2 cache has
-no 0.x past (part 2), and its cache faults (part 7) are not yet rows here.
+no 0.x past (part 2), so that part has no row here, named: the 0.x LAYOUT is
+still a fault (part 7).
 
   1. WRITER x READER. Each writer fetches HIGH online into a fresh cache. It
      must name <cache>/<subroot>/unpacked/sha256/<the registry's manifest
@@ -161,6 +163,30 @@ no 0.x past (part 2), and its cache faults (part 7) are not yet rows here.
   6. CROSS-UID (#486; with --other-user). Each writer's part-1 cache, written
      at umask 022, is read by every reader as the other user exactly as in
      part 1, after the same three controls as the 1.x part 6.
+
+  7. WRITER x READER x FAULT x MODE (#486, #558; with --other-user, or
+     --faults-as-self for a development run as the cache's own owner, which a
+     mode denies too). The 1.x part 7 over the real CLIs and the real
+     registry, with the cache under the channel's subroot (r5): each writer's
+     part-1 cache, on a copy, is faulted by this user, with the faulted path
+     named at the layout the CLI names (`<cache>/<subroot>`, never the cache
+     directory). The faults are none, root-000 (the cache directory),
+     subroot-000 (the layout; the 1.x cache has no such level), unpacked-000,
+     entry-000, record-000, record-garbage-noblobs and layout-0x (a 0.x
+     registry directory in place of the subroot). Each reader runs `fetch HIGH
+     --offline`, `list --offline` and `verify` in the default mode and with
+     --strict, and with --system-dir (one of the channel's own default system
+     directories, /opt/chtypes/<subroot>) once more with that directory
+     holding a readable unpacked build. A positive control first proves the
+     reading uid is refused the faulted path, or the row is INVALID. Every
+     reader must give the SAME answer, and the one the 1.x matrix expects:
+     the default mode answers "not installed" with a warning naming the path
+     (or from the system dir, with the warning), and strict mode exits 9 with
+     CHTYPES_CACHE_UNUSABLE naming the path and the reason, never falling
+     through to the system dir. A binding that answers otherwise is reported
+     as it answered, never excused: the expectation is the 1.x one (it is
+     written once, for both). --only-faults runs this part alone, for a
+     development run with no concurrency and no line rows.
 
 The run fails if any cell fails, if a cell that should exist does not, or if
 the registry served other builds at the end than at the start (a mid-run
@@ -775,9 +801,14 @@ def cross_uid_rows(h: Harness, names: list[str], user: str, expected: dict[str, 
 
 
 FAULTS = ("none", "root-000", "unpacked-000", "entry-000", "record-000", "record-garbage-noblobs", "layout-0x")
+# The ABI v2 rows: the cache a user names holds the channel's subroot (r5), so
+# the root can be faulted twice, at the cache directory and at the subroot, and
+# a CLI names the SUBROOT either way (the cache directory is not a layout).
+V2_FAULTS = ("none", "root-000", "subroot-000", "unpacked-000", "entry-000", "record-000", "record-garbage-noblobs", "layout-0x")
 # The reason strict mode gives each fault, and whether the default mode warns.
 FAULT_REASON = {
     "root-000": ("unreadable_root", True),
+    "subroot-000": ("unreadable_root", True),
     "unpacked-000": ("unreadable_root", True),
     "entry-000": ("unreadable_entry", True),
     "record-000": ("unreadable_entry", True),
@@ -835,16 +866,21 @@ def expected_answer(
     return {"exit": 0, "code": "", "unusable": None, "warned": warned, "verified_none": not listed}
 
 
-def apply_fault(fault: str, cache: Path, entry: Path) -> Path | None:
+def apply_fault(fault: str, cache: Path, entry: Path, sub: str = "") -> Path | None:
     """Faults a copy of a writer's cache, as this user. Returns the path the
-    error and the warning must name (None for no fault)."""
+    error and the warning must name (None for no fault). `sub` is the layout's
+    subroot under the cache ("" for the 1.x cache, the channel's under ABI v2)."""
     if fault == "none":
         return None
+    layout = cache / sub if sub else cache
     if fault == "root-000":
         os.chmod(cache, 0)
-        return cache
+        return layout
+    if fault == "subroot-000":
+        os.chmod(layout, 0)
+        return layout
     if fault == "unpacked-000":
-        target = cache / "unpacked" / "sha256"
+        target = layout / "unpacked" / "sha256"
         os.chmod(target, 0)
         return target
     if fault == "entry-000":
@@ -855,12 +891,12 @@ def apply_fault(fault: str, cache: Path, entry: Path) -> Path | None:
         return entry / "verified.json"
     if fault == "record-garbage-noblobs":
         (entry / "verified.json").write_text("not json {")
-        shutil.rmtree(cache / "blobs", ignore_errors=True)
+        shutil.rmtree(layout / "blobs", ignore_errors=True)
         return entry / "verified.json"
     if fault == "layout-0x":
-        shutil.rmtree(cache)
-        shutil.copytree(FIXTURES / "layouts" / "upgrade-0x-registry", cache)
-        return cache
+        shutil.rmtree(layout)
+        shutil.copytree(FIXTURES / "layouts" / "upgrade-0x-registry", layout)
+        return layout
     raise ValueError(fault)
 
 
@@ -892,19 +928,29 @@ def fault_control(h: Harness, user: str | None, fault: str, faulted: Path | None
 
 
 def fault_rows(
-    h: Harness, names: list[str], user: str | None, system_dir: Path | None
+    h: Any,
+    names: list[str],
+    user: str | None,
+    system_dir: Path | None,
+    *,
+    spelling: str = SPELLING,
+    platform: str = PLATFORM,
+    sub: str = "",
+    faults: tuple[str, ...] = FAULTS,
 ) -> tuple[dict[tuple[str, str], str], list[str]]:
     """Part 7: writer x reader x fault x mode, read as the other user (or, with
     --faults-as-self, a local development run, as this one: a mode denies the
     owner too). Returns the cells and one table title per (mode, system dir)
-    block."""
+    block. `h` is the 1.x Harness or the ABI v2 V2Harness (`run`, `fetch` and
+    `work`); under ABI v2 `sub` is the channel's subroot, the layout the cache
+    faults and the system directory both hold (r5)."""
     cells: dict[tuple[str, str], str] = {}
     blocks: list[str] = []
     for writer in names:
         pristine = h.work / f"nxn-{writer}"
-        done = h.fetch(writer, SPELLING, pristine, offline=False)
+        done = h.fetch(writer, spelling, pristine, offline=False)
         if done.returncode != 0:
-            for fault in FAULTS:
+            for fault in faults:
                 for mode in ("default", "strict"):
                     for with_sys in ((False, True) if system_dir else (False,)):
                         label = f"{mode}{' +system dir' if with_sys else ''}: {writer} writes, {fault}"
@@ -912,17 +958,17 @@ def fault_rows(
                             cells[(label, reader)] = f"FAIL (no cache: {done.stderr.strip()[-120:]})"
             continue
         hexname = Path(named_dir(done)).name
-        for fault in FAULTS:
+        for fault in faults:
             cache = h.work / f"nxn-{writer}-{fault}"
             shutil.copytree(pristine, cache)
-            entry = cache / "unpacked" / "sha256" / hexname
-            faulted = apply_fault(fault, cache, entry)
+            entry = cache / sub / "unpacked" / "sha256" / hexname
+            faulted = apply_fault(fault, cache, entry, sub)
             control = fault_control(h, user, fault, faulted)
             for with_sys in ((False, True) if system_dir else (False,)):
                 sys_entry = None
                 if with_sys:
                     assert system_dir is not None
-                    shutil.copytree(pristine / "unpacked", system_dir / "unpacked")
+                    shutil.copytree(pristine / sub / "unpacked", system_dir / "unpacked")
                     sys_entry = system_dir / "unpacked" / "sha256" / hexname
                 for mode in ("default", "strict"):
                     label = f"{mode}{' +system dir' if with_sys else ''}: {writer} writes, {fault}"
@@ -936,7 +982,7 @@ def fault_rows(
                             cells[(label, reader)] = f"INVALID control: {control}"
                             continue
                         runs = [
-                            ("fetch", h.run(reader, "fetch", SPELLING, "--platform", PLATFORM, "--cache", str(cache), "--offline", *flag, user=user)),
+                            ("fetch", h.run(reader, "fetch", spelling, "--platform", platform, "--cache", str(cache), "--offline", *flag, user=user)),
                             ("list", h.run(reader, "list", "--offline", "--cache", str(cache), *flag, user=user)),
                             ("verify", h.run(reader, "verify", "--cache", str(cache), *flag, user=user)),
                         ]
@@ -1178,10 +1224,14 @@ class Registry:
 
 
 def host_platform() -> str | None:
-    """This host's platform key, when the registry can serve it (Linux only)."""
-    if not sys.platform.startswith("linux"):
-        return None
-    return {"x86_64": "linux-amd64", "aarch64": "linux-arm64", "arm64": "linux-arm64"}.get(os.uname().machine)
+    """This host's platform key, when the registry serves it: Linux on amd64
+    and arm64, and darwin on arm64."""
+    machine = os.uname().machine
+    if sys.platform.startswith("linux"):
+        return {"x86_64": "linux-amd64", "aarch64": "linux-arm64", "arm64": "linux-arm64"}.get(machine)
+    if sys.platform == "darwin":
+        return {"arm64": "darwin-arm64"}.get(machine)
+    return None
 
 
 class V2Harness:
@@ -1212,8 +1262,11 @@ class V2Harness:
         argv = [*self.clis[binding], *args]
         if user is not None:
             argv = as_user(user, self.env, argv)
+        # Another uid starts in "/", not in this one's working directory, which a
+        # runner's home (macOS: mode 0750) can make unreachable to it.
         try:
-            return subprocess.run(argv, env=self.env, capture_output=True, text=True, timeout=timeout, check=False)
+            return subprocess.run(argv, env=self.env, cwd="/" if user is not None else None, capture_output=True, text=True,
+                                  timeout=timeout, check=False)
         except subprocess.TimeoutExpired:
             return subprocess.CompletedProcess(argv, 124, "", f"cache-interop: timed out after {timeout}s")
 
@@ -1623,9 +1676,23 @@ def progress(msg: str) -> None:
     print(f"cache-interop: [{time.strftime('%H:%M:%S')}] {msg}", file=sys.stderr, flush=True)
 
 
-def v2_expected_cells(n: int, other_user: bool, coarse: bool) -> int:
+def v2_expected_cells(n: int, other_user: bool, coarse: bool, faults: bool = False, system_dir: bool = False) -> int:
     sets = n + (1 if n > 1 else 0)
-    return n * n + (n * n if other_user else 0) + 2 * n * n + sets + (sets if coarse else 0) + 3 * n
+    fault_cells = n * len(V2_FAULTS) * 2 * (2 if system_dir else 1) * n if faults else 0
+    return n * n + (n * n if other_user else 0) + 2 * n * n + sets + (sets if coarse else 0) + 3 * n + fault_cells
+
+
+def v2_fault_output(
+    cells: dict[tuple[str, str], str], blocks: list[str], names: list[str], other_user: str | None
+) -> str:
+    """The fault tables, one per (mode, system dir) block, as the 1.x run prints them."""
+    out = ""
+    for title in blocks:
+        prefix = title.replace(", with a system dir", " +system dir") + ": "
+        rows = [r for r in dict.fromkeys(r for (r, _c) in cells) if r.startswith(prefix)]
+        who = other_user or "this user"
+        out += "\n" + render_table(f"faults, {title} (as {who}): writer, fault \\ reader", rows, names, cells) + "\n"
+    return out
 
 
 def main_run_v2(
@@ -1637,6 +1704,9 @@ def main_run_v2(
     processes: int = CONCURRENCY,
     rounds: int = V2_ROUNDS,
     coarse_rounds: int = V2_COARSE_ROUNDS,
+    system_dir: Path | None = None,
+    faults_as_self: bool = False,
+    only_faults: bool = False,
     channel: Channel | None = None,
     registry: Any = None,
     extra_env: dict[str, str] | None = None,
@@ -1651,7 +1721,7 @@ def main_run_v2(
     registry = registry or Registry(channel.base)
     platform = platform or host_platform()
     if platform is None:
-        print("cache-interop: --platform is required off Linux (the registry serves linux builds only)", file=sys.stderr)
+        print("cache-interop: --platform is required on a host the registry has no build for (it serves linux-amd64, linux-arm64 and darwin-arm64)", file=sys.stderr)
         return 2
     lines = registry.lines()
     if len(lines) < 2:
@@ -1663,13 +1733,33 @@ def main_run_v2(
           f"record schema {channel.record_schema}, key {channel.key_id}, abi {channel.abi} (scripts/release-channel.sh)")
     print(f"cache-interop: platform {platform}; lines {high} ({digests[high]}) and {low} ({digests[low]}), read from the registry")
     os.umask(UMASK)
-    work = Path(tempfile.mkdtemp(prefix="cache-interop-v2-", dir=work_base))
+    # Resolved, so a path a CLI prints is the path judged on a host whose temp
+    # directory is a symlink (darwin's /var is /private/var).
+    work = Path(tempfile.mkdtemp(prefix="cache-interop-v2-", dir=work_base)).resolve()
     os.chmod(work, 0o755)
     try:
         h = V2Harness(clis, work, channel, platform, extra_env)
         for b in names:
             v = h.run(b, "--version", timeout=120)
             print(f"cache-interop: {b}: `{shlex.join(clis[b])} --version` exit {v.returncode}: {v.stdout.strip() or v.stderr.strip()[-160:]!r}")
+        faulting = other_user is not None or faults_as_self
+        if only_faults:
+            # A local development run: the fault rows alone, no concurrency, no lines.
+            if not faulting:
+                print("cache-interop: --only-faults needs --other-user or --faults-as-self", file=sys.stderr)
+                return 2
+            progress("the cache faults only (--only-faults)")
+            cells, blocks = fault_rows(h, names, other_user, system_dir, spelling=high, platform=platform, sub=channel.subroot, faults=V2_FAULTS)
+            out = v2_fault_output(cells, blocks, names, other_user)
+            print(out)
+            bad = [(r, c, v) for (r, c), v in cells.items() if not v.startswith("ok")]
+            for r, c, v in bad:
+                print(f"FAILED {r} / {c}: {v}", file=sys.stderr)
+            want = v2_expected_cells(len(names), False, False, True, system_dir is not None) - v2_expected_cells(len(names), False, False)
+            if len(cells) != want:
+                print(f"cache-interop: {len(cells)} cells, expected {want}", file=sys.stderr)
+                return 1
+            return 1 if bad else 0
         schema = record_schema_for(channel)
         cells: dict[tuple[str, str], str] = {}
         records: dict[str, dict[str, Any]] = {}
@@ -1726,6 +1816,13 @@ def main_run_v2(
                 cells.update({(f"coarse: {r}", c): v for (r, c), v in got.items()})
         progress("the read-only commands")
         cells.update(v2_read_only_cells(h, names, (high, low)))
+        fault_blocks: list[str] = []
+        if faulting:
+            progress(f"the cache faults, read {'as ' + other_user if other_user else 'by this user'}{', with a system dir' if system_dir else ''}")
+            fault_cells, fault_blocks = fault_rows(
+                h, names, other_user, system_dir, spelling=high, platform=platform, sub=channel.subroot, faults=V2_FAULTS
+            )
+            cells.update(fault_cells)
         moved = {ln: registry.digest(ln, platform) for ln in (high, low)}
 
         out = render_table(f"ABI v2, {high}: writer \\ reader", [f"{w} writes" for w in names], names, cells) + "\n"
@@ -1752,6 +1849,10 @@ def main_run_v2(
         out += "\n" + render_table("concurrent installs per binding", names, ["natural", "coarse clock"], count_cells) + "\n"
         ro_rows = sorted({r for (r, _c) in cells if r.startswith("read-only commands: ")})
         out += "\n" + render_table("read-only commands \\ reader", ro_rows, names, cells) + "\n"
+        if faulting:
+            out += v2_fault_output(cells, fault_blocks, names, other_user)
+        else:
+            out += "\ncache faults: SKIPPED by name (neither --other-user nor --faults-as-self)\n"
         print(out)
         if summary and os.environ.get("GITHUB_STEP_SUMMARY"):
             with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
@@ -1760,7 +1861,7 @@ def main_run_v2(
         for r, c, v in bad:
             print(f"FAILED {r} / {c}: {v}", file=sys.stderr)
         rc = 1 if bad else 0
-        want = v2_expected_cells(len(names), other_user is not None, coarse_clock)
+        want = v2_expected_cells(len(names), other_user is not None, coarse_clock, faulting, system_dir is not None)
         if len(cells) != want:
             print(f"cache-interop: {len(cells)} cells, expected {want}", file=sys.stderr)
             rc = 1
@@ -1778,7 +1879,10 @@ def main_run_v2(
 # complete temporary directory, and three planted defects (FAKE_V2_PLANT,
 # "<defect>:<binding>"): `reader-rejects` reads no record at all,
 # `concurrent` installs on every online fetch by a mkdir that a second
-# installer fails on, and `ro-creates` makes the subroot on `list`.
+# installer fails on, `ro-creates` makes the subroot on `list`, and
+# `strict-lax` answers a cache fault under --strict as the default mode does
+# (the fault rows' defect). It reads and faults a cache as the 1.x CLIs do:
+# an unreadable piece, an unacceptable record and a 0.x layout.
 FAKE_V2_CLI = r'''
 import hashlib, json, os, shutil, sys, time
 binding, args = sys.argv[1], sys.argv[2:]
@@ -1812,28 +1916,73 @@ def within(req, version):
     want, got = req.split("."), version.split(".")
     return got[:len(want)] == want
 
-def installed():
+strict = has("--strict")
+sysbase = os.path.join(cfg["system_dir"], "unpacked", "sha256") if cfg.get("system_dir") else None
+
+def unusable(path, reason, errno=""):
+    if strict and plant != "strict-lax:" + binding:
+        print("chtypes: %s is unusable as a cache: %s%s [CHTYPES_CACHE_UNUSABLE]" % (path, reason, " (%s)" % errno if errno else ""), file=sys.stderr)
+        sys.exit(9)
+    if errno:
+        print("chtypes: %s could not be read (%s); treated as not installed." % (path, errno), file=sys.stderr)
+
+def scan(root, top, is_cache):
+    """(dir, record) for each acceptable entry under `root` (an unpacked/sha256
+    directory); an unreadable or unacceptable piece is `unusable`, which
+    strict mode makes an error and the default mode answers as not installed."""
+    if is_cache:
+        try:
+            top_names = os.listdir(top)
+        except FileNotFoundError:
+            return []
+        except PermissionError:
+            unusable(top, "unreadable_root", "EACCES")
+            return []
+        if top_names and "oci-layout" not in top_names:
+            unusable(top, "layout_0x")
+            return []
     try:
-        names = sorted(os.listdir(base))
+        names = sorted(os.listdir(root))
     except FileNotFoundError:
+        return []
+    except PermissionError:
+        unusable(root, "unreadable_root", "EACCES")
         return []
     out = []
     for n in names:
-        try:
-            rec = json.load(open(os.path.join(base, n, "verified.json")))
-        except (OSError, ValueError):
+        d = os.path.join(root, n)
+        if len(n) != 64:
             continue
-        if len(n) == 64 and rec.get("schema") == cfg["schema"] and plant != "reader-rejects:" + binding:
-            out.append((n, rec))
+        try:
+            os.listdir(d)
+        except PermissionError:
+            unusable(d, "unreadable_entry", "EACCES")
+            continue
+        try:
+            rec = json.load(open(os.path.join(d, "verified.json")))
+        except PermissionError:
+            unusable(os.path.join(d, "verified.json"), "unreadable_entry", "EACCES")
+            continue
+        except (OSError, ValueError):
+            unusable(os.path.join(d, "verified.json"), "unacceptable_record")
+            continue
+        if rec.get("schema") == cfg["schema"] and plant != "reader-rejects:" + binding:
+            out.append((d, rec))
     return out
+
+def installed():
+    found = scan(base, layout, True)
+    if sysbase:
+        found += scan(sysbase, cfg["system_dir"], False)
+    return found
 
 if cmd == "where":
     print(layout)
 elif cmd == "list":
     if plant == "ro-creates:" + binding:
         os.makedirs(layout, exist_ok=True)
-    for n, rec in installed():
-        print("installed %s %s %s" % (rec["version"], rec["platform"], os.path.join(base, n)))
+    for d, rec in installed():
+        print("installed %s %s %s" % (rec["version"], rec["platform"], d))
     if not offline:
         for line in cfg["lines"]:
             print("published %s support unknown" % line)
@@ -1841,19 +1990,19 @@ elif cmd == "verify":
     found = installed()
     if not found:
         print("chtypes: verified 0 builds under " + layout, file=sys.stderr)
-    for n, rec in found:
-        lib = open(os.path.join(base, n, rec["library"]), "rb").read()
+    for d, rec in found:
+        lib = open(os.path.join(d, rec["library"]), "rb").read()
         if hashlib.sha256(lib).hexdigest() != rec["library_sha256"]:
-            print("MISMATCH " + n, file=sys.stderr)
+            print("MISMATCH " + d, file=sys.stderr)
             sys.exit(1)
 elif cmd == "fetch":
     spelling = args[0]
     # The planted racer installs on every online fetch, hit or not, so a
     # second installer meets the first one's entry whatever the timing.
     racer = plant == "concurrent:" + binding and not offline
-    hits = [] if racer else [(n, rec) for n, rec in installed() if within(spelling, rec["version"])]
+    hits = [] if racer else [(d, rec) for d, rec in installed() if within(spelling, rec["version"])]
     if hits:
-        print(os.path.join(base, hits[0][0]))
+        print(hits[0][0])
         sys.exit(0)
     line = cfg["lines"].get(".".join(spelling.split(".")[:2]))
     if offline or line is None:
@@ -1868,6 +2017,7 @@ elif cmd == "fetch":
                        "bundle_manifest": None},
            "signed_by": cfg["key_id"], "predicate": {"abi": cfg["abi"]}}
     os.makedirs(base, exist_ok=True)
+    open(os.path.join(layout, "oci-layout"), "w").write('{"imageLayoutVersion": "1.0.0"}')
     if racer:
         try:
             os.mkdir(final)
@@ -1952,12 +2102,17 @@ def selftest_v2() -> None:
     }
     fake_channel = Channel(name="v2-dev", base="https://fake.invalid/chtypes/v2-dev", subroot="v2-dev", record_schema=2, key_id="0123456789abcdef", abi=2)
 
-    def run(names: list[str], plant: str, **kw: Any) -> tuple[int, dict[str, str], str]:
+    def run(names: list[str], plant: str, with_system_dir: bool = False, **kw: Any) -> tuple[int, dict[str, str], str]:
         with tempfile.TemporaryDirectory() as d:
             fake = Path(d) / "fake-chtypes.py"
             fake.write_text(FAKE_V2_CLI)
             config = Path(d) / "config.json"
-            config.write_text(json.dumps({"subroot": "v2-dev", "schema": 2, "key_id": fake_channel.key_id, "abi": 2, "lines": served}))
+            system_dir = Path(d) / "system-dir"
+            system_dir.mkdir()
+            config.write_text(json.dumps({"subroot": "v2-dev", "schema": 2, "key_id": fake_channel.key_id, "abi": 2, "lines": served,
+                                          "system_dir": str(system_dir) if with_system_dir else None}))
+            if with_system_dir:
+                kw["system_dir"] = system_dir
             clis = {b: [sys.executable, str(fake), b] for b in names}
             buf_out, buf_err = io.StringIO(), io.StringIO()
             with contextlib.redirect_stdout(buf_out), contextlib.redirect_stderr(buf_err):
@@ -1980,17 +2135,24 @@ def selftest_v2() -> None:
         if sys.platform.startswith("linux"):
             assert main() == 0 and seen, seen
             assert seen[-1] == ({"go": ["g", "--x"]}, {"other_user": "nobody", "coarse_clock": True, "platform": "linux-arm64",
-                                                       "processes": 9, "rounds": 5, "coarse_rounds": 4}), seen[-1]
+                                                       "processes": 9, "rounds": 5, "coarse_rounds": 4, "system_dir": None,
+                                                       "faults_as_self": False, "only_faults": False}), seen[-1]
         sys.argv = ["cache-interop.py", "--abi", "2", "--cli", "rust=r"]
         assert main() == 0 and seen[-1][1] == {"other_user": None, "coarse_clock": False, "platform": None, "processes": CONCURRENCY,
-                                                "rounds": V2_ROUNDS, "coarse_rounds": V2_COARSE_ROUNDS}, seen[-1]
-        for bad in (["--rounds", "0"], ["--system-dir", "/opt/chtypes/v1"], ["--abi", "3"]):
+                                                "rounds": V2_ROUNDS, "coarse_rounds": V2_COARSE_ROUNDS,
+                                                "system_dir": None, "faults_as_self": False, "only_faults": False}, seen[-1]
+        sys.argv = ["cache-interop.py", "--abi", "2", "--cli", "go=g", "--faults-as-self", "--only-faults"]
+        assert main() == 0 and seen[-1][1]["faults_as_self"] and seen[-1][1]["only_faults"], seen[-1]
+        for bad in (["--rounds", "0"], ["--system-dir", "/opt/chtypes/v1"], ["--system-dir", "/tmp"], ["--abi", "3"]):
             sys.argv = ["cache-interop.py", "--abi", "2", "--cli", "go=g", *bad]
             with contextlib.redirect_stderr(io.StringIO()):
                 assert main() == 2, f"--abi 2 must refuse {bad}"
         sys.argv = ["cache-interop.py", "--cli", "go=g", "--rounds", "5"]
         with contextlib.redirect_stderr(io.StringIO()):
             assert main() == 2, "the round counts belong to --abi 2"
+        sys.argv = ["cache-interop.py", "--cli", "go=g", "--only-faults"]
+        with contextlib.redirect_stderr(io.StringIO()):
+            assert main() == 2, "--only-faults belongs to --abi 2"
     finally:
         main_run_v2, sys.argv = real_run, saved_argv
 
@@ -2015,6 +2177,23 @@ def selftest_v2() -> None:
             assert "CHTYPES_CACHE_UNUSABLE" in failed[must], f"a concurrent failure names its exact code: {failed[must]}"
         if plant.startswith("ro-creates:"):
             assert "created" in failed[must], f"a read-only command that creates a directory names it: {failed[must]}"
+
+    # The cache-fault rows (part 7). They fault a cache as its owner, so the
+    # stand-in CLIs are denied too; a root user is denied nothing, and the
+    # rows' own positive control would call every cell INVALID.
+    if os.getuid() == 0:
+        print("cache-interop --selftest: the cache-fault checks need a non-root user (a mode denies root nothing): SKIPPED here", file=sys.stderr)
+    else:
+        rc, failed, log_text = run(list(BINDINGS), "", with_system_dir=True, faults_as_self=True)
+        assert rc == 0 and not failed, f"faults, positive control: four sound CLIs must pass every fault cell (rc {rc}):\n{log_text[-3000:]}"
+        assert "faults, strict (as this user)" in log_text and "faults, default, with a system dir (as this user)" in log_text, log_text[-3000:]
+        for fault in V2_FAULTS:
+            assert f"go writes, {fault}" in log_text, f"the fault row {fault} is in the table"
+        rc, failed, log_text = run(["go", "ts"], "strict-lax:ts", faults_as_self=True)
+        bad_rows = [r for r in failed if "strict: " in r]
+        assert rc != 0 and bad_rows, f"planted strict-lax:ts: a fault answered as the default mode does must fail a strict row:\n{log_text[-3000:]}"
+        assert all(row.startswith("strict: ") and ", none /" not in row for row in failed), f"planted strict-lax:ts: only faulted strict rows fail: {sorted(failed)}"
+        assert all("exit 9" in failed[r] or "readers disagree" in failed[r] or "'exit': 9" in failed[r] for r in bad_rows), failed
 
     # The coarse-clock leg: LD_PRELOAD is Linux's, so its own proof runs there.
     if not sys.platform.startswith("linux"):
@@ -2147,6 +2326,18 @@ def selftest() -> None:
     print("cache-interop --selftest: OK")
 
 
+def check_system_dir(system_dir: Path, allowed: list[str]) -> int:
+    """0 when `system_dir` is one of the CLIs' default system dirs and is
+    empty and writable by this user, else 2 after saying why."""
+    if str(system_dir) not in allowed:
+        print(f"cache-interop: --system-dir must be one of the default system dirs {allowed}", file=sys.stderr)
+        return 2
+    if not system_dir.is_dir() or any(system_dir.iterdir()) or not os.access(system_dir, os.W_OK):
+        print(f"cache-interop: --system-dir {system_dir} must exist, be empty and be writable by this user", file=sys.stderr)
+        return 2
+    return 0
+
+
 def main() -> int:
     argv = sys.argv[1:]
     if argv == ["--selftest"]:
@@ -2158,6 +2349,7 @@ def main() -> int:
     faults_as_self = False
     abi = 1
     coarse_clock = False
+    only_faults = False
     platform: str | None = None
     counts: dict[str, int] = {}
     i = 0
@@ -2184,6 +2376,9 @@ def main() -> int:
         elif argv[i] == "--coarse-clock":
             coarse_clock = True
             i += 1
+        elif argv[i] == "--only-faults":
+            only_faults = True
+            i += 1
         elif argv[i] == "--platform" and i + 1 < len(argv):
             platform = argv[i + 1]
             i += 2
@@ -2197,12 +2392,18 @@ def main() -> int:
         print("usage: cache-interop.py [--abi 2] --cli <binding>=<command> ... | --selftest", file=sys.stderr)
         return 2
     if abi == 2:
-        if system_dir is not None or faults_as_self:
-            print("cache-interop: --system-dir and --faults-as-self belong to the 1.x rows, not --abi 2", file=sys.stderr)
-            return 2
         if coarse_clock and not sys.platform.startswith("linux"):
             print("cache-interop: --coarse-clock needs Linux (LD_PRELOAD)", file=sys.stderr)
             return 2
+        if system_dir is not None:
+            # A v2 CLI honors no override (r6): the system directories it reads are its own, the channel's.
+            try:
+                subroot = channel_from_script().subroot
+            except RuntimeError as e:
+                print(f"cache-interop: {e}", file=sys.stderr)
+                return 2
+            if (rc := check_system_dir(system_dir, [f"/usr/local/share/chtypes/{subroot}", f"/opt/chtypes/{subroot}"])) != 0:
+                return rc
         return main_run_v2(
             clis,
             other_user=other_user,
@@ -2211,18 +2412,17 @@ def main() -> int:
             processes=counts.get("processes", CONCURRENCY),
             rounds=counts.get("rounds", V2_ROUNDS),
             coarse_rounds=counts.get("coarse_rounds", V2_COARSE_ROUNDS),
+            system_dir=system_dir,
+            faults_as_self=faults_as_self,
+            only_faults=only_faults,
         )
-    if coarse_clock or platform is not None or counts:
-        print("cache-interop: --coarse-clock, --platform, --processes and the round counts belong to --abi 2", file=sys.stderr)
+    if coarse_clock or only_faults or platform is not None or counts:
+        print("cache-interop: --coarse-clock, --only-faults, --platform, --processes and the round counts belong to --abi 2", file=sys.stderr)
         return 2
     if system_dir is not None:
         constants = json.loads((ROOT / "spec" / "fetch-v1" / "constants.json").read_text(encoding="utf-8"))
-        if str(system_dir) not in constants["cache"]["system_dirs"]:
-            print(f"cache-interop: --system-dir must be one of the default system dirs {constants['cache']['system_dirs']}", file=sys.stderr)
-            return 2
-        if not system_dir.is_dir() or any(system_dir.iterdir()) or not os.access(system_dir, os.W_OK):
-            print(f"cache-interop: --system-dir {system_dir} must exist, be empty and be writable by this user", file=sys.stderr)
-            return 2
+        if (rc := check_system_dir(system_dir, constants["cache"]["system_dirs"])) != 0:
+            return rc
     return main_run(clis, other_user, system_dir, faults_as_self)
 
 
