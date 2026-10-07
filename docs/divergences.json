@@ -3,44 +3,8 @@
   "//": "The machine-checkable half of docs/limitations.md's '## Known divergences' section (chtypes#185). The prose is authored there; this file carries only what the retired v0 checker could drive against loaded artifacts. Every '###' heading under that section must have exactly one entry here (by 'heading', matched verbatim, prefix stripped) and every entry here must match a heading — the retired v0 checker's coverage rule required either side to exist only with the other. Each check's 'settings' are a compile-time profile (a type gate binds at compile, docs/guides/settings.md 'The one exception'); 'err_code' and 'err_msg' are asserted only where docs/limitations.md itself states them — a code without a quoted message means the page named the code alone. 'stored' asserts THIS LIBRARY's current answer for a row's stored text (BatchResult.rows[i].values[column].text) — it is expected to start FAILING the day a relink makes the library match the server, which is the retirement signal for that entry, not a regression. 'stored_same' asserts that several named rows all store IDENTICAL text for a column, with no fixed text of its own — the shape a value computed once (rather than per row or per insert) produces, for a value (a random DEFAULT's exact bytes) that is not reproducible across processes. A check's top-level 'batches' (default 1) drives its payload through its compiled schema that many times, concatenating rows across calls in order, to reproduce separate INSERTs rather than one larger one. A check naming a top-level 'filter' (a boolean SQL expression) is driven down a DIFFERENT call tree: the schema compiles, the filter compiles over it, then Filter.rows(format, payload) answers one Verdict per row ('t'/'f'/'e'/'d') rather than an Outcome — its 'expect' still names 'outcome' (the call-level FilterOutcome, 'ok' unless the call itself was refused) and may also name 'verdicts' (the per-row list, index-aligned with the payload's rows, asserting THIS LIBRARY's current per-row answer exactly as 'stored' asserts a stored value — expected to start FAILING the day a relink makes the library refuse the query instead, the retirement signal for that entry). A check's 'lines' may be narrower than every served line a divergence is measured on: it names the lines THIS CHECK drives, which — like the demangle entry above — is the set where a library fix is expected to land and retire the entry; docs/limitations.md states the full measured scope in prose.",
   "entries": [
     {
-      "id": "projection-without-order-by-over-accept",
-      "heading": "A projection with no ORDER BY is accepted at schema creation; a real server refuses the CREATE",
-      "note": "no machine check is expressible in this register's schema: the case is decided at schema creation, and a check asserts the outcome of a payload driven through a schema that compiled, not the schema-create call's own verdict. The v1 replacement of the checker must add an expectation on that verdict before this entry can carry a check. Retirement: on the artifact producer's measured re-run against the production library build that ships the fix, never on CI.",
-      "checks": []
-    },
-    {
-      "id": "row-preview-skips-ttl-step",
-      "heading": "The row preview skips the TTL step: a row whose TTL expression throws is accepted, where a real server refuses it",
-      "note": "no machine check is expressible in this register's schema: a check drives one call tree (compile a schema, then a payload through the batch, or a filter through Filter.rows) and asserts that call's own outcome, so it cannot express the differential here, which is the row preview accepting a row that the batch preview refuses with 38. The schema has no field that selects the row preview (chs_preview_row) rather than the batch preview, and no 'expect' that contrasts two calls' outcomes. The v1 replacement of the checker must add both before this entry can carry a check. Retirement: on the artifact producer's measured re-run against the production library build that ships the fix, never on CI.",
-      "checks": []
-    },
-    {
-      "id": "batch-preview-code-10-ttl-reads-materialized",
-      "heading": "The batch preview refuses a row with code 10 when a TTL expression reads a MATERIALIZED column",
-      "note": "no machine check is in this entry yet: the over-reject is the batch preview's own verdict (code 10) on a payload a real server accepts, which this register's schema could express, but the retired v0 checker that drove such checks is not replaced, so a check written now would not run. The v1 replacement of the checker should add one for this case. Retirement: on the artifact producer's measured re-run against the production library build that ships the fix, never on CI.",
-      "checks": []
-    },
-    {
-      "id": "column-ttl-throws-on-rows-ttl-expired-row",
-      "heading": "A column TTL that throws on a row the table's rows TTL expires is accepted, where a real server refuses it",
-      "note": "no machine check is in this entry yet: the divergence is the batch preview's own verdict on one payload, which this register's schema could express, but the retired v0 checker that drove such checks is not replaced, so a check written now would not run. The v1 replacement of the checker should add one for this case. Retirement: on the artifact producer's measured re-run against the production library build that ships the fix, never on CI.",
-      "checks": []
-    },
-    {
-      "id": "batch-preview-evaluates-default-for-column-ttl",
-      "heading": "The batch preview evaluates a column's DEFAULT for a column TTL when the row supplies the column",
-      "note": "no machine check is in this entry yet: the divergence is the batch preview's own verdict on one payload, which this register's schema could express, but the retired v0 checker that drove such checks is not replaced, so a check written now would not run. The v1 replacement of the checker should add one for this case. Retirement: on the artifact producer's measured re-run against the production library build that ships the fix, never on CI.",
-      "checks": []
-    },
-    {
       "id": "unique-key-over-accept",
       "heading": "A UNIQUE KEY is accepted at schema creation; a real server refuses the CREATE",
-      "note": "no machine check is expressible in this register's schema: the case is decided at schema creation, and a check asserts the outcome of a payload driven through a schema that compiled, not the schema-create call's own verdict. The v1 replacement of the checker must add an expectation on that verdict before this entry can carry a check. Retirement: on the artifact producer's measured re-run against the production library build that ships the fix, never on CI.",
-      "checks": []
-    },
-    {
-      "id": "memory-table-settings-over-reject",
-      "heading": "Table SETTINGS on a Memory table are refused, where a real server accepts them",
       "note": "no machine check is expressible in this register's schema: the case is decided at schema creation, and a check asserts the outcome of a payload driven through a schema that compiled, not the schema-create call's own verdict. The v1 replacement of the checker must add an expectation on that verdict before this entry can carry a check. Retirement: on the artifact producer's measured re-run against the production library build that ships the fix, never on CI.",
       "checks": []
     },
