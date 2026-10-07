@@ -322,6 +322,16 @@ FIRM; an unrecognized value is read as `unsupported`.
 
 The verdict on a whole body. A batch is never skipped; its rows carry their own outcomes.
 
+The batch answers the first of these that applies:
+
+1. **A call-level rejection is `rejected`.** The call's own settings are refused (a value the settings constraints or the setter refuse), or the INSERT column list's verdict, a CREATE-time type gate or a contract violation refuses the call. The server refuses these before it reads a byte of the body, so no row changes the answer.
+2. **A call-level decline is `unsupported`,** with the setting named in the batch document's top-level `unsupported_settings`. This holds whatever the rows say, refusing rows and an empty body included: every row was read in a context the call did not ask for, so neither an acceptance nor a refusal there is the server's answer (a DateTime past the type's range in the schema's own zone can be in range in the call's zone). Every row reads `unsupported`, filter rows read `d`, the row preview answers the same, and no export bytes are produced.
+3. **Otherwise the first row, in body order, that is neither accepted nor skipped** gives its outcome (`rejected` or `unsupported`) and its code. An `unsupported` row ends the read, so a refused row after it is not reached and the batch stays `unsupported`. After the rows, the whole-body steps run in the server's order (the Object and Dynamic block steps, the DEFAULT step over the reader's chunks, the partition split, the writer's index expressions, the engine merge, the TTL, the projections), only on a batch the rows left accepted, and each may still refuse or decline it.
+4. **`accepted_poisoned`:** a stored value the server itself cannot read back. The INSERT succeeds, but nothing is exported.
+5. **`accepted`,** the only verdict that exports bytes.
+
+A skipped row never changes the verdict. Steps 2 and 3 depart from "rejected if any row is refused" for one reason: never a refusal that is not definite. Both answer `unsupported`, which a caller never scores as agreement.
+
 FIRM; an unrecognized value is read as `unsupported`.
 
 | value               |
@@ -766,7 +776,7 @@ The fields the description fixes, as JSON Schema; the document may carry more:
 
 A body's verdict, counts and per-row documents (each a row document, with its own `input_span`), and, when an export was asked for, where each accepted row sits in the export bytes. `engine_rows`, present when the table's engine merges rows at insert, is a list of rows, each a list of cells: `{name, stored, null}`, plus `value_b64` for a String or FixedString value. `storage_transforms` entries carry `row`, `column`, `reason` and `stored`, plus `value_b64`; `transformed` entries carry `row`, `column`, `input`, `stored`, `reason` and `lossy`. Every name, rendering, `err` and `export_declined` follows the rule for byte strings in JSON.
 
-`unsupported_settings`, at the top level, is a list of name objects with the same shape as a row document's: the call's own settings that the library declined.
+`unsupported_settings`, at the top level, is a list of name objects with the same shape as a row document's: the call's own settings that the library declined. It is empty when none was, and when it is not empty the batch's outcome is at least `unsupported` (see `batch_outcome`).
 
 `at_merge` lists what an `OPTIMIZE TABLE ... FINAL` of the part this `INSERT` writes would do, at the call's clock instant. It is absent when nothing would happen. `engine_rows` stays exactly what the `INSERT` writer produces, so the two never contradict each other. Each entry is `{row, reason, column, stored, input_rows}`:
 
