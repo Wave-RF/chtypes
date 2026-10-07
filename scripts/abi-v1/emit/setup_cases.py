@@ -63,6 +63,9 @@ THE RULE THE CASES PIN. Setup latches only once an image completes load step 7
     next open is a UsageError;
   * a failed open is never remembered, so the same open runs again.
 
+Rule r7 (a closed handle is never passed as NULL) has one case here for
+chs_preview_batch's `filter`, whose NULL means no filter: see _closed_filter_case.
+
 Once an image has completed step 7, a different setup is a UsageError. The bad
 zone, its refusal and the stub rule behind both come from _stubshared.IMAGE_ZONE,
 and the probe from _stubshared.ZONE_PROBE, which the stub is generated from too;
@@ -198,8 +201,59 @@ def _retry_case(model) -> dict:
     }
 
 
+# The statement the closed-filter case compiles: any CREATE the stub accepts.
+FILTER_CASE_STATEMENT = "CREATE TABLE t (k UInt8) ENGINE = Memory"
+
+
+def _closed_filter_case(model) -> dict:
+    """Rule r7 for chs_preview_batch's `filter`, whose NULL is no filter: a
+    closed filter is never passed as NULL.
+
+    A batch call mints no handle, so no live count shows whether a filter
+    reached it. The stub variant "filter-observable" (emit/stub.py,
+    _stubshared.FILTER_OBSERVABLE_DOCS) answers `rows_passed` 1 when the filter
+    reached it and 0 when it received NULL; the case reads that through the
+    public result, never a hand-set value. A closed filter must be refused with
+    the binding's usage error: a binding that passed NULL instead would return
+    a result with `rows_passed` 0, and a consumer's per-row filter would be
+    silently skipped.
+
+    Rust cannot express it: a Filter is an owned value freed only on Drop, so a
+    closed filter is unreachable.
+
+    The steps beyond setup's ops: `compile` (the statement, as a named schema),
+    `filter_new` (the expression, on a named schema, as a named filter),
+    `filter_close`, and `rows` (a CSV body through the named schema, with the
+    named filter when it has one; `rows_passed` is what the batch result must
+    report)."""
+    misuse = {"class": _class_of(model, "CHS_INVALID_ARGUMENT")}
+    rows = {"op": "rows", "schema": "schema", "format": "CSV", "body": "1\n"}
+    return {
+        "id": "filter.a_closed_filter_is_never_passed_as_null",
+        "variant": "filter-observable",
+        "rule": "r7",
+        "not_expressible": {
+            "rust": "a freed handle is unreachable: a Filter is an owned value that frees only on Drop",
+        },
+        "steps": [
+            {"op": "open", "expect": OK},
+            {"op": "compile", "statement": FILTER_CASE_STATEMENT, "as": "schema", "expect": OK},
+            {"op": "filter_new", "schema": "schema", "expression": "k > 1", "as": "open_filter", "expect": OK},
+            # Control 1: an OPEN filter reaches the library as non-NULL.
+            {**rows, "filter": "open_filter", "expect": OK, "rows_passed": 1},
+            # Control 2: with NO filter the library receives NULL.
+            {**rows, "expect": OK, "rows_passed": 0},
+            # The rule: a CLOSED filter is refused with the usage error.
+            {"op": "filter_close", "filter": "open_filter"},
+            {**rows, "filter": "open_filter", "expect": misuse},
+            # And the refusal leaves the schema usable, with no filter.
+            {**rows, "expect": OK, "rows_passed": 0},
+        ],
+    }
+
+
 def build_cases(model) -> list[dict]:
-    return [_latch_case(model), _retry_case(model)]
+    return [_latch_case(model), _retry_case(model), _closed_filter_case(model)]
 
 
 def render(model) -> str:

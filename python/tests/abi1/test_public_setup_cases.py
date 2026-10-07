@@ -19,6 +19,7 @@ from chtypes import (
     ArtifactCorruptError,
     ArtifactIncompatibleError,
     FetchOptions,
+    Format,
     InternalError,
     Registry,
     SchemaError,
@@ -74,7 +75,14 @@ def _outcome(want: dict, error: BaseException | None) -> str:
 def test_setup_case(
     setup_case: dict, stubs_dir, stubs_manifest, tmp_path, clean_process, monkeypatch
 ) -> None:
+    if "python" in setup_case.get("not_expressible", {}):
+        pytest.skip(f"not expressible in Python: {setup_case['not_expressible']['python']}")
     images: dict[str, str] = {}
+    # The case's open library, and the schemas and filters its steps (rule r7) name.
+    current = None
+    schemas: dict = {}
+    filters: dict = {}
+    batch_rows_passed: int | None = None
 
     def image(variant: str | None) -> str:
         """The case's one fresh copy of `variant` (the case's own by default)."""
@@ -93,8 +101,22 @@ def test_setup_case(
     for i, step in enumerate(steps):
         error: BaseException | None = None
         opened = None
+        if step["op"] == "filter_close":
+            filters[step["filter"]].close()
+            continue
         try:
-            if step["op"] == "setup":
+            if step["op"] == "filter_new":
+                filters[step["as"]] = schemas[step["schema"]].compile_filter(step["expression"])
+            elif step["op"] == "rows":
+                batch_rows_passed = None
+                row_filter = filters[step["filter"]] if "filter" in step else None
+                batch = schemas[step["schema"]].rows(
+                    Format.CSV, step["body"].encode(), row_filter=row_filter
+                )
+                batch_rows_passed = batch.rows_passed
+            elif step["op"] == "compile":
+                schemas[step["as"]] = current.compile_table(step["statement"].encode())
+            elif step["op"] == "setup":
                 setup(timezone=step["timezone"])
             elif step["op"] == "open" and "request" in step:
                 # A registry over an empty cache, offline, autofetch off.
@@ -127,7 +149,14 @@ def test_setup_case(
             ArtifactCorruptError,
         ) as exc:
             error = exc
+        if opened is not None:
+            current = opened
         diff = _outcome(step["expect"], error)
+        if not diff and "rows_passed" in step and step["rows_passed"] != batch_rows_passed:
+            diff = (
+                f"rows_passed {batch_rows_passed}, want {step['rows_passed']}: "
+                "the stub says whether the filter reached the library"
+            )
         if not diff and "image_zone" in step["expect"]:
             zone = opened.validate_type(IMAGE_ZONE_PROBE)
             want_zone = step["expect"]["image_zone"]

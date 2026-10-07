@@ -1065,6 +1065,49 @@ def _fill_outputs(model, fn) -> list[str]:
     return lines
 
 
+def _filter_observable(model, fn) -> list[str]:
+    """Rule r7: under CHS_STUB_FILTER_OBSERVABLE (variant "filter-observable",
+    see _stubshared.FILTER_OBSERVABLE_DOCS) chs_preview_batch answers a batch
+    document that says, in `rows_passed`, whether its nullable handle (the
+    filter) reached it: 1 for a non-NULL filter, 0 for NULL. A batch call mints
+    no handle, so no live count can show it; this is the one observable that
+    does. Emitted after the input checks and the status injection."""
+    if fn.name != "chs_preview_batch":
+        return []
+    outs = [q for q in fn.params if q.kind == "out_handle" and q.type == BUF_HANDLE]
+    docs = [q for q in outs if q.content == "document:batch"]
+    flt = next((p for p in fn.params if p.kind == "handle" and p.nullable), None)
+    if len(docs) != 1 or flt is None:
+        raise ValueError(f"{fn.name}: the shape _filter_observable answers has changed")
+    out = docs[0]
+    seen, none = (_c_str(_stubshared.FILTER_OBSERVABLE_DOCS[k]) for k in ("filter", "none"))
+    lines = [
+        "#if defined(CHS_STUB_FILTER_OBSERVABLE)",
+        "    {",
+        f"        if ({out.name} == NULL) {{",
+        *_c_fixed_error("CHS_INVALID_ARGUMENT", f"{out.name}: required", indent="            "),
+        "        }",
+    ]
+    for q in outs:
+        if q is not out:  # an export output a caller asked for gets an empty buffer
+            lines += [
+                f"        if ({q.name} != NULL) {{",
+                "            chs_sb xb; chs_sb_init(&xb);",
+                f"            *{q.name} = chs_stub_finish_buf(&xb);",
+                "        }",
+            ]
+    lines += [
+        "        chs_sb sb; chs_sb_init(&sb);",
+        f"        chs_sb_cat(&sb, ({flt.name} != NULL ? {seen} : {none}));",
+        f"        *{out.name} = chs_stub_finish_buf(&sb);",
+        "        chs_stub_set_err(err, NULL);",
+        "        return CHS_OK;",
+        "    }",
+        "#endif",
+    ]
+    return lines
+
+
 def _gen_generic(model, fn) -> str:
     sig = fn.prototype().rstrip(";")
     body = [sig + " {"]
@@ -1079,6 +1122,7 @@ def _gen_generic(model, fn) -> str:
     body += _image_zone(fn)
     body += _zone_probe(fn)
     body += _document_mode(model, fn)
+    body += _filter_observable(model, fn)
     body += _fill_outputs(model, fn)
     err_param = next((p for p in fn.params if p.kind == "out_error"), None)
     if err_param is not None:

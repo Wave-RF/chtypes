@@ -16,10 +16,13 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   ArtifactCorruptError,
   ArtifactIncompatibleError,
+  type Filter,
+  Format,
   InternalError,
   type Library,
   openUnverified,
   Registry,
+  type Schema,
   SchemaError,
   Status,
   setup,
@@ -51,12 +54,22 @@ interface Step {
   readonly request?: string;
   readonly allow?: boolean;
   readonly expect: Expect;
+  /** The compile and filter ops (rule r7): the names and the statement or expression they use, the body (CSV), and the `rowsPassed` a batch result must report. */
+  readonly as?: string;
+  readonly schema?: string;
+  readonly statement?: string;
+  readonly filter?: string;
+  readonly expression?: string;
+  readonly body?: string;
+  readonly rows_passed?: number;
 }
 
 interface SetupCase {
   readonly id: string;
   readonly variant: string;
   readonly steps: readonly Step[];
+  /** The bindings that cannot express the case, and why. */
+  readonly not_expressible?: Readonly<Record<string, string>>;
 }
 
 const setupDoc = JSON.parse(readFileSync(SETUP_CASES_PATH, 'utf8')) as { image_zone_probe: string; cases: SetupCase[] };
@@ -108,6 +121,11 @@ describe('the setup cases file', () => {
 describe.skipIf(!stubsAvailable)('the shared setup cases, through the public API', () => {
   it.each(setupCases.map((c) => [c.id, c] as const))('%s', async (_id, c) => {
     expect(c.steps.length).toBeGreaterThan(0);
+    const why = c.not_expressible?.ts;
+    if (why !== undefined) {
+      console.info(`SKIPPED (loudly): ${c.id} is not expressible in TypeScript: ${why}`);
+      return;
+    }
     const dir = mkdtempSync(path.join(os.tmpdir(), 'setup-case-'));
     const images = new Map<string, string>();
     /** The case's one fresh copy of `variant` (the case's own by default). */
@@ -122,6 +140,11 @@ describe.skipIf(!stubsAvailable)('the shared setup cases, through the public API
       }
       return copy;
     };
+    // The case's open library, and the schemas and filters its steps (rule r7) name.
+    let current: Library | undefined;
+    const schemas = new Map<string, Schema>();
+    const filters = new Map<string, Filter>();
+    let batchRowsPassed: number | undefined;
     resetSetupForTests();
     const saved = process.env.CHTYPES_ALLOW_UNVERIFIED_LIBRARY;
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -130,8 +153,21 @@ describe.skipIf(!stubsAvailable)('the shared setup cases, through the public API
       for (const [i, step] of c.steps.entries()) {
         let error: unknown;
         let opened: Library | undefined;
+        if (step.op === 'filter_close') {
+          (filters.get(step.filter as string) as Filter).close();
+          continue;
+        }
         try {
-          if (step.op === 'setup') setup({ timezone: step.timezone ?? '' });
+          if (step.op === 'filter_new') {
+            filters.set(step.as as string, (schemas.get(step.schema as string) as Schema).compileFilter(step.expression as string));
+          } else if (step.op === 'rows') {
+            batchRowsPassed = undefined;
+            const rowFilter = step.filter === undefined ? undefined : filters.get(step.filter);
+            const batch = (schemas.get(step.schema as string) as Schema).rows(Format.CSV, Buffer.from(step.body as string), { rowFilter });
+            batchRowsPassed = batch.rowsPassed;
+          } else if (step.op === 'compile') {
+            schemas.set(step.as as string, (current as Library).compileTable(step.statement as string));
+          } else if (step.op === 'setup') setup({ timezone: step.timezone ?? '' });
           else if (step.op === 'open' && step.request !== undefined) {
             // A registry over an empty cache, offline, autofetch off.
             const cacheDir = mkdtempSync(path.join(dir, 'cache-'));
@@ -144,7 +180,11 @@ describe.skipIf(!stubsAvailable)('the shared setup cases, through the public API
           if (!known) throw err;
           error = err;
         }
+        if (opened !== undefined) current = opened;
         let diff = outcome(step.expect, error);
+        if (diff === '' && step.rows_passed !== undefined && step.rows_passed !== batchRowsPassed) {
+          diff = `rows_passed ${String(batchRowsPassed)}, want ${step.rows_passed}: the stub says whether the filter reached the library`;
+        }
         if (diff === '' && step.expect.image_zone !== undefined) {
           const zone = (opened as Library).validateType(setupDoc.image_zone_probe).toString('utf8');
           if (zone !== step.expect.image_zone) diff = `the image was set up with zone ${JSON.stringify(zone)}, want ${JSON.stringify(step.expect.image_zone)}`;
