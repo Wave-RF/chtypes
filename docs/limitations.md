@@ -213,6 +213,37 @@ CREATE TABLE t (k UInt32, v String) ENGINE = Memory SETTINGS max_rows_to_keep = 
 
 Until then, do not read a refusal with 115 on a non-MergeTree table's `SETTINGS` as the server's answer.
 
+### A filter whose WHERE is a Float64 is evaluated on 26.3, where that server refuses it
+
+**Filter over-accept, on `26.3` only.** A filter whose `WHERE` expression has type `Float64` is evaluated to a verdict (`t` or `f`) for every row. A `26.3` server refuses such a filter with error **59**. For example, `WHERE toFloat64(x) / 10 - 0.25` and `WHERE (toFloat64(x) - toFloat64(x)) / 0`:
+
+|                       |                                      |
+| --------------------- | ------------------------------------ |
+| this library, on 26.3 | answers `t` or `f` for each row      |
+| a 26.3 server         | refuses the filter with error **59** |
+
+On `26.7`, `26.8` and `26.9` the server answers these filters, and this library agrees.
+
+**Measured**: by the artifact producer, against a library built from the same core commit as the production library build `20261006.220511`, on all four supported lines (`26.3` diverging; `26.7`, `26.8`, `26.9` agreeing), on linux-amd64 and linux-arm64. The production artifact itself is not measured; it is expected to behave the same (`inferred`: the same source). A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
+
+Until then, on `26.3`, do not treat a verdict for a `Float64` `WHERE` as the server's answer.
+
+### A toFixedString filter over a LowCardinality column answers 131 when the row's dictionary holds another row's key
+
+**Filter over-reject, on every supported line.** A filter such as `WHERE toFixedString(lc, 2) = 'k1'` over a `LowCardinality(String)` column answers `e` with error **131** for a row whose own value fits, when the column's dictionary for that row also holds a key from another row that does not fit. A real server answers `t` or `f` for that row. It occurs:
+
+- after a skipped row that carried a too-long key, in JSON and CSV input;
+- on every row of a `Values` or `Native` body in the measured corpus.
+
+|               |                                         |
+| ------------- | --------------------------------------- |
+| this library  | answers `e` (error **131**) for the row |
+| a real server | answers `t` or `f`                      |
+
+**Measured**: by the artifact producer, against a library built from the same core commit as the production library build `20261006.220511`, on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64. The production artifact itself is not measured; it is expected to behave the same (`inferred`: the same source). A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
+
+Until then, do not read an `e` with 131 from a `toFixedString` filter over a `LowCardinality` column as the server's answer.
+
 ## Known gaps in 1.0
 
 Each item is a place where 1.0 does less than you might expect, or answers differently from a server. None of them returns a wrong answer without saying so, and every one is planned. Each entry says what happens, what to do today, and that a fix is planned.
