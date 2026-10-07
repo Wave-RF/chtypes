@@ -616,31 +616,6 @@
       "reason": "The ABI v2 dev binding's rule r3 (spec/abi-v2/docs.md): every vocabulary has an explicit unknown(n) member, an unlisted value kept per field, which Rust spells as an Unknown variant carrying the raw value, with is_known() false and from_wire/from_code to read one; the call status, the transform reasons and the value sources gain types of their own (Status, Reason, Source; the 1.x status, reason and source modules stay beside them), and discover_query_param gains DiscoverQueryParam. Refusal.dev_message is rule r6's exact fingerprint message. docs/reference/bindings-v1.md is the 1.x surface and names none of them; the v2 surface document lands with the other dev bindings (public issue #511), and this entry goes with it."
     },
     {
-      "binding": "python",
-      "kind": "missing",
-      "names": [
-        "Library.new_server",
-        "Library.compile_table(server=)",
-        "ServerProfile",
-        "ServerProfile.timezone",
-        "ServerProfile.settings",
-        "ServerProfile.macros",
-        "Server",
-        "Server.close",
-        "SchemaDescription.server",
-        "SchemaDescription.replicated",
-        "SchemaServer",
-        "SchemaServer.timezone",
-        "SchemaServer.settings",
-        "SchemaServer.macros",
-        "SchemaReplicated",
-        "SchemaReplicated.zookeeper_path",
-        "SchemaReplicated.replica_name"
-      ],
-      "issue": 511,
-      "reason": "PENDING: the ABI v2 server profile (chs_server_create, chs_schema_create's server, schema_description's server and replicated) landed in Go first, which sets the shape for all four. Python's follow-up pull request adds Library.new_server, the server= keyword of compile_table, ServerProfile, Server and the description's members, and removes this entry."
-    },
-    {
       "binding": "ts",
       "kind": "missing",
       "names": [

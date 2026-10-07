@@ -23,9 +23,11 @@ from ._abi2._vocab import EXPORT_NONE, DocFlags, Format
 from ._guard import CloseGuard
 from ._input import (
     BytesIn,
+    ServerProfile,
     Settings,
     body_bytes,
     columns_json,
+    server_profile_json,
     settings_json,
     string_map_json,
     to_bytes,
@@ -40,7 +42,7 @@ from .results import (
     SchemaDescription,
 )
 
-__all__ = ["Block", "Filter", "Library", "Schema", "open_unverified"]
+__all__ = ["Block", "Filter", "Library", "Schema", "Server", "open_unverified"]
 
 # One image per file, process-wide: keyed on the realpath's device and inode, so
 # two registries, two spellings or a hardlink of one artifact share one image
@@ -157,6 +159,19 @@ class _Handle:
         tb: TracebackType | None,
     ) -> None:
         self.close()
+
+
+class Server(_Handle):
+    """One ClickHouse server (`chs_server`), made by `Library.new_server` and
+    passed to `Library.compile_table(server=)`. Immutable once made, so safe to
+    share across threads: any number of threads may compile tables on one server
+    at once. `close` releases the caller's reference, after the compiles already
+    using the server have returned; a schema compiled on the server holds its own
+    counted reference inside the library, so a server and its schemas close in
+    any order."""
+
+    __slots__ = ()
+    _what = "Server"
 
 
 class Block(_Handle):
@@ -388,18 +403,45 @@ class Library:
         """Live handle counts per kind in this image (a diagnostic)."""
         return _decode.decode_live_handles(self._api.live_handles())
 
+    def new_server(self, profile: ServerProfile) -> Server:
+        """Describe one ClickHouse server from a profile (`chs_server_create`). The
+        library validates the whole profile here, once: a zone DateLUT cannot
+        load, or a setting the server's SET check refuses, is the library's own
+        refusal (`SchemaError`); a malformed macro set is a `UsageError`; a build
+        that will not describe the profile declines it (`UnsupportedError`). The
+        binding checks none of it first. No server option is defined yet, so the
+        options document is empty."""
+        document = server_profile_json(profile)
+        return Server(self, self._api.server_create(document, None))
+
     def compile_table(
         self,
         create_table: BytesIn,
         *,
         settings: Settings | None = None,
         session_timezone: str | None = None,
+        server: Server | None = None,
     ) -> Schema:
         """Compile exactly one `CREATE TABLE` statement. `settings` is the profile;
-        a compiled type always takes the image zone, never the profile's."""
+        a compiled type always takes the image zone, never the profile's.
+
+        `server` (from `new_server`) compiles the table on that server: the
+        schema's home zone is the server's timezone, the server's settings layer
+        under the schema's own, and a Replicated engine's ZooKeeper path and
+        replica name expand the server's macros. A closed server is a
+        `UsageError`, raised before any call; a server from another library is
+        that library's own refusal, also a `UsageError`. `None` is no server: the
+        schema is on the image's own server."""
         statement = to_bytes(create_table, "create_table")
         settings_bytes = settings_json(settings, session_timezone)
-        # No server (NULL) and no options (none, which is `{}`): the schema is on
-        # the image's own server, exactly as before the server profile existed.
-        handle = self._api.schema_create(None, statement, settings_bytes, None)
+        if server is not None and not isinstance(server, Server):
+            raise TypeError(f"server must be a Server, not {type(server).__name__}")
+        # No schema option is defined yet: none, which the library reads as `{}`.
+        # A closed server is refused here, before the call, because its freed
+        # handle would cross as NULL and the library would compile on the
+        # image's server instead of refusing.
+        with _hold(*(() if server is None else (server._guard,))):
+            handle = self._api.schema_create(
+                None if server is None else server._handle, statement, settings_bytes, None
+            )
         return Schema(self, handle)
