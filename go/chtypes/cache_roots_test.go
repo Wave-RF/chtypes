@@ -4,9 +4,11 @@ package chtypes_test
 // resolution the fetch layer runs, and create nothing.
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/wave-rf/chtypes/go/chtypes"
@@ -86,5 +88,61 @@ func TestCacheRootAndSearchDirsCreateNothing(t *testing.T) {
 	ents, err := os.ReadDir(parent)
 	if err != nil || len(ents) != 0 {
 		t.Errorf("the parent holds %v (err %v), want it empty", ents, err)
+	}
+}
+
+// TestCacheRootsSharedTable reads the one table every binding's test reads
+// (tests/fixtures/cache-roots/cases.json), so all four give one list for the
+// same environment and options.
+func TestCacheRootsSharedTable(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "tests", "fixtures", "cache-roots", "cases.json"))
+	if err != nil {
+		t.Skipf("SKIPPED: the shared cache-roots table is not beside this checkout (%v)", err)
+	}
+	var table struct {
+		Cases []struct {
+			Name       string            `json:"name"`
+			Env        map[string]string `json:"env"`
+			CacheDir   *string           `json:"cache_dir"`
+			SystemDirs *[]string         `json:"system_dirs"`
+			SearchDirs []string          `json:"search_dirs"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(raw, &table); err != nil {
+		t.Fatal(err)
+	}
+	if len(table.Cases) == 0 {
+		t.Fatal("the shared table has no cases")
+	}
+	for _, c := range table.Cases {
+		t.Run(c.Name, func(t *testing.T) {
+			tmp := t.TempDir()
+			sub := func(s string) string { return strings.ReplaceAll(s, "<TMP>", tmp) }
+			clearCacheEnv(t)
+			for k, v := range c.Env {
+				t.Setenv(k, sub(v))
+			}
+			var o chtypes.FetchOptions
+			if c.CacheDir != nil {
+				o.CacheDir = sub(*c.CacheDir)
+			}
+			if c.SystemDirs != nil {
+				o.SystemDirs = []string{}
+				for _, d := range *c.SystemDirs {
+					o.SystemDirs = append(o.SystemDirs, sub(d))
+				}
+			}
+			var want []string
+			for _, d := range c.SearchDirs {
+				want = append(want, sub(d))
+			}
+			got, err := chtypes.SearchDirs(o)
+			if err != nil || !reflect.DeepEqual(got, want) {
+				t.Errorf("SearchDirs = %v, %v; want %v", got, err, want)
+			}
+			if root, err := chtypes.CacheRoot(o); err != nil || root != want[0] {
+				t.Errorf("CacheRoot = %q, %v; want %q", root, err, want[0])
+			}
+		})
 	}
 }
