@@ -205,16 +205,28 @@ func (l *Library) LiveHandles() (map[string]uint64, error) {
 	return decodeLiveHandles(raw)
 }
 
-// CompileTable compiles exactly one CREATE TABLE statement (chs_schema_create).
+// CompileTable compiles exactly one CREATE TABLE statement (chs_schema_create),
+// on the server OnServer names, or on the image's own server without it.
 func (l *Library) CompileTable(createTable string, opts ...CompileOption) (*Schema, error) {
 	c := compileConfig(opts)
 	settings, err := callSettings(c.settings, c.timezone)
 	if err != nil {
 		return nil, err
 	}
-	// No server (NULL) and no options (length 0, `{}`): the schema is on the
-	// image's own server, exactly as before the server profile existed.
-	h, cerr := l.tbl.SchemaCreate(nil, []byte(createTable), settings, nil)
+	// The server, or NULL: the schema is then on the image's own server,
+	// exactly as before the server profile existed. A closed server is refused
+	// here, before the call, because its freed handle would cross as NULL and
+	// the library would compile on the image's server instead of refusing.
+	var server *abi2.Server
+	if c.server != nil {
+		if err := c.server.enter(); err != nil {
+			return nil, err
+		}
+		defer c.server.g.leave()
+		server = c.server.h
+	}
+	// No schema option is defined yet: length 0, which the library reads as {}.
+	h, cerr := l.tbl.SchemaCreate(server, []byte(createTable), settings, nil)
 	if cerr != nil {
 		return nil, callError(cerr)
 	}

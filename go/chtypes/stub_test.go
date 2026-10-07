@@ -356,7 +356,15 @@ func TestStubZeroLiveHandles(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, _, _ = s, f, b // abandoned, never closed
+			srv, err := lib.NewServer(ServerProfile{Timezone: "UTC"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			on, err := lib.CompileTable("CREATE TABLE t (x UInt8) ENGINE = Memory", OnServer(srv))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _, _, _, _ = s, f, b, srv, on // abandoned, never closed
 		}
 	}()
 	deadline := time.Now().Add(20 * time.Second)

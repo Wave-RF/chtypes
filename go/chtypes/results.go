@@ -168,9 +168,40 @@ type Column struct {
 	DefaultExpr string
 }
 
-// SchemaDescription is a schema's columns, in declared order.
+// SchemaDescription is a schema's columns, in declared order, and the server
+// it was compiled on.
 type SchemaDescription struct {
 	Columns []Column
+	// Server is the server the schema was compiled on, from server: nil
+	// exactly when it was compiled without one.
+	Server *SchemaServer
+	// Replicated is the ZooKeeper path and replica name of a Replicated
+	// engine on a server, from replicated: nil when the document carries none.
+	Replicated *SchemaReplicated
+}
+
+// SchemaServer is the server a schema was compiled on, as the library holds
+// it. Its strings are the caller's own profile values given back, so they are
+// plain text, not data-derived.
+type SchemaServer struct {
+	// Timezone is the zone the schema's types bind: the profile's, or else the
+	// image zone (Setup's), exactly as chs_initialize spelled it.
+	Timezone string
+	// Settings is the server's settings as the profile gave them; the library
+	// reports {} (an empty map) when it gave none.
+	Settings map[string]string
+	// Macros is the server's macro set: nil exactly when the profile carried
+	// no macros (unknown), and non-nil, even empty, when it did (the complete
+	// set).
+	Macros map[string]string
+}
+
+// SchemaReplicated is what ClickHouse's own TableZnodeInfo resolved for a
+// Replicated engine, fully expanded, to compare with the server's own
+// system.replicas. Both expand DDL bytes, so both are byte strings.
+type SchemaReplicated struct {
+	ZooKeeperPath string
+	ReplicaName   string
 }
 
 // DiscoveredColumn is one column read from a server's system.columns rows.
