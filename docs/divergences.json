@@ -43,6 +43,18 @@
       "heading": "Table SETTINGS on a Memory table are refused, where a real server accepts them",
       "note": "no machine check is expressible in this register's schema: the case is decided at schema creation, and a check asserts the outcome of a payload driven through a schema that compiled, not the schema-create call's own verdict. The v1 replacement of the checker must add an expectation on that verdict before this entry can carry a check. Retirement: on the artifact producer's measured re-run against the production library build that ships the fix, never on CI.",
       "checks": []
+    },
+    {
+      "id": "filter-float64-where-over-accept-26-3",
+      "heading": "A filter whose WHERE is a Float64 is evaluated on 26.3, where that server refuses it",
+      "note": "no machine check is in this entry yet: the divergence is a filter's own verdict on one payload, which this register's schema could express (a filter through Filter.rows), but the retired v0 checker that drove such checks is not replaced, so a check written now would not run. The v1 replacement of the checker should add one for this case. Retirement: on the artifact producer's measured re-run against the production library build that ships the fix, never on CI.",
+      "checks": []
+    },
+    {
+      "id": "filter-tofixedstring-lowcardinality-131",
+      "heading": "A toFixedString filter over a LowCardinality column answers 131 when the row's dictionary holds another row's key",
+      "note": "no machine check is in this entry yet: the divergence is a filter's own verdict on one payload, which this register's schema could express (a filter through Filter.rows), but the retired v0 checker that drove such checks is not replaced, so a check written now would not run. The v1 replacement of the checker should add one for this case. Retirement: on the artifact producer's measured re-run against the production library build that ships the fix, never on CI.",
+      "checks": []
     }
   ]
 }
