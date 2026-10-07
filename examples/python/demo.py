@@ -629,13 +629,15 @@ def section8(lib: chtypes.Library) -> None:
     kv("(b) MergeTree SETTINGS", "what this build answers, told apart by type")
     for label, clause in (
         ("unknown NAME", "index_granularityy = 8192"),
-        ("known, non-default", "index_granularity = 4096"),
+        ("read on insert", "index_granularity = 4096"),
+        ("storage-only", "old_parts_lifetime = 100"),
         ("known, AT default", "index_granularity = 8192"),
     ):
         stmt = f"CREATE TABLE s (a UInt8) ENGINE = MergeTree ORDER BY tuple() SETTINGS {clause}"
         kv(f"  {label}", f"{clause} -> " + classify(lambda stmt=stmt: lib.compile_table(stmt)))
     note("a refusal carries the server's own code (this DDL can never exist); a decline")
-    note("means this build will not model the setting, and a real server might accept")
+    note("means this build will not model the setting, and a real server might accept;")
+    note("a setting only the storage layer reads is accepted: the rows stored do not change")
     blank()
 
     ttl_ddl = "CREATE TABLE ttl_t (ts DateTime, v UInt8) ENGINE = MergeTree ORDER BY ts TTL ts + INTERVAL 1 DAY"

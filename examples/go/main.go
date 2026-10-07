@@ -790,11 +790,13 @@ func section8(lib *chtypes.Library) {
 
 	// (b) MergeTree-namespace settings are part of the statement. Two
 	// failures, two KINDS: the class decides, a refusal is the SERVER's, a
-	// decline is this LIBRARY declining. Never flatten them.
-	kv("(b) MergeTree settings", "refusal vs decline vs inert")
+	// decline is this LIBRARY declining. Never flatten them. A setting only
+	// the storage layer reads is accepted: the rows stored do not change.
+	kv("(b) MergeTree settings", "refusal vs decline vs accepted")
 	for _, c := range []struct{ label, setting string }{
 		{"unknown NAME", "index_granularityy = 8192"},
-		{"known, non-default", "index_granularity = 4096"},
+		{"read on insert", "index_granularity = 4096"},
+		{"storage-only", "old_parts_lifetime = 100"},
 		{"known, AT default", "index_granularity = 8192"},
 	} {
 		s2, err := lib.CompileTable("CREATE TABLE t (a UInt8) ENGINE = MergeTree ORDER BY tuple() SETTINGS " + c.setting)
@@ -808,7 +810,9 @@ func section8(lib *chtypes.Library) {
 	}
 	note("an unknown name is the server's own refusal: this DDL can never")
 	note("exist, tell the tenant. A decline means the library will not guess:")
-	note("a real server might well accept it, so validate cautiously.")
+	note("a real server might well accept it, so validate cautiously. A")
+	note("setting only the storage layer reads compiles: the rows stored do")
+	note("not change.")
 	blank()
 
 	// (c) TTL: accepted per row, gone per batch.

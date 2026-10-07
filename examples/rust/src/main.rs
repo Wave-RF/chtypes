@@ -840,10 +840,11 @@ fn section8(lib: &Arc<Library>) {
     }
     blank();
 
-    kv("(b) MergeTree SETTINGS", "refusal vs accepted");
+    kv("(b) MergeTree SETTINGS", "refusal vs decline vs accepted");
     for setting in [
         "index_granularityy = 8192",
         "index_granularity = 4096",
+        "old_parts_lifetime = 100",
         "index_granularity = 8192",
     ] {
         let stmt = format!(
