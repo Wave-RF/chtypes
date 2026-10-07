@@ -17,7 +17,8 @@ import {
 import type { Resolved } from './ocifetch/index.js';
 import { Schema, type CompileOptions } from './schema.js';
 import { commitSetup, latchSetup, settleFailedOpen, setupGeneration } from './setup.js';
-import { type BytesIn, bytesIn, encodeSettings } from './settings.js';
+import { Server, serverHandleOf } from './server.js';
+import { type BytesIn, bytesIn, encodeServerProfile, encodeSettings, type ServerProfile } from './settings.js';
 
 export class Library {
   readonly #image: LoadedImage;
@@ -95,13 +96,31 @@ export class Library {
     return decodeLiveHandles(this.#calls.liveHandles());
   }
 
-  /** Compile exactly one `CREATE TABLE` statement. */
+  /**
+   * Describe one ClickHouse server from a profile (`chs_server_create`). The
+   * library validates the whole profile here, once: a zone DateLUT cannot load,
+   * or a setting the server's SET check refuses, is the library's own refusal (a
+   * `SchemaError` carrying ClickHouse's code); a malformed macro set is a
+   * `UsageError`; a build that will not describe the profile declines it (an
+   * `UnsupportedError`). The binding checks none of it first. No server option is
+   * defined yet, so the options document is empty.
+   */
+  newServer(profile: ServerProfile): Server {
+    return new Server(this.#calls.serverCreate(encodeServerProfile(profile), Buffer.alloc(0)));
+  }
+
+  /** Compile exactly one `CREATE TABLE` statement, on `options.server` or on the image's own server. */
   compileTable(createTable: BytesIn, options: CompileOptions = {}): Schema {
-    // No server (NULL) and no options (length 0, `{}`): the schema is on the
-    // image's own server, exactly as before the server profile existed.
+    // The server, or NULL: with none, the schema is on the image's own server,
+    // exactly as before the server profile existed. A closed server is refused
+    // before the call by its handle's guard (its `ptr` raises a UsageError),
+    // because a freed handle would cross as NULL and the library would compile
+    // on the image's server instead of refusing. No schema option is defined
+    // yet: length 0, which the library reads as `{}`.
+    const server = options.server === undefined || options.server === null ? null : serverHandleOf(options.server);
     return new Schema(
       this.#calls,
-      this.#calls.schemaCreate(null, bytesIn(createTable), encodeSettings(options.settings, options.sessionTimezone), Buffer.alloc(0)),
+      this.#calls.schemaCreate(server, bytesIn(createTable), encodeSettings(options.settings, options.sessionTimezone), Buffer.alloc(0)),
     );
   }
 }

@@ -47,6 +47,8 @@ from .results import (
     Header,
     RowResult,
     SchemaDescription,
+    SchemaReplicated,
+    SchemaServer,
     Span,
     Transform,
     Value,
@@ -449,10 +451,55 @@ def _column(obj: dict[str, Any], where: str) -> Column:
     )
 
 
+def _string_map(obj: Mapping[str, Any], key: str, where: str) -> dict[str, str] | None:
+    """An object of plain JSON strings (a server's settings or macros, the
+    caller's own values given back): None when absent, a dict, even an empty
+    one, when present, so absent and `{}` stay apart."""
+    value = obj.get(key)
+    if value is None:
+        return None
+    inner = _obj(value, where, key)
+    out: dict[str, str] = {}
+    for name, item in inner.items():
+        if not isinstance(item, str):
+            raise _wrong(f"{where}.{key}", name, "a string", item)
+        out[name] = item
+    return out
+
+
+def _server(obj: dict[str, Any], where: str) -> SchemaServer:
+    return SchemaServer(
+        timezone=_text(obj, "timezone", where),
+        settings=_string_map(obj, "settings", where) or {},
+        macros=_string_map(obj, "macros", where),
+    )
+
+
+def _replicated(obj: dict[str, Any], where: str) -> SchemaReplicated:
+    return SchemaReplicated(
+        zookeeper_path=_bytes(obj, "zookeeper_path", where),
+        replica_name=_bytes(obj, "replica_name", where),
+    )
+
+
 def decode_schema_description(raw: bytes) -> SchemaDescription:
     where = "schema_description"
     obj = _obj(strict_loads(raw, where), where)
-    return SchemaDescription(columns=_objects(obj, "columns", where, _column))
+    # Both are absent on a schema compiled without a server, so that document
+    # decodes exactly as it did before servers existed.
+    server = obj.get("server")
+    replicated = obj.get("replicated")
+    return SchemaDescription(
+        columns=_objects(obj, "columns", where, _column),
+        server=None
+        if server is None
+        else _server(_obj(server, where, "server"), f"{where}.server"),
+        replicated=(
+            None
+            if replicated is None
+            else _replicated(_obj(replicated, where, "replicated"), f"{where}.replicated")
+        ),
+    )
 
 
 def _discovered(obj: dict[str, Any], where: str) -> DiscoveredColumn:

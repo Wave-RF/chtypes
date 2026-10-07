@@ -1,6 +1,6 @@
 # examples/rust: the Rust tour
 
-Seventeen sections over the public surface of the v1 API ([`docs/reference/bindings-v1.md`](../../docs/reference/bindings-v1.md)), matching `../go`, `../python` and `../ts` section for section. See [`../README.md`](../README.md) for the section list. A section whose v0 feature the v1 API deletes (bindings-v1.md section 7) keeps its number and says which deletion removed it.
+Eighteen sections over the public surface of the API ([`docs/reference/bindings-v1.md`](../../docs/reference/bindings-v1.md)), matching `../go`, `../python` and `../ts` section for section. See [`../README.md`](../README.md) for the section list. A section whose v0 feature the v1 API deletes (bindings-v1.md section 7) keeps its number and says which deletion removed it.
 
 ## Run it
 

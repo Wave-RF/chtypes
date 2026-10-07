@@ -6,7 +6,7 @@
 //! behind the `chs_*` C ABI, which is why they are exact rather than
 //! approximately right.
 //!
-//! This file is a tutorial you RUN. Seventeen numbered sections walk the public
+//! This file is a tutorial you RUN. Eighteen numbered sections walk the public
 //! API of the Rust SDK, each with a comment saying what it demonstrates, why an
 //! ingest pipeline cares and what to look for in the output. The same section
 //! numbers, schemas and rows exist in the Go, Python and TypeScript tours, so
@@ -31,7 +31,7 @@
 use chtypes::{
     BatchResult, CompileOptions, DocFlags, Error, EvalOptions, FilterOptions, FilterOutcome,
     FilterResult, Format, Library, Outcome, Registry, RegistryOptions, RowOptions, RowsOptions,
-    SetupOptions, Value, Verdict,
+    ServerProfile, SetupOptions, Value, Verdict,
 };
 use std::sync::Arc;
 
@@ -128,6 +128,7 @@ fn main() {
     section15(&lib);
     section16(&lib);
     section17(&lib);
+    section18(&lib);
     blank();
     println!("Done. Every value above was measured by this run.");
 }
@@ -1464,6 +1465,97 @@ fn section17(lib: &Arc<Library>) {
         ),
         Err(err) => kv("columns [id, nosuch]", &err.to_string()),
     }
+}
+
+// ---------------------------------------------------------------------------
+// SECTION 18: The server profile
+//
+// WHAT: describe one ClickHouse server (its timezone; its settings and macros
+// can be given too) with `lib.new_server`, then compile a table ON it with
+// `CompileOptions::server`. The schema's home zone is the server's, as on the
+// server.
+// WHY: the same table on a Tokyo server and a UTC server fills a timezone()
+// DEFAULT, and binds a zone-less DateTime, differently. Without a server the
+// library refuses timezone() as a server constant it cannot know.
+// LOOK FOR: the row fed only `k`, and `tz` filled by the server's own zone;
+// the description naming the server. A build that does not compile on a
+// server yet DECLINES, and this section then says SKIPPED by name.
+// C API: chs_server_create, chs_server_free, and chs_schema_create's server.
+// ---------------------------------------------------------------------------
+fn section18(lib: &Arc<Library>) {
+    section(18, "The server profile");
+
+    // Every profile field is optional and passed through as given: the library
+    // validates the zone with DateLUT, the settings with the server's own SET
+    // check and the macros with ClickHouse's own reader.
+    let srv = match lib.new_server(&ServerProfile {
+        timezone: Some("Asia/Tokyo".to_string()),
+        ..ServerProfile::default()
+    }) {
+        Ok(srv) => srv,
+        Err(err) if err.is_unsupported() => {
+            kv(
+                "SKIPPED",
+                "section 18: this build declines a server profile",
+            );
+            note(&truncate(&err.to_string(), 66));
+            return;
+        }
+        Err(err) => fatal(&format!("new_server: {err}")),
+    };
+    kv(
+        "server",
+        r#"ServerProfile { timezone: Some("Asia/Tokyo") }"#,
+    );
+
+    const DDL: &str =
+        "CREATE TABLE t (k UInt8, tz String DEFAULT timezone()) ENGINE = MergeTree ORDER BY k";
+    let schema = match lib.compile_table(
+        DDL,
+        &CompileOptions {
+            server: Some(srv.clone()),
+            ..CompileOptions::default()
+        },
+    ) {
+        Ok(s) => s,
+        Err(err) if err.is_unsupported() => {
+            kv(
+                "SKIPPED",
+                "section 18: this build declines a table on a server",
+            );
+            note(&truncate(&err.to_string(), 66));
+            note("a build that compiles on a server prints the filled tz here; until");
+            note("then the decline is the answer (a real server accepts the table)");
+            return;
+        }
+        Err(err) => fatal(&format!("compile on a server: {err}")),
+    };
+    kv("schema", DDL);
+
+    match schema.describe() {
+        Ok(d) => {
+            if let Some(server) = &d.server {
+                kv(
+                    "description's server",
+                    &format!("timezone {}", server.timezone),
+                );
+            }
+        }
+        Err(err) => kv("describe", &err.to_string()),
+    }
+    match schema.row(Format::JsonEachRow, br#"{"k":1}"#, &RowOptions::default()) {
+        Ok(row) => {
+            for v in &row.values {
+                kv(
+                    &format!("  {}", v.column),
+                    &format!("{:<20} ({})", text_or(v), v.source),
+                );
+            }
+        }
+        Err(err) => kv("row", &err.to_string()),
+    }
+    note("tz came from the server's own timezone(): Asia/Tokyo, not the image");
+    note("zone. The schema holds the server, so dropping either first is safe.");
 }
 
 // ------------------------------------------------------------- plumbing

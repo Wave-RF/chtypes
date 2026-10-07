@@ -11,6 +11,7 @@ vendored reader does not know a fact, the document says `null` and the field is
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from ._abi2._vocab import DefaultKind, FilterOutcome, Outcome, Verdict
@@ -32,6 +33,8 @@ __all__ = [
     "Header",
     "RowResult",
     "SchemaDescription",
+    "SchemaReplicated",
+    "SchemaServer",
     "Span",
     "Transform",
     "Value",
@@ -211,8 +214,37 @@ class Column:
 
 
 @dataclass(frozen=True, slots=True)
+class SchemaServer:
+    """The server a schema was compiled on, as the library holds it. Its strings
+    are the caller's own profile values given back, so they are plain text, not
+    data-derived. `timezone` is the zone the schema's types bind: the profile's,
+    or else the image zone. `settings` is the profile's settings (`{}` when it
+    gave none). `macros` is None exactly when the profile carried no macros
+    (unknown), and a mapping, even an empty one, when it did (the complete set)."""
+
+    timezone: str
+    settings: Mapping[str, str]
+    macros: Mapping[str, str] | None
+
+
+@dataclass(frozen=True, slots=True)
+class SchemaReplicated:
+    """What ClickHouse's own TableZnodeInfo resolved for a Replicated engine on a
+    server, fully expanded. Both expand DDL bytes, so both are `bytes`."""
+
+    zookeeper_path: bytes
+    replica_name: bytes
+
+
+@dataclass(frozen=True, slots=True)
 class SchemaDescription:
+    """A schema's columns, in declared order, and the server it was compiled on.
+    `server` is None exactly when it was compiled without one; `replicated` is
+    None when the document carries none."""
+
     columns: tuple[Column, ...]
+    server: SchemaServer | None = None
+    replicated: SchemaReplicated | None = None
 
 
 @dataclass(frozen=True, slots=True)

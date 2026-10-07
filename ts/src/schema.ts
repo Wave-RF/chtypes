@@ -29,6 +29,7 @@ import {
   type RowResult,
   type SchemaDescription,
 } from './documents.js';
+import type { Server } from './server.js';
 import { type BytesIn, bytesIn, encodeColumns, encodeParams, encodeSettings, type Settings } from './settings.js';
 
 /** Options of `Library.compileTable`: the profile settings a schema compiles under, and the zone that profile defaults to. */
@@ -36,6 +37,15 @@ export interface CompileOptions {
   readonly settings?: Settings | undefined;
   /** In a compile profile it is a default for later calls on the schema; a compiled type always takes the image zone, never the profile's. */
   readonly sessionTimezone?: string | undefined;
+  /**
+   * Compile on this server (`Library.newServer`): the schema's home zone is the
+   * server's timezone, the server's settings layer under the schema's own, and a
+   * Replicated engine's ZooKeeper path and replica name expand the server's
+   * macros. A closed server is a `UsageError`, raised before any call; a server
+   * from another library is that library's own refusal, also a `UsageError`.
+   * Absent (or `undefined`) is no server: the schema is on the image's own server.
+   */
+  readonly server?: Server | undefined;
 }
 
 /** Options of `Schema.row` and `Schema.parseBlock`. */

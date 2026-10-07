@@ -1,6 +1,6 @@
 # examples/python — the Python tour
 
-Seventeen sections over the whole v1 public surface, matching `../go`, `../ts` and `../rust` section for section. See [`../README.md`](../README.md) for the section list. **Runs entirely offline** once an artifact is installed: no Docker, no ClickHouse server, no network.
+Eighteen sections over the whole public surface, matching `../go`, `../ts` and `../rust` section for section. See [`../README.md`](../README.md) for the section list. **Runs entirely offline** once an artifact is installed: no Docker, no ClickHouse server, no network.
 
 ## Run it
 
@@ -27,7 +27,7 @@ That is the whole command: `uv` resolves `chtypes` as an editable path dependenc
 
 Everything in the tour is the same _concept_ in all four SDKs ([`docs/reference/bindings-v1.md`](../../docs/reference/bindings-v1.md)); these are the places where the Python spelling is its own.
 
-- **Keyword-only options.** `compile_table(ddl, settings=..., session_timezone=...)`, `rows(..., columns=..., row_filter=..., export=..., doc_flags=...)`.
+- **Keyword-only options.** `compile_table(ddl, settings=..., session_timezone=..., server=...)`, `rows(..., columns=..., row_filter=..., export=..., doc_flags=...)`.
 - **Context managers.** `with lib.compile_table(...) as schema:` frees the handle; so do `Filter` and `Block`. A `Registry` and a `Library` have nothing to close.
 - **Peer error types.** `UnsupportedError` is a PEER of `SchemaError`, not a subclass: `except SchemaError` never catches a decline, and all four call errors share `CallError`. Section 10 demonstrates the idiom.
 - **Bytes everywhere a name or a message is.** The tour decodes them for printing only, through one `show()` helper.

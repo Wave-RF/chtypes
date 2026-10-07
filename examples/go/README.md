@@ -1,6 +1,6 @@
 # examples/go: the Go tour
 
-Eighteen sections over the whole public API, matching `../python`, `../ts` and `../rust` section for section through section 17; section 18, the ABI v2 server profile, lands in Go first. See [`../README.md`](../README.md) for the section list. **Runs entirely offline** (no Docker, no ClickHouse server, no network) against an installed artifact.
+Eighteen sections over the whole public API, matching `../python`, `../ts` and `../rust` section for section. See [`../README.md`](../README.md) for the section list. **Runs entirely offline** (no Docker, no ClickHouse server, no network) against an installed artifact.
 
 ## Run it
 

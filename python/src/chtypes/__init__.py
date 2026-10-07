@@ -59,7 +59,7 @@ from ._abi2._vocab import (
     Status,
     Verdict,
 )
-from ._input import BytesIn, Settings
+from ._input import BytesIn, ServerProfile, Settings
 from ._setup import setup
 from .errors import (
     CODE_ARTIFACT_CORRUPT,
@@ -92,7 +92,7 @@ from .errors import (
     UnsupportedError,
     UsageError,
 )
-from .library import Block, Filter, Library, Schema, open_unverified
+from .library import Block, Filter, Library, Schema, Server, open_unverified
 from .registry import FetchOptions, Registry, Resolved, TrustedKey, cache_root, search_dirs
 from .results import (
     BatchResult,
@@ -111,6 +111,8 @@ from .results import (
     Header,
     RowResult,
     SchemaDescription,
+    SchemaReplicated,
+    SchemaServer,
     Span,
     Transform,
     Value,
@@ -172,6 +174,10 @@ __all__ = [
     "Schema",
     "SchemaDescription",
     "SchemaError",
+    "SchemaReplicated",
+    "SchemaServer",
+    "Server",
+    "ServerProfile",
     "Settings",
     "Source",
     "SourceForbiddenError",

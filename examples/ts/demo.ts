@@ -7,12 +7,12 @@
 // come from ClickHouse's own C++, vendored per release into a shared library
 // behind the C ABI, which is why they are exact rather than approximately right.
 //
-// This file is a tutorial you RUN. Seventeen numbered sections walk the whole
+// This file is a tutorial you RUN. Eighteen numbered sections walk the whole
 // public API of the TypeScript SDK, from opening a library to the end of the
 // process, each with a comment saying what it demonstrates, why an ingest
-// pipeline cares and what to look at in the output. The same seventeen sections,
-// with the same numbering, schemas and rows, exist in the Go, Python and Rust
-// tours, so two of them can be diffed and only the language idioms differ.
+// pipeline cares and what to look at in the output. The same sections, with the
+// same numbering, schemas and rows, exist in the Go, Python and Rust tours, so two of them
+// can be diffed and only the language idioms differ.
 // The API is docs/reference/bindings-v1.md; this tour does not restate it.
 //
 // EVERYTHING HERE IS OFFLINE once an artifact is installed: no Docker, no
@@ -43,6 +43,7 @@ import {
   type RowResult,
   type Schema,
   SchemaError,
+  type Server,
   setup,
   UnsupportedError,
   UsageError,
@@ -132,6 +133,7 @@ async function main(): Promise<void> {
   section15(lib);
   section16(lib);
   section17(lib);
+  section18(lib);
 
   blank();
   console.log('Done. Every value above was measured by this run.');
@@ -1102,6 +1104,67 @@ function section17(lib: Library): void {
     note('code 16 NO_SUCH_COLUMN_IN_TABLE: the SAME code and message an ALIAS column in the');
     note('list would get, indistinguishable from the wire');
   });
+}
+
+// ---------------------------------------------------------------------------
+// SECTION 18: The server profile
+//
+// WHAT: describe one ClickHouse server (its timezone; its settings and macros
+// can be given too) with lib.newServer, then compile a table ON it with the
+// `server` option of compileTable. The schema's home zone is the server's, as
+// on the server.
+// WHY: the same table on a Tokyo server and a UTC server fills a timezone()
+// DEFAULT, and binds a zone-less DateTime, differently. Without a server the
+// library refuses timezone() as a server constant it cannot know.
+// LOOK FOR: the row fed only `k`, and `tz` filled by the server's own zone;
+// the description naming the server. A build that does not compile on a server
+// yet DECLINES, and this section then says SKIPPED by name.
+// C API: chs_server_create, chs_server_free, and chs_schema_create's server.
+// ---------------------------------------------------------------------------
+function section18(lib: Library): void {
+  section(18, 'The server profile');
+
+  // Every profile member is optional and passed through as given: the library
+  // validates the zone with DateLUT, the settings with the server's own SET
+  // check and the macros with ClickHouse's own reader.
+  let server: Server;
+  try {
+    server = lib.newServer({ timezone: 'Asia/Tokyo' });
+  } catch (err) {
+    if (!(err instanceof UnsupportedError)) throw err;
+    kv('SKIPPED', 'section 18: this build declines a server profile');
+    note(truncate(err.messageBytes.toString(), 66));
+    return;
+  }
+  try {
+    kv('server', "{ timezone: 'Asia/Tokyo' }");
+
+    const ddl = 'CREATE TABLE t (k UInt8, tz String DEFAULT timezone()) ENGINE = MergeTree ORDER BY k';
+    let schema: Schema;
+    try {
+      schema = lib.compileTable(ddl, { server });
+    } catch (err) {
+      if (!(err instanceof UnsupportedError)) throw err;
+      kv('SKIPPED', 'section 18: this build declines a table on a server');
+      note(truncate(err.messageBytes.toString(), 66));
+      note('a build that compiles on a server prints the filled tz here; until');
+      note('then the decline is the answer (a real server accepts the table)');
+      return;
+    }
+    try {
+      kv('schema', ddl);
+      const d = schema.describe();
+      if (d.server !== undefined) kv("description's server", `timezone ${d.server.timezone}`);
+      const r = schema.row(Format.JSONEachRow, utf8('{"k":1}'));
+      for (const v of r.values) kv(`  ${v.column.toString()}`, `${text(v).padEnd(20)} (${v.source})`);
+      note("tz came from the server's own timezone(): Asia/Tokyo, not the image");
+      note('zone. The schema holds the server, so closing either first is safe.');
+    } finally {
+      schema.close();
+    }
+  } finally {
+    server.close();
+  }
 }
 
 // ------------------------------------------------------------- plumbing

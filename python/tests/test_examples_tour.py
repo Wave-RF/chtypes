@@ -12,7 +12,7 @@ import importlib.util
 from pathlib import Path
 
 DEMO = Path(__file__).resolve().parents[2] / "examples" / "python" / "demo.py"
-SECTIONS = 17
+SECTIONS = 18
 
 
 def test_the_tour_defines_every_section_in_order() -> None:
