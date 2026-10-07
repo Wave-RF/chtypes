@@ -14,6 +14,7 @@
 
 import { createHash } from 'node:crypto';
 import { asString, field, items, type Json, parseJsonValue } from '../json.js';
+import { aliasTag } from './channel.js';
 import { MANIFEST_MAX_BYTES, MAX_UNPACKED_BYTES, MEDIA_TYPE_INDEX, MEDIA_TYPE_MANIFEST, SPELLING_REFUSE_HINT_REGEX } from './constants.gen.js';
 import { ArtifactCorruptError, ArtifactUnpublishedError, SourceIncompatibleError, SourceUnreachableError } from './errors.js';
 import { type RequestOptions, readFileUrl, requestBuffered, requestToSink } from './http.js';
@@ -279,38 +280,48 @@ export interface IndexResolveResult {
   readonly manifest: ManifestInfo;
 }
 
+/** One tag's index, fetched from the first base that serves it. */
+interface IndexAtBase {
+  readonly base: string;
+  readonly url: string;
+  readonly body: Buffer;
+  readonly json: Json | null;
+}
+
 /**
- * `GET manifests/<spelling>` across `bases` in order (guide §3, §7 A5's tag
- * rule: a tag 404 moves to the next base, and every base 404ing is
- * `UNPUBLISHED`), then the platform's manifest by digest across every base
- * (mirrors may carry the same tag pointing at the same digest, so a base
- * that served the index is not the only one asked for its blobs).
+ * `GET manifests/<ref>` across `bases` in order. A temporary error (guide §2: a
+ * timeout, a 5xx exhausted, a dead host) on any but the last base, and a 404 on
+ * any, move to the next base. Returns `undefined` when every base 404'd.
+ *
+ * Under `alias` (the dev channel's `<tag>--fp-<fingerprint>`, guide §3) only a
+ * 404 on EVERY base is `undefined`, the one outcome the caller answers with the
+ * tag itself: a temporary error on any base is thrown once every base was tried,
+ * so a transient error can never route a request to the tag, which may name a
+ * build of another fingerprint.
  */
-export async function resolveTag(
+async function indexAcrossBases(
   bases: readonly string[],
-  spelling: string,
-  platform: PlatformKey,
+  ref: string,
   options: RequestOptions,
-): Promise<IndexResolveResult> {
-  checkSpelling(spelling);
-  if (bases.length === 0) throw new Error('chtypes: no base URLs configured');
-  const info = platformInfo(platform);
-  const triedBases: string[] = [];
+  triedBases: string[],
+  alias: boolean,
+): Promise<IndexAtBase | undefined> {
+  let aliasFailure: SourceUnreachableError | undefined;
   for (let baseIndex = 0; baseIndex < bases.length; baseIndex++) {
     const base = bases[baseIndex]!;
     const isLastBase = baseIndex === bases.length - 1;
-    const url = endpointUrl(base, `/manifests/${spelling}`);
+    const url = endpointUrl(base, `/manifests/${ref}`);
     let status: number;
     let body: Buffer;
     let json: Json | null;
     try {
       ({ status, body, json } = await getJsonAt(url, MANIFEST_MAX_BYTES, options));
     } catch (err) {
-      // A temporary error (guide §2: a timeout, a 5xx exhausted, a dead
-      // host) moves to the next base, same as a tag 404 — never a
-      // verification failure, which propagates immediately.
+      // A temporary error moves to the next base, same as a tag 404 — never
+      // a verification failure, which propagates immediately.
       if (err instanceof SourceUnreachableError && !isLastBase) {
         triedBases.push(base);
+        if (alias) aliasFailure = err;
         continue;
       }
       throw err;
@@ -325,51 +336,82 @@ export async function resolveTag(
       // anomaly this fetcher does not have a specific verdict for.
       throw new SourceUnreachableError(`chtypes: ${url} returned status ${status}`);
     }
-    if (json === null) {
-      throw new ArtifactCorruptError(`chtypes: ${url} did not return valid JSON`);
-    }
-    const mediaType = asString(field(json, 'mediaType'));
-    if (mediaType !== '' && mediaType !== MEDIA_TYPE_INDEX) {
-      throw new SourceIncompatibleError(`chtypes: ${url} has mediaType ${JSON.stringify(mediaType)}, not ${MEDIA_TYPE_INDEX}`);
-    }
-    const manifests = items(field(json, 'manifests'));
-    const matches = manifests.filter((m) => {
-      const p = field(m, 'platform');
-      return asString(field(p, 'os')) === info.os && asString(field(p, 'architecture')) === info.architecture;
-    });
-    if (matches.length === 0) {
-      const offered = manifests
-        .map((m) => {
-          const p = field(m, 'platform');
-          return `${asString(field(p, 'os'))}-${asString(field(p, 'architecture'))}`;
-        })
-        .filter((k) => k !== '-');
-      throw new ArtifactUnpublishedError(
-        `chtypes: ${spelling} offers no manifest for ${platform}; the index offers: ${offered.join(', ') || '(none)'}`,
-      );
-    }
-    if (matches.length > 1) {
-      // `index-duplicate-platform`: the index disagrees with itself about
-      // which manifest is this platform's — `CORRUPT`, the plan's own
-      // annotation for this case.
-      throw new ArtifactCorruptError(`chtypes: ${spelling}'s index names ${platform} more than once`);
-    }
-    const d = matches[0]!;
-    const manifestDigest = asString(field(d, 'digest'));
-    if (manifestDigest === '') throw new ArtifactCorruptError(`chtypes: ${spelling}'s ${platform} descriptor has no digest`);
-    const manifestDescriptor: Descriptor = {
-      mediaType: asString(field(d, 'mediaType')),
-      digest: manifestDigest,
-      size: numberField(d, 'size'),
-    };
-    if (manifestDescriptor.mediaType !== MEDIA_TYPE_MANIFEST) {
-      throw new SourceIncompatibleError(
-        `chtypes: ${spelling}'s ${platform} descriptor has mediaType ${JSON.stringify(manifestDescriptor.mediaType)}, not ${MEDIA_TYPE_MANIFEST}`,
-      );
-    }
-    const manifestBytes = await fetchManifestBytesByDigest(bases, manifestDescriptor, options);
-    const manifest = parseManifest(manifestDigest, manifestBytes);
-    return { repositoryRoot: base, indexDigest: digestOfHex(sha256Hex(body)), indexBytes: body, manifest };
+    return { base, url, body, json };
   }
-  throw new ArtifactUnpublishedError(`chtypes: ${spelling} is unpublished: every base 404d the tag (${triedBases.join(', ')})`);
+  if (aliasFailure !== undefined) throw aliasFailure;
+  return undefined;
+}
+
+/**
+ * `GET manifests/<spelling>` across `bases` in order (guide §3, §7 A5's tag
+ * rule: a tag 404 moves to the next base, and every base 404ing is
+ * `UNPUBLISHED`), then the platform's manifest by digest across every base
+ * (mirrors may carry the same tag pointing at the same digest, so a base
+ * that served the index is not the only one asked for its blobs). Under the
+ * dev channel a version spelling resolves its own fingerprint's alias first
+ * (`aliasTag`, guide §3), and the tag only when every base 404'd the alias;
+ * what the alias names is then checked exactly as the tag's answer would be.
+ */
+export async function resolveTag(
+  bases: readonly string[],
+  spelling: string,
+  platform: PlatformKey,
+  options: RequestOptions,
+): Promise<IndexResolveResult> {
+  checkSpelling(spelling);
+  if (bases.length === 0) throw new Error('chtypes: no base URLs configured');
+  const info = platformInfo(platform);
+  const triedBases: string[] = [];
+  const alias = aliasTag(spelling);
+  let found = alias === undefined ? undefined : await indexAcrossBases(bases, alias, options, [], true);
+  if (found === undefined) found = await indexAcrossBases(bases, spelling, options, triedBases, false);
+  if (found === undefined) {
+    throw new ArtifactUnpublishedError(`chtypes: ${spelling} is unpublished: every base 404d the tag (${triedBases.join(', ')})`);
+  }
+  const { base, url, body, json } = found;
+  if (json === null) {
+    throw new ArtifactCorruptError(`chtypes: ${url} did not return valid JSON`);
+  }
+  const mediaType = asString(field(json, 'mediaType'));
+  if (mediaType !== '' && mediaType !== MEDIA_TYPE_INDEX) {
+    throw new SourceIncompatibleError(`chtypes: ${url} has mediaType ${JSON.stringify(mediaType)}, not ${MEDIA_TYPE_INDEX}`);
+  }
+  const manifests = items(field(json, 'manifests'));
+  const matches = manifests.filter((m) => {
+    const p = field(m, 'platform');
+    return asString(field(p, 'os')) === info.os && asString(field(p, 'architecture')) === info.architecture;
+  });
+  if (matches.length === 0) {
+    const offered = manifests
+      .map((m) => {
+        const p = field(m, 'platform');
+        return `${asString(field(p, 'os'))}-${asString(field(p, 'architecture'))}`;
+      })
+      .filter((k) => k !== '-');
+    throw new ArtifactUnpublishedError(
+      `chtypes: ${spelling} offers no manifest for ${platform}; the index offers: ${offered.join(', ') || '(none)'}`,
+    );
+  }
+  if (matches.length > 1) {
+    // `index-duplicate-platform`: the index disagrees with itself about
+    // which manifest is this platform's — `CORRUPT`, the plan's own
+    // annotation for this case.
+    throw new ArtifactCorruptError(`chtypes: ${spelling}'s index names ${platform} more than once`);
+  }
+  const d = matches[0]!;
+  const manifestDigest = asString(field(d, 'digest'));
+  if (manifestDigest === '') throw new ArtifactCorruptError(`chtypes: ${spelling}'s ${platform} descriptor has no digest`);
+  const manifestDescriptor: Descriptor = {
+    mediaType: asString(field(d, 'mediaType')),
+    digest: manifestDigest,
+    size: numberField(d, 'size'),
+  };
+  if (manifestDescriptor.mediaType !== MEDIA_TYPE_MANIFEST) {
+    throw new SourceIncompatibleError(
+      `chtypes: ${spelling}'s ${platform} descriptor has mediaType ${JSON.stringify(manifestDescriptor.mediaType)}, not ${MEDIA_TYPE_MANIFEST}`,
+    );
+  }
+  const manifestBytes = await fetchManifestBytesByDigest(bases, manifestDescriptor, options);
+  const manifest = parseManifest(manifestDigest, manifestBytes);
+  return { repositoryRoot: base, indexDigest: digestOfHex(sha256Hex(body)), indexBytes: body, manifest };
 }

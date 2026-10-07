@@ -88,6 +88,12 @@ class NotFoundHttpError(TransportError):
     """A 404 (or, for a `file://` base, a missing path)."""
 
 
+class AliasNotFoundError(TransportError):
+    """`mode="alias"`: every configured base answered the alias tag 404 (or,
+    for a `file://` base, has no such path). The one alias outcome the caller
+    answers with the tag itself (docs/guides/fetch-v1.md §3)."""
+
+
 class UnauthorizedHttpError(TransportError):
     """A 401 that is not (or is no longer) resolvable by the anonymous token flow."""
 
@@ -506,6 +512,12 @@ def fetch_from_bases(
       where it is retried within the shared budget before giving up — a
       listed digest that 404s is a host fault, never "unpublished", so the
       final exception for this mode is always `UnreachableHttpError`.
+    - `alias`: the dev channel's alias tag (docs/guides/fetch-v1.md §3). A 404
+      moves to the next base, as for a tag, but only a 404 on EVERY base is
+      "not found" (`AliasNotFoundError`, which the caller answers with the tag
+      itself). Any other failure on any base is raised as that failure, as the
+      tag would get it, so a transient error can never route a request to the
+      tag, which may name a build of another fingerprint.
 
     `decided-here` (the spec does not state it): when bases disagree — some
     404, some unreachable — the outcome follows the LAST base tried, since
@@ -516,6 +528,7 @@ def fetch_from_bases(
         raise UnreachableHttpError("no base URLs configured")
     last_index = len(bases) - 1
     last_error: TransportError | None = None
+    alias_failure: TransportError | None = None  # mode="alias": a base's non-404 failure
     for i, base in enumerate(bases):
         is_last = i == last_index
         scheme = urlsplit(base).scheme
@@ -538,8 +551,13 @@ def fetch_from_bases(
             continue
         except UnreachableHttpError as e:
             last_error = e
+            alias_failure = e
             continue
     assert last_error is not None
+    if mode == "alias":
+        if alias_failure is None:
+            raise AliasNotFoundError(f"{path}: not found on any configured base")
+        last_error = alias_failure
     if mode == "tag" and isinstance(last_error, NotFoundHttpError):
         raise last_error
     if isinstance(last_error, (UnauthorizedHttpError, ForbiddenHttpError)):

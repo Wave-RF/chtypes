@@ -223,7 +223,18 @@ const (
 	// the LAST base, retry within the normal budget before giving up — a
 	// listed digest that still 404s is a host fault, never "unpublished".
 	notFoundRetryOnLast
+	// notFoundAlias is the dev channel's alias policy (§3): a 404 moves to
+	// the next base, as for a tag, but only a 404 on EVERY base is "not
+	// found" (errAliasNotFound, which the caller answers with the tag
+	// itself). Any other failure on any base — a 5xx or a transport error
+	// once the retries are spent, a 401, a 403 — is returned as that
+	// failure, so a transient error can never route a request to the tag,
+	// which may be a build of another fingerprint.
+	notFoundAlias
 )
+
+// errAliasNotFound is notFoundAlias's "every base answered 404".
+var errAliasNotFound = errors.New("chtypes: no base has the alias tag")
 
 // fetchAcrossBases tries suffix against each base in order. A temporary
 // failure (a transport error, or a retry-exhausted 5xx) moves to the next
@@ -256,6 +267,9 @@ func (s *session) fetchAcrossBases(ctx context.Context, bases []string, suffix s
 			continue
 		}
 		if result.status == http.StatusNotFound {
+			if policy == notFoundAlias {
+				continue // not found here; only a 404 on every base is "not found"
+			}
 			if policy == notFoundUnpublished {
 				lastErr = newError(CodeArtifactUnpublished, "", "", u, nil, "no tag at %s", u)
 			} else {
@@ -277,17 +291,36 @@ func (s *session) fetchAcrossBases(ctx context.Context, bases []string, suffix s
 		}
 		return result, base, nil
 	}
+	if policy == notFoundAlias && lastErr == nil {
+		return nil, "", errAliasNotFound
+	}
 	return nil, "", lastErr
 }
 
+// fetchTag fetches manifests/<tag> across bases under the tag policy. Under a
+// contract with an alias fingerprint (the dev channel) and for a version
+// spelling, it first fetches manifests/<tag>--fp-<fingerprint> under the alias
+// policy, and falls back to the tag only when every base answered the alias
+// 404 (docs/guides/fetch-v1.md §3). What it returns is then trusted exactly as
+// the tag's own answer would be: nothing about an alias is a credential.
+func (s *session) fetchTag(ctx context.Context, bases []string, tag string, opts requestOptions) (*httpResult, string, error) {
+	if alias := s.ch.aliasTag(tag); alias != "" {
+		result, base, err := s.fetchAcrossBases(ctx, bases, "manifests/"+alias, notFoundAlias, opts)
+		if !errors.Is(err, errAliasNotFound) {
+			return result, base, err
+		}
+	}
+	return s.fetchAcrossBases(ctx, bases, "manifests/"+tag, notFoundUnpublished, opts)
+}
+
 // resolveIndex fetches the OCI image index for spelling, trying bases in
-// order under the tag-404 policy. The returned digest is computed from the
+// order under the tag-404 policy, through the dev channel's alias first
+// (fetchTag). The returned digest is computed from the
 // bytes received: the index itself is informational only (§7.4; it is
 // computed by the host, not stored, so there is no descriptor to verify it
 // against).
 func (s *session) resolveIndex(ctx context.Context, bases []string, spelling string) (*ImageIndex, Digest, string, error) {
-	result, base, err := s.fetchAcrossBases(ctx, bases, "manifests/"+spelling, notFoundUnpublished,
-		requestOptions{maxBytes: ManifestMaxBytes, accept: manifestAccept})
+	result, base, err := s.fetchTag(ctx, bases, spelling, requestOptions{maxBytes: ManifestMaxBytes, accept: manifestAccept})
 	if err != nil {
 		return nil, "", "", err
 	}

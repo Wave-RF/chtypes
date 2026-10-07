@@ -12,10 +12,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func devChannelForTest(t *testing.T) {
@@ -307,7 +310,7 @@ func TestDevOfflineEnvMakesNoRequestAndLoadsAnInstalledBuild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	entry := writeRecordRoot(t, root, "26.8.1.1", "20260801.000001")
+	entry := writeDevRecordRoot(t, root, "26.8.1.1", "20260801.000001")
 	res, err := Ensure(context.Background(), req, o())
 	if err != nil || res == nil || res.Dir != entry {
 		t.Fatalf("Ensure under CHTYPES_OFFLINE=1 with a build installed = %v, %v; want %s", res, err, entry)
@@ -328,5 +331,136 @@ func TestDevOfflineEnvMakesNoRequestAndLoadsAnInstalledBuild(t *testing.T) {
 	opt.Offline = true
 	if ro, err := resolveOptions(opt); err != nil || !ro.offline {
 		t.Errorf("the Offline option did not resolve offline (%v)", err)
+	}
+}
+
+// The alias step (docs/guides/fetch-v1.md §3): the dev channel names its alias
+// with its OWN fingerprint, the generated constant, which is the header's; the
+// v1 contract has no alias; and only a version spelling gets one.
+func TestDevChannelAliasIsItsOwnGeneratedFingerprint(t *testing.T) {
+	devChannelForTest(t)
+	hexFP, ok := strings.CutPrefix(DevABIFingerprint, "sha256:")
+	if !ok || !fingerprintHex.MatchString(hexFP) {
+		t.Fatalf("DevABIFingerprint = %q, want sha256: and 64 lowercase hex", DevABIFingerprint)
+	}
+	header := filepath.Join("..", "..", "..", "include", "v2", "chtypes.h")
+	if b, err := os.ReadFile(header); err != nil {
+		t.Logf("SKIPPED the header cross-check: %s is not beside this checkout (%v)", header, err)
+	} else if !bytes.Contains(b, []byte(`#define CHS_ABI_FINGERPRINT "`+DevABIFingerprint+`"`)) {
+		t.Errorf("%s does not define CHS_ABI_FINGERPRINT as %s: the fetch layer's copy is not the binding's fingerprint", header, DevABIFingerprint)
+	}
+	for tag, want := range map[string]string{
+		"26.9":       "26.9--fp-" + hexFP,
+		"26.9.8":     "26.9.8--fp-" + hexFP,
+		"26.9.8.3":   "26.9.8.3--fp-" + hexFP,
+		"latest":     "",
+		"sha256-abc": "",
+	} {
+		if got := active().aliasTag(tag); got != want {
+			t.Errorf("dev channel aliasTag(%q) = %q, want %q", tag, got, want)
+		}
+	}
+	if got := len(active().aliasTag("26.9")); got != 73 {
+		t.Errorf("the alias of 26.9 is %d characters, want 73", got)
+	}
+	restore := UseFetchV1ForTests()
+	defer restore()
+	if got := active().aliasTag("26.9"); got != "" {
+		t.Errorf("the v1 contract's aliasTag(26.9) = %q, want none", got)
+	}
+}
+
+// The dev channel itself, against a registry with no alias: the FIRST manifest
+// request is its own alias, the tag follows only on a 404; and a 5xx on the
+// alias is that failure, with the tag never requested.
+func TestDevChannelResolvesItsOwnAliasFirst(t *testing.T) {
+	t.Cleanup(AllowOverridesForTests())
+	for _, k := range []string{EnvBasesName, EnvTrustedKeysName, EnvAllowUnsignedName, EnvCacheName, EnvCacheStrictName, EnvOfflineName} {
+		t.Setenv(k, "")
+	}
+	alias := "/v2/chtypes/v2-dev/manifests/26.9--fp-" + strings.TrimPrefix(DevABIFingerprint, "sha256:")
+	tag := "/v2/chtypes/v2-dev/manifests/26.9"
+	for _, tc := range []struct {
+		name        string
+		aliasStatus int
+		wantPaths   []string
+		wantCode    ErrorCode
+	}{
+		{"alias 404, then the tag", http.StatusNotFound, []string{alias, tag}, CodeArtifactUnpublished},
+		{"alias 503, never the tag", http.StatusServiceUnavailable, []string{alias, alias, alias, alias, alias}, CodeSourceUnreachable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var mu sync.Mutex
+			var paths []string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				paths = append(paths, r.URL.Path)
+				mu.Unlock()
+				if r.URL.Path == alias {
+					w.WriteHeader(tc.aliasStatus)
+					return
+				}
+				w.WriteHeader(http.StatusNotFound)
+			}))
+			defer srv.Close()
+			clock := Clock{Now: time.Now, Sleep: func(context.Context, time.Duration) {}}
+			_, err := Ensure(context.Background(), Request{Spelling: "26.9", Platform: "linux-amd64"},
+				&Options{Bases: []string{srv.URL + "/chtypes/v2-dev"}, CacheDir: t.TempDir(), SystemDirs: []string{}, Clock: &clock})
+			var fe *FetchError
+			if !errors.As(err, &fe) || fe.Code != tc.wantCode {
+				t.Errorf("Ensure = %v, want %s", err, tc.wantCode)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if strings.Join(paths, " ") != strings.Join(tc.wantPaths, " ") {
+				t.Errorf("requested %q, want %q", paths, tc.wantPaths)
+			}
+		})
+	}
+}
+
+// writeDevRecordRoot is writeRecordRoot for a build of this SDK's own ABI: its
+// predicate names the generated fingerprint, as a dev artifact's signed
+// predicate does, so the dev channel's record filter sees it.
+func writeDevRecordRoot(t *testing.T, root, version, build string) string {
+	t.Helper()
+	entry := writeRecordRoot(t, root, version, build)
+	path := filepath.Join(entry, CacheVerifiedRecord)
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := decodeRecord(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec.Predicate["abi_fingerprint"] = DevABIFingerprint
+	if b, err = encodeRecord(*rec); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return entry
+}
+
+// The record filter (docs/guides/fetch-v1.md §3): the dev channel sees only a
+// record whose signed abi_fingerprint is its own generated fingerprint; the v1
+// contract sees every record.
+func TestDevChannelSeesOnlyItsOwnFingerprintsRecords(t *testing.T) {
+	devChannelForTest(t)
+	other := "sha256:" + strings.Repeat("0", 64)
+	if !active().visible(map[string]any{"abi_fingerprint": DevABIFingerprint}) {
+		t.Errorf("the dev channel does not see a record of its own fingerprint %s", DevABIFingerprint)
+	}
+	for _, pred := range []map[string]any{{"abi_fingerprint": other}, {}, {"abi_fingerprint": strings.TrimPrefix(DevABIFingerprint, "sha256:")}} {
+		if active().visible(pred) {
+			t.Errorf("the dev channel sees a record with predicate %v", pred)
+		}
+	}
+	restore := UseFetchV1ForTests()
+	defer restore()
+	if !active().visible(map[string]any{"abi_fingerprint": other}) || !active().visible(map[string]any{}) {
+		t.Errorf("the v1 contract filters records by fingerprint")
 	}
 }

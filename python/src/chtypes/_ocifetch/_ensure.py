@@ -355,6 +355,10 @@ def _newer_installed(
     (`26.3.4.1`) keeps only a newer BUILD of that exact version. A request
     that is not a version spelling (an arbitrary tag) names no range, so
     nothing is kept for it.
+
+    Under the dev channel only an install of its own fingerprint counts
+    (`_channel.visible`): a newer build of another fingerprint, installed by
+    another dev SDK, is never kept over this one's own.
     """
     if not re.match(C.SPELLING_REGEX, request_spelling):
         return None
@@ -368,6 +372,8 @@ def _newer_installed(
     for dir_, record in list_verified_records(roots):
         if record.platform != platform_key:
             continue
+        if not _channel.visible(record.predicate):
+            continue  # another fingerprint's build (_channel.visible): never kept over this one's
         if not version_within_request(record.version, request_spelling):
             continue
         version_key = _version_key(record.version)
@@ -693,7 +699,11 @@ def _ensure_floating(
     scratch_root = _scratch_root(cache_root_path)
 
     index_doc, index_bytes, index_digest = fetch_manifest_by_tag(
-        bases, request.spelling, policy=policy, retry=retry
+        bases,
+        request.spelling,
+        policy=policy,
+        retry=retry,
+        alias=_channel.alias_tag(request.spelling),
     )
     platform_desc = resolve_platform_manifest(index_doc, platform_key)
     manifest_hex = parse_digest(platform_desc.digest)
@@ -1050,6 +1060,7 @@ def _verify_and_install_from_local_blobs(
     manifest_digest: str,
     cache_write_root: Path,
     trusted_keys: tuple[TrustedKey, ...],
+    visible_only: bool = False,
 ) -> VerifiedRecord | None:
     """docs/guides/fetch-v1.md §1/§6: "A pre-seeded layout has entries in
     `index.json` with no corresponding `unpacked/` directory yet; the first
@@ -1103,6 +1114,9 @@ def _verify_and_install_from_local_blobs(
         return None
 
     predicate = verified.statement.predicate
+    if visible_only and not _channel.visible(predicate):
+        # A lookup never installs another fingerprint's pre-seeded build.
+        return None
     layer_hex = parse_digest(layer_desc.digest)
     if layer_hex not in verified.statement.subject_sha256:
         return None
@@ -1180,6 +1194,7 @@ def _verify_preseeded_entries(roots: Sequence[Path], trusted_keys: tuple[Trusted
                 manifest_digest=digest,
                 cache_write_root=cache_write_root,
                 trusted_keys=trusted_keys,
+                visible_only=True,
             )
             if record is not None:
                 already_verified.add(digest)
@@ -1224,7 +1239,10 @@ def resolve_installed(request: Request, platform: str, options: Options) -> Reso
     candidates = [
         (dir_path, record)
         for dir_path, record in list_verified_records(roots)
-        if record.platform == platform and version_within_request(record.version, request.spelling)
+        if record.platform == platform
+        and version_within_request(record.version, request.spelling)
+        # Under the dev channel, only its own fingerprint's builds (_channel.visible).
+        and _channel.visible(record.predicate)
     ]
     if not candidates:
         return None

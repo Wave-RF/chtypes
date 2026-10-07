@@ -11,7 +11,7 @@ import { unlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { asString, field, items, parseJsonValue } from '../json.js';
-import { activeChannel, allowUnsigned, noteIgnoredOverrides, offlineMode, refusePinning, warnIgnored } from './channel.js';
+import { activeChannel, allowUnsigned, noteIgnoredOverrides, offlineMode, refusePinning, visibleToChannel, warnIgnored } from './channel.js';
 import {
   BASE_SEPARATOR,
   CACHE_ANNOTATION_PREFIX,
@@ -194,6 +194,8 @@ export async function resolveInstalled(
     for (const { dir, record } of await listVerified(r.root)) {
       if (record.platform !== platform) continue;
       if (!withinRequest(record.version, request)) continue;
+      // Under the dev channel, only its own fingerprint's builds (`visibleToChannel`).
+      if (!visibleToChannel(record.predicate)) continue;
       candidates.push({ record, dir, source: r.source, rank });
     }
   }
@@ -282,7 +284,7 @@ async function verifyPreseededEntries(
     if (entry.platform !== undefined && (entry.platform.os !== info.os || entry.platform.architecture !== info.architecture)) continue;
     const already = await readVerifiedRecord(unpackedDir(writeRoot, hexOfDigest(entry.digest)));
     if (already !== undefined) continue;
-    await verifyAndInstallFromLocalBlobs(sourceDir, writeRoot, entry.digest, platform, trustedKeys);
+    await verifyAndInstallFromLocalBlobs(sourceDir, writeRoot, entry.digest, platform, trustedKeys, true);
   }
 }
 
@@ -330,6 +332,10 @@ function compareVersionThenBuild(a: ArtifactPredicate, b: ArtifactPredicate): nu
  * answered only by that exact version, so for it only a newer BUILD of the
  * same version counts. A request that is not a version spelling (an
  * arbitrary tag) names no range, so nothing is kept for it.
+ *
+ * Under the dev channel only an install of its own fingerprint counts
+ * (`visibleToChannel`): a newer build of another fingerprint, installed by
+ * another dev SDK, is never kept over this one's own.
  */
 async function checkMonotonic(
   root: string,
@@ -342,6 +348,7 @@ async function checkMonotonic(
   for (const { dir, record } of await listVerified(root)) {
     if (record.platform !== platform) continue;
     if (!withinRequest(record.version, request)) continue;
+    if (!visibleToChannel(record.predicate)) continue;
     if (compareVersionThenBuild(incoming, record.predicate) >= 0) continue;
     if (best === undefined || compareVersionThenBuild(best.record.predicate, record.predicate) < 0) best = { record, dir };
   }

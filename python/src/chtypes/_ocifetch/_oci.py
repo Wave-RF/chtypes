@@ -16,7 +16,13 @@ from chtypes._ocifetch._errors import (
     ArtifactUnpublishedError,
     SourceIncompatibleError,
 )
-from chtypes._ocifetch._http import FetchPolicy, RetryPolicy, fetch_from_bases, get_json
+from chtypes._ocifetch._http import (
+    AliasNotFoundError,
+    FetchPolicy,
+    RetryPolicy,
+    fetch_from_bases,
+    get_json,
+)
 
 __all__ = [
     "Descriptor",
@@ -242,9 +248,31 @@ def fetch_manifest_by_tag(
     policy: FetchPolicy,
     retry: RetryPolicy,
     max_bytes: int = C.MANIFEST_MAX_BYTES,
+    alias: str | None = None,
 ) -> tuple[dict, bytes, str]:
-    """GET manifests/<tag>; returns (doc, raw_bytes, resolved_digest)."""
+    """GET manifests/<tag>; returns (doc, raw_bytes, resolved_digest).
+
+    With `alias` (the dev channel's `<tag>--fp-<fingerprint>`, from
+    `_channel.alias_tag`), GET manifests/<alias> first, and the tag only when
+    every base answered the alias 404 (docs/guides/fetch-v1.md §3); any other
+    failure of the alias request is raised as it is. What is returned is then
+    trusted exactly as the tag's own answer would be."""
     accept = (C.MEDIA_TYPE_INDEX, C.MEDIA_TYPE_MANIFEST)
+    if alias is not None:
+        try:
+            doc, resp = get_json(
+                bases,
+                f"/manifests/{alias}",
+                mode="alias",
+                accept=accept,
+                max_bytes=max_bytes,
+                policy=policy,
+                retry=retry,
+            )
+        except AliasNotFoundError:
+            pass
+        else:
+            return doc, resp.body, f"sha256:{hashlib.sha256(resp.body).hexdigest()}"
     doc, resp = get_json(
         bases,
         f"/manifests/{tag}",

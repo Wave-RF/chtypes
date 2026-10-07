@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 2,
+  "mediaType": "application/vnd.oci.image.index.v1+json",
+  "manifests": [
+    {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:e8d39c88e29cbb8d10ef9d77831a66f63351ae05b37604d3e85aa44a13bd4766",
+      "size": 552,
+      "artifactType": "application/vnd.wavehouse.chtypes.artifact.v1",
+      "platform": {
+        "os": "linux",
+        "architecture": "amd64"
+      }
+    },
+    {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:fd76582ca54806d395920eab4c67f65c1fbdf9270cfcecb9ebbdee475216bdb5",
+      "size": 552,
+      "artifactType": "application/vnd.wavehouse.chtypes.artifact.v1",
+      "platform": {
+        "os": "linux",
+        "architecture": "arm64"
+      }
+    },
+    {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:c6c2bbaa0f0c0b2ff7bc24ce8a7e7b46069a28466a218e884a6f3cd5f2d4b634",
+      "size": 552,
+      "artifactType": "application/vnd.wavehouse.chtypes.artifact.v1",
+      "platform": {
+        "os": "darwin",
+        "architecture": "arm64"
+      }
+    }
+  ]
+}

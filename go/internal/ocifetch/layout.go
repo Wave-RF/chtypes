@@ -596,11 +596,14 @@ func listUnpacked(dir string) ([]installedEntry, error) {
 // whose version satisfies versionWithin(request, version), the newest by
 // (version, build) — build compared as the fixed-width string it is
 // (docs/guides/fetch-v1.md §6's offline-newest-build case).
-func newestMatching(entries []installedEntry, platform, request string) (*installedEntry, bool) {
+func newestMatching(entries []installedEntry, platform, request string, ch *channel) (*installedEntry, bool) {
 	var candidates []installedEntry
 	for _, e := range entries {
 		if e.rec.Platform != platform {
 			continue
+		}
+		if !ch.visible(e.rec.Predicate) {
+			continue // another fingerprint's build (channel.go): never the answer
 		}
 		if !versionWithin(request, e.rec.Version) {
 			continue

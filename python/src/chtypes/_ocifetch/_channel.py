@@ -18,6 +18,19 @@ five ways:
   used through its subroot `<cache>/v2-dev`, never as a whole layout;
 - a signed predicate must say abi 2.
 
+It also resolves one tag the v1 contract never asks for: a version request
+fetches `<tag>--fp-<its own fingerprint>` first, the newest dev build of the ABI
+this binding speaks, and falls back to `<tag>` only when no base has that alias
+(docs/guides/fetch-v1.md §3, "The dev channel's alias step"), so a dev build of a
+newer fingerprint never strands this one. Its cache lookups (`resolve_installed`,
+and `ensure`'s offline answer and its monotonic rule) see only the records whose
+signed `abi_fingerprint` is its own: a build of another fingerprint in a shared
+cache is never returned and never kept over this one's own, and it is never
+removed or rewritten either. It is automatic, with no override; the trust checks
+are unchanged, and a listing never shows an alias. The fingerprint
+is the generated `CHS_ABI_FINGERPRINT` of the ABI layer (`chtypes._abi2._decls`),
+never a hand-written copy.
+
 The v1 contract itself stays in this package, unchanged, because the fetch-v1
 conformance cases (tests/fixtures/fetch-v1) are its specification and the dev
 channel shares every other rule with it. Only a test run reaches it:
@@ -29,16 +42,19 @@ override a user can reach.
 from __future__ import annotations
 
 import os
+import re
 import sys
 import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from typing import Final, Protocol
 
+from chtypes._abi2._decls import CHS_ABI_FINGERPRINT
 from chtypes._ocifetch import _constants as C
 from chtypes._ocifetch._dsse import TrustedKey
 
 __all__ = [
+    "ALIAS_SEPARATOR",
     "DEV_ABI_GENERATION",
     "DEV_CACHE_DIR",
     "DEV_CHANNEL_BASE",
@@ -50,12 +66,15 @@ __all__ = [
     "PinningRefusedError",
     "abi",
     "active",
+    "alias_tag",
     "allow_overrides_for_tests",
     "channel_name",
     "enforce",
     "ignored_settings_warned",
     "pinning_requested",
     "trusted_keys",
+    "use_own_fingerprint_for_tests",
+    "visible",
     "use_dev_channel_for_tests",
     "use_fetch_v1_for_tests",
 ]
@@ -78,6 +97,10 @@ DEV_CACHE_DIR: Final = "v2-dev"
 DEV_RECORD_SCHEMA: Final = 2
 # The abi a dev predicate must carry.
 DEV_ABI_GENERATION: Final = 2
+
+# Joins a tag and a fingerprint into the dev channel's alias tag:
+# <tag>--fp-<64 lowercase hex> (docs/guides/fetch-v1.md §3).
+ALIAS_SEPARATOR: Final = "--fp-"
 
 # What every lock, frozen or update request gets from a 2.0.0-dev SDK, before
 # any network call (rule r6).
@@ -102,6 +125,11 @@ class Channel:
     keys: tuple[dict[str, str], ...]  # {"keyid", "ed25519_hex"}: the default trust
     overridable: bool  # the base, trust and unsigned overrides are honored
     pinnable: bool  # lock, frozen and update are honored
+    # The fingerprint, 64 lowercase hex, this contract's SDK speaks: a version
+    # request resolves its alias tag before the tag itself, and the cache
+    # lookups see only records signed with it. "" does neither (the v1 contract
+    # and every production channel).
+    own_fingerprint: str = ""
 
 
 # What a 2.0.0-dev SDK speaks, and what every process speaks unless a test
@@ -117,6 +145,7 @@ DEV_CHANNEL: Final = Channel(
     keys=({"keyid": DEV_KEY_ID, "ed25519_hex": DEV_KEY_HEX},),
     overridable=False,
     pinnable=False,
+    own_fingerprint=CHS_ABI_FINGERPRINT.removeprefix("sha256:"),
 )
 
 # The v1 contract the fetch-v1 conformance cases specify, from the generated
@@ -200,6 +229,49 @@ def allow_overrides_for_tests() -> Callable[[], None]:
     cache, no pinning). Returns the restore function; raises outside a test run."""
     _test_only("allow_overrides_for_tests")
     return _use(replace(DEV_CHANNEL, overridable=True))
+
+
+_FINGERPRINT_HEX = re.compile(r"[0-9a-f]{64}")
+
+
+def use_own_fingerprint_for_tests(fingerprint: str) -> Callable[[], None]:
+    """Make this TEST run's active contract speak `fingerprint` (64 lowercase
+    hex) as the dev channel speaks its own: a version request resolves that
+    fingerprint's alias tag first, and the cache lookups see only records
+    signed with it. The fetch-v1 conformance cases that carry
+    `request.own_fingerprint` run under it, against fixtures that name a
+    fixture fingerprint. Everything else stays the active contract's. Returns
+    the restore function; raises outside a test run or on a fingerprint that is
+    not 64 lowercase hex."""
+    _test_only("use_own_fingerprint_for_tests")
+    if not _FINGERPRINT_HEX.fullmatch(fingerprint):
+        raise ValueError(f"use_own_fingerprint_for_tests: {fingerprint!r} is not 64 lowercase hex")
+    return _use(replace(active(), own_fingerprint=fingerprint))
+
+
+def alias_tag(tag: str, channel: Channel | None = None) -> str | None:
+    """The alias a version request for `tag` resolves first under a contract
+    with an own fingerprint, or None when it resolves `tag` alone: under the
+    v1 contract and every production channel, and for a request that is not a
+    version spelling (an arbitrary tag has no alias)."""
+    channel = channel or active()
+    if not channel.own_fingerprint or not re.fullmatch(C.SPELLING_REGEX, tag):
+        return None
+    return f"{tag}{ALIAS_SEPARATOR}{channel.own_fingerprint}"
+
+
+def visible(predicate: object, channel: Channel | None = None) -> bool:
+    """Whether a cache record (or a pre-seeded entry) whose SIGNED predicate is
+    `predicate` may answer a request under the active contract: under one with
+    an own fingerprint (the dev channel), only when the predicate's
+    `abi_fingerprint` is that fingerprint; under every other, always. A record
+    it cannot see is never returned and never kept by the monotonic rule, and
+    nothing removes or rewrites it: another SDK of another fingerprint owns it."""
+    channel = channel or active()
+    if not channel.own_fingerprint:
+        return True
+    fingerprint = predicate.get("abi_fingerprint") if isinstance(predicate, dict) else None
+    return fingerprint == f"sha256:{channel.own_fingerprint}"
 
 
 def use_dev_channel_for_tests() -> Callable[[], None]:

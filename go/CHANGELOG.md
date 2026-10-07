@@ -6,6 +6,10 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+### Added
+
+- A 2.0.0-dev SDK prefers the newest build of its own fingerprint (#511). A version request resolves `<tag>--fp-<fingerprint>` first, the alias the staging dev registry serves beside every dev tag, with the binding's own generated ABI fingerprint, and the tag itself only when every base answers the alias 404; any other failure of the alias request is that failure, with no fallback, and an alias whose index lacks the platform is `CHTYPES_ARTIFACT_UNPUBLISHED`. The dev channel's cache lookups (the installed-build lookup a registry open makes first, the offline answer, and the monotonic rule of a fetch) now see only records whose signed `abi_fingerprint` is the SDK's own, so a newer build of another fingerprint, installed by another dev SDK in the shared cache, is never returned or kept over this one's own, and is never removed or rewritten. So a dev build of a newer fingerprint no longer strands an older dev SDK until its consumers upgrade. Trust is unchanged (the signed predicate and the load checks decide), a listing never shows an alias, nothing records one, `list` and `where` are unchanged, and there is no option: both steps are the dev channel's alone, and the v1 contract and every production channel never take them. The rule is `docs/guides/fetch-v1.md` section 3, and the `dev-alias-*`, `resolve-installed-dev-alias-*` and `list-tags-dev-alias` conformance cases hold all four bindings to it.
+
 ## [1.1.0] — 2026-10-06
 
 ### Added

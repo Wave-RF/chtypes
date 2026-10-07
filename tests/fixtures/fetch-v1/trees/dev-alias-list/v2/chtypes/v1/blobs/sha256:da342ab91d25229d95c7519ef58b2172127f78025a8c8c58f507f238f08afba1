@@ -1,0 +1,16 @@
+{
+  "abi": 1,
+  "abi_fingerprint": "sha256:b60d9a4c4b6577df1dbfe62cf497d7e7f16868fe1701b993a28a754af57b0886",
+  "clickhouse_version": "26.8.15.10",
+  "channel": "stable",
+  "clickhouse_minor": "26.8",
+  "clickhouse_commit": "ec537b48eb23e229a426c5a2d8622826e45617aa",
+  "os": "darwin",
+  "arch": "arm64",
+  "build": "20261005.120000",
+  "core_commit": "37fa0c363dd6a63d17ab309d315c0b9b44e06823",
+  "inputs_sha256": "f0f3d8f625d4233cd3ac7d8f4ce8bc9992a8b856ee3d012807f06e52d6f0cfa4",
+  "library": "libchtypes.dylib",
+  "library_sha256": "97669a76891664c0ded93145e92bae7bd9fac5392fe8897db41eff98b6d3fbff",
+  "library_bytes": 110
+}

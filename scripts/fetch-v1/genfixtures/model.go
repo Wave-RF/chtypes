@@ -50,6 +50,11 @@ type Request struct {
 	AllowUnsigned bool     `json:"allow_unsigned"`
 	Trust         string   `json:"trust"`
 	Bases         []string `json:"bases"`
+	// OwnFingerprint, when set, is the 64-hex fingerprint the runner hands
+	// its binding's alias seam: the case runs with the dev channel's alias
+	// step (docs/guides/fetch-v1.md §3) under a fixture fingerprint. nil runs
+	// it with none, as the v1 contract and every production channel do.
+	OwnFingerprint *string `json:"own_fingerprint"`
 }
 
 type ExpectRequests struct {
@@ -69,6 +74,14 @@ type Expect struct {
 	Warnings      []string       `json:"warnings"`
 	Requests      ExpectRequests `json:"requests"`
 	LockAfter     *string        `json:"lock_after"`
+	// Tags is what a `list-tags-` case's listing must return, in order: the
+	// tree's own tags/list less every alias (aliascases.go). nil for every
+	// other case.
+	Tags []string `json:"tags"`
+	// RecordsIntact names installed manifests whose unpacked/sha256/<hex>/
+	// directory must be byte for byte the same after the call as before it
+	// (aliascases.go: another fingerprint's build in a shared cache).
+	RecordsIntact []string `json:"records_intact"`
 }
 
 // newCase returns a Case with every schema-required array/object field
@@ -95,9 +108,10 @@ func newCase(id, tree string, transports ...string) Case {
 		},
 		Env: map[string]string{},
 		Expect: Expect{
-			OK:       true,
-			Sleeps:   []float64{},
-			Warnings: []string{},
+			OK:            true,
+			Sleeps:        []float64{},
+			Warnings:      []string{},
+			RecordsIntact: []string{},
 			Requests: ExpectRequests{
 				NoneMatching: []string{},
 			},
