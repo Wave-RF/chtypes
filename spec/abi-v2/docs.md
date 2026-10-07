@@ -4,6 +4,8 @@ This file holds the prose for `spec/abi-v2/abi.json`, one `###` section per hand
 
 Prose is deliberately outside the fingerprint: editing this file never changes `CHS_ABI_FINGERPRINT`, so it never invalidates a built library. The rule that follows is that anything a binding or the artifact producer must act on is structured in `abi.json` (a nullability, an ownership, a status a call may return, a thread class, a vocabulary), never only stated here.
 
+The WHERE-affecting settings lists for each supported ClickHouse line are in `spec/abi-v2/where-settings/` (with a README); they are documentation, outside the fingerprint. The consumer rule (v2.0 and later) is in that README: refuse to stream on a setting the library declines by name, and on a non-default `result-content` setting.
+
 Each section is copied into a C comment, so it may not contain a comment opener or closer, or two question marks in a row.
 
 **UNSTABLE.** `spec/abi-v2/abi.json` declares `stability` `unstable`: generation 2 is being designed, and its fingerprint moves with every change to the description until the lock. It was seeded as generation 1's surface at generation 2; the additions land one pull request at a time. The first is the server profile: the `chs_server` handle, `chs_server_create` and `chs_server_free`, a server and an options document on `chs_schema_create`, and the `server` and `replicated` members of `schema_description`. The second is the batch document's `at_merge` list, with its `merge_reason` vocabulary, and a top-level `unsupported_settings` (public issue #544). What generation 2 adds, and what the lock needs, are in public issue #511.

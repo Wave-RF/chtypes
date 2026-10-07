@@ -1,0 +1,6984 @@
+{
+ "schema": "chtypes.where-settings-union/1",
+ "tags": [
+  "v26.3.38.2-lts",
+  "v26.7.19.5-stable",
+  "v26.8.15.10-lts",
+  "v26.9.8.3-stable"
+ ],
+ "generator": "chtypes where-settings generator",
+ "settings": [
+  {
+   "name": "adaptive_aggregator_freeze_threshold",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "adaptive_aggregator_freeze_threshold_bytes",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "additional_result_filter",
+   "tier": "result-content",
+   "kind": "result",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "additional_table_filters",
+   "tier": "result-content",
+   "kind": "result",
+   "scopes": [
+    "analyzer",
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "aggregate_function_input_format",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "aggregate_functions_null_for_empty",
+   "tier": "predicate",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "aggregation_in_order_max_block_bytes",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "aggregation_memory_efficient_merge_threads",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "ai_function_allow_insecure_endpoint",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "ai_function_embedding_default_credentials",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "ai_function_embedding_max_batch_size",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "ai_function_max_retries",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "ai_function_request_timeout_sec",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "ai_function_retry_initial_delay_ms",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "ai_function_text_default_credentials",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "ai_function_throw_on_error",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "allow_correlated_subqueries",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "allow_custom_error_code_in_throwif",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "allow_deprecated_error_prone_window_functions",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "allow_deprecated_snowflake_conversion_functions",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts"
+   ]
+  },
+  {
+   "name": "allow_dynamic_type_in_join_keys",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "allow_execute_multiif_columnar",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "allow_experimental_ai_functions",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.7.19.5-stable"
+   ]
+  },
+  {
+   "name": "allow_experimental_analyzer",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "expressions",
+    "functions",
+    "old-analyzer",
+    "pass-switch"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "allow_experimental_correlated_subqueries",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "alias",
+    "analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "allow_experimental_nlp_functions",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "allow_experimental_nullable_tuple_type",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "alias",
+    "expressions",
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "allow_experimental_parallel_reading_from_replicas",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer",
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "allow_experimental_projection_optimization",
+   "tier": "predicate",
+   "kind": "where",
+   "scopes": [
+    "alias"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "allow_experimental_query_deduplication",
+   "tier": "predicate",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts"
+   ]
+  },
+  {
+   "name": "allow_experimental_time_time64_type",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "alias"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "allow_fuzz_query_functions",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "allow_general_join_planning",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "allow_get_client_http_header",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "allow_hyperscan",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "functions",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "allow_lossy_numeric_supertype",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "functions"
+   ],
+   "tags": [
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "allow_nonconst_timezone_arguments",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "allow_nullable_tuple_in_extracted_subcolumns",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "types"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "allow_push_predicate_when_subquery_contains_with",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "allow_settings_after_format_in_insert",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "allow_simdjson",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "functions",
+    "types"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "allow_special_bool_values_inside_variant",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "allow_suspicious_fixed_string_types",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "expressions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "allow_suspicious_low_cardinality_types",
+   "tier": "predicate",
+   "kind": "where",
+   "scopes": [
+    "expressions",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "allow_suspicious_types_in_group_by",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "allow_suspicious_types_in_order_by",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "allow_suspicious_variant_types",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "expressions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "analyzer_compatibility_allow_compound_identifiers_in_unflatten_nested",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "analyzer_compatibility_allow_cte_redefinition",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "analyzer_compatibility_allow_non_aggregate_in_having",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "analyzer_compatibility_apply_final_to_all_joined_tables",
+   "tier": "result-content",
+   "kind": "result",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "analyzer_compatibility_join_using_top_level_identifier",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "analyzer_compatibility_multiple_joins_qualify_column_names",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "analyzer_compatibility_prefer_alias_over_subcolumn",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "analyzer_inline_views",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "any_join_distinct_right_table_keys",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "apply_deleted_mask",
+   "tier": "result-content",
+   "kind": "result",
+   "scopes": [
+    "result-switch"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "asterisk_include_alias_columns",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "asterisk_include_materialized_columns",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "asterisk_include_virtual_columns",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "async_socket_for_remote",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "automatic_parallel_replicas_mode",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "bool_false_representation",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "bool_true_representation",
+   "tier": "predicate",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "cast_ipv4_ipv6_default_on_conversion_error",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "cast_keep_nullable",
+   "tier": "predicate",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "cast_string_to_date_time_mode",
+   "tier": "predicate",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "cast_string_to_dynamic_use_inference",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "cast_string_to_variant_use_inference",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "check_conversion_from_numbers_to_enum",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "format-settings",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "cluster_for_parallel_replicas",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "collect_hash_table_stats_during_aggregation",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "collect_hash_table_stats_during_joins",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "compatibility",
+   "tier": "predicate",
+   "kind": "where",
+   "scopes": [
+    "compatibility"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "compile_aggregate_expressions",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "compile_expressions",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "expressions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "compile_regular_expressions",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "compile_sort_description",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "old-analyzer",
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "convert_query_to_cnf",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "correlated_subqueries_default_join_kind",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "correlated_subqueries_substitute_equivalent_expressions",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "correlated_subqueries_use_in_memory_buffer",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "count_distinct_implementation",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "count_distinct_optimization",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "count_matches_stop_at_empty_match",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "cross_to_inner_join_rewrite",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "database",
+   "tier": "result-content",
+   "kind": "result",
+   "scopes": [
+    "query-construction"
+   ],
+   "tags": [
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "date_time_64_output_format_cut_trailing_zeros_align_to_groups_of_thousands",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "format-settings",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "date_time_input_format",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "date_time_output_format",
+   "tier": "predicate",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "date_time_overflow_behavior",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "format-settings",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "decimal_check_overflow",
+   "tier": "predicate",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "types"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "dialect",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "pass-switch"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "distinct_overflow_mode",
+   "tier": "result-truncate",
+   "kind": "result",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts"
+   ]
+  },
+  {
+   "name": "distributed_aggregation_memory_efficient",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "distributed_group_by_no_merge",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "old-analyzer",
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "distributed_product_mode",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "do_not_merge_across_partitions_select_final",
+   "tier": "result-content",
+   "kind": "result",
+   "scopes": [
+    "result-switch"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "dynamic_throw_on_type_mismatch",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "empty_result_for_aggregation_by_constant_keys_on_empty_set",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "empty_result_for_aggregation_by_empty_set",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "enable_adaptive_aggregator",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "enable_analyzer",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "alias"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "enable_cascades_optimizer",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "planner"
+   ],
+   "tags": [
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "enable_early_constant_folding",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "enable_extended_results_for_datetime_functions",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "enable_function_early_short_circuit",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "enable_global_with_statement",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "enable_group_by_top_k_optimization",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "enable_hash_join_row_store",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "old-analyzer",
+    "planner"
+   ],
+   "tags": [
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "enable_identifier_resolve_cache",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "enable_lazy_columns_replication",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "expressions",
+    "functions",
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "enable_materialized_cte",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "enable_memory_bound_merging_of_aggregation_results",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "enable_named_columns_in_function_tuple",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "functions",
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "enable_nullable_tuple_type",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "alias",
+    "expressions",
+    "format-settings"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "enable_optimize_predicate_expression",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "enable_optimize_predicate_expression_to_final_subquery",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "enable_order_by_all",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "enable_packed_string_keys_in_aggregation",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "enable_parallel_blocks_marshalling",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "enable_parallel_replicas",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "alias"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "enable_parallel_single_level_merge",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "enable_positional_arguments",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "enable_producing_buckets_out_of_order_in_aggregation",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "enable_reads_from_query_cache",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "enable_scalar_subquery_optimization",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "enable_scopes_for_with_statement",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "enable_sharding_aggregator",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts"
+   ]
+  },
+  {
+   "name": "enable_software_prefetch_in_aggregation",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "enable_streaming_queries",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "enable_time_time64_type",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "expressions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "enable_unaligned_array_join",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "exact_rows_before_limit",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "except_default_mode",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "execute_exists_as_scalar_subquery",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "extract_key_value_pairs_max_pairs_per_row",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "extract_kvp_max_pairs_per_row",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "alias"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "extremes",
+   "tier": "output",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer",
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "filter",
+   "tier": "result-content",
+   "kind": "result",
+   "scopes": [
+    "query-construction"
+   ],
+   "tags": [
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "final",
+   "tier": "result-content",
+   "kind": "result",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "force_aggregation_in_order",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "force_grouping_standard_compatibility",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "force_optimize_skip_unused_shards",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "format_avro_schema_registry_connection_timeout",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "format_avro_schema_registry_max_retries",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "format_avro_schema_registry_receive_timeout",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "format_avro_schema_registry_send_timeout",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "format_binary_max_array_size",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "format_binary_max_object_size",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "format_binary_max_string_size",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "format_csv_allow_double_quotes",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "format_csv_allow_single_quotes",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "format_csv_delimiter",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "format_csv_null_representation",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "format_regexp",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "format_tsv_null_representation",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "formatdatetime_e_with_space_padding",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "formatdatetime_f_prints_scale_number_of_digits",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "formatdatetime_f_prints_single_zero",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "formatdatetime_format_without_leading_zeros",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "formatdatetime_parsedatetime_m_is_month_name",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "fsync_metadata",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "function_base58_max_input_size",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "functions"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "function_date_trunc_return_type_behavior",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "function_implementation",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts"
+   ]
+  },
+  {
+   "name": "function_json_value_return_type_allow_complex",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "function_json_value_return_type_allow_nullable",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "function_locate_has_mysql_compatible_argument_order",
+   "tier": "predicate",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "function_range_max_elements_in_block",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "function_sleep_max_microseconds_per_block",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "function_visible_width_behavior",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "functions_h3_default_if_invalid",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "geo_distance_returns_float64_on_float64_arguments",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "geotoh3_argument_order",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "grace_hash_join_initial_buckets",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "old-analyzer",
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "grace_hash_join_max_buckets",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "old-analyzer",
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "group_by_overflow_mode",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "group_by_top_k_optimization_observation_rows",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "group_by_two_level_threshold",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "group_by_two_level_threshold_bytes",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "group_by_use_nulls",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer",
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "h3togeo_lon_lat_result_order",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "highlight_max_matches_per_row",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "functions"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "implicit_select",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "implicit_table_at_top_level",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "inject_random_order_for_select_without_order_by",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_binary_decode_types_in_binary_format",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_binary_max_type_complexity",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings",
+    "types"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_binary_read_json_as_string",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_csv_allow_cr_end_of_line",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_csv_arrays_as_nested_csv",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_csv_deserialize_separate_columns_into_tuple",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_csv_empty_as_default",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_csv_enum_as_number",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_csv_trim_whitespaces",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_csv_try_infer_numbers_from_strings",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_csv_try_infer_strings_from_quoted_tuples",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_csv_use_best_effort_in_schema_inference",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_hive_text_collection_items_delimiter",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_hive_text_fields_delimiter",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_hive_text_map_keys_delimiter",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_ipv4_default_on_conversion_error",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "format-settings",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_ipv6_default_on_conversion_error",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "format-settings",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_json_defaults_for_missing_elements_in_named_tuple",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_json_empty_as_default",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_json_ignore_unknown_keys_in_named_tuple",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_json_infer_array_of_dynamic_from_array_of_different_types",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_json_infer_incomplete_types_as_strings",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_json_map_as_array_of_tuples",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_json_max_depth",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_json_max_object_size",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_json_max_string_column_growth_step",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_json_named_tuples_as_objects",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_json_read_arrays_as_strings",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_json_read_bools_as_numbers",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_json_read_bools_as_strings",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_json_read_numbers_as_strings",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_json_read_objects_as_strings",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_json_throw_on_bad_escape_sequence",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_json_try_infer_named_tuples_from_objects",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_json_try_infer_numbers_from_strings",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_json_use_string_type_for_ambiguous_paths_in_named_tuples_inference_from_objects",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_max_bytes_to_read_for_schema_inference",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_max_rows_to_read_for_schema_inference",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_mysql_dump_table_name",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_native_decode_types_in_binary_format",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_null_as_default",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_parquet_max_block_size",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_read_datetime_number_as_raw_value",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "format-settings"
+   ],
+   "tags": [
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_try_infer_dates",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_try_infer_datetimes",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_try_infer_datetimes_only_datetime64",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_try_infer_exponent_floats",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_try_infer_integers",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_try_infer_variants",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_tsv_crlf_end_of_line",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_tsv_empty_as_default",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_tsv_enum_as_number",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "input_format_tsv_use_best_effort_in_schema_inference",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "interactive_delay",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "expressions",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "intersect_default_mode",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "interval_output_format",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "join_algorithm",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "join_any_take_last_row",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "join_default_strictness",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "join_use_nulls",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "joined_subquery_requires_alias",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "json_type_escape_dots_in_keys",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "condition-cache-key",
+    "format-settings",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "least_greatest_legacy_null_behavior",
+   "tier": "predicate",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "legacy_column_name_of_tuple_literal",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "limit",
+   "tier": "result-truncate",
+   "kind": "result",
+   "scopes": [
+    "analyzer",
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "lock_acquire_timeout",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "functions",
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "log_queries",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "functions",
+    "types"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "make_distributed_plan",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "expressions",
+    "old-analyzer",
+    "planner"
+   ],
+   "tags": [
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_ast_depth",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "functions",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_ast_elements",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "functions",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_autoincrement_series",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_block_size",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "functions",
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_bytes_before_external_group_by",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_bytes_before_external_join",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_bytes_in_distinct",
+   "tier": "result-truncate",
+   "kind": "result",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts"
+   ]
+  },
+  {
+   "name": "max_bytes_in_set",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "expressions",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_bytes_ratio_before_external_group_by",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_bytes_ratio_before_external_join",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_bytes_to_read",
+   "tier": "result-truncate",
+   "kind": "result",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_bytes_to_read_leaf",
+   "tier": "result-truncate",
+   "kind": "result",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_bytes_to_transfer",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "expressions",
+    "old-analyzer",
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_columns_to_read",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_distributed_connections",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_dynamic_subcolumns_in_json_type_parsing",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_estimated_execution_time",
+   "tier": "result-truncate",
+   "kind": "result",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_execution_speed",
+   "tier": "result-truncate",
+   "kind": "result",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_execution_speed_bytes",
+   "tier": "result-truncate",
+   "kind": "result",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_execution_time",
+   "tier": "result-truncate",
+   "kind": "result",
+   "scopes": [
+    "functions",
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_expanded_ast_elements",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_hyperscan_regexp_length",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "functions",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_hyperscan_regexp_total_length",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "functions",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_parallel_replicas",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_parser_backtracks",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "condition-cache-key",
+    "expressions",
+    "functions",
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_parser_depth",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "condition-cache-key",
+    "expressions",
+    "format-settings",
+    "functions",
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_query_size",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "condition-cache-key",
+    "expressions",
+    "functions",
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_rand_distribution_parameter",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_rand_distribution_trials",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_result_bytes",
+   "tier": "result-truncate",
+   "kind": "result",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_result_rows",
+   "tier": "result-truncate",
+   "kind": "result",
+   "scopes": [
+    "analyzer",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_rows_in_distinct",
+   "tier": "result-truncate",
+   "kind": "result",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts"
+   ]
+  },
+  {
+   "name": "max_rows_in_set",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "expressions",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_rows_in_set_to_optimize_join",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts"
+   ]
+  },
+  {
+   "name": "max_rows_to_group_by",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_rows_to_read",
+   "tier": "result-truncate",
+   "kind": "result",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_rows_to_read_leaf",
+   "tier": "result-truncate",
+   "kind": "result",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_rows_to_transfer",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "expressions",
+    "old-analyzer",
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_size_to_preallocate_for_aggregation",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_size_to_preallocate_for_joins",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_streams_to_max_threads_ratio",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_subquery_depth",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_temporary_columns",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "expressions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_temporary_non_const_columns",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "expressions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_threads",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "functions",
+    "old-analyzer",
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_threads_min_free_memory_per_thread",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "max_wkb_geometry_elements",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "functions"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "min_count_to_compile_aggregate_expression",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "min_count_to_compile_expression",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "expressions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "min_count_to_compile_regular_expression",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "min_count_to_compile_sort_description",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "old-analyzer",
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "min_execution_speed",
+   "tier": "result-truncate",
+   "kind": "result",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "min_execution_speed_bytes",
+   "tier": "result-truncate",
+   "kind": "result",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "min_free_disk_space_for_temporary_data",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "min_hit_rate_to_use_consecutive_keys_optimization",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "min_joined_block_size_bytes",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts"
+   ]
+  },
+  {
+   "name": "min_joined_block_size_rows",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts"
+   ]
+  },
+  {
+   "name": "min_rows_ratio_for_hash_join_row_store",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "old-analyzer",
+    "planner"
+   ],
+   "tags": [
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "normalize_function_names",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "expressions",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "offset",
+   "tier": "result-truncate",
+   "kind": "result",
+   "scopes": [
+    "analyzer",
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_aggregation_in_order",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_aggregators_of_group_by_keys",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_and_compare_chain",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_and_compare_chain_max_hash_work",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_append_index",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_arithmetic_operations_in_aggregate_functions",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_const_name_size",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_dictget_tuple_element",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_empty_string_comparisons",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_extract_common_expressions",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_functions_to_subcolumns",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_group_by_constant_keys",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_group_by_function_keys",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_if_chain_to_multiif",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_if_transform_strings_to_enum",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_injective_functions_in_group_by",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_injective_functions_in_limit_by",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_injective_functions_inside_uniq",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_inverse_dictionary_lookup",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_limit_by_function_keys",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_min_equality_disjunction_chain_length",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_min_inequality_conjunction_chain_length",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_move_to_prewhere",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_multiif_to_if",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_normalize_count_variants",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_or_like_chain",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_or_like_chain_min_patterns",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_or_like_chain_min_substrings",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_qbit_distance_function_reads",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_read_in_order",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_redundant_comparisons",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_redundant_functions_in_order_by",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_respect_aliases",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_rewrite_aggregate_function_with_if",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_rewrite_array_exists_to_has",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_rewrite_has_to_in",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_rewrite_like_perfect_affix",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_rewrite_regexp_functions",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_rewrite_sum_if_to_count_if",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_skip_unused_shards",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_substitute_columns",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_syntax_fuse_functions",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_time_filter_with_preimage",
+   "tier": "predicate",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_trivial_count_query",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "old-analyzer",
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_trivial_count_with_sparsity_filter",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_trivial_group_by_limit_query",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_trivial_view_pushdown_to_distributed",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_truncate_order_by_after_group_by_keys",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_uniq_to_count",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_use_projections",
+   "tier": "predicate",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "optimize_using_constraints",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "order",
+   "tier": "result-truncate",
+   "kind": "result",
+   "scopes": [
+    "query-construction"
+   ],
+   "tags": [
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "output_format_always_write_decimal_point_in_float_and_decimal",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "format-settings"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "output_format_binary_encode_types_in_binary_format",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "output_format_binary_write_json_as_string",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "output_format_csv_serialize_tuple_into_separate_columns",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "output_format_decimal_trailing_zeros",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "output_format_float_precision",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "format-settings"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "output_format_image_width",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "output_format_json_escape_forward_slashes",
+   "tier": "predicate",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "output_format_json_map_as_array_of_tuples",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "output_format_json_named_tuples_as_objects",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "output_format_json_quote_64bit_floats",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "output_format_json_quote_64bit_integers",
+   "tier": "predicate",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "output_format_json_quote_decimals",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "output_format_json_quote_denormals",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "output_format_json_skip_null_value_in_named_tuples",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "output_format_markdown_escape_special_characters",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "output_format_native_encode_types_in_binary_format",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "output_format_native_use_flattened_dynamic_and_json_serialization",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "output_format_native_write_json_as_string",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "output_format_pretty_grid_charset",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "output_format_pretty_max_rows",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "output_format_pretty_named_tuples_as_json",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "output_format_pretty_row_numbers",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "output_format_sql_insert_table_name",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "output_format_trim_fixed_string",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "output_format_values_escape_quote_with_quote",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "output_format_write_statistics",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "page",
+   "tier": "result-truncate",
+   "kind": "result",
+   "scopes": [
+    "query-construction"
+   ],
+   "tags": [
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "parallel_hash_join_threshold",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "parallel_replica_offset",
+   "tier": "result-content",
+   "kind": "result",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "parallel_replicas_allow_in_with_subquery",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "parallel_replicas_allow_materialized_views",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "parallel_replicas_allow_view_over_mergetree",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "parallel_replicas_count",
+   "tier": "result-content",
+   "kind": "result",
+   "scopes": [
+    "old-analyzer",
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "parallel_replicas_custom_key",
+   "tier": "result-content",
+   "kind": "result",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "parallel_replicas_custom_key_range_lower",
+   "tier": "result-content",
+   "kind": "result",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "parallel_replicas_custom_key_range_upper",
+   "tier": "result-content",
+   "kind": "result",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "parallel_replicas_for_cluster_engines",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "parallel_replicas_for_non_replicated_merge_tree",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "parallel_replicas_local_plan",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "parallel_replicas_min_number_of_rows_per_replica",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "parallel_replicas_mode",
+   "tier": "result-content",
+   "kind": "result",
+   "scopes": [
+    "analyzer",
+    "old-analyzer",
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "parallel_replicas_plan_based",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "parsedatetime_e_requires_space_padding",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "parsedatetime_parse_without_leading_zeros",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "precise_float_parsing",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "format-settings",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "prefer_column_name_to_alias",
+   "tier": "predicate",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer",
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "prefer_global_in_and_join",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "print_pretty_type_names",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "query_cache_compress_entries",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "query_cache_for_subqueries",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "query_cache_max_entries",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "query_cache_max_size_in_bytes",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "query_cache_min_query_duration",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "query_cache_min_query_runs",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "query_cache_share_between_users",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "query_cache_squash_partial_results",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "query_cache_ttl",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "query_plan_aggregation_in_order",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "query_plan_display_internal_aliases",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "query_plan_enable_multithreading_after_window_functions",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "query_plan_join_swap_table",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts"
+   ]
+  },
+  {
+   "name": "query_plan_max_limit_for_top_k_optimization",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "query_plan_read_in_order",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "query_plan_use_logical_join_step",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "alias"
+   ],
+   "tags": [
+    "v26.3.38.2-lts"
+   ]
+  },
+  {
+   "name": "query_plan_use_new_logical_join_step",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts"
+   ]
+  },
+  {
+   "name": "read_overflow_mode",
+   "tier": "result-truncate",
+   "kind": "result",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "read_overflow_mode_leaf",
+   "tier": "result-truncate",
+   "kind": "result",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "recursive_cte_max_steps_in_type_inference",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "regexp_max_matches_per_row",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "reject_expensive_hyperscan_regexps",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "result_overflow_mode",
+   "tier": "result-truncate",
+   "kind": "result",
+   "scopes": [
+    "result-switch"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "rewrite_count_distinct_if_with_count_distinct_implementation",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "rewrite_in_to_join",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "run_query_in_background",
+   "tier": "result-truncate",
+   "kind": "result",
+   "scopes": [
+    "result-switch"
+   ],
+   "tags": [
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "schema_inference_hints",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "schema_inference_make_columns_nullable",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "schema_inference_make_json_columns_nullable",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "select",
+   "tier": "result-content",
+   "kind": "result",
+   "scopes": [
+    "query-construction"
+   ],
+   "tags": [
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "serialize_query_plan",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "serialize_string_in_memory_with_zero_byte",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "session_timezone",
+   "tier": "predicate",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "functions",
+    "types"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "set_overflow_mode",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "expressions",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "short_circuit_function_evaluation",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "condition-cache-key",
+    "expressions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "short_circuit_function_evaluation_for_nulls",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "short_circuit_function_evaluation_for_nulls_threshold",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "single_join_prefer_left_table",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "skip_redundant_aliases_in_udf",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "sort",
+   "tier": "result-truncate",
+   "kind": "result",
+   "scopes": [
+    "query-construction"
+   ],
+   "tags": [
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "splitby_max_substrings_includes_remaining_string",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "temporary_files_buffer_size",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "temporary_files_codec",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "throw_on_unsupported_query_inside_transaction",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "timeout_before_checking_execution_speed",
+   "tier": "result-truncate",
+   "kind": "result",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "timeout_overflow_mode",
+   "tier": "result-truncate",
+   "kind": "result",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "totals_auto_threshold",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "totals_mode",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "transfer_overflow_mode",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "expressions",
+    "old-analyzer",
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "transform_null_in",
+   "tier": "predicate",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "expressions",
+    "old-analyzer",
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "type_json_allow_duplicated_key_with_literal_and_nested_object",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "type_json_skip_duplicated_paths",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "type_json_skip_invalid_typed_paths",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "type_json_skip_null_typed_paths",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "format-settings",
+    "functions"
+   ],
+   "tags": [
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "type_json_use_partial_match_to_skip_paths_by_regexp",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "format-settings"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "union_default_mode",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "use_concurrency_control",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "functions",
+    "old-analyzer",
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "use_index_for_in_with_subqueries",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "expressions",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "use_index_for_in_with_subqueries_max_values",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "expressions",
+    "old-analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "use_join_disjunctions_push_down",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts"
+   ]
+  },
+  {
+   "name": "use_legacy_to_time",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "use_query_condition_cache",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "use_query_condition_cache_for_top_k",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "use_skip_indexes_for_top_k",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "use_structure_from_insertion_table_in_table_functions",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "use_top_k_dynamic_filtering",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "use_variant_as_common_type",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "functions",
+    "old-analyzer",
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "use_variant_default_implementation_for_comparisons",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "use_with_fill_by_sorting_prefix",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "validate_enum_literals_in_operators",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer",
+    "condition-cache-key",
+    "functions",
+    "old-analyzer",
+    "planner"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "validate_experimental_and_suspicious_types_inside_nested_types",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "expressions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "validate_group_by_all_key_types",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "analyzer"
+   ],
+   "tags": [
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "validate_polygons",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "variant_throw_on_type_mismatch",
+   "tier": "predicate-unflipped",
+   "kind": "where",
+   "scopes": [
+    "condition-cache-key",
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "webassembly_udf_input_split_memory_ratio",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "webassembly_udf_max_fuel",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "webassembly_udf_max_input_block_size",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "webassembly_udf_max_instances",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  },
+  {
+   "name": "webassembly_udf_max_memory",
+   "tier": "execution",
+   "kind": "where",
+   "scopes": [
+    "functions"
+   ],
+   "tags": [
+    "v26.3.38.2-lts",
+    "v26.7.19.5-stable",
+    "v26.8.15.10-lts",
+    "v26.9.8.3-stable"
+   ]
+  }
+ ]
+}
