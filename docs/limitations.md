@@ -97,81 +97,6 @@ Every entry here has a machine-checkable twin in [`docs/divergences.json`](diver
 
 **What gets an entry here, and when.** A divergence that changes the verdict or the stored value at default settings (an over-accept, an over-reject, or a row both sides accept but store differently) is listed as soon as the server's answer has been measured on each line it affects, and not before, because a wrong entry is worse than a late one. A divergence that is only a different error code, or that needs a non-default setting to reach, is listed if a published build still shows it seven days after it was found. Until then it's tracked with the artifact producer, whose comparison against real servers keeps finding such cases, and it's usually fixed in the next relink. Every entry is removed on the relink that fixes it.
 
-### The row preview skips the engine's insert-time merge step on Collapsing and Replacing-with-`is_deleted` tables
-
-**Over-accept, on every supported line, through the row preview only.** `chs_preview_row` (the row preview) does not run the table engine's insert-time merge step. A real server's single-row INSERT runs it, and it refuses a row whose `sign` or `is_deleted` is out of range. For example, a one-row preview is accepted for each of:
-
-- `CollapsingMergeTree(sign)` with `sign = 7`;
-- `ReplacingMergeTree(ver, is_deleted)` with `is_deleted = 2`.
-
-|                           |                                                          |
-| ------------------------- | -------------------------------------------------------- |
-| this library, row preview | accepts the row                                          |
-| a real server             | refuses the INSERT with error **117** (`INCORRECT_DATA`) |
-
-The batch preview (`chs_preview_batch`) of the same row answers correctly, with 117, so it agrees with the server.
-
-**Measured**: by the artifact producer, against the production library build `20261004.052404` on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64; the server half against the server's single-row INSERT. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
-
-Until then, use the batch preview, even for one row, on `CollapsingMergeTree`, `VersionedCollapsingMergeTree` and `ReplacingMergeTree` with an `is_deleted` column, **unless the table's sign, version or `is_deleted` column is `MATERIALIZED`**. On such a table the batch preview can refuse a valid row (see [the batch preview refuses with code 10 when an engine column is MATERIALIZED](#the-batch-preview-refuses-a-row-with-code-10-when-an-engine-column-is-materialized)), so neither preview is a complete answer there.
-
-### Creating a schema accepts MergeTree-family CREATE statements that a real server refuses
-
-**Over-accept, on every supported line, at schema creation.** `chs_schema_create` (the schema-create call) accepts some MergeTree-family `CREATE TABLE` statements that a real server refuses at the CREATE. The cases measured:
-
-- wrong engine arguments: `SummingMergeTree(a, b)`, `AggregatingMergeTree(x)`, `MergeTree(k)`;
-- a `String` version column, or a `UInt8` sign column;
-- a missing sign, version or columns-to-sum column;
-- `ReplacingMergeTree(ver)` with no `ORDER BY`;
-- the deprecated engine syntax;
-- `ReplacingMergeTree` with a projection (the server refuses with error **344**);
-- from 26.7, an `AggregatingMergeTree` dimension outside the keys (the server refuses with error **36**).
-
-For every other case in the list, the server refuses the CREATE.
-
-**Measured**: by the artifact producer, against the production library build `20261004.052404` on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
-
-Until then, do not treat a successful schema creation on these engines as proof that the server will accept the CREATE.
-
-### A DEFAULT that throws on a row which supplies the column can fail the server's INSERT while this library accepts it
-
-**Over-accept, on every supported line, with `input_format_defaults_for_omitted_fields=1` (the server's default).** A server evaluates a column's `DEFAULT` expression over the whole INSERT block, including the rows that supply the column, whenever some other row of the block omits it. This library accepts every row. For example, with `b Int32 DEFAULT intDiv(10, a)`, a batch in which some rows omit `b` and one row is `{"a":0,"b":5}`:
-
-|               |                                                                             |
-| ------------- | --------------------------------------------------------------------------- |
-| this library  | accepts every row                                                           |
-| a real server | refuses the INSERT, with error **153**, **395** or **70** by the expression |
-
-A batch in which every row supplies the column, and a single row, agree with the server. With `input_format_defaults_for_omitted_fields=0` the server also accepts a mixed batch, so there is no divergence.
-
-The reverse is an over-reject, and needs a non-default setting, so it is a line here and not an entry of its own. With `b Int32 DEFAULT intDiv(10, a)` and a column `m … MATERIALIZED b + 1`, in `JSONEachRow` with `input_format_defaults_for_omitted_fields=0`, a row that omits `b` with `a = 0` is accepted by a server (`b` takes its type's default) and refused by this library with error 153.
-
-**Measured**: by the artifact producer, against the production library build `20261004.052404` and its successor `20261006.170903`, on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 only, with identical results. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
-
-Until then, do not trust an accepted batch that mixes rows omitting and rows supplying a DEFAULT column whose expression can throw.
-
-### A Nullable sorting key is accepted
-
-**Over-accept, on every supported line, at schema creation, linux-amd64 only.** `ORDER BY k` (also `ORDER BY (k, v)`, or `PRIMARY KEY k`) over a `Nullable` column, without `allow_nullable_key`, is accepted by `chs_schema_create`. A real server refuses the CREATE with error **44**.
-
-`allow_nullable_key = 1`, and `ifNull` or `assumeNotNull` keys, are declined (`unsupported`) rather than accepted: an over-decline, not an entry here.
-
-**Measured**: by the artifact producer, against the production library build `20261004.052404` and its successor `20261006.170903`, on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 only. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
-
-Until then, do not treat a successful schema creation with a Nullable sorting key as proof that the server will accept the CREATE.
-
-### A clock-reading MATERIALIZED expression reports 1970, or ignores the clock offset, in both previews
-
-**Value divergence, on every supported line, through both the batch and the row preview.** In a batch preview with no pinned clock, where no row omits a Volatile DEFAULT column, a clock-reading `MATERIALIZED` expression (`now()`, `now64()`, `today()`) reports `1970-01-01` in the batch document's `computed` values. A real server stores the current time. In a mixed batch, the rows that supply the defaulted column get 1970, and the rows that omit it get the current time.
-
-With a pinned clock (`chtypes_now_epoch_nanos`) plus `chtypes_clock_offset_nanos`, an omitted DEFAULT applies the offset, but a `MATERIALIZED` expression ignores it.
-
-The row preview (`chs_preview_row`) is affected the same way. With no pinned clock, its clock-reading `MATERIALIZED` values are `1970-01-01 00:00:00`; with a pinned clock plus an offset, its clock-derived values carry the pin alone, ignoring the offset. Neither returns an error: the row document's outcome is OK, with the wrong value in it.
-
-**Measured**: by the artifact producer, the batch preview against the production library build `20261004.052404` and its successor `20261006.170903`, on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64, with identical results; the row preview against `20261006.170903` on all four lines, on linux-amd64 and linux-arm64. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
-
-Until then, do not trust clock values from either preview (a batch document's `computed` values, or the row document's) unless at least one row omits a Volatile DEFAULT column, or the clock is pinned with no offset.
-
 ### A projection with no ORDER BY is accepted at schema creation; a real server refuses the CREATE
 
 **Over-accept, on every supported line, at schema creation, linux-amd64 only.** A table whose `PROJECTION` has no `ORDER BY` is accepted by `chs_schema_create`, and a preview then accepts rows for it. A real server refuses the CREATE with error **36** (`ORDER BY cannot be empty`).
@@ -194,19 +119,6 @@ The batch preview (`chs_preview_batch`) of the same row answers correctly, with 
 **Measured**: by the artifact producer, against the production library builds `20261004.052404` and `20261006.170903` on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
 
 Until then, use the batch preview, even for one row, on a table with a `TTL`.
-
-### The batch preview refuses a row with code 10 when an engine column is MATERIALIZED
-
-**Over-reject, on every supported line, through the batch preview.** On a table without a `PARTITION BY` whose sign, version, `is_deleted` or sorting-key column is `MATERIALIZED`, `chs_preview_batch` (the batch preview) refuses the row with code **10**. A real server accepts it, or refuses it with **117** where the engine's own check applies. On a `SummingMergeTree` table of this kind, the batch document can also report `engine_rows: []` where the server stores the row.
-
-|                             |                                                           |
-| --------------------------- | --------------------------------------------------------- |
-| this library, batch preview | refuses the row with code **10**                          |
-| a real server               | accepts the row (or refuses it with **117**, by the data) |
-
-**Measured**: by the artifact producer, against the production library builds `20261004.052404` and `20261006.170903` on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
-
-Until then, on such a table, do not read a batch preview's refusal with code 10 as the server's answer. The row preview accepts these rows, but it does not run the engine's merge step (see [the entry above](#the-row-preview-skips-the-engines-insert-time-merge-step-on-collapsing-and-replacing-with-is_deleted-tables)), so it cannot catch an out-of-range sign or `is_deleted` either.
 
 ### The batch preview refuses a row with code 10 when a TTL expression reads a MATERIALIZED column
 
@@ -264,6 +176,42 @@ The row preview accepts the row, agreeing with the server.
 **Measured**: by the artifact producer, against the production library build `20261006.170903` on `26.3`, `26.7` and `26.8`, on linux-amd64 and linux-arm64. `26.9` is not yet confirmed either way. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
 
 Until then, on such a table, do not read a batch preview's refusal with 153 as the server's answer when the row supplies the column.
+
+### A UNIQUE KEY is accepted at schema creation; a real server refuses the CREATE
+
+**Over-accept, on `26.7`, `26.8` and `26.9`, at schema creation.** This library ignores a `UNIQUE KEY` clause and compiles the table. A real server refuses the CREATE with error **344**, because the feature is disabled by default: the server's message names `allow_experimental_unique_key = 1` on `26.7` and `26.8`, and `enable_unique_key = 1` on `26.9`. For example:
+
+```sql
+CREATE TABLE t (k Int32, v Int32) ENGINE = MergeTree ORDER BY k UNIQUE KEY k
+```
+
+|               |                                       |
+| ------------- | ------------------------------------- |
+| this library  | creates the schema                    |
+| a real server | refuses the CREATE with error **344** |
+
+With the feature enabled, a `UNIQUE KEY` table that also has a `PROJECTION` is the same over-accept: the server refuses with 344 (projections are not supported with a `UNIQUE KEY`), and this library compiles it. On `26.3` both sides refuse the clause at parse, with error 62, so they agree.
+
+**Measured**: by the artifact producer, against the production library build `20261006.170903` on `26.7`, `26.8` and `26.9`, on linux-amd64 and linux-arm64. The current production build `20261006.220511` is not measured; it is expected to behave the same (`inferred`: nothing between the two builds touched this path). A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
+
+Until then, do not treat a successful schema creation as proof that the server will accept a CREATE with a `UNIQUE KEY`.
+
+### Table SETTINGS on a Memory table are refused, where a real server accepts them
+
+**Over-reject, on every supported line, at schema creation.** This library loads a table's `SETTINGS` with the MergeTree settings loader whatever the engine, so a setting that belongs to another engine is refused as unknown. For example:
+
+```sql
+CREATE TABLE t (k UInt32, v String) ENGINE = Memory SETTINGS max_rows_to_keep = 10
+```
+
+|               |                                                                              |
+| ------------- | ---------------------------------------------------------------------------- |
+| this library  | refuses the CREATE with error **115** (`Unknown setting 'max_rows_to_keep'`) |
+| a real server | creates the table                                                            |
+
+**Measured**: by the artifact producer, against the production library build `20261006.170903` on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64. The current production build `20261006.220511` is not measured; it is expected to behave the same (`inferred`). A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
+
+Until then, do not read a refusal with 115 on a non-MergeTree table's `SETTINGS` as the server's answer.
 
 ## Known gaps in 1.0
 
@@ -328,6 +276,12 @@ For a TSV `String` that contains a raw NUL byte, the third detector can report `
 `TTL now() + INTERVAL 1 DAY` in a `CREATE TABLE` returns an `InternalError` (`CHS_INTERNAL`) where a server refuses the statement with its own error. Measured against the 26.9.8.3 library (`measured`).
 
 **Workaround:** treat an internal error from a CREATE whose TTL does not reference a column as that refusal. **Planned:** fixed in 1.0.x.
+
+### A Replicated table assumes the server has Keeper
+
+This library compiles a `Replicated*MergeTree` CREATE on the assumption that the server it stands for has ClickHouse Keeper (or ZooKeeper) configured, as a replicated deployment does. A stock server with no Keeper refuses such a CREATE, so on that server a successful schema creation here is not proof the CREATE will succeed. That is a fact about the deployment, which this library cannot see, not a divergence in a supported setup (`measured` by the artifact producer on production build `20261006.220511`).
+
+It applies to replicated paths that need no `{shard}` or `{replica}` macro. Those two macros are server configuration, so this release declines them (`unsupported`). `{database}`, `{table}` and `{uuid}` are answered as the server would.
 
 ## Pre-1.0
 
