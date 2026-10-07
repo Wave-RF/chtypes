@@ -35,7 +35,7 @@ Each of these is `unsupported` — an `UnsupportedError`, `Error::Unsupported`, 
 
 - **Engines and sorting keys** beyond the modeled MergeTree family.
 - **TTL forms** that are not a plain rows TTL: `WHERE` and `GROUP BY` TTLs, `TO DISK` and `TO VOLUME` moves, `RECOMPRESS`, and any clock-reading TTL expression.
-- **MergeTree settings declared at a non-default value.** An unknown _name_ is the server's own 115, a rejection; a known name at a value this build does not model is a decline, never a silent ignore.
+- **MergeTree settings the server reads while it creates the table or inserts into it, declared at a non-default value**, and `disk` at any value. A setting only the storage layer reads, such as a part lifetime or a merge timeout, is accepted at any value, because the server stores the same rows with it as without it: `old_parts_lifetime = 100` compiles, while `index_granularity = 4096` is declined. An unknown _name_ is the server's own 115 and a value that does not parse is the server's own code (27 for `index_granularity = 'abc'`); both are rejections. A declined setting is never silently ignored. Library builds before `20261007.044112` declined every non-default value.
 - **Server- and session-property DEFAULTs** — `hostName()`, `currentUser()` and the rest. Their value is a property of the server, and there is no server here.
 - **DEFAULT expressions past the admission budgets** — 256 MiB and one second by default, both adjustable through the process-wide settings in [`guides/settings.md`](guides/settings.md). This is what bounds a blocking DEFAULT: `sleep` and `sleepEachRow` are not declined by name, so `DEFAULT sleep(0)` is admitted, while `DEFAULT sleep(1.5)` exceeds the one-second budget and is declined when the schema compiles.
 

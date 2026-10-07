@@ -158,10 +158,14 @@ The zone follows the settings precedence above: a per-call `session_timezone` be
 
 The `SETTINGS` clause after an engine declaration is its own namespace, and in 1.0 it is part of the one `CREATE TABLE` statement you compile: `... ENGINE = MergeTree ORDER BY k SETTINGS index_granularity = 4096`. There is no separate argument for them any more (`WithMergeTreeSettings`, `merge_tree_settings=` and `set_engine` are deleted, [`reference/bindings-v1.md` §7](../reference/bindings-v1.md#7-what-v0-api-is-deleted-and-why)).
 
-The two failure modes there are deliberately different from each other:
+The clause goes through the server's own MergeTree settings loader, and each setting gets one of four answers:
 
-- an **unknown** MergeTree setting name is the server's own 115, a schema error;
-- a **known** name at a **non-default** value is `unsupported` — a decline. It is not modeled, so it is not guessed at, and it is certainly not silently ignored.
+- an **unknown** name is the server's own 115, a schema error, and a value that does not parse is the server's own code (27 for `index_granularity = 'abc'`);
+- a setting **at its default** is inert;
+- a setting **only the storage layer reads**, such as a part lifetime or a merge timeout (`old_parts_lifetime = 100`), is accepted at any value, because the server stores the same rows with it as without it;
+- a setting the server **reads while it creates the table or inserts into it**, at a **non-default** value (`index_granularity = 4096`), is `unsupported` — a decline, and so is `disk` at any value. It is not modeled, so it is not guessed at, and it is certainly not silently ignored. The decline's message names the setting.
+
+The refusal and the decline are deliberately different kinds: a refusal means the server would refuse the statement too, and a decline means this library will not guess. Library builds before `20261007.044112` declined every non-default value.
 
 ## Next
 

@@ -598,12 +598,14 @@ function section8(lib: Library): void {
   note('when present, the truth to believe over rows');
   blank();
 
-  kv('(b) MergeTree settings', 'refusal vs decline vs inert');
+  kv('(b) MergeTree settings', 'refusal vs decline vs accepted');
   const mt = (setting: string): string => `CREATE TABLE t (a UInt8) ENGINE = MergeTree ORDER BY tuple() SETTINGS ${setting}`;
   kv('  unknown NAME', `index_granularityy -> ${classify(() => lib.compileTable(mt('index_granularityy = 8192')))}`);
   note("the server's own 115: this DDL can never exist; tell the tenant");
-  kv('  known, non-default', `index_granularity=4096 -> ${classify(() => lib.compileTable(mt('index_granularity = 4096')))}`);
+  kv('  read on insert', `index_granularity=4096 -> ${classify(() => lib.compileTable(mt('index_granularity = 4096')))}`);
   note('a DECLINE where no setting behavior is modeled: a real server might well accept it');
+  kv('  storage-only', `old_parts_lifetime=100 -> ${classify(() => lib.compileTable(mt('old_parts_lifetime = 100')))}`);
+  note('accepted: only the storage layer reads it, so the rows stored do not change');
   kv('  known, AT default', `index_granularity=8192 -> ${classify(() => lib.compileTable(mt('index_granularity = 8192')))} (inert)`);
   blank();
 
