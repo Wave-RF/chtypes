@@ -1621,6 +1621,8 @@ mod cache_roots_tests {
     /// earliest of them (a tie goes to the earlier root).
     #[test]
     fn search_dirs_is_the_order_a_lookup_reads() {
+        // The v1 cache rules these cases specify: a fixture cache used whole.
+        let _v1 = channel::use_fetch_v1_for_tests();
         let base = scratch("search-dirs");
         let (cache, a, b) = (base.join("cache"), base.join("a"), base.join("b"));
         let opts = || options(&cache, vec![a.clone(), b.clone()]);
@@ -1643,6 +1645,8 @@ mod cache_roots_tests {
     /// answer's `dir` and `library_path` are absolute (public issue #541).
     #[test]
     fn relative_cache_dir_resolves_to_absolute() {
+        // The v1 cache rules these cases specify: a fixture cache used whole.
+        let _v1 = channel::use_fetch_v1_for_tests();
         let base = scratch("relative");
         write_record(&base.join("cache"), "26.8.1.1", "20260801.000001");
         // Reach the seeded cache by a path relative to the cwd (`..` up to the
