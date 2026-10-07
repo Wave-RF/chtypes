@@ -312,6 +312,65 @@ with a row where `d = '2020-01-01'`:
 
 Until then, for a table with a `TTL`, read `engine_rows` as the state after the next merge, not as the part the `INSERT` writes.
 
+### A DEFAULT that reads a Tuple or JSON subcolumn is refused, where a real server stores the row
+
+**Over-reject, on every supported line.** A `DEFAULT` that reads a subcolumn of a `Tuple` (`t.x`) or of a `JSON` column (`j.a`) makes every row, and the batch, fail with error **47** (`t.x` unknown). A real server stores every row. For example:
+
+```sql
+CREATE TABLE t (t Tuple(x UInt8, y String), tx UInt8 DEFAULT t.x, ty String DEFAULT t.y, tz String DEFAULT concat(t.y, '!', toString(t.x))) ENGINE = MergeTree ORDER BY tuple()
+```
+
+with the `JSONEachRow` rows `{"t":{"x":1,"y":"a"}}`, `{"t":{"x":2,"y":"b"},"tx":9}`, `{}`, `{"tx":5}` and `{"t":{"x":3,"y":""}}`:
+
+|               |                                                   |
+| ------------- | ------------------------------------------------- |
+| this library  | refuses every row and the batch with error **47** |
+| a real server | stores all five rows                              |
+
+The same holds for a `JSON` subcolumn, e.g. `a String DEFAULT toString(j.a)` over `j JSON`.
+
+**Measured**: by the artifact producer, against the production library build `20261006.220511` on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64, at default settings. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
+
+Until then, do not read a refusal with 47 for a `DEFAULT` over a subcolumn as the server's answer.
+
+### A MATERIALIZED server constant is accepted with its value missing, where a real server stores its own value
+
+**Stored-value divergence, on every supported line, on a schema with no server profile.** A `MATERIALIZED` expression that is a server constant, such as `timezone()`, `hostName()` or `version()`, is accepted, but its value is missing from the reported values (an earlier measurement saw it rendered as `null`). A real server stores its own value. This library, with no server profile, cannot know that value; the fix in progress makes such a schema declined (`unsupported`) rather than answered. For example:
+
+```sql
+CREATE TABLE t (id UInt32, z String MATERIALIZED timezone(), d String DEFAULT concat(z, '!')) ENGINE = MergeTree ORDER BY tuple()
+```
+
+with the rows `{"id":1}` and `{"id":2,"d":"x"}`:
+
+|               |                                        |
+| ------------- | -------------------------------------- |
+| this library  | accepts both rows; `z` is not reported |
+| a real server | stores `z` = its zone (`UTC` there)    |
+
+**Measured**: by the artifact producer, against the production library build `20261006.220511` on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64, at default settings. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
+
+Until then, do not rely on the values reported for a `MATERIALIZED` server constant, or for anything computed from it.
+
+### A DEFAULT over an EPHEMERAL Tuple's subcolumn is accepted, where a real server refuses the INSERT with no column list
+
+**Over-accept, on every supported line.** A `DEFAULT` that reads a subcolumn of an `EPHEMERAL` `Tuple` column is accepted. A real server `INSERT` with no column list does not read the `EPHEMERAL` column, so the subcolumn is unknown and the server refuses with error **47**. For example:
+
+```sql
+CREATE TABLE t (e Tuple(x UInt8, y String) EPHEMERAL, d UInt8 DEFAULT e.x, s String DEFAULT e.y, k UInt8) ENGINE = MergeTree ORDER BY tuple()
+```
+
+with the rows `{"e":{"x":1,"y":"a"},"k":1}`, `{"k":2}` and `{"e":{"x":3,"y":"c"},"d":9,"k":3}`, inserted with no column list:
+
+|               |                                      |
+| ------------- | ------------------------------------ |
+| this library  | accepts every row and the batch      |
+| a real server | refuses the INSERT with error **47** |
+
+**Measured**: by the artifact producer, against the production library build `20261006.220511` on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64, at default settings. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
+
+Until then, do not treat an accepted batch as proof the server accepts it when a `DEFAULT` reads an `EPHEMERAL` `Tuple`'s subcolumn.
+
 ## Known gaps in 1.0
 
 Each item is a place where 1.0 does less than you might expect, or answers differently from a server. None of them returns a wrong answer without saying so, and every one is planned. Each entry says what happens, what to do today, and that a fix is planned.

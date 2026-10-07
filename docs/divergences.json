@@ -73,6 +73,24 @@
       "heading": "For a TTL table, the batch document's engine rows show the state after a merge, not what the INSERT writes",
       "note": "no machine check is in this entry yet: the divergence is the batch document's reported engine rows for one payload, which this register's schema could compare, but the retired v0 checker that drove such checks is not replaced, so a check written now would not run. The v1 replacement of the checker should add one for this case. Retirement: on the artifact producer's measured re-run against the production library build that ships the change, never on CI.",
       "checks": []
+    },
+    {
+      "id": "default-over-tuple-json-subcolumn-47",
+      "heading": "A DEFAULT that reads a Tuple or JSON subcolumn is refused, where a real server stores the row",
+      "note": "no machine check is in this entry yet: the divergence is the batch's own verdict or reported values on one payload, which this register's schema could express, but the retired v0 checker that drove such checks is not replaced, so a check written now would not run. The v1 replacement of the checker should add one for this case. Retirement: on the artifact producer's measured re-run against the production library build that ships the fix, never on CI.",
+      "checks": []
+    },
+    {
+      "id": "materialized-server-constant-value-missing",
+      "heading": "A MATERIALIZED server constant is accepted with its value missing, where a real server stores its own value",
+      "note": "no machine check is in this entry yet: the divergence is the batch's own verdict or reported values on one payload, which this register's schema could express, but the retired v0 checker that drove such checks is not replaced, so a check written now would not run. The v1 replacement of the checker should add one for this case. Retirement: on the artifact producer's measured re-run against the production library build that ships the fix, never on CI.",
+      "checks": []
+    },
+    {
+      "id": "default-over-ephemeral-tuple-subcolumn-over-accept",
+      "heading": "A DEFAULT over an EPHEMERAL Tuple's subcolumn is accepted, where a real server refuses the INSERT with no column list",
+      "note": "no machine check is in this entry yet: the divergence is the batch's own verdict or reported values on one payload, which this register's schema could express, but the retired v0 checker that drove such checks is not replaced, so a check written now would not run. The v1 replacement of the checker should add one for this case. Retirement: on the artifact producer's measured re-run against the production library build that ships the fix, never on CI.",
+      "checks": []
     }
   ]
 }
