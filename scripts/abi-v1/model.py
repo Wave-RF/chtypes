@@ -29,11 +29,13 @@ Validation happens in three layers, each refusing rather than guessing:
 
 From generation 2 on, load() also checks the generation's own rules
 (`generation_rule_problems`, below): the description says its stability, a
-result document's schema never closes an object to new fields (r2), no enum
-value takes the name readers reserve for unknown(n) (r3), every status and
-error code generation 1 published keeps its name and number (r4), and docs.md
-carries the `## Rules` section naming each rule. Every major checks that the
-description's `abi` is the major it is generated as.
+growable function takes exactly one options document and every input
+document closes its objects (r1), a result document's schema never closes an
+object to new fields (r2), no enum value takes the name readers reserve for
+unknown(n) (r3), every status and error code generation 1 published keeps its
+name and number (r4), and docs.md carries the `## Rules` section naming each
+rule. Every major checks that the description's `abi` is the major it is
+generated as.
 
 Emitters receive the `Model` and never read the JSON themselves. Everything an
 emitter needs about a parameter's C shape is precomputed here (`Param.c`,
@@ -45,7 +47,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -163,6 +165,11 @@ CONTENTS: dict[str, str] = {
     "json_array_names": "a JSON array of column names, each an object carrying the name as byte_strings says",
     "timezone": "a time zone name, validated by ClickHouse's own DateLUT; length 0 means UTC",
 }
+# A bytes_in content `input:<name>` names an entry of the description's
+# `inputs` (generation 2 on): a JSON object the library validates and whose
+# unknown keys it refuses (r1). Beside CONTENTS, not in it: its meaning is the
+# named document's schema and prose, not one line.
+INPUT_PREFIX = "input:"
 STATUS_ENUM = "chs_status"
 ERROR_HANDLE = "chs_error"
 BUF_HANDLE = "chs_buf"
@@ -413,6 +420,7 @@ class Function:
     may_return: tuple[str, ...]
     params: tuple[Param, ...]
     doc: str
+    growable: bool = False  # r1, generation 2 on: takes exactly one options document
 
     @property
     def is_firm(self) -> bool:
@@ -475,6 +483,27 @@ class Constant:
     @property
     def is_firm(self) -> bool:
         return not self.provisional
+
+
+@dataclass(frozen=True)
+class InputDoc:
+    """An input document (generation 2 on): a JSON object a caller passes in a
+    bytes_in parameter whose content is `input:<name>`. Its schema closes
+    every object, because the library refuses a key it does not define (r1).
+    `options` marks the one document a growable function takes the inputs it
+    gains in."""
+
+    name: str
+    options: bool
+    schema: Any
+    doc: str
+
+
+def input_name(content: str | None) -> str | None:
+    """`server_profile` for the content `input:server_profile`, else None."""
+    if content and content.startswith(INPUT_PREFIX):
+        return content[len(INPUT_PREFIX) :]
+    return None
 
 
 @dataclass(frozen=True)
@@ -681,6 +710,7 @@ class Model:
     v0: dict[str, list[dict[str, Any]]]
     major: int = 1
     stability: str | None = None  # generation 2 on: "unstable" until the lock, then "locked"
+    inputs: dict[str, InputDoc] = field(default_factory=dict)  # generation 2 on: the input documents (r1)
 
     @property
     def spec(self) -> Spec:
@@ -695,6 +725,16 @@ class Model:
             if f.name == name:
                 return f
         raise KeyError(name)
+
+    def input_of(self, p: Param) -> InputDoc | None:
+        """The input document a bytes_in parameter carries, or None."""
+        name = input_name(p.content) if p.kind == "bytes_in" else None
+        return self.inputs.get(name) if name else None
+
+    def options_param(self, fn: Function) -> Param | None:
+        """The one options document a growable function takes (r1), or None."""
+        found = [p for p in fn.params if (d := self.input_of(p)) is not None and d.options]
+        return found[0] if fn.growable and len(found) == 1 else None
 
     @property
     def markers(self) -> dict[str, str]:
@@ -864,9 +904,7 @@ def _expand_return(r: dict[str, Any]) -> Return:
 #
 # The rules every generation from 2 on is written under are normative in its
 # docs.md `## Rules` section. These are the parts a description can be checked
-# against. (r1), a growable function's options document, waits for the first
-# growable function, which brings the description's way of marking one; (r5)
-# and (r6), the cache and the dev channel, are binding behavior.
+# against. (r5) and (r6), the cache and the dev channel, are binding behavior.
 
 
 def _closed_objects(node: Any, where: str) -> list[str]:
@@ -881,6 +919,86 @@ def _closed_objects(node: Any, where: str) -> list[str]:
         for i, v in enumerate(node):
             out += _closed_objects(v, f"{where}/{i}")
     return out
+
+
+def _open_objects(node: Any, where: str) -> list[str]:
+    """Every object schema in an input document's schema that does not close
+    its object (r1). A record closes with `additionalProperties: false`; a
+    map, whose keys are data (setting or macro names) rather than names the
+    ABI defines, has an `additionalProperties` schema and no `properties`.
+    Anything else would let a key the library refuses look valid."""
+    out: list[str] = []
+    if isinstance(node, dict):
+        is_object = node.get("type") == "object" or "properties" in node
+        if is_object:
+            ap = node.get("additionalProperties")
+            record = ap is False
+            mapping = isinstance(ap, dict) and "properties" not in node
+            if not (record or mapping):
+                out.append(where)
+        for k, v in node.items():
+            if k in ("properties", "$defs") and isinstance(v, dict):
+                for name, sub in v.items():
+                    out += _open_objects(sub, f"{where}/{k}/{name}")
+            elif k in ("additionalProperties", "items", "propertyNames"):
+                out += _open_objects(v, f"{where}/{k}")
+            elif k in ("oneOf", "anyOf", "allOf") and isinstance(v, list):
+                for i, sub in enumerate(v):
+                    out += _open_objects(sub, f"{where}/{k}/{i}")
+    return out
+
+
+def r1_problems(sp: Spec, raw: dict[str, Any]) -> list[str]:
+    """(r1) A growable function takes its growable inputs in exactly one
+    options document, which the library validates, refusing a key it does not
+    know. What a description can be checked for:
+
+      * a function marked `growable` takes exactly one options document: one
+        bytes_in parameter whose content names an `inputs` entry with
+        `options` true;
+      * a function not marked `growable` takes no input document at all;
+      * every input document is a JSON object whose schema closes every
+        object (`_open_objects`), so its schema refuses what the library does;
+      * every input document is taken by some function.
+
+    A content naming no `inputs` entry is load()'s cross-reference problem."""
+    problems: list[str] = []
+    inputs = raw.get("inputs", {})
+    taken: set[str] = set()
+    for f in raw["functions"]:
+        docs = [(p["name"], input_name(p.get("content"))) for p in f["params"] if p["kind"] == "bytes_in"]
+        docs = [(pn, n) for pn, n in docs if n is not None]
+        taken |= {n for _, n in docs}
+        where = f"{sp.abi_json}: function {f['name']}"
+        if not f.get("growable", False):
+            for pn, n in docs:
+                problems.append(
+                    f"{where}: takes the input document {n!r} (parameter {pn!r}) but is not marked `growable`; "
+                    "(r1) a function takes an input document only as a growable function does, so mark it "
+                    "growable or take the input another way"
+                )
+            continue
+        options = [f"{pn} (input:{n})" for pn, n in docs if inputs.get(n, {}).get("options") is True]
+        if len(options) != 1:
+            problems.append(
+                f"{where}: is marked `growable`, so (r1) it takes exactly one options document (a bytes_in "
+                "parameter whose content is input:<name>, naming an `inputs` entry with `options` true); it takes "
+                + (str(len(options)) + ": " + ", ".join(options) if options else "none")
+            )
+    for name, entry in inputs.items():
+        schema = entry.get("schema")
+        at = f"inputs.{name}.schema"
+        if not isinstance(schema, dict) or schema.get("type") != "object":
+            problems.append(f"{sp.abi_json}: {at} is not an object schema; (r1) an input document is a JSON object")
+        for where in _open_objects(schema, at):
+            problems.append(
+                f"{sp.abi_json}: {where} does not close its object, but (r1) the library refuses a key an input "
+                "document does not define: close a record with `additionalProperties: false`, or give a map whose "
+                "keys are data an `additionalProperties` schema and no `properties`"
+            )
+        if name not in taken:
+            problems.append(f"{sp.abi_json}: inputs.{name} is taken by no function's bytes_in parameter")
+    return problems
 
 
 def _reserved_unknown(spelling: Any) -> bool:
@@ -902,6 +1020,9 @@ def generation_rule_problems(root: Path, sp: Spec, raw: dict[str, Any], sdk: dic
             f"{sp.abi_json}: from generation 2 on the description declares `stability`, one of "
             f"{list(STABILITIES)} ('unstable' until the lock); found {stability!r}"
         )
+
+    # (r1) a growable function's one options document, and closed input documents.
+    problems += r1_problems(sp, raw)
 
     # The rules themselves are stated, every one of them.
     if not docs.rules.strip():
@@ -1110,9 +1231,19 @@ def load(root: Path, major: int = 1) -> Model:
         ):
             problems.append(f"document {document.name}: carries names, but no byte field is a `name`")
 
+    # ---- input documents (generation 2 on; the v1 schema admits none)
+    inputs: dict[str, InputDoc] = {}
+    for name, d in raw.get("inputs", {}).items():
+        schema = d["schema"]
+        problems += [f"input {name}: {p}" for p in schema_keyword_problems(schema)]
+        inputs[name] = InputDoc(name, bool(d["options"]), schema, doc(f"{INPUT_PREFIX}{name}"))
+
     def content_check(where: str, content: str | None) -> None:
         if content and content.startswith("document:") and content[len("document:") :] not in documents:
             problems.append(f"{where}: content {content!r} names no entry in documents")
+        named = input_name(content)
+        if named is not None and named not in inputs:
+            problems.append(f"{where}: content {content!r} names no entry in inputs")
 
     # ---- build_info
     bi = raw["build_info"]
@@ -1167,6 +1298,7 @@ def load(root: Path, major: int = 1) -> Model:
             may_return=tuple(f.get("may_return", ())),
             params=params,
             doc=doc(name),
+            growable=bool(f.get("growable", False)),
         )
         functions.append(fn)
 
@@ -1199,7 +1331,12 @@ def load(root: Path, major: int = 1) -> Model:
             if p.kind == "out_handle" and (p.type == BUF_HANDLE) != bool(p.content):
                 problems.append(f"{pw}: an out chs_buf says its content, and only an out chs_buf does")
             if p.kind == "bytes_in" and p.content and p.content.startswith("document:"):
-                problems.append(f"{pw}: documents are outputs; an input's content is one of {sorted(CONTENTS)}")
+                problems.append(
+                    f"{pw}: documents are outputs; an input's content is one of {sorted(CONTENTS)} or "
+                    f"{INPUT_PREFIX}<name>"
+                )
+            if p.kind != "bytes_in" and input_name(p.content) is not None:
+                problems.append(f"{pw}: an input document is an input; only a bytes_in parameter carries one")
             content_check(pw, p.content)
 
         # Returns.
@@ -1234,6 +1371,8 @@ def load(root: Path, major: int = 1) -> Model:
                 )
             if (r.type == BUF_HANDLE) != bool(r.content):
                 problems.append(f"{where}: a returned chs_buf says its content, and only a chs_buf does")
+            if input_name(r.content) is not None:
+                problems.append(f"{where}: an input document is an input; a return never carries one")
         if r.borrows is not None:
             if r.kind != "scalar" or r.type != "u8ptr_const":
                 problems.append(f"{where}: only a const uint8_t * return borrows from a parameter")
@@ -1307,11 +1446,13 @@ def load(root: Path, major: int = 1) -> Model:
             problems.append(f"{where}: thread class `{fn.thread}` applies only to a call that takes a handle")
 
     # ---- docs coverage: exactly one section per symbol
-    required = set(handles) | set(enums) | set(fmap)
+    required = set(handles) | set(enums) | set(fmap) | {f"{INPUT_PREFIX}{n}" for n in inputs}
     optional = set(constants) | {f"document:{d}" for d in documents}
     for name in sorted(required):
         if name not in docs.sections:
-            problems.append(f"{sp.docs_md}: no `### {name}` section; every handle, enum and function has one")
+            problems.append(
+                f"{sp.docs_md}: no `### {name}` section; every handle, enum, function and input document has one"
+            )
     for name in sorted(docs.sections):
         if name not in required | optional:
             problems.append(f"{sp.docs_md}: a section for {name!r}, which the description does not define")
@@ -1433,4 +1574,5 @@ def load(root: Path, major: int = 1) -> Model:
         v0=v0,
         major=major,
         stability=raw.get("stability"),
+        inputs=inputs,
     )

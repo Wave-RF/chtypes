@@ -102,14 +102,24 @@ on darwin the library loads exactly like "ok" (measured: both RTLD_NOW
 and a manual dlopen() succeed on darwin-arm64, and the ctor marker file
 appears, proving dlopen genuinely ran rather than being refused first).
 
-A handle-typed parameter is resolved through HANDLE_RECIPE (schema, filter,
-block — the only three the description has today; a fourth handle kind
-needs one more entry here, which `--check` cannot catch by itself, so a
-schema change that adds a handle kind should grep this file). A recipe is a
-call, so a signature change to chs_schema_create, chs_filter_create or
-chs_block_create is also an edit here (generation fails loudly until it is
-made: `_check_calls` refuses any call in this file whose arguments do not
-match its function's input parameters, kind for kind).
+Generation 2 adds, from the description's input documents (rule r1), the
+"input document" cases (`_input_document_cases`): each input document refuses
+an unknown top-level key, naming it, and a document that is not a JSON object,
+as _stubshared.INPUT_DOCUMENT says the stub does; and the server profile's
+cases, which accept an empty profile, `{}` and every member, and a schema that
+holds its server. A NULL server keeps every other case's answer: each other
+call to chs_schema_create passes a NULL server.
+
+A handle-typed parameter is resolved through HANDLE_RECIPE (server, schema,
+filter, block; chs_server only where the description has it). A fifth handle
+kind needs one more entry here, which `--check` cannot catch by itself, so a
+schema change that adds a handle kind should grep this file. A recipe is a
+call, so a signature change to chs_server_create, chs_schema_create,
+chs_filter_create or chs_block_create is also an edit here (generation fails
+loudly until it is made: `_check_calls` refuses any call in this file whose
+arguments do not match its function's input parameters, kind for kind).
+chs_schema_create's arguments are built from its own parameters
+(`_schema_args`), so its generation-2 signature needs no second copy here.
 """
 
 from __future__ import annotations
@@ -138,18 +148,39 @@ def path(major: int) -> str:
 # ------------------------------------------------------------------ recipes
 
 
-def _schema_recipe() -> dict:
-    return {
-        "fn": "chs_schema_create",
-        "args": [{"bytes_hex": b"CREATE TABLE t (x Int32)".hex()}, {"bytes_hex": ""}],
-    }
+def _schema_args(model, create_table: bytes, server: dict | None = None) -> list[dict]:
+    """chs_schema_create's arguments, from its own input parameters: the
+    statement, a NULL server (or `server`) where the description has one, and
+    every other input empty. ABI v1's are (create_table, settings), exactly as
+    before generation 2."""
+    fn = model.function("chs_schema_create")
+    out: list[dict] = []
+    for p in fn.params:
+        if p.is_out:
+            continue
+        if p.kind == "handle":
+            out.append(server if server is not None else {"null_handle": True})
+        elif p.name == "create_table":
+            out.append({"bytes_hex": create_table.hex()})
+        else:
+            out.append({"bytes_hex": ""})
+    return out
 
 
-def _filter_recipe() -> dict:
+def _schema_recipe(model) -> dict:
+    return {"fn": "chs_schema_create", "args": _schema_args(model, b"CREATE TABLE t (x Int32)")}
+
+
+def _server_recipe(model) -> dict:  # noqa: ARG001 - every recipe takes the model
+    """A server with nothing described: an empty profile and empty options."""
+    return {"fn": "chs_server_create", "args": [{"bytes_hex": ""}, {"bytes_hex": ""}]}
+
+
+def _filter_recipe(model) -> dict:
     return {
         "fn": "chs_filter_create",
         "args": [
-            {"handle": _schema_recipe()},
+            {"handle": _schema_recipe(model)},
             {"bytes_hex": b"x = 1".hex()},
             {"bytes_hex": "{}".encode().hex()},
             {"bytes_hex": ""},
@@ -157,11 +188,11 @@ def _filter_recipe() -> dict:
     }
 
 
-def _block_recipe() -> dict:
+def _block_recipe(model) -> dict:
     return {
         "fn": "chs_block_create",
         "args": [
-            {"handle": _schema_recipe()},
+            {"handle": _schema_recipe(model)},
             {"int": 0},  # CHS_JSON_EACH_ROW
             {"bytes_hex": b"{}".hex()},
             {"bytes_hex": ""},
@@ -170,12 +201,20 @@ def _block_recipe() -> dict:
     }
 
 
-HANDLE_RECIPE = {"chs_schema": _schema_recipe, "chs_filter": _filter_recipe, "chs_block": _block_recipe}
+HANDLE_RECIPE = {
+    "chs_server": _server_recipe,
+    "chs_schema": _schema_recipe,
+    "chs_filter": _filter_recipe,
+    "chs_block": _block_recipe,
+}
 
 # A placeholder value per bytes_in content vocabulary (model.CONTENTS' keys),
-# used for every bytes_in parameter EXCEPT the function's first, which always
-# gets ADVERSARIAL_BYTES instead so every echo case exercises a NUL and an
-# invalid-UTF-8 byte at least once.
+# used for every bytes_in parameter EXCEPT the function's first that is not an
+# input document, which always gets ADVERSARIAL_BYTES instead so every echo
+# case exercises a NUL and an invalid-UTF-8 byte at least once. An input
+# document (`input:<name>`, rule r1) is validated JSON, so it always gets
+# INPUT_PLACEHOLDER, and a function whose every bytes_in parameter is one
+# (chs_server_create) carries no adversarial bytes.
 CONTENT_PLACEHOLDER: dict[str, bytes] = {
     "bytes": b"body",
     "name": b"col",
@@ -187,6 +226,7 @@ CONTENT_PLACEHOLDER: dict[str, bytes] = {
     "timezone": b"UTC",
 }
 ADVERSARIAL_BYTES = b"a\x00\xffz"
+INPUT_PLACEHOLDER = b"{}"
 
 
 def _literal_value(p) -> tuple[dict, bytes | int | None]:
@@ -199,14 +239,18 @@ def _literal_value(p) -> tuple[dict, bytes | int | None]:
         v = -1 if p.name == "export_format" else 0
         return {"int": v}, v
     if p.kind == "bytes_in":
-        data = CONTENT_PLACEHOLDER.get(p.content or "", b"x")
+        if abimodel.input_name(p.content) is not None:
+            data = INPUT_PLACEHOLDER
+        else:
+            data = CONTENT_PLACEHOLDER.get(p.content or "", b"x")
         return {"bytes_hex": data.hex()}, data
     raise ValueError(f"_literal_value: unexpected kind {p.kind!r} for parameter {p.name}")
 
 
-def _build_args(fn) -> tuple[list[dict], list[dict | int]]:
+def _build_args(fn, model) -> tuple[list[dict], list[dict | int]]:
     """(the case's "args" list, the matching expected echo-arg shapes), with
-    the function's FIRST bytes_in parameter forced to ADVERSARIAL_BYTES."""
+    the function's FIRST bytes_in parameter that is not an input document
+    forced to ADVERSARIAL_BYTES."""
     args: list[dict] = []
     echo: list[dict | int] = []
     first_bytes_seen = False
@@ -225,10 +269,10 @@ def _build_args(fn) -> tuple[list[dict], list[dict | int]]:
             recipe = HANDLE_RECIPE.get(p.type)
             if recipe is None:
                 raise ValueError(f"{fn.name}: no HANDLE_RECIPE for handle kind {p.type!r}; add one")
-            args.append({"handle": recipe()})
+            args.append({"handle": recipe(model)})
             echo.append({"kind": p.type})
         elif p.kind == "bytes_in":
-            if not first_bytes_seen:
+            if not first_bytes_seen and abimodel.input_name(p.content) is None:
                 data = ADVERSARIAL_BYTES
                 first_bytes_seen = True
                 args.append({"bytes_hex": data.hex()})
@@ -256,8 +300,8 @@ def _buf_out_params(fn) -> list:
 LOADED_ZONE = b""
 
 
-def _echo_case(fn) -> dict:
-    args, echo_args = _build_args(fn)
+def _echo_case(fn, model) -> dict:
+    args, echo_args = _build_args(fn, model)
     zone = _stubshared.IMAGE_ZONE
     if fn.name == zone["fn"]:
         i = next(k for k, p in enumerate([p for p in fn.params if not p.is_out]) if p.name == zone["param"])
@@ -272,7 +316,7 @@ def _echo_case(fn) -> dict:
     return {"id": f"{fn.name}.echo", "kind": "echo", "fn": fn.name, "args": args, "expect": expect}
 
 
-def _status_cases(fn) -> list[dict]:
+def _status_cases(fn, model) -> list[dict]:
     first_bytes = next((p for p in fn.params if p.kind == "bytes_in"), None)
     if first_bytes is None:
         return []
@@ -280,7 +324,7 @@ def _status_cases(fn) -> list[dict]:
     for status in fn.may_return:
         if status == "CHS_OK":
             continue
-        args, _ = _build_args(fn)
+        args, _ = _build_args(fn, model)
         msg = f"{fn.name} forced {status}"
         injected = f"!S:{status}:77:TEST_CODE:{msg}".encode()
         # Overwrite the first bytes_in argument (built adversarially above)
@@ -310,7 +354,7 @@ def _overridden_echo_case(model, case_id: str, fn_name: str, overrides: dict[str
     computed from the same bytes, by the same helper the generic echo cases
     use, so it cannot drift from what the stub echoes."""
     fn = model.function(fn_name)
-    args, echo = _build_args(fn)
+    args, echo = _build_args(fn, model)
     inputs = [p for p in fn.params if not p.is_out]
     for name, data in overrides.items():
         i = next((k for k, p in enumerate(inputs) if p.name == name and p.kind == "bytes_in"), None)
@@ -342,7 +386,7 @@ def _decision_cases(model) -> list[dict]:
             "id": "one_create.second_statement_refused",
             "kind": "status",
             "fn": rule["fn"],
-            "args": [{"bytes_hex": two.hex()}, {"bytes_hex": ""}],
+            "args": _schema_args(model, two),
             "expect": {
                 "status": rule["status"],
                 "error": {"ch_code": rule["ch_code"], "ch_name": rule["ch_name"], "message": rule["message"], "column": ""},
@@ -352,7 +396,7 @@ def _decision_cases(model) -> list[dict]:
             "id": "one_create.trailing_semicolon_accepted",
             "kind": "echo",
             "fn": rule["fn"],
-            "args": [{"bytes_hex": one.hex()}, {"bytes_hex": ""}],
+            "args": _schema_args(model, one),
             "expect": {"status": "CHS_OK"},
         },
         # The per-call zone is the session_timezone key in the call's own
@@ -368,10 +412,95 @@ def _decision_cases(model) -> list[dict]:
         ),
         *_image_zone_cases(model),
     ]
+    cases += _input_document_cases(model)
     cases += _document_cases(model)
     cases += _lifecycle_cases(model)
     cases += _concurrent_cases(model)
     return cases
+
+
+def _input_document_status(param: str, doc: str, key: str | None) -> dict:
+    rule = _stubshared.INPUT_DOCUMENT
+    return {
+        "status": rule["status"],
+        "error": {
+            "ch_code": 0,
+            "ch_name": "",
+            "message": _stubshared.input_document_message(param, doc, key),
+            "column": "",
+        },
+    }
+
+
+# A key no input document will ever define: the r1 cases' unknown key.
+UNKNOWN_INPUT_KEY = "x_unknown"
+# The server profile the cases accept: every member, nested values included,
+# so the stub's reader proves it skips a value whatever it holds.
+FULL_PROFILE = (
+    b'{"timezone":"Asia/Tokyo","settings":{"date_time_input_format":"best_effort"},'
+    b'"macros":{"replica":"r1","shard":"01"}}'
+)
+
+
+def _input_document_cases(model) -> list[dict]:
+    """Rule r1 (generation 2 on): for every bytes_in parameter that carries an
+    input document, a document with an unknown key is CHS_INVALID_ARGUMENT
+    naming the key, after every key the document defines; and a document
+    that is not a JSON object is refused too. Then the server profile's own
+    cases: an empty profile, `{}` and every member are accepted, and a schema
+    created ON a server answers as one created on none. Empty for ABI v1."""
+    out: list[dict] = []
+    for fn in model.functions:
+        inputs = [p for p in fn.params if not p.is_out]
+        for p in inputs:
+            d = model.input_of(p)
+            if d is None:
+                continue
+            known = {k: ({} if s.get("type") == "object" else "") for k, s in d.schema.get("properties", {}).items()}
+            doc = json.dumps({**known, UNKNOWN_INPUT_KEY: "1"}, separators=(",", ":")).encode()
+            for case_id, data, key in (
+                (f"input_document.{fn.name}.{p.name}.unknown_key_refused", doc, UNKNOWN_INPUT_KEY),
+                (f"input_document.{fn.name}.{p.name}.not_an_object_refused", b"[]", None),
+            ):
+                args, _ = _build_args(fn, model)
+                args[inputs.index(p)] = {"bytes_hex": data.hex()}
+                out.append(
+                    {
+                        "id": case_id,
+                        "kind": "status",
+                        "fn": fn.name,
+                        "args": args,
+                        "expect": _input_document_status(p.name, d.name, key),
+                    }
+                )
+    if "chs_server" not in model.handles:
+        return out
+    fn = model.function("chs_server_create")
+    for case_id, profile in (
+        ("server_profile.empty_accepted", b""),
+        ("server_profile.empty_object_accepted", b"{}"),
+        ("server_profile.every_member_accepted", FULL_PROFILE),
+    ):
+        args, _ = _build_args(fn, model)
+        args[0] = {"bytes_hex": profile.hex()}
+        out.append({"id": case_id, "kind": "echo", "fn": fn.name, "args": args, "expect": {"status": "CHS_OK"}})
+    # A schema created on a server answers as one created on none (the stub's
+    # chs_schema_create mints it either way); the lifecycle case below proves
+    # it holds the server.
+    out.append(
+        {
+            "id": "server_profile.schema_on_server_accepted",
+            "kind": "echo",
+            "fn": "chs_schema_create",
+            "args": _schema_args(
+                model,
+                b"CREATE TABLE t (x Int32)",
+                {"handle": {"fn": "chs_server_create", "args": [{"bytes_hex": FULL_PROFILE.hex()}, {"bytes_hex": ""}]}},
+            ),
+            "expect": {"status": "CHS_OK"},
+        }
+    )
+    return out
 
 
 def _image_zone_cases(model) -> list[dict]:
@@ -460,10 +589,10 @@ def _document_cases(model) -> list[dict]:
     return out
 
 
-def _live(**counts: int) -> dict:
-    """A live_delta step over every handle kind: the kinds not named must not
-    have moved either."""
-    return {"live_delta": {k: counts.get(k, 0) for k in ("chs_buf", "chs_error", "chs_schema", "chs_filter", "chs_block")}}
+def _live(model, **counts: int) -> dict:
+    """A live_delta step over every handle kind the description has: the
+    kinds not named must not have moved either."""
+    return {"live_delta": {k: counts.get(k, 0) for k in model.handles}}
 
 
 def _lifecycle_cases(model) -> list[dict]:
@@ -474,7 +603,7 @@ def _lifecycle_cases(model) -> list[dict]:
     for k in ("chs_buf", "chs_error", "chs_schema", "chs_filter", "chs_block"):
         if k not in model.handles:
             raise ValueError(f"_lifecycle_cases: the description has no handle {k!r}")
-    schema = _schema_recipe()
+    schema = _schema_recipe(model)
     filt = {
         "fn": "chs_filter_create",
         "args": [{"ref": "s"}, {"bytes_hex": b"x = 1".hex()}, {"bytes_hex": b"{}".hex()}, {"bytes_hex": ""}],
@@ -512,12 +641,12 @@ def _lifecycle_cases(model) -> list[dict]:
             "steps": [
                 {"let": "s", "call": schema},
                 {"let": "f", "call": filt},
-                _live(chs_schema=1, chs_filter=1),
+                _live(model, chs_schema=1, chs_filter=1),
                 {"free": "s"},
-                _live(chs_schema=1, chs_filter=1),
+                _live(model, chs_schema=1, chs_filter=1),
                 {"call": eval_body, "expect": eval_body_expect},
                 {"free": "f"},
-                _live(),
+                _live(model),
             ],
         },
         {
@@ -528,14 +657,46 @@ def _lifecycle_cases(model) -> list[dict]:
                 {"let": "f", "call": filt},
                 {"let": "b", "call": block},
                 {"free": "s"},
-                _live(chs_schema=1, chs_filter=1, chs_block=1),
+                _live(model, chs_schema=1, chs_filter=1, chs_block=1),
                 {"call": eval_block, "expect": eval_block_expect},
                 {"free": "f"},
-                _live(chs_schema=1, chs_block=1),
+                _live(model, chs_schema=1, chs_block=1),
                 {"free": "b"},
-                _live(),
+                _live(model),
             ],
         },
+        *_server_lifecycle_cases(model),
+    ]
+
+
+def _server_lifecycle_cases(model) -> list[dict]:
+    """Generation 2: a schema holds a counted reference to the server it was
+    created on, so the server outlives the caller's free of it, the schema
+    still answers, and the server goes only with the schema. Empty for ABI v1."""
+    if "chs_server" not in model.handles:
+        return []
+    server = {"fn": "chs_server_create", "args": [{"bytes_hex": FULL_PROFILE.hex()}, {"bytes_hex": ""}]}
+    schema = {"fn": "chs_schema_create", "args": _schema_args(model, b"CREATE TABLE t (x Int32)", {"ref": "v"})}
+    describe = {"fn": "chs_schema_describe", "args": [{"ref": "s"}]}
+    describe_expect = {
+        "status": "CHS_OK",
+        "outputs": {"out": {"fn": "chs_schema_describe", "out": "out", "args": [{"kind": "chs_schema"}]}},
+    }
+    return [
+        {
+            "id": "lifecycle.schema_holds_server",
+            "kind": "lifecycle",
+            "steps": [
+                {"let": "v", "call": server},
+                {"let": "s", "call": schema},
+                _live(model, chs_server=1, chs_schema=1),
+                {"free": "v"},
+                _live(model, chs_server=1, chs_schema=1),
+                {"call": describe, "expect": describe_expect},
+                {"free": "s"},
+                _live(model),
+            ],
+        }
     ]
 
 
@@ -552,7 +713,7 @@ def _concurrent_cases(model) -> list[dict]:
     for fn in model.functions:
         if fn.thread != "shared" or kinds.get(fn.name) != "generic":
             continue
-        echo = _echo_case(fn)
+        echo = _echo_case(fn, model)
         out.append(
             {
                 "id": f"{fn.name}.concurrent",
@@ -667,8 +828,8 @@ def build_cases(model) -> list[dict]:
     for fn in model.functions:
         if kinds.get(fn.name) != "generic":
             continue
-        cases.append(_echo_case(fn))
-        cases += _status_cases(fn)
+        cases.append(_echo_case(fn, model))
+        cases += _status_cases(fn, model)
     cases += _decision_cases(model)
     cases += _loader_cases(model)
     _check_calls(model, cases)

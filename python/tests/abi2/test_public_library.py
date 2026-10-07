@@ -109,9 +109,11 @@ def test_settings_and_the_zone_reach_the_library_as_one_json_object(lib, monkeyp
     seen: list[bytes | None] = []
     real = lib._api.schema_create
 
-    def spy(create_table, settings):
+    def spy(server, create_table, settings, options):
+        # No public server API yet: every compile is on no server, with no options.
+        assert server is None and options is None
         seen.append(settings)
-        return real(create_table, settings)
+        return real(server, create_table, settings, options)
 
     monkeypatch.setattr(lib._api, "schema_create", spy)
     lib.compile_table(CREATE, settings={"a": "b"}, session_timezone="Not/AZone").close()

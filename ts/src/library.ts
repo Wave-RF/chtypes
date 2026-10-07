@@ -97,9 +97,11 @@ export class Library {
 
   /** Compile exactly one `CREATE TABLE` statement. */
   compileTable(createTable: BytesIn, options: CompileOptions = {}): Schema {
+    // No server (NULL) and no options (length 0, `{}`): the schema is on the
+    // image's own server, exactly as before the server profile existed.
     return new Schema(
       this.#calls,
-      this.#calls.schemaCreate(bytesIn(createTable), encodeSettings(options.settings, options.sessionTimezone)),
+      this.#calls.schemaCreate(null, bytesIn(createTable), encodeSettings(options.settings, options.sessionTimezone), Buffer.alloc(0)),
     );
   }
 }

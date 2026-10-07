@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/wave-rf/chtypes/spec/abi-v2/schema/abi.schema.json",
   "title": "chtypes ABI description, format 2",
-  "description": "The shape of spec/abi-v2/abi.json: format 1 (spec/abi-v1/schema/abi.schema.json) plus the top-level `stability`, and `abi` pinned to 2. Structure only: cross-references (a handle's free function exists, a status is a chs_status value, a FIRM function names nothing provisional, docs.md covers every symbol) are checked by scripts/abi-v1/model.py. Uses only the keywords that validator implements; it refuses any other.",
+  "description": "The shape of spec/abi-v2/abi.json: format 1 (spec/abi-v1/schema/abi.schema.json) plus the top-level `stability`, the top-level `inputs` (the closed input documents a growable function takes, rule r1 in spec/abi-v2/docs.md) and a function's `growable`, and `abi` pinned to 2. Structure only: cross-references (a handle's free function exists, a status is a chs_status value, a FIRM function names nothing provisional, docs.md covers every symbol) are checked by scripts/abi-v1/model.py. Uses only the keywords that validator implements; it refuses any other.",
   "type": "object",
   "additionalProperties": false,
   "required": ["description_schema", "abi", "stability", "library", "scalars", "handles", "enums", "constants", "byte_strings", "documents", "build_info", "functions"],
@@ -55,6 +55,12 @@
       "propertyNames": {"pattern": "^[a-z][a-z0-9_]*$"},
       "additionalProperties": {"$ref": "#/$defs/document"}
     },
+    "inputs": {
+      "type": "object",
+      "description": "The input documents: JSON objects a caller passes in a bytes_in parameter whose content is input:<name>. The library refuses a key a document does not define (rule r1), so each schema closes every object; scripts/abi-v1/model.py checks that and r1's shape.",
+      "propertyNames": {"pattern": "^[a-z][a-z0-9_]*$"},
+      "additionalProperties": {"$ref": "#/$defs/input"}
+    },
     "build_info": {
       "type": "object",
       "additionalProperties": false,
@@ -87,9 +93,9 @@
     },
     "scalar": {"enum": ["void", "int", "int32", "uint32", "int64", "uint64", "size", "u8ptr_const", "cstr_static"]},
     "content": {
-      "description": "What a counted byte string carries. Every one is a byte string, never a C string: NUL and invalid UTF-8 pass through. A document:<name> content names an entry in documents.",
+      "description": "What a counted byte string carries. Every one is a byte string, never a C string: NUL and invalid UTF-8 pass through. A document:<name> content names an entry in documents, and an input:<name> content an entry in inputs.",
       "type": "string",
-      "pattern": "^(bytes|name|sql|message|ascii|json_object_string_values|json_array_names|timezone|document:[a-z][a-z0-9_]*)$"
+      "pattern": "^(bytes|name|sql|message|ascii|json_object_string_values|json_array_names|timezone|document:[a-z][a-z0-9_]*|input:[a-z][a-z0-9_]*)$"
     },
     "handle": {
       "type": "object",
@@ -190,6 +196,15 @@
         "provisional": {"$ref": "#/$defs/markers"}
       }
     },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["options", "schema"],
+      "properties": {
+        "options": {"type": "boolean", "description": "true: an options document, the one input a growable function takes the inputs it gains in (rule r1), so a later option is a new member here, never a new parameter. false: an input document of fixed purpose (a server profile), which a function may take beside its options document."},
+        "schema": {"type": "object", "description": "A JSON Schema (the subset model.py implements) of the document. It closes every object: `additionalProperties: false` on a record, or an `additionalProperties` schema and no `properties` on a map whose keys are data, such as setting or macro names."}
+      }
+    },
     "function": {
       "type": "object",
       "additionalProperties": false,
@@ -199,6 +214,7 @@
         "class": {"enum": ["handshake", "tombstone", "api", "tooling"]},
         "thread": {"enum": ["any", "shared", "handle_serial", "process_once", "process_serial"], "description": "The thread class; scripts/abi-v1/model.py THREADS describes each, and load() ties it to the function's shape: `shared` exactly when the call reads a caller handle and is not a free, `handle_serial` exactly for a free."},
         "provisional": {"$ref": "#/$defs/markers"},
+        "growable": {"type": "boolean", "description": "Rule r1 in spec/abi-v2/docs.md: true marks a function that may gain inputs after it first ships. It takes exactly one options document (a bytes_in parameter whose content names an inputs entry with options true), and a function not marked growable takes no input document at all; scripts/abi-v1/model.py checks both."},
         "returns": {"$ref": "#/$defs/return"},
         "may_return": {
           "type": "array",

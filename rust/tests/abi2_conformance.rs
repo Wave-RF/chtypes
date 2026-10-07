@@ -221,6 +221,7 @@ fn free_handle(api: &Api, h: MintedHandle) {
     unsafe {
         match h {
             MintedHandle::Buf(p) => (api.chs_buf_free)(p),
+            MintedHandle::Server(p) => (api.chs_server_free)(p),
             MintedHandle::Schema(p) => (api.chs_schema_free)(p),
             MintedHandle::Filter(p) => (api.chs_filter_free)(p),
             MintedHandle::Block(p) => (api.chs_block_free)(p),

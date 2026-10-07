@@ -410,7 +410,7 @@ func stopAt(rec map[string]any, step string, ce *abi2.CallError) {
 func runGoldensCase(t *testing.T, lib *Library, c goldensCase, rec map[string]any) {
 	t.Helper()
 	tbl := lib.tbl
-	sch, cerr := tbl.SchemaCreate(c.Schema.CreateTable, c.Schema.Settings)
+	sch, cerr := tbl.SchemaCreate(nil, c.Schema.CreateTable, c.Schema.Settings, nil)
 	if cerr != nil {
 		stopAt(rec, "schema_create", cerr)
 		return

@@ -207,7 +207,7 @@ function runCase(image: LoadedImage, setup: string, platform: string, c: GoldenC
   let schema: SchemaHandle | undefined;
   let filter: FilterHandle | undefined;
   try {
-    const created = attempt(() => calls.schemaCreate(b64(c.schema.create_table_b64), b64(c.schema.settings_b64)));
+    const created = attempt(() => calls.schemaCreate(null, b64(c.schema.create_table_b64), b64(c.schema.settings_b64), Buffer.alloc(0)));
     if (!created.ok) return { id: c.id, setup, result: 'ran', at: 'schema_create', status: created.status, error: created.error, decoded_ok: null };
     schema = created.value;
 

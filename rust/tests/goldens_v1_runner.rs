@@ -513,7 +513,7 @@ fn execute(api: &Arc<Api>, case: &Value) -> Result<Result<Answered, Stopped>, St
     let schema_in = &case["schema"];
     let create_table = dec(&schema_in["create_table_b64"], "create_table_b64")?;
     let schema_settings = dec(&schema_in["settings_b64"], "schema settings_b64")?;
-    let schema: SchemaHandle = match api.schema_create(&create_table, &schema_settings) {
+    let schema: SchemaHandle = match api.schema_create(None, &create_table, &schema_settings, &[]) {
         Ok(s) => s,
         Err(error) => {
             return Ok(Err(Stopped {

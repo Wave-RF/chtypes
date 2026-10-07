@@ -57,7 +57,21 @@ typedef chs_buf *(*fn_error_text)(const chs_error *);
 typedef void (*fn_error_free)(chs_error *);
 typedef chs_status (*fn_live_handles)(chs_buf **, chs_error **);
 typedef chs_status (*fn_quote_string)(const uint8_t *, size_t, chs_buf **, chs_error **);
+#if CHS_ABI_VERSION >= 2
+/* Generation 2: chs_schema_create takes a nullable server first and an options
+   document after the settings. Every call below passes NULL and none, which is
+   generation 1's behavior; test_server_profile covers the server itself. */
+typedef chs_status (*fn_schema_create)(const chs_server *, const uint8_t *, size_t, const uint8_t *, size_t,
+                                       const uint8_t *, size_t, chs_schema **, chs_error **);
+typedef chs_status (*fn_server_create)(const uint8_t *, size_t, const uint8_t *, size_t, chs_server **, chs_error **);
+typedef void (*fn_server_free)(chs_server *);
+#define SCHEMA_CREATE(l, sql, n, settings, settings_n, out, err)                                                    \
+    (l)->schema_create(NULL, (sql), (n), (settings), (settings_n), NULL, 0, (out), (err))
+#else
 typedef chs_status (*fn_schema_create)(const uint8_t *, size_t, const uint8_t *, size_t, chs_schema **, chs_error **);
+#define SCHEMA_CREATE(l, sql, n, settings, settings_n, out, err)                                                    \
+    (l)->schema_create((sql), (n), (settings), (settings_n), (out), (err))
+#endif
 typedef void (*fn_schema_free)(chs_schema *);
 typedef chs_status (*fn_filter_create)(
     const chs_schema *, const uint8_t *, size_t, const uint8_t *, size_t, const uint8_t *, size_t, chs_filter **,
@@ -91,6 +105,10 @@ typedef struct {
     fn_filter_free filter_free;
     fn_filter_eval_body filter_eval_body;
     fn_preview_row preview_row;
+#if CHS_ABI_VERSION >= 2
+    fn_server_create server_create;
+    fn_server_free server_free;
+#endif
 } lib_t;
 
 #define SYM(l, field, name)                                                                                           \
@@ -130,6 +148,10 @@ static lib_t load_lib(const char *path) {
     SYM(l, filter_free, "chs_filter_free");
     SYM(l, filter_eval_body, "chs_filter_eval_body");
     SYM(l, preview_row, "chs_preview_row");
+#if CHS_ABI_VERSION >= 2
+    SYM(l, server_create, "chs_server_create");
+    SYM(l, server_free, "chs_server_free");
+#endif
     return l;
 }
 
@@ -215,7 +237,7 @@ static void test_sha256_via_echo(lib_t *l) {
 static void test_long_echo_not_truncated(lib_t *l) {
     chs_schema *schema = NULL;
     chs_error *err = NULL;
-    CHECK(l->schema_create((const uint8_t *) "x", 1, NULL, 0, &schema, &err) == CHS_OK,
+    CHECK(SCHEMA_CREATE(l, (const uint8_t *) "x", 1, NULL, 0, &schema, &err) == CHS_OK,
           "chs_schema_create for the long-echo test");
 
     const char *body = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -322,7 +344,7 @@ static void test_holds_and_live(lib_t *l) {
 
     chs_schema *schema = NULL;
     chs_error *err = NULL;
-    CHECK(l->schema_create((const uint8_t *) "x", 1, NULL, 0, &schema, &err) == CHS_OK, "chs_schema_create");
+    CHECK(SCHEMA_CREATE(l, (const uint8_t *) "x", 1, NULL, 0, &schema, &err) == CHS_OK, "chs_schema_create");
     CHECK(live_count(l, "chs_schema") == schema_before + 1, "live chs_schema did not increase by one on create");
 
     chs_filter *filter = NULL;
@@ -352,14 +374,14 @@ static void test_one_create(lib_t *l) {
     static const char one[] = "CREATE TABLE a (x Int32) ENGINE = Memory;\n";
     chs_schema *schema = NULL;
     chs_error *err = NULL;
-    chs_status st = l->schema_create((const uint8_t *) two, sizeof two - 1, NULL, 0, &schema, &err);
+    chs_status st = SCHEMA_CREATE(l, (const uint8_t *) two, sizeof two - 1, NULL, 0, &schema, &err);
     CHECK(st == CHS_REJECTED, "two CREATE statements gave status %d, want CHS_REJECTED", (int) st);
     CHECK(schema == NULL, "two CREATE statements still produced a schema");
     CHECK(err != NULL && l->error_ch_code(err) == 62, "two CREATE statements: ch_code %d, want 62",
           err != NULL ? l->error_ch_code(err) : -1);
     if (err != NULL) l->error_free(err);
     err = NULL;
-    st = l->schema_create((const uint8_t *) one, sizeof one - 1, NULL, 0, &schema, &err);
+    st = SCHEMA_CREATE(l, (const uint8_t *) one, sizeof one - 1, NULL, 0, &schema, &err);
     CHECK(st == CHS_OK && schema != NULL, "one CREATE statement with a trailing semicolon gave status %d", (int) st);
     if (schema != NULL) l->schema_free(schema);
 }
@@ -413,7 +435,7 @@ static void test_concurrent_shared(lib_t *l) {
 
     chs_schema *schema = NULL;
     chs_error *err = NULL;
-    CHECK(l->schema_create((const uint8_t *) "x", 1, NULL, 0, &schema, &err) == CHS_OK, "chs_schema_create");
+    CHECK(SCHEMA_CREATE(l, (const uint8_t *) "x", 1, NULL, 0, &schema, &err) == CHS_OK, "chs_schema_create");
     chs_filter *filter = NULL;
     CHECK(l->filter_create(schema, (const uint8_t *) "1", 1, NULL, 0, NULL, 0, &filter, &err) == CHS_OK,
           "chs_filter_create");
@@ -470,7 +492,7 @@ static void test_document_mode(lib_t *l) {
     };
     chs_schema *schema = NULL;
     chs_error *err = NULL;
-    CHECK(l->schema_create((const uint8_t *) "x", 1, NULL, 0, &schema, &err) == CHS_OK, "chs_schema_create");
+    CHECK(SCHEMA_CREATE(l, (const uint8_t *) "x", 1, NULL, 0, &schema, &err) == CHS_OK, "chs_schema_create");
     for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
         uint8_t body[64];
         memcpy(body, "!D:", 3);
@@ -505,7 +527,7 @@ static void test_cross_image(lib_t *a, lib_t *b) {
     a->buf_free(out);
 
     chs_schema *schema = NULL;
-    CHECK(a->schema_create((const uint8_t *) "x", 1, NULL, 0, &schema, &err) == CHS_OK, "chs_schema_create on lib a");
+    CHECK(SCHEMA_CREATE(a, (const uint8_t *) "x", 1, NULL, 0, &schema, &err) == CHS_OK, "chs_schema_create on lib a");
     chs_filter *filter = NULL;
     chs_status st = b->filter_create(schema, (const uint8_t *) "1", 1, NULL, 0, NULL, 0, &filter, &err);
     CHECK(st == CHS_INVALID_ARGUMENT, "lib b's chs_filter_create over lib a's schema gave %d, want CHS_INVALID_ARGUMENT",
@@ -513,6 +535,68 @@ static void test_cross_image(lib_t *a, lib_t *b) {
     if (err != NULL) b->error_free(err);
     a->schema_free(schema);
 }
+
+#if CHS_ABI_VERSION >= 2
+/* Generation 2: rule r1's closed input documents
+   (scripts/abi-v1/emit/_stubshared.py INPUT_DOCUMENT) through the reader the
+   stub compiles, on inputs whose values would trip a reader that does not
+   track strings and nesting; and a schema holding the server it was created
+   on (D2), so the server outlives the caller's free of it. */
+static void test_server_profile(lib_t *l) {
+    static const struct {
+        const char *what;
+        const char *profile;
+        chs_status want;
+        const char *message; /* the exact message, for a refusal */
+    } cases[] = {
+        {"length 0", "", CHS_OK, NULL},
+        {"an empty object", " { } ", CHS_OK, NULL},
+        {"every member, values holding quotes, braces and commas",
+         "{\"settings\":{\"a\":\"x\\\"},{y\",\"b\":\"[1,{\"},\"macros\":{\"shard\":\"01\"},\"timezone\":\"UTC\"}",
+         CHS_OK, NULL},
+        {"an unknown key after the known ones", "{\"timezone\":\"UTC\", \"zz\" : 1}", CHS_INVALID_ARGUMENT,
+         "profile: unknown key \"zz\" in the input document server_profile"},
+        {"an array", "[]", CHS_INVALID_ARGUMENT, "profile: the input document server_profile is not a JSON object"},
+        {"a trailing byte", "{} x", CHS_INVALID_ARGUMENT,
+         "profile: the input document server_profile is not a JSON object"},
+    };
+    for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+        chs_server *server = NULL;
+        chs_error *err = NULL;
+        size_t n = strlen(cases[i].profile);
+        chs_status st = l->server_create(n ? (const uint8_t *) cases[i].profile : NULL, n, NULL, 0, &server, &err);
+        CHECK(st == cases[i].want, "chs_server_create, %s: status %d, want %d", cases[i].what, (int) st,
+              (int) cases[i].want);
+        CHECK((server != NULL) == (cases[i].want == CHS_OK), "chs_server_create, %s: a server iff CHS_OK",
+              cases[i].what);
+        if (cases[i].message != NULL && err != NULL) {
+            chs_buf *m = l->error_message(err);
+            size_t k = m != NULL ? l->buf_len(m) : 0;
+            CHECK(k == strlen(cases[i].message) && memcmp(l->buf_data(m), cases[i].message, k) == 0,
+                  "chs_server_create, %s: message %.*s", cases[i].what, (int) k,
+                  m != NULL ? (const char *) l->buf_data(m) : "");
+            if (m != NULL) l->buf_free(m);
+        }
+        if (err != NULL) l->error_free(err);
+        if (server != NULL) l->server_free(server);
+    }
+
+    long server_before = live_count(l, "chs_server");
+    long schema_before = live_count(l, "chs_schema");
+    chs_server *server = NULL;
+    chs_error *err = NULL;
+    CHECK(l->server_create(NULL, 0, NULL, 0, &server, &err) == CHS_OK, "chs_server_create({})");
+    chs_schema *schema = NULL;
+    CHECK(l->schema_create(server, (const uint8_t *) "x", 1, NULL, 0, NULL, 0, &schema, &err) == CHS_OK,
+          "chs_schema_create on a server");
+    l->server_free(server); /* the caller's own reference; the schema still holds one */
+    CHECK(live_count(l, "chs_server") == server_before + 1,
+          "live chs_server dropped after freeing the server while a schema still holds it");
+    l->schema_free(schema);
+    CHECK(live_count(l, "chs_server") == server_before, "live chs_server did not return to its baseline");
+    CHECK(live_count(l, "chs_schema") == schema_before, "live chs_schema did not return to its baseline");
+}
+#endif
 
 static void test_unbound_refuses_rtld_now(const char *dir) {
     char path[4096];
@@ -548,6 +632,9 @@ int main(int argc, char **argv) {
     test_document_mode(&a);
     test_concurrent_shared(&a);
     test_cross_image(&a, &b);
+#if CHS_ABI_VERSION >= 2
+    test_server_profile(&a);
+#endif
     test_unbound_refuses_rtld_now(argv[1]);
 
     if (g_pass == 0) {
