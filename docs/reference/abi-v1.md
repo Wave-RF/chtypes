@@ -275,8 +275,6 @@ FIRM; an unrecognized value is read as `value_changed`.
 | `ttl_expired`           | true  |
 | `ttl_column_expired`    | true  |
 
-The last two reasons, `ttl_expired` and `ttl_column_expired`, stay in the frozen v1 vocabulary, so a reader still knows them and an older build may still send them. A library build from `20261007.120436` on never emits them: a batch's `engine_rows` matches what a synchronous `INSERT` writes, and a TTL's delete or reset happens at the next merge, which a preview does not perform.
-
 #### `value_src`
 
 Where a column's value came from. `is_stored` says whether the row as stored carries a value for the column: a column the input named but the table never stores (an EPHEMERAL column, a skipped MATERIALIZED or ALIAS column) and a DEFAULT the library could not resolve carry none.
