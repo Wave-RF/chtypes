@@ -6,3 +6,10 @@
 # and musl, which covers the shipping linux-arm64 target.
 allowBuilds:
   esbuild: true
+
+# source-map-js <1.2.2 (GHSA-68fv-2mgg-jv7q) reaches the tree only through
+# postcss under vite/vitest: a dev and build dependency, not part of the
+# published package (whose one runtime dependency is ffi-rs). Pinned past it so
+# the dependency audit stays clean.
+overrides:
+  source-map-js: ">=1.2.2"
