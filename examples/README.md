@@ -45,7 +45,7 @@ Read any tour top to bottom as a tutorial; every section carries a comment block
 5. **Accept, reject, decline (and poison)** — the whole verdict contract, each outcome shown concretely with what a caller should do about it.
 6. **DEFAULT evaluation: where every value comes from** — `input` / `default` / `default_substituted` / `absent`, the pinned clock, MATERIALIZED values, unknown fields, and the clock-skew budget.
 7. **One schema, every format** — every supported format with accepts, rejects and each format's signature behavior; binary payloads are hand-built hex, explained byte by byte.
-8. **Engines, MergeTree settings, TTL and partitions** — SummingMergeTree's post-merge preview, the refusal-versus-decline pair on MergeTree settings, and a row accepted per row yet stored nowhere per batch (TTL).
+8. **Engines, MergeTree settings, TTL and partitions** — SummingMergeTree's post-merge preview, the refusal-versus-decline pair on MergeTree settings, and a TTL batch whose expired row the INSERT still writes (a TTL deletes at the next merge, not at insert).
 9. **Settings and zones: who wins** — settings precedence measured layer by layer, and time zones.
 10. **The error taxonomy** — the typed errors, caught by type (never string matching), and why the decline type must never be mistaken for the refusal type.
 11. **Discovery, offline** — the canonical discovery queries, their parsers, and DDL reconstruction against CANNED server responses.

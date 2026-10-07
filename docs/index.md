@@ -39,7 +39,7 @@ A bad **row** is a verdict, not an exception. Exceptions (or the `Err` arm) are 
 
 ClickHouse never says _"I silently changed your value."_ It accepts the row and stores something else. `256` into a `UInt8` is stored as `0`, and the INSERT succeeds.
 
-chtypes derives that report and it is not optional: every accepted row carries a list of the changes made to it, each named — `overflow_wrap`, `date_clamp`, `poisoned`, `ttl_expired`, and the rest. It is the one answer in the whole system that is _computed_ rather than merely relayed, and it is why the product exists. [`guides/transformations.md`](guides/transformations.md) is the guide.
+chtypes derives that report and it is not optional: every accepted row carries a list of the changes made to it, each named — `overflow_wrap`, `date_clamp`, `poisoned`, `value_changed`, and the rest. It is the one answer in the whole system that is _computed_ rather than merely relayed, and it is why the product exists. [`guides/transformations.md`](guides/transformations.md) is the guide.
 
 ## The guarantees behind the answers
 

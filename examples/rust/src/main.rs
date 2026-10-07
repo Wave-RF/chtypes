@@ -807,9 +807,12 @@ fn section7(lib: &Arc<Library>) {
 // WHAT: the engine, its settings, the partition key and the TTL are part of the
 // one CREATE TABLE statement now; this section feeds three statements.
 // WHY: SummingMergeTree merges at insert time, a MergeTree SETTINGS list is
-// validated by the server, and a TTL can make a row stored nowhere.
+// validated by the server, and a TTL deletes at the next MERGE, which a preview
+// does not perform, so engine_rows matches what the INSERT writes.
 // LOOK FOR: engine_rows (the stored rows after the engine's insert-time merge),
-// the refusal for an unknown MergeTree setting, and the TTL transform.
+// the refusal for an unknown MergeTree setting, and the TTL batch's row, which
+// engine_rows still HOLDS (before build 20261007.120436 it was left out and a
+// ttl_expired transform was reported).
 // The v0 SetEngine, SetTTL, SetPartitionBy and WithMergeTreeSettings are
 // deleted (bindings-v1.md section 7).
 // ---------------------------------------------------------------------------
@@ -897,7 +900,9 @@ fn section8(lib: &Arc<Library>) {
         },
         Err(err) => kv("  compile", &err.to_string()),
     }
-    note("a row can PARSE fine and still be stored nowhere: the TTL expired it");
+    note("a row past a TTL still PARSES and the INSERT still writes it: the next merge");
+    note("deletes it, which a preview does not perform. Before build 20261007.120436");
+    note("engine_rows left it out and a ttl_expired transform was reported");
 }
 
 // ---------------------------------------------------------------------------

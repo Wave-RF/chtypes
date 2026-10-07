@@ -83,6 +83,8 @@ The lossy ones, by what they are about:
 | identifiers                  | `uuid_mangle`, `ip_mangle`                                                                               |
 | the loud one                 | `poisoned`                                                                                               |
 
+> `ttl_expired` and `ttl_column_expired` are still in the vocabulary, but a build from `20261007.120436` on never emits them (see [Where the batch differs from the row](#where-the-batch-differs-from-the-row)).
+>
 > `default_materialized` is spelled with an `s`. It is a frozen wire constant rather than prose, so it stays as the artifact emits it — do not "correct" it in code or in a comparison.
 
 **`poisoned` is the one to wire an alert to.** It means the stored value is not merely different but meaningless — the row was accepted and what landed cannot be read back as what was sent. A batch carrying one gets the outcome `accepted_poisoned` rather than `accepted`, which exists precisely so a caller can branch on it without scanning the reasons.
@@ -134,7 +136,9 @@ ALIAS columns are never reported at all. An `ALTER … MODIFY COLUMN a ALIAS <ex
 
 ## Where the batch differs from the row
 
-On a `BatchResult`, `transformed` folds in the storage layer's own verdicts — the ones that are properties of the write rather than of the parse, `ttl_expired` and `ttl_column_expired` among them. When `engineRows` is present it, not `rows`, is the stored truth: the MergeTree insert-time merge can collapse rows, and the batch reports what the table would end up holding.
+On a `BatchResult`, `transformed` folds in the storage layer's own verdicts — the ones that are properties of the write rather than of the parse. When `engineRows` is present it, not `rows`, is the stored truth: the MergeTree insert-time merge can collapse rows, and the batch reports what the table would end up holding.
+
+`ttl_expired` and `ttl_column_expired` belong to this group only for older builds. A build from `20261007.120436` on never emits them: `engineRows` matches what a synchronous `INSERT` writes, so a row past a rows TTL stays in it and a column past a column TTL keeps its supplied value. The server deletes the row or resets the column at the next merge, which a preview does not perform. An earlier build left the expired row out of `engineRows` and reported `ttl_expired`, or reset the column to its `DEFAULT` and reported `ttl_column_expired`. Both reasons stay in the frozen v1 vocabulary, so a reader still knows them. ABI v2 reports the merge's effect separately, as `at_merge`.
 
 Also worth knowing: `substituted` lives on the **row**, not on the batch, in every binding. A batch-level `substituted` does not exist — reach it through `batch.rows[i]`.
 

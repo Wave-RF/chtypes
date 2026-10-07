@@ -230,9 +230,13 @@ Validate with it at the gate, forward only the accepted rows, and the worker's I
 
 ## `engine_rows` is the stored truth when it is present
 
-`rows` describes the parse. The storage layer can do more: the MergeTree insert-time merge collapses rows under a ReplacingMergeTree or a CollapsingMergeTree, and a table-level TTL can drop them outright.
+`rows` describes the parse. The storage layer can do more: the MergeTree insert-time merge collapses rows under a ReplacingMergeTree or a CollapsingMergeTree.
 
-When the result carries `engine_rows` (`EngineRows` in Go, `engineRows` in TypeScript), **it, not `rows`, is what the table would end up holding.** The batch-level `transformed` folds in the storage layer's own verdicts alongside it — `ttl_expired` and `ttl_column_expired` are batch facts, not parse facts.
+When the result carries `engine_rows` (`EngineRows` in Go, `engineRows` in TypeScript), **it, not `rows`, is what the table would end up holding.** The batch-level `transformed` folds in the storage layer's own verdicts alongside it, as batch facts rather than parse facts.
+
+`engine_rows` matches what a server's synchronous `INSERT` writes. A TTL does not change that: a row past a rows TTL stays in `engine_rows`, and a column past a column TTL keeps the value you supplied. The server deletes the row or resets the column at the next merge, which a preview does not perform. ABI v2 reports this separately, as `at_merge`.
+
+This holds for library builds from `20261007.120436` on. An earlier build previewed the merge's result instead: it left an expired row out of `engine_rows` and reported `ttl_expired`, or reset an expired column to its `DEFAULT` and reported `ttl_column_expired`. Those two reasons are still in the v1 vocabulary, so a reader accepts them, but a build from `20261007.120436` on never emits them.
 
 ## Exporting the accepted rows as wire bytes
 
