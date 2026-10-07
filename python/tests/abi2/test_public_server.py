@@ -22,7 +22,8 @@ CREATE = b"CREATE TABLE t (k UInt8) ENGINE = Memory"
 
 
 def _servers(lib) -> int:
-    return lib.live_handles()["chs_server"]
+    (name,) = [k for k in lib.live_handles() if k.endswith("server")]
+    return lib.live_handles()[name]
 
 
 @pytest.mark.parametrize(
