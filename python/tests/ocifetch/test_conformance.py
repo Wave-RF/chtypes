@@ -21,12 +21,14 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.request
 from pathlib import Path
 
 import pytest
 
 import chtypes._ocifetch._ensure as _ensure_module
 import chtypes._ocifetch._http as _http_module
+from chtypes.__main__ import _published_tags
 from chtypes._ocifetch import _channel
 from chtypes._ocifetch import _constants as C
 from chtypes._ocifetch._dsse import (
@@ -247,6 +249,42 @@ def _check_requests(log: _RequestLog, expect_requests: dict) -> str | None:
     return None
 
 
+def _snapshot_install(cache_dir: Path, manifest_digest: str) -> dict[str, str]:
+    """Every file under <cache>/unpacked/sha256/<hex>/, by relative path, as its
+    sha256: what `expect.records_intact` compares before and after a call."""
+    root = cache_dir / "unpacked" / "sha256" / parse_digest(manifest_digest)
+    return {
+        str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest()
+        for p in sorted(root.rglob("*"))
+        if p.is_file()
+    }
+
+
+def _check_registry_log(http_port: int, case_id: str, expect_requests: dict) -> str | None:
+    """The same expectations, over http, against what the registry itself logged
+    (`GET /_log/s-<case-id>`, docs/guides/fetch-v1.md §10), which every binding's
+    runner reads: what was served, not what this process believes it asked for."""
+    with urllib.request.urlopen(f"http://127.0.0.1:{http_port}/_log/s-{case_id}", timeout=10) as r:
+        log = json.loads(r.read())
+    lines = [f"{e['method']} {e['path']}" for e in log]
+    if expect_requests["max"] is not None and len(lines) > expect_requests["max"]:
+        return (
+            f"registry log: requests.max={expect_requests['max']} but {len(lines)} logged: {lines}"
+        )
+    for pattern in expect_requests["none_matching"]:
+        for line in lines:
+            if re.search(pattern, line):
+                return f"registry log: requests.none_matching {pattern!r} matched {line!r}"
+    auth_on_second = any(
+        e["origin"] == "second" and any(k.lower() == "authorization" for k in e["headers"])
+        for e in log
+    )
+    if auth_on_second != expect_requests["auth_on_second_origin"]:
+        want = expect_requests["auth_on_second_origin"]
+        return f"registry log: auth_on_second_origin={auth_on_second}, want {want}"
+    return None
+
+
 # ---------------------------------------------------------------------------
 # installed.json pre-install (docs/guides/fetch-v1.md §10 "Cache fixtures and
 # installed.json"): a test-setup instruction, never a runtime format any
@@ -451,6 +489,13 @@ def _run_case(
             return "fail", f"unknown before_index_rename_hook {hook_name!r} — not implemented"
         before_index_rename = hook_factory(cache_dir)
 
+    # records_intact: each named install's directory, as the pre-install left
+    # it, compared after the call.
+    intact_before = {d: _snapshot_install(cache_dir, d) for d in expect["records_intact"]}
+    for d, snap in intact_before.items():
+        if not snap:
+            return "fail", f"records_intact: {d} is not installed before the call"
+
     clock = _FakeClock()
     request_log.clear()
     options = Options(
@@ -471,11 +516,19 @@ def _run_case(
     mismatches: list[str] = []
     resolved = None
     generic_result = None
+    listed: list[str] | None = None
     # docs/guides/fetch-v1.md §10 "The generic-fetch convention": a case id
     # starting goldens-/fixtures- exercises fetch_signed(), not ensure() —
     # cases.schema.json has no separate shape for this, so the convention is
     # keyed on the id prefix, same as the generator itself.
     is_generic = case["id"].startswith(("goldens-", "fixtures-"))
+    # The dev channel's alias step (docs/guides/fetch-v1.md §3), under the
+    # case's fixture fingerprint; a null one leaves the v1 contract as it is.
+    restore_alias = (
+        _channel.use_own_fingerprint_for_tests(req["own_fingerprint"])
+        if req["own_fingerprint"] is not None
+        else None
+    )
     saved_search_roots = _ensure_module.search_roots
     if system_dirs:
 
@@ -493,6 +546,10 @@ def _run_case(
             # ("/sdk-fetch-fixtures") for fixtures.
             repository = "" if is_goldens else C.FIXTURES_REPO_SUFFIX
             generic_result = fetch_signed(repository, req["spelling"], predicate_type, options)
+        elif case["id"].startswith("list-tags-"):
+            # The listing (docs/guides/fetch-v1.md §10): what `chtypes list`
+            # names as published, from the registry's tags/list.
+            listed = _published_tags(options)
         elif case["id"].startswith("resolve-installed-"):
             # The cache-only seam entry (docs/guides/fetch-v1.md §10): a miss is
             # reported as CHTYPES_ARTIFACT_MISSING, the code --offline gives.
@@ -512,6 +569,8 @@ def _run_case(
         if expect["ok"] or expect["code"] is not None:
             mismatches.append(f"unexpected ValueError: {e}")
     finally:
+        if restore_alias is not None:
+            restore_alias()
         _ensure_module.search_roots = saved_search_roots
         for d in system_dirs:
             _chmod_tree(d, dir_mode=0o755, file_mode=0o644)
@@ -551,12 +610,27 @@ def _run_case(
                         f"warnings: no warning contains {keyword!r}: {resolved.warnings}"
                     )
 
+    for d, snap in intact_before.items():
+        after = _snapshot_install(cache_dir, d)
+        if after != snap:
+            mismatches.append(
+                f"records_intact: the install of {d} changed "
+                f"({len(snap)} file(s) before, {len(after)} after)"
+            )
+
+    if expect["tags"] is not None and not mismatches and listed != expect["tags"]:
+        mismatches.append(f"listed {listed!r} != {expect['tags']!r}")
+
     if clock.sleeps != expect["sleeps"]:
         mismatches.append(f"sleeps {clock.sleeps} != {expect['sleeps']}")
 
     requests_mismatch = _check_requests(request_log, expect["requests"])
     if requests_mismatch:
         mismatches.append(requests_mismatch)
+    if transport == "http" and http_port is not None:
+        registry_mismatch = _check_registry_log(http_port, case["id"], expect["requests"])
+        if registry_mismatch:
+            mismatches.append(registry_mismatch)
 
     if expect["lock_after"] is not None:
         expected_lock_path = fixtures_root / "locks" / "expected" / f"{expect['lock_after']}.json"

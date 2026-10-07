@@ -39,8 +39,14 @@
 #      discarded; check 4 still fetches into the real one;
 #   4. fetch: `chtypes fetch <newest line>` installs into
 #      <CHTYPES_CACHE>/[CACHE_SUBROOT]/unpacked/sha256/<hex>, and sha256:<hex>
-#      is the platform manifest [REGISTRY_BASE] serves for that line on this
-#      platform. An install directory is named by the digest of the manifest it
+#      is the platform manifest [REGISTRY_BASE] serves THIS binding for that
+#      line on this platform. On a channel with [FP_ALIAS] (the dev channel,
+#      docs/guides/fetch-v1.md §3) that is the manifest of the alias
+#      <line>--fp-<the header's fingerprint> when the registry serves it, and
+#      the line's own tag's when it answers the alias 404; the CLI resolves
+#      exactly so, and any other answer is no manifest at all, as the CLI
+#      does not fall back then either. The probe of check 3 compares the same
+#      way. An install directory is named by the digest of the manifest it
 #      was verified from, so this proves the bytes the CLI installed are that
 #      registry's, whatever the CLI was configured with;
 #   5. record: that directory's verified.json is record schema
@@ -103,6 +109,44 @@ this_platform() {
 tags_of() { parse_json '"\n".join(d.get("tags") or [])'; }
 manifest_for() { # <os> <arch>: stdin is an OCI index; stdout is that platform's manifest digest
   parse_json 'next((m["digest"] for m in d.get("manifests") or [] if (m.get("platform") or {}).get("os") == a[0] and (m.get("platform") or {}).get("architecture") == a[1]), None)' "$1" "$2"
+}
+
+# alias_tag <line> <fingerprint>: the dev channel's own-fingerprint alias of
+# <line>, <line>--fp-<64 hex> (docs/guides/fetch-v1.md §3).
+alias_tag() { printf '%s--fp-%s\n' "$1" "${2#sha256:}"; }
+# served_ref <the alias's HTTP status>: which tag the CLI resolves, by the rule
+# it follows (§3): `alias` when the registry serves the alias, `line` when it
+# answers the alias 404, and nothing otherwise (the CLI does not fall back).
+served_ref() { case "$1" in 200) echo alias ;; 404) echo line ;; *) echo "" ;; esac; }
+# fetch_index <ref>: GET the channel registry's index for <ref> into
+# $work/index.json; stdout is the HTTP status, empty when the request failed.
+fetch_index() {
+  local s
+  s="$(curl -sS -A "$RC_UA" --retry 3 --retry-all-errors -o "$work/index.json" -w '%{http_code}' \
+    -H 'Accept: application/vnd.oci.image.index.v1+json' "$api/manifests/$1")" || s=""
+  printf '%s' "$s"
+}
+# staging_manifest <line>: the platform manifest digest the channel's registry
+# serves THIS binding for <line> (check 4): with FP_ALIAS, the alias for the
+# header's fingerprint ($want) when it is served, else, on a 404, the line's
+# own tag. Leaves the ref it compared and that ref's HTTP status in
+# $work/manifest.ref and $work/manifest.status (a $(...) caller cannot see a
+# variable). Empty when the registry serves none.
+staging_manifest() {
+  local ref="$1" s
+  if [ "${FP_ALIAS:-0}" = 1 ]; then
+    ref="$(alias_tag "$1" "$want")"
+    s="$(fetch_index "$ref")"
+    if [ "$(served_ref "$s")" = line ]; then
+      ref="$1"
+      s="$(fetch_index "$ref")"
+    fi
+  else
+    s="$(fetch_index "$ref")"
+  fi
+  printf '%s' "$ref" > "$work/manifest.ref"
+  printf '%s' "$s" > "$work/manifest.status"
+  [ "$s" != 200 ] || manifest_for "$os" "$arch" < "$work/index.json"
 }
 
 # ---- the checks: each prints what it found and returns its verdict ----
@@ -233,6 +277,49 @@ if [ "${1:-}" = "--selftest" ]; then
   refuses "an install outside the subroot" "not under /c/v2-dev/unpacked/sha256/" check_fetch_dir "/c/unpacked/sha256/${bdigest#sha256:}" /c/v2-dev "$bdigest"
   refuses "a directory not named by a digest" "is not named by a manifest digest" check_fetch_dir /c/v2-dev/unpacked/sha256/26.9 /c/v2-dev "$bdigest"
   refuses "no manifest for this platform" "serves no manifest for this platform" check_fetch_dir "/c/v2-dev/unpacked/sha256/${bdigest#sha256:}" /c/v2-dev ""
+  # 4b. which index check 4 (and the probe of check 3) compares against: the
+  # alias for this binding's fingerprint, the CLI's own first choice (§3).
+  expect "the channel resolves its alias" "1" "${FP_ALIAS:-0}"
+  expect "the alias of a line" "26.9--fp-${dev#sha256:}" "$(alias_tag 26.9 "$dev")"
+  expect "an alias served: the alias" alias "$(served_ref 200)"
+  expect "an alias not found: the line" line "$(served_ref 404)"
+  expect "an alias that fails: nothing (no fallback)" "" "$(served_ref 503)"
+  expect "an alias request that did not complete: nothing" "" "$(served_ref "")"
+  # The same, end to end, against a stand-in registry: `curl` below answers
+  # the alias with $stub_alias (and $alias_index on a 200), and the line's own
+  # tag with 200 and $line_index.
+  work="$(mktemp -d)"; api="https://registry.example/v2/chtypes/v2-dev"; os=linux; arch=amd64; want="$dev"
+  line_index='{"manifests":[{"digest":"'"$bdigest"'","platform":{"os":"linux","architecture":"amd64"}}]}'
+  alias_index='{"manifests":[{"digest":"'"$cdigest"'","platform":{"os":"linux","architecture":"amd64"}}]}'
+  stub_alias=200
+  curl() {
+    local out="" url=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -o) out="$2"; shift 2 ;;
+        -A | -w | -H | --retry) shift 2 ;;
+        -*) shift ;;
+        *) url="$1"; shift ;;
+      esac
+    done
+    case "$url" in
+      "$api/manifests/26.9--fp-${dev#sha256:}")
+        [ "$stub_alias" != 200 ] || printf '%s' "$alias_index" > "$out"
+        printf '%s' "$stub_alias" ;;
+      "$api/manifests/26.9") printf '%s' "$line_index" > "$out"; printf 200 ;;
+      *) printf 404 ;;
+    esac
+  }
+  expect "an alias served: its manifest, not the line's" "$cdigest" "$(staging_manifest 26.9)"
+  expect "  ... and the ref compared is the alias" "26.9--fp-${dev#sha256:}" "$(cat "$work/manifest.ref")"
+  stub_alias=404
+  expect "no alias: the line's own manifest" "$bdigest" "$(staging_manifest 26.9)"
+  expect "  ... and the ref compared is the line" "26.9" "$(cat "$work/manifest.ref")"
+  stub_alias=503
+  expect "an alias that fails: no manifest, never the line's" "" "$(staging_manifest 26.9)"
+  stub_alias=200; alias_index='{"manifests":[{"digest":"'"$cdigest"'","platform":{"os":"darwin","architecture":"arm64"}}]}'
+  expect "an alias without this platform: no manifest, never the line's" "" "$(staging_manifest 26.9)"
+  unset -f curl; rm -rf "$work"
   # 5. record
   t="$(mktemp -d)"
   record() { printf '{"schema":%s,"signed_by":"%s","predicate":{"abi":%s,"abi_fingerprint":"%s"}}' "$1" "$2" "$3" "$4" > "$t/verified.json"; }
@@ -492,15 +579,6 @@ run_check "2 cache root" check_cache_root "$where_out" "$cache_root"
 line=""
 api="$(registry_api "$REGISTRY_BASE")"
 read -r os arch <<<"$(this_platform)"
-# staging_manifest <line>: the platform manifest digest the channel's registry serves for <line>;
-# leaves the HTTP status in $work/manifest.status (a $(...) caller cannot see a variable). Empty when it serves none.
-staging_manifest() {
-  local manifest_status
-  manifest_status="$(curl -sS -A "$RC_UA" --retry 3 --retry-all-errors -o "$work/index.json" -w '%{http_code}' \
-    -H 'Accept: application/vnd.oci.image.index.v1+json' "$api/manifests/$1")" || manifest_status=""
-  printf '%s' "$manifest_status" > "$work/manifest.status"
-  [ "$manifest_status" != 200 ] || manifest_for "$os" "$arch" < "$work/index.json"
-}
 if ! listing="$("$CLI" list 2>"$work/list.err")"; then
   verdict FAIL "3 listing" "'chtypes list' failed: $(paste -sd' ' - < "$work/list.err")"
 elif ! status="$(http_get "$api/tags/list" "$work/tags.json")" || [ "$status" != 200 ]; then
@@ -514,8 +592,9 @@ else
     else
       # The origin probe (#523): the names matched, which production's listing would also do.
       want_manifest="$(staging_manifest "$line")"
-      manifest_status="$(cat "$work/manifest.status")"
-      [ "$manifest_status" = 200 ] || echo "  $api/manifests/$line answered HTTP ${manifest_status:-none}"
+      manifest_status="$(cat "$work/manifest.status")"; manifest_ref="$(cat "$work/manifest.ref")"
+      echo "  the probe compares against $api/manifests/$manifest_ref"
+      [ "$manifest_status" = 200 ] || echo "  $api/manifests/$manifest_ref answered HTTP ${manifest_status:-none}"
       probe_dir="$(CHTYPES_CACHE="$work/probe-cache" "$CLI" fetch "$line" 2>"$work/probe.err" | tail -n 1)" || probe_dir=""
       [ ! -s "$work/probe.err" ] || sed 's/^/  probe fetch: /' "$work/probe.err"
       if origin="$(check_origin "$probe_dir" "$want_manifest")"; then
@@ -538,8 +617,9 @@ else
     verdict FAIL "4 fetch" "'chtypes fetch $line' failed"
   else
     manifest="$(staging_manifest "$line")"
-    manifest_status="$(cat "$work/manifest.status")"
-    [ "$manifest_status" = 200 ] || echo "  $api/manifests/$line answered HTTP ${manifest_status:-none}"
+    manifest_status="$(cat "$work/manifest.status")"; manifest_ref="$(cat "$work/manifest.ref")"
+    echo "  check 4 compares against $api/manifests/$manifest_ref"
+    [ "$manifest_status" = 200 ] || echo "  $api/manifests/$manifest_ref answered HTTP ${manifest_status:-none}"
     run_check "4 fetch" check_fetch_dir "$dir" "$cache_root" "$manifest"
   fi
   if [ -n "$dir" ] && [ -d "$dir" ]; then

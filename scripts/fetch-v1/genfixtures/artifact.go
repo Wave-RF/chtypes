@@ -78,6 +78,11 @@ type ArtifactOptions struct {
 	LibraryContentForPredicateOnly []byte
 	// SkipSigning leaves the manifest with no referrer at all (no-bundle).
 	SkipSigning bool
+	// ABIFingerprint, when set, is the predicate's abi_fingerprint
+	// ("sha256:<hex>") in place of the per-platform fake: the dev-alias
+	// cases (aliascases.go) build each build under the fingerprint its
+	// alias tag names. The fetch layer passes the field through opaque.
+	ABIFingerprint string
 }
 
 // buildPlatformArtifact builds one platform's manifest, layer and config,
@@ -136,6 +141,9 @@ func buildPlatformArtifact(tree *Tree, key SigningKey, platformKey, version, bui
 	}
 	if plat.OS != "darwin" {
 		predicate.GlibcFloor = "2.17"
+	}
+	if opts.ABIFingerprint != "" {
+		predicate.ABIFingerprint = opts.ABIFingerprint
 	}
 
 	configBytes := canonicalJSON(predicate)

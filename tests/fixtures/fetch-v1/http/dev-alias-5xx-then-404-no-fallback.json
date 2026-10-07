@@ -1,0 +1,48 @@
+{
+  "schema": 1,
+  "id": "dev-alias-5xx-then-404-no-fallback",
+  "tree": "dev-alias",
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/v2/chtypes/v1/manifests/26.8--fp-0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d",
+      "responses": [
+        {
+          "status": 503
+        },
+        {
+          "status": 503
+        },
+        {
+          "status": 503
+        },
+        {
+          "status": 503
+        },
+        {
+          "status": 503
+        }
+      ]
+    }
+  ],
+  "second_origin_routes": [
+    {
+      "method": "GET",
+      "path": "/v2/chtypes/v1/manifests/26.8--fp-0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d",
+      "responses": [
+        {
+          "status": 404
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v2/chtypes/v1/manifests/26.8",
+      "responses": [
+        {
+          "from_tree": true
+        }
+      ]
+    }
+  ]
+}

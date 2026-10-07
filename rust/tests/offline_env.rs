@@ -88,7 +88,14 @@ fn offline_env_makes_no_request_and_loads_an_installed_build() {
         library: "lib.so".to_string(),
         library_sha256: oci::sha256_hex(library.as_bytes()),
         library_bytes: library.len() as u64,
-        predicate: serde_json::json!({"clickhouse_version": "26.8.1.1", "build": "20260801.000001"}),
+        // A build of this SDK's own ABI: its predicate names the generated
+        // fingerprint, as a dev artifact's signed predicate does, so the dev
+        // channel's record filter sees it.
+        predicate: serde_json::json!({
+            "clickhouse_version": "26.8.1.1",
+            "build": "20260801.000001",
+            "abi_fingerprint": ocifetch::abi_fingerprint::DEV_ABI_FINGERPRINT,
+        }),
     };
     let entry: PathBuf = root.join(constants::CACHE_UNPACKED_DIR).join(&manifest);
     layout::write_atomic(&entry.join("lib.so"), library.as_bytes()).unwrap();

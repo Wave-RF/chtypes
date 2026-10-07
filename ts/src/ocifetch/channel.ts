@@ -21,6 +21,19 @@
  *     subroot `<cache>/v2-dev`, never as a whole layout;
  *   - a signed predicate must say abi 2.
  *
+ * It also resolves one tag the v1 contract never asks for: a version request
+ * fetches `<tag>--fp-<its own fingerprint>` first, the newest dev build of the
+ * ABI this binding speaks, and falls back to `<tag>` only when no base has that
+ * alias (`docs/guides/fetch-v1.md` §3, "The dev channel's alias step"), so a
+ * dev build of a newer fingerprint never strands this one. Its cache lookups
+ * (`resolveInstalled`, and `ensure`'s offline answer and its monotonic rule)
+ * see only the records whose signed `abi_fingerprint` is its own: a build of
+ * another fingerprint in a shared cache is never returned and never kept over
+ * this one's own, and it is never removed or rewritten either. It is
+ * automatic, with no override; the trust checks are unchanged, and a listing
+ * never shows an alias. The fingerprint is the ABI layer's generated `ABI_FINGERPRINT`,
+ * never a hand-written copy.
+ *
  * The v1 contract itself stays in this module, unchanged, because the
  * fetch-v1 conformance cases (`tests/fixtures/fetch-v1`) are its
  * specification and the dev channel shares every other rule with it. Only a
@@ -29,6 +42,7 @@
  * package's entry point, so neither is an override a user can reach.
  */
 
+import { ABI_FINGERPRINT } from '../abi2/decls.gen.js';
 import {
   ABI_GENERATION,
   DEFAULT_BASES,
@@ -37,6 +51,7 @@ import {
   ENV_TRUSTED_KEYS_NAME,
   RELEASE_KEYS,
   SCHEMA_VERSION,
+  SPELLING_REGEX,
   SYSTEM_CACHE_DIRS,
 } from './constants.gen.js';
 import type { FetchV1Options, TrustedKey } from './types.js';
@@ -53,6 +68,9 @@ export const DEV_CACHE_DIR = 'v2-dev';
 export const DEV_RECORD_SCHEMA = 2;
 /** The abi a dev predicate must carry. */
 export const DEV_ABI_GENERATION = 2;
+
+/** Joins a tag and a fingerprint into the dev channel's alias tag: `<tag>--fp-<64 lowercase hex>` (`docs/guides/fetch-v1.md` §3). */
+export const ALIAS_SEPARATOR = '--fp-';
 
 /**
  * The environment twin of the `offline` option (public issue #528): `CHTYPES_OFFLINE=1` reads the cache only and
@@ -92,6 +110,8 @@ export interface Channel {
   readonly overridable: boolean;
   /** Whether lock, frozen and update are honored. */
   readonly pinnable: boolean;
+  /** The fingerprint, 64 lowercase hex, this contract's SDK speaks: a version request resolves its alias tag before the tag itself, and the cache lookups see only records signed with it. `''` does neither (the v1 contract and every production channel). */
+  readonly ownFingerprint: string;
 }
 
 /** What a 2.0.0-dev SDK speaks, and what every process speaks unless a test selected another contract. */
@@ -106,6 +126,8 @@ const DEV_CHANNEL: Channel = {
   keys: [{ keyid: DEV_KEY_ID, ed25519Hex: DEV_KEY_HEX }],
   overridable: false,
   pinnable: false,
+  // The generated constant (src/abi2/decls.gen.ts), never a hand-written one.
+  ownFingerprint: ABI_FINGERPRINT.slice('sha256:'.length),
 };
 
 /** The v1 contract the fetch-v1 conformance cases specify, from the generated constants. Only `useFetchV1ForTests` selects it. */
@@ -120,6 +142,7 @@ const FETCH_V1_CHANNEL: Channel = {
   keys: RELEASE_KEYS.map((k) => ({ keyid: k.keyid, ed25519Hex: k.ed25519Hex })),
   overridable: true,
   pinnable: true,
+  ownFingerprint: '',
 };
 
 let current: Channel | undefined;
@@ -175,6 +198,47 @@ export function useFetchV1ForTests(): () => void {
 export function allowOverridesForTests(): () => void {
   testOnly('allowOverridesForTests');
   return use({ ...DEV_CHANNEL, overridable: true });
+}
+
+/**
+ * Makes this TEST process's active contract speak `fingerprint` (64 lowercase
+ * hex) as the dev channel speaks its own: a version request resolves that
+ * fingerprint's alias tag first, and the cache lookups see only records signed
+ * with it. The fetch-v1 conformance cases that carry `request.own_fingerprint`
+ * run under it, against fixtures that name a fixture fingerprint. Everything
+ * else stays the active contract's. Returns the restore function; throws
+ * outside a vitest worker or on a fingerprint that is not 64 lowercase hex.
+ */
+export function useOwnFingerprintForTests(fingerprint: string): () => void {
+  testOnly('useOwnFingerprintForTests');
+  if (!/^[0-9a-f]{64}$/.test(fingerprint)) {
+    throw new Error(`chtypes: useOwnFingerprintForTests: ${JSON.stringify(fingerprint)} is not 64 lowercase hex`);
+  }
+  return use({ ...activeChannel(), ownFingerprint: fingerprint });
+}
+
+/**
+ * The alias a version request for `tag` resolves first under a contract with
+ * an own fingerprint, or `undefined` when it resolves `tag` alone: under the
+ * v1 contract and every production channel, and for a request that is not a
+ * version spelling (an arbitrary tag has no alias).
+ */
+export function aliasTag(tag: string, channel: Channel = activeChannel()): string | undefined {
+  if (channel.ownFingerprint === '' || !new RegExp(SPELLING_REGEX).test(tag)) return undefined;
+  return `${tag}${ALIAS_SEPARATOR}${channel.ownFingerprint}`;
+}
+
+/**
+ * Whether a cache record (or a pre-seeded entry) whose SIGNED predicate is
+ * `predicate` may answer a request under the active contract: under one with
+ * an own fingerprint (the dev channel), only when the predicate's
+ * `abi_fingerprint` is that fingerprint; under every other, always. A record
+ * it cannot see is never returned and never kept by the monotonic rule, and
+ * nothing removes or rewrites it: another SDK of another fingerprint owns it.
+ */
+export function visibleToChannel(predicate: { readonly abi_fingerprint?: unknown }, channel: Channel = activeChannel()): boolean {
+  if (channel.ownFingerprint === '') return true;
+  return predicate.abi_fingerprint === `sha256:${channel.ownFingerprint}`;
 }
 
 /** Makes this TEST process speak the dev channel exactly as every other process does (undoing either function above). Returns the restore function. */

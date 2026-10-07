@@ -23,6 +23,7 @@
 import { rm } from 'node:fs/promises';
 import path from 'node:path';
 import { MEDIA_TYPE_BUNDLE, PREDICATE_TYPE_ARTIFACT } from './constants.gen.js';
+import { visibleToChannel } from './channel.js';
 import { checkArtifactStatement, parseStatement, verifyBundleSignature } from './dsse.js';
 import { ArtifactCorruptError } from './errors.js';
 import {
@@ -65,6 +66,8 @@ export async function verifyAndInstallFromLocalBlobs(
   manifestDigest: string,
   platform: PlatformKey,
   trustedKeys: readonly TrustedKey[],
+  /** A lookup's own install: another fingerprint's build is never installed (`visibleToChannel`). */
+  visibleOnly = false,
 ): Promise<VerifiedRecord | undefined> {
   const manifestHex = hexOfDigest(manifestDigest);
   const existing = await readVerifiedRecord(unpackedDir(writeRoot, manifestHex));
@@ -85,6 +88,7 @@ export async function verifyAndInstallFromLocalBlobs(
       // No `requestedSpelling`: this entry is verified on its own terms,
       // not against one request — see this function's own doc comment.
     });
+    if (visibleOnly && !visibleToChannel(predicate)) return undefined;
 
     const layerBytes = await readLocalBlob(blobsSourceDir, hexOfDigest(manifest.layer.digest));
     if (layerBytes === undefined) return undefined;

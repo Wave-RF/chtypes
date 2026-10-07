@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "source": {
-    "generator_commit": "cbde9da706fd5077a45a41d9feb3ce562803401a",
+    "generator_commit": "629ff5cdd37cad3d91c33ec16122d01cdf843451",
     "go_sum_sha256": "e998462ee1660f7d0b42c45fd0e16ddef8c688e81aaa22c466ada3c69565eec9"
   },
   "cases": [
@@ -31,7 +31,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -48,7 +49,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -76,7 +79,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -93,7 +97,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -122,7 +128,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -139,7 +146,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -167,7 +176,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -184,7 +194,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -212,7 +224,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -229,7 +242,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -257,7 +272,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -274,7 +290,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -302,7 +320,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -319,7 +338,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -347,7 +368,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -364,7 +386,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -392,7 +416,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -409,7 +434,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -437,7 +464,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -454,7 +482,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -481,7 +511,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -498,7 +529,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -525,7 +558,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -542,7 +576,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -570,7 +606,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -587,7 +624,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -615,7 +654,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -632,7 +672,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -660,7 +702,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -677,7 +720,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -705,7 +750,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -722,7 +768,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -750,7 +798,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -767,7 +816,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -795,7 +846,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -812,7 +864,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -840,7 +894,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -857,7 +912,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -885,7 +942,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -902,7 +960,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -930,7 +990,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -947,7 +1008,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -975,7 +1038,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -992,7 +1056,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -1020,7 +1086,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -1037,7 +1104,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -1065,7 +1134,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -1084,7 +1154,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -1113,7 +1185,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -1130,7 +1203,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -1158,7 +1233,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -1175,7 +1251,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -1203,7 +1281,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -1220,7 +1299,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -1248,7 +1329,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -1265,7 +1347,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -1293,7 +1377,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -1310,7 +1395,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -1338,7 +1425,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -1355,7 +1443,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -1383,7 +1473,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -1400,7 +1491,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -1428,7 +1521,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -1445,7 +1539,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -1473,7 +1569,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -1490,7 +1587,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -1518,7 +1617,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -1535,7 +1635,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -1563,7 +1665,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -1580,7 +1683,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -1608,7 +1713,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -1625,7 +1731,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -1653,7 +1761,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -1670,7 +1779,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -1698,7 +1809,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -1715,7 +1827,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -1743,7 +1857,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -1760,7 +1875,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -1788,7 +1905,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -1805,7 +1923,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -1833,7 +1953,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -1850,7 +1971,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -1878,7 +2001,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -1895,7 +2019,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -1923,7 +2049,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -1940,7 +2067,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -1968,7 +2097,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -1985,7 +2115,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -2013,7 +2145,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -2030,7 +2163,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -2058,7 +2193,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -2077,7 +2213,9 @@
           ],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -2105,7 +2243,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -2124,7 +2263,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -2154,7 +2295,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -2171,7 +2313,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -2199,7 +2343,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -2216,7 +2361,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -2244,7 +2391,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -2261,7 +2409,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -2289,7 +2439,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -2306,7 +2457,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -2334,7 +2487,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -2351,7 +2505,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -2379,7 +2535,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -2396,7 +2553,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -2424,7 +2583,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -2441,7 +2601,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -2469,7 +2631,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -2486,7 +2649,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -2514,7 +2679,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -2531,7 +2697,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -2559,7 +2727,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -2576,7 +2745,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -2604,7 +2775,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -2621,7 +2793,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -2649,7 +2823,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -2666,7 +2841,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -2694,7 +2871,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -2711,7 +2889,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -2739,7 +2919,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -2756,7 +2937,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -2784,7 +2967,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -2801,7 +2985,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -2829,7 +3015,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -2846,7 +3033,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -2874,7 +3063,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -2891,7 +3081,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -2919,7 +3111,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -2936,7 +3129,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -2964,7 +3159,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -2981,7 +3177,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -3009,7 +3207,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -3026,7 +3225,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -3054,7 +3255,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -3071,7 +3273,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -3099,7 +3303,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -3116,7 +3321,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -3144,7 +3351,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -3161,7 +3369,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -3189,7 +3399,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -3206,7 +3417,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -3234,7 +3447,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -3251,7 +3465,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -3279,7 +3495,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -3296,7 +3513,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -3324,7 +3543,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -3341,7 +3561,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -3369,7 +3591,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -3388,7 +3611,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -3416,7 +3641,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -3433,7 +3659,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -3461,7 +3689,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -3480,7 +3709,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -3508,7 +3739,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -3525,7 +3757,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -3553,7 +3787,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -3570,7 +3805,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -3598,7 +3835,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -3615,7 +3853,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -3643,7 +3883,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -3660,7 +3901,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -3688,7 +3931,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -3705,7 +3949,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -3733,7 +3979,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -3750,7 +3997,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -3778,7 +4027,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -3795,7 +4045,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -3823,7 +4075,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -3840,7 +4093,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -3868,7 +4123,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -3885,7 +4141,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -3913,7 +4171,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -3930,7 +4189,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -3958,7 +4219,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -3975,7 +4237,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -4003,7 +4267,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -4020,7 +4285,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -4048,7 +4315,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -4065,7 +4333,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -4093,7 +4363,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -4110,7 +4381,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -4138,7 +4411,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -4155,7 +4429,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -4183,7 +4459,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -4200,7 +4477,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -4230,7 +4509,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -4247,7 +4527,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -4277,7 +4559,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -4294,7 +4577,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -4324,7 +4609,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -4341,7 +4627,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -4371,7 +4659,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -4388,7 +4677,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -4417,7 +4708,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -4434,7 +4726,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -4462,7 +4756,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -4479,7 +4774,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -4507,7 +4804,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -4524,7 +4822,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -4552,7 +4852,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -4569,7 +4870,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -4598,7 +4901,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -4618,7 +4922,9 @@
           ],
           "auth_on_second_origin": false
         },
-        "lock_after": "lock-write-all-platforms"
+        "lock_after": "lock-write-all-platforms",
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -4646,7 +4952,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -4663,7 +4970,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": "update-re-resolves"
+        "lock_after": "update-re-resolves",
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -4692,7 +5001,8 @@
         "bases": [
           "{base}/does-not-exist",
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -4709,7 +5019,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -4737,7 +5049,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -4754,7 +5067,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -4781,7 +5096,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -4801,7 +5117,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -4828,7 +5146,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -4847,7 +5166,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -4874,7 +5195,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -4893,7 +5215,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -4920,7 +5244,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -4939,7 +5264,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -4966,7 +5293,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -4985,7 +5313,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -5012,7 +5342,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -5029,7 +5360,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -5056,7 +5389,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -5078,7 +5412,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -5105,7 +5441,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -5122,7 +5459,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -5149,7 +5488,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -5166,7 +5506,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -5193,7 +5535,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -5210,7 +5553,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -5237,7 +5582,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {
         "CHTYPES_DOWNLOAD_TOKEN": "test-static-token"
@@ -5256,7 +5602,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -5283,7 +5631,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {
         "CHTYPES_DOWNLOAD_TOKEN": "wrong-token"
@@ -5302,7 +5651,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -5329,7 +5680,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {
         "CHTYPES_DOWNLOAD_TOKEN": "forbidden-token"
@@ -5348,7 +5700,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -5375,7 +5729,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {
         "CHTYPES_DOWNLOAD_TOKEN": "test-static-token"
@@ -5394,7 +5749,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -5421,7 +5778,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -5438,7 +5796,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -5466,7 +5826,8 @@
         "bases": [
           "{base}",
           "{base2}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -5488,7 +5849,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -5516,7 +5879,8 @@
         "bases": [
           "{base}",
           "{base2}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -5533,7 +5897,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -5561,7 +5927,8 @@
         "bases": [
           "{base}",
           "{base}-never-contacted"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -5580,7 +5947,9 @@
           ],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -5608,7 +5977,8 @@
         "bases": [
           "http://127.0.0.1:1/chtypes/v1",
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -5625,7 +5995,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -5652,7 +6024,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -5671,7 +6044,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -5698,7 +6073,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -5715,7 +6091,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -5743,7 +6121,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -5760,7 +6139,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -5788,7 +6169,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -5805,7 +6187,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -5833,7 +6217,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -5850,7 +6235,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -5878,7 +6265,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -5895,7 +6283,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -5923,7 +6313,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -5940,7 +6331,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -5968,7 +6361,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -5985,7 +6379,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -6013,7 +6409,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -6030,7 +6427,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -6058,7 +6457,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -6075,7 +6475,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -6103,7 +6505,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -6120,7 +6523,9 @@
           "none_matching": [],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
       }
     },
     {
@@ -6148,7 +6553,8 @@
         "trust": "test",
         "bases": [
           "{base}"
-        ]
+        ],
+        "own_fingerprint": null
       },
       "env": {},
       "expect": {
@@ -6167,7 +6573,767 @@
           ],
           "auth_on_second_origin": false
         },
-        "lock_after": null
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
+      }
+    },
+    {
+      "id": "dev-alias-line-present",
+      "tree": "dev-alias",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null
+      },
+      "request": {
+        "spelling": "26.8",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d"
+      },
+      "env": {},
+      "expect": {
+        "ok": true,
+        "version": "26.8.15.9",
+        "build": "20260920.120000",
+        "manifest": "sha256:7936ec2b04468ba3f91e6869e2d3db3b4ad83f3624852e8740c9c6df100c9e8c",
+        "library_sha256": "1132bc155062ea7e593a63a75cad66467ec0610b11df3aa68a9f916d859b6c43",
+        "code": null,
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": null,
+          "none_matching": [
+            "GET .*/manifests/26.8$"
+          ],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
+      }
+    },
+    {
+      "id": "dev-alias-exact-present",
+      "tree": "dev-alias",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null
+      },
+      "request": {
+        "spelling": "26.8.14.2",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d"
+      },
+      "env": {},
+      "expect": {
+        "ok": true,
+        "version": "26.8.14.2",
+        "build": "20260901.000000",
+        "manifest": "sha256:d646379be4fbad412f4da3069cd6f9e332a7cedc35a277b37d86c41642e04da6",
+        "library_sha256": "a74187532bd311f964ffe2fc902d4adea2a9916f0bfeaec2c6370b03fba82f94",
+        "code": null,
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": null,
+          "none_matching": [
+            "GET .*/manifests/26.8.14.2$"
+          ],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
+      }
+    },
+    {
+      "id": "dev-alias-absent",
+      "tree": "dev-alias",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null
+      },
+      "request": {
+        "spelling": "26.8",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": "6b9cf343c1a27657ae1abb846b206d5a4abcd0e220cf98cef2538cc09e7cc9df"
+      },
+      "env": {},
+      "expect": {
+        "ok": true,
+        "version": "26.8.15.10",
+        "build": "20261005.120000",
+        "manifest": "sha256:04c5dc762ea2d565054ccd112c279bfeb6de9b41afc83863ae8f9a829263e529",
+        "library_sha256": "0f4c135c8463eb631cda95190015d1c4aef2a7b881daa997e347ad6cb73fb754",
+        "code": null,
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": null,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
+      }
+    },
+    {
+      "id": "dev-alias-v1-channel-never",
+      "tree": "dev-alias",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null
+      },
+      "request": {
+        "spelling": "26.8",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null
+      },
+      "env": {},
+      "expect": {
+        "ok": true,
+        "version": "26.8.15.10",
+        "build": "20261005.120000",
+        "manifest": "sha256:04c5dc762ea2d565054ccd112c279bfeb6de9b41afc83863ae8f9a829263e529",
+        "library_sha256": "0f4c135c8463eb631cda95190015d1c4aef2a7b881daa997e347ad6cb73fb754",
+        "code": null,
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": null,
+          "none_matching": [
+            "--fp-"
+          ],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
+      }
+    },
+    {
+      "id": "dev-alias-platform-absent",
+      "tree": "dev-alias",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null
+      },
+      "request": {
+        "spelling": "26.7",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d"
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_ARTIFACT_UNPUBLISHED",
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": 1,
+          "none_matching": [
+            "GET .*/manifests/26.7$"
+          ],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
+      }
+    },
+    {
+      "id": "dev-alias-signed-version-outside",
+      "tree": "dev-alias",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null
+      },
+      "request": {
+        "spelling": "26.6",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d"
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_ARTIFACT_CORRUPT",
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": null,
+          "none_matching": [
+            "GET .*/manifests/26.6$"
+          ],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
+      }
+    },
+    {
+      "id": "dev-alias-5xx-no-fallback",
+      "tree": "dev-alias",
+      "transports": [
+        "http"
+      ],
+      "http_script": "dev-alias-5xx-no-fallback",
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null
+      },
+      "request": {
+        "spelling": "26.8",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d"
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_SOURCE_UNREACHABLE",
+        "sleeps": [
+          4,
+          8,
+          16,
+          32
+        ],
+        "warnings": [],
+        "requests": {
+          "max": 5,
+          "none_matching": [
+            "GET .*/manifests/26.8$"
+          ],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
+      }
+    },
+    {
+      "id": "dev-alias-second-base",
+      "tree": "dev-alias",
+      "transports": [
+        "http"
+      ],
+      "http_script": "dev-alias-second-base",
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null
+      },
+      "request": {
+        "spelling": "26.8",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}",
+          "{base2}"
+        ],
+        "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d"
+      },
+      "env": {},
+      "expect": {
+        "ok": true,
+        "version": "26.8.15.9",
+        "build": "20260920.120000",
+        "manifest": "sha256:7936ec2b04468ba3f91e6869e2d3db3b4ad83f3624852e8740c9c6df100c9e8c",
+        "library_sha256": "1132bc155062ea7e593a63a75cad66467ec0610b11df3aa68a9f916d859b6c43",
+        "code": null,
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": null,
+          "none_matching": [
+            "GET .*/manifests/26.8$"
+          ],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
+      }
+    },
+    {
+      "id": "dev-alias-5xx-then-404-no-fallback",
+      "tree": "dev-alias",
+      "transports": [
+        "http"
+      ],
+      "http_script": "dev-alias-5xx-then-404-no-fallback",
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null
+      },
+      "request": {
+        "spelling": "26.8",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}",
+          "{base2}"
+        ],
+        "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d"
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_SOURCE_UNREACHABLE",
+        "sleeps": [
+          4,
+          8,
+          16,
+          32
+        ],
+        "warnings": [],
+        "requests": {
+          "max": null,
+          "none_matching": [
+            "GET .*/manifests/26.8$"
+          ],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
+      }
+    },
+    {
+      "id": "dev-alias-foreign-newer-fetches-own",
+      "tree": "dev-alias",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "dev-alias-foreign-newer",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null
+      },
+      "request": {
+        "spelling": "26.8",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d"
+      },
+      "env": {},
+      "expect": {
+        "ok": true,
+        "version": "26.8.15.9",
+        "build": "20260920.120000",
+        "manifest": "sha256:7936ec2b04468ba3f91e6869e2d3db3b4ad83f3624852e8740c9c6df100c9e8c",
+        "library_sha256": "1132bc155062ea7e593a63a75cad66467ec0610b11df3aa68a9f916d859b6c43",
+        "code": null,
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": null,
+          "none_matching": [
+            "GET .*/manifests/26.8$"
+          ],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [
+          "sha256:04c5dc762ea2d565054ccd112c279bfeb6de9b41afc83863ae8f9a829263e529"
+        ]
+      }
+    },
+    {
+      "id": "resolve-installed-dev-alias-foreign-newer",
+      "tree": "dev-alias",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "dev-alias-foreign-newer",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null
+      },
+      "request": {
+        "spelling": "26.8",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d"
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_ARTIFACT_MISSING",
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": 0,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [
+          "sha256:04c5dc762ea2d565054ccd112c279bfeb6de9b41afc83863ae8f9a829263e529"
+        ]
+      }
+    },
+    {
+      "id": "resolve-installed-dev-alias-own-beside-foreign-newer",
+      "tree": "dev-alias",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "dev-alias-own-beside-foreign-newer",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null
+      },
+      "request": {
+        "spelling": "26.8",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d"
+      },
+      "env": {},
+      "expect": {
+        "ok": true,
+        "version": "26.8.15.9",
+        "build": "20260920.120000",
+        "manifest": "sha256:7936ec2b04468ba3f91e6869e2d3db3b4ad83f3624852e8740c9c6df100c9e8c",
+        "library_sha256": "1132bc155062ea7e593a63a75cad66467ec0610b11df3aa68a9f916d859b6c43",
+        "code": null,
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": 0,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [
+          "sha256:04c5dc762ea2d565054ccd112c279bfeb6de9b41afc83863ae8f9a829263e529"
+        ]
+      }
+    },
+    {
+      "id": "dev-alias-own-beside-foreign-newer-offline",
+      "tree": "dev-alias",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "dev-alias-own-beside-foreign-newer",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null
+      },
+      "request": {
+        "spelling": "26.8",
+        "platform": "linux-arm64",
+        "offline": true,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d"
+      },
+      "env": {},
+      "expect": {
+        "ok": true,
+        "version": "26.8.15.9",
+        "build": "20260920.120000",
+        "manifest": "sha256:7936ec2b04468ba3f91e6869e2d3db3b4ad83f3624852e8740c9c6df100c9e8c",
+        "library_sha256": "1132bc155062ea7e593a63a75cad66467ec0610b11df3aa68a9f916d859b6c43",
+        "code": null,
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": 0,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [
+          "sha256:04c5dc762ea2d565054ccd112c279bfeb6de9b41afc83863ae8f9a829263e529"
+        ]
+      }
+    },
+    {
+      "id": "resolve-installed-dev-alias-v1-channel-sees-all",
+      "tree": "dev-alias",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "dev-alias-own-beside-foreign-newer",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null
+      },
+      "request": {
+        "spelling": "26.8",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null
+      },
+      "env": {},
+      "expect": {
+        "ok": true,
+        "version": "26.8.15.10",
+        "build": "20261005.120000",
+        "manifest": "sha256:04c5dc762ea2d565054ccd112c279bfeb6de9b41afc83863ae8f9a829263e529",
+        "library_sha256": "0f4c135c8463eb631cda95190015d1c4aef2a7b881daa997e347ad6cb73fb754",
+        "code": null,
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": 0,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": []
+      }
+    },
+    {
+      "id": "list-tags-dev-alias",
+      "tree": "dev-alias-list",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null
+      },
+      "request": {
+        "spelling": "",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d"
+      },
+      "env": {},
+      "expect": {
+        "ok": true,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": null,
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": null,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": [
+          "26.8",
+          "26.9"
+        ],
+        "records_intact": []
       }
     }
   ]

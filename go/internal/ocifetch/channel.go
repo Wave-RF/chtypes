@@ -18,6 +18,18 @@ package ocifetch
 //     used through its subroot <cache>/v2-dev, never as a whole layout;
 //   - a signed predicate must say abi 2.
 //
+// It also resolves one tag the v1 contract never asks for: a version request
+// fetches <tag>--fp-<its own fingerprint> first, the newest dev build of the
+// ABI this module speaks, and falls back to <tag> only when no base has that
+// alias (docs/guides/fetch-v1.md §3, "The dev channel's alias step"), so a dev
+// build of a newer fingerprint never strands this one. Its cache lookups
+// (ResolveInstalled, and Ensure's offline answer and its monotonic rule) see
+// only the records whose signed abi_fingerprint is its own: a build of another
+// fingerprint in a shared cache is never returned and never kept over this
+// one's own, and it is never removed or rewritten either. It is automatic, with
+// no override; the trust checks are unchanged, and a listing never shows an
+// alias.
+//
 // The v1 contract itself stays in this package, unchanged, because the fetch-v1
 // conformance cases (tests/fixtures/fetch-v1) are its specification and the
 // dev channel shares every other rule with it. Only a test binary reaches it:
@@ -28,7 +40,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -60,6 +74,10 @@ const (
 // generated set is the v1 fetch contract's.
 const EnvOfflineName = `CHTYPES_OFFLINE`
 
+// AliasSeparator joins a tag and a fingerprint into the dev channel's alias
+// tag: <tag>--fp-<64 lowercase hex> (docs/guides/fetch-v1.md §3).
+const AliasSeparator = "--fp-"
+
 // PinningRefused is the message every lock, frozen or update request gets
 // from a 2.0.0-dev SDK, before any network call (rule r6).
 const PinningRefused = "--lock, --frozen and --update are refused by a 2.0.0-dev SDK: a dev build is replaceable, " +
@@ -77,6 +95,11 @@ type channel struct {
 	keys         []ReleaseKey
 	overridable  bool // the base, trust and unsigned overrides are honored
 	pinnable     bool // lock, frozen and update are honored
+	// ownFingerprint is the fingerprint, 64 lowercase hex, this contract's
+	// SDK speaks: a version request resolves its alias tag before the tag
+	// itself, and the cache lookups see only records signed with it. ""
+	// does neither (the v1 contract and every production channel).
+	ownFingerprint string
 }
 
 // devChannel is what a 2.0.0-dev SDK speaks, and what every non-test binary of
@@ -90,6 +113,8 @@ var devChannel = channel{
 	systemDirs:   []string{"/usr/local/share/chtypes/" + DevCacheDir, "/opt/chtypes/" + DevCacheDir},
 	bases:        []string{DevChannelBase},
 	keys:         []ReleaseKey{{KeyID: DevKeyID, Ed25519Hex: DevKeyHex}},
+	// The generated constant (abi_fingerprint_gen.go), never a hand-written one.
+	ownFingerprint: strings.TrimPrefix(DevABIFingerprint, "sha256:"),
 }
 
 // fetchV1Channel is the v1 contract the conformance cases specify, from the
@@ -151,6 +176,51 @@ func AllowOverridesForTests() (restore func()) {
 	c := devChannel
 	c.overridable = true
 	return use(&c)
+}
+
+// UseOwnFingerprintForTests makes this TEST binary's active contract speak
+// fingerprint (64 lowercase hex) as the dev channel speaks its own: a version
+// request resolves that fingerprint's alias tag first, and the cache lookups
+// see only records signed with it. The fetch-v1 conformance cases that carry
+// request.own_fingerprint run under it, against fixtures that name a fixture
+// fingerprint. Everything else stays the active contract's. It returns the
+// restore function, and panics outside a test binary or on a fingerprint that
+// is not 64 lowercase hex.
+func UseOwnFingerprintForTests(fingerprint string) (restore func()) {
+	testOnly("UseOwnFingerprintForTests")
+	if !fingerprintHex.MatchString(fingerprint) {
+		panic("ocifetch: UseOwnFingerprintForTests: " + strconv.Quote(fingerprint) + " is not 64 lowercase hex")
+	}
+	c := *active()
+	c.ownFingerprint = fingerprint
+	return use(&c)
+}
+
+var fingerprintHex = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// aliasTag is the alias a version request for tag resolves first under a
+// contract with an own fingerprint, or "" when it resolves tag alone: under
+// the v1 contract and every production channel, and for a request that is not
+// a version spelling (an arbitrary tag has no alias).
+func (c *channel) aliasTag(tag string) string {
+	if c == nil || c.ownFingerprint == "" || !spellingRegex.MatchString(tag) {
+		return ""
+	}
+	return tag + AliasSeparator + c.ownFingerprint
+}
+
+// visible reports whether a cache record (or a pre-seeded entry) whose SIGNED
+// predicate is pred may answer a request under this contract: under one with
+// an own fingerprint (the dev channel), only when the predicate's
+// abi_fingerprint is that fingerprint; under every other, always. A record it
+// cannot see is never returned and never kept by the monotonic rule, and
+// nothing removes or rewrites it: another SDK of another fingerprint owns it.
+func (c *channel) visible(pred map[string]any) bool {
+	if c == nil || c.ownFingerprint == "" {
+		return true
+	}
+	fp, _ := pred["abi_fingerprint"].(string)
+	return fp == "sha256:"+c.ownFingerprint
 }
 
 // UseDevChannelForTests makes this TEST binary speak the dev channel exactly

@@ -56,7 +56,8 @@ set -euo pipefail
 # versions ^2\.N\.N$ (not pre-releases), the production repository
 # https://registry.wavehouse.dev/chtypes/v2, the release key (key id
 # deb275922dbff76e), the cache subroot v2, npm's `latest` dist-tag, and
-# never-default replaced by its opposite (the default then IS the new 2.x).
+# never-default replaced by its opposite (the default then IS the new 2.x),
+# and no FP_ALIAS: a production channel never resolves an alias.
 # Until that pull request exists, any other CHANNEL refuses everything below.
 # ============================================================================
 CHANNEL="v2-dev"
@@ -76,6 +77,7 @@ case "$CHANNEL" in
     CACHE_SUBROOT=v2-dev
     RECORD_SCHEMA=2
     GO_MODULE=github.com/wave-rf/chtypes/go/v2
+    FP_ALIAS=1   # a dev SDK resolves <tag>--fp-<its fingerprint> before <tag> (docs/guides/fetch-v1.md §3)
     ;;
   *)
     echo "::error::release-channel: CHANNEL '$CHANNEL' has no definition. Only the lock writes another arm (scripts/release-channel.sh, THE LOCK; #511)." >&2

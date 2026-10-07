@@ -10,12 +10,17 @@
 
 import diagnosticsChannel from 'node:diagnostics_channel';
 import { createHash } from 'node:crypto';
-import { cp, mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ABI_FINGERPRINT } from '../../src/abi2/decls.gen.js';
 import {
   activeChannel,
+  aliasTag,
+  allowOverridesForTests,
   captureIgnoredForTests,
   channelName,
   DEV_CACHE_DIR,
@@ -28,12 +33,13 @@ import {
   PinningRefusedError,
   useDevChannelForTests,
   useFetchV1ForTests,
+  visibleToChannel,
 } from '../../src/ocifetch/channel.js';
 import { RELEASE_KEYS, TEST_KEYS } from '../../src/ocifetch/constants.gen.js';
 import { checkArtifactStatement, keyIdOfRawKey, parseStatement } from '../../src/ocifetch/dsse.js';
 import { effectiveFetchOptions, ensure, listInstalled, resolveInstalled } from '../../src/ocifetch/ensure.js';
 import { cacheRoot, decodeRecord, encodeRecord, systemDirs, unpackedDir, type VerifiedRecord } from '../../src/ocifetch/layout.js';
-import { ArtifactMissingError } from '../../src/ocifetch/errors.js';
+import { ArtifactMissingError, FetchV1Error } from '../../src/ocifetch/errors.js';
 import type { ArtifactPredicate, FetchV1Options } from '../../src/ocifetch/types.js';
 
 useDevChannelForTests();
@@ -305,7 +311,10 @@ describe('public issue #528: CHTYPES_OFFLINE=1 is the environment twin of the of
       bundleDigest: null,
       bundleManifestDigest: null,
       signedBy: null,
-      predicate: { clickhouse_version: '26.8.1.1', build: '20260801.000001' } as unknown as ArtifactPredicate,
+      // A build of this SDK's own ABI: its predicate names the generated
+      // fingerprint, as a dev artifact's signed predicate does, so the dev
+      // channel's record filter sees it.
+      predicate: { clickhouse_version: '26.8.1.1', build: '20260801.000001', abi_fingerprint: ABI_FINGERPRINT } as unknown as ArtifactPredicate,
     };
     const entry = unpackedDir(root, hex);
     await mkdir(entry, { recursive: true });
@@ -326,5 +335,81 @@ describe('public issue #528: CHTYPES_OFFLINE=1 is the environment twin of the of
       requests.stop();
     }
     expect(requests.count()).toBe(0);
+  });
+});
+
+describe('the alias step (guide §3): a dev SDK prefers the newest build of its own fingerprint', () => {
+  const hexFp = ABI_FINGERPRINT.slice('sha256:'.length);
+
+  it('names its alias with its own generated fingerprint (the one the header defines), only for a version spelling; the v1 contract has none', async () => {
+    expect(ABI_FINGERPRINT.startsWith('sha256:')).toBe(true);
+    expect(hexFp).toMatch(/^[0-9a-f]{64}$/);
+    const header = await readFile(path.resolve(import.meta.dirname, '../../../include/v2/chtypes.h'), 'utf8');
+    expect(header).toContain(`#define CHS_ABI_FINGERPRINT "${ABI_FINGERPRINT}"`);
+    for (const tag of ['26.9', '26.9.8', '26.9.8.3']) expect(aliasTag(tag)).toBe(`${tag}--fp-${hexFp}`);
+    expect(aliasTag('26.9')?.length).toBe(73);
+    expect(aliasTag('latest')).toBeUndefined();
+    expect(aliasTag('sha256-abc')).toBeUndefined();
+    const restore = useFetchV1ForTests();
+    try {
+      expect(aliasTag('26.9')).toBeUndefined();
+    } finally {
+      restore();
+    }
+  });
+
+  for (const [aliasStatus, attempts, code] of [
+    [404, 1, 'CHTYPES_ARTIFACT_UNPUBLISHED'],
+    [503, 5, 'CHTYPES_SOURCE_UNREACHABLE'],
+  ] as const) {
+    it(`requests its own alias FIRST; an alias ${aliasStatus} gives ${code}${aliasStatus === 404 ? ' after the tag' : ', and the tag is never requested'}`, async () => {
+      clearEnv();
+      const alias = `/v2/chtypes/v2-dev/manifests/26.9--fp-${hexFp}`;
+      const tag = '/v2/chtypes/v2-dev/manifests/26.9';
+      const paths: string[] = [];
+      const server = createServer((req, res) => {
+        paths.push(req.url ?? '');
+        res.statusCode = req.url === alias ? aliasStatus : 404;
+        res.end();
+      });
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const restore = allowOverridesForTests();
+      let caught: unknown;
+      try {
+        const { port } = server.address() as AddressInfo;
+        await ensure('26.9', {
+          bases: [`http://127.0.0.1:${port}/chtypes/v2-dev`],
+          cacheDir: await tempDir(),
+          systemDirs: [],
+          platform: 'linux-amd64',
+          clock: { now: () => Date.now(), sleep: async () => {} },
+        });
+      } catch (err) {
+        caught = err;
+      } finally {
+        restore();
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+      expect(caught).toBeInstanceOf(FetchV1Error);
+      expect((caught as FetchV1Error).code).toBe(code);
+      expect(paths).toEqual([...Array<string>(attempts).fill(alias), ...(aliasStatus === 404 ? [tag] : [])]);
+    });
+  }
+});
+
+describe('the record filter (guide §3): a dev SDK sees only its own fingerprint\'s records', () => {
+  it('sees a record of its own generated fingerprint and no other; the v1 contract sees every record', () => {
+    const other = `sha256:${'0'.repeat(64)}`;
+    expect(visibleToChannel({ abi_fingerprint: ABI_FINGERPRINT })).toBe(true);
+    expect(visibleToChannel({ abi_fingerprint: other })).toBe(false);
+    expect(visibleToChannel({})).toBe(false);
+    expect(visibleToChannel({ abi_fingerprint: ABI_FINGERPRINT.slice('sha256:'.length) })).toBe(false);
+    const restore = useFetchV1ForTests();
+    try {
+      expect(visibleToChannel({ abi_fingerprint: other })).toBe(true);
+      expect(visibleToChannel({})).toBe(true);
+    } finally {
+      restore();
+    }
   });
 });
