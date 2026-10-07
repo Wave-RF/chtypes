@@ -204,6 +204,116 @@ func TestDecodeBatch(t *testing.T) {
 	}
 }
 
+// atMergeBatchDoc is a batch carrying ABI v2's at_merge list in every shape
+// the spec gives an entry, and the batch's own unsupported_settings (public
+// issue #544). It has no unknown member, so the fast decoder answers it too
+// (decode_equivalence_test.go compares the two on it).
+const atMergeBatchDoc = `{
+  "outcome": "accepted",
+  "unsupported_settings": [{"name": "session_timezone"}, {"name_b64": "/w=="}],
+  "at_merge": [
+    {"row": 0, "reason": "ttl_delete"},
+    {"row": 1, "reason": "ttl_column_reset", "column": "c", "stored": "0"},
+    {"row": 2, "reason": "ttl_column_reset", "column": "t"},
+    {"row": 3, "reason": "ttl_column_reset", "column_b64": "/wA=", "stored_b64": "/w=="},
+    {"row": 4, "reason": "ttl_delete", "input_rows": [4, 7]},
+    {"row": 5, "reason": "a_reason_nobody_listed"},
+    {"row": 6, "reason": "ttl_column_reset", "column": "e", "stored": "", "input_rows": []}
+  ]
+}`
+
+// ABI v2's at_merge (public issue #544): each entry decodes one to one, an
+// absent column, stored or input_rows is nil (never an empty value), an
+// unlisted reason is its unknown(n) and never fails the batch (r3), and an
+// unknown member is ignored (r2).
+func TestDecodeBatchAtMerge(t *testing.T) {
+	b, err := decodeBatch([]byte(atMergeBatchDoc), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b.AtMerge) != 7 {
+		t.Fatalf("AtMerge = %+v, want 7 entries", b.AtMerge)
+	}
+	str := func(p *string) string {
+		if p == nil {
+			return "<nil>"
+		}
+		return *p
+	}
+	for i, tc := range []struct {
+		reason        MergeReason
+		column        string
+		stored        string
+		inputRows     []int
+		inputRowsNil  bool
+		known         bool
+		columnPresent bool
+	}{
+		{MergeTTLDelete, "<nil>", "<nil>", nil, true, true, false},
+		{MergeTTLColumnReset, "c", "0", nil, true, true, true},
+		{MergeTTLColumnReset, "t", "<nil>", nil, true, true, true},       // stored absent: decided at the merge
+		{MergeTTLColumnReset, "\xff\x00", "\xff", nil, true, true, true}, // both by their _b64 form
+		{MergeTTLDelete, "<nil>", "<nil>", []int{4, 7}, false, true, false},
+		{"a_reason_nobody_listed", "<nil>", "<nil>", nil, true, false, false},
+		{MergeTTLColumnReset, "e", "", []int{}, false, true, true}, // an empty stored is not an absent one
+	} {
+		e := b.AtMerge[i]
+		if e.Row != i || e.Reason != tc.reason || e.Reason.Known() != tc.known || str(e.Column) != tc.column || str(e.Stored) != tc.stored {
+			t.Errorf("entry %d = {Row %d Reason %q Known %v Column %q Stored %q}, want {%d %q %v %q %q}",
+				i, e.Row, e.Reason, e.Reason.Known(), str(e.Column), str(e.Stored), i, tc.reason, tc.known, tc.column, tc.stored)
+		}
+		if (e.Column != nil) != tc.columnPresent {
+			t.Errorf("entry %d: Column present = %v, want %v", i, e.Column != nil, tc.columnPresent)
+		}
+		if (e.InputRows == nil) != tc.inputRowsNil || len(e.InputRows) != len(tc.inputRows) {
+			t.Errorf("entry %d: InputRows = %#v, want %#v", i, e.InputRows, tc.inputRows)
+		}
+		for j := range tc.inputRows {
+			if e.InputRows[j] != tc.inputRows[j] {
+				t.Errorf("entry %d: InputRows = %v, want %v", i, e.InputRows, tc.inputRows)
+			}
+		}
+	}
+	if len(b.UnsupportedSettings) != 2 || b.UnsupportedSettings[0] != "session_timezone" || b.UnsupportedSettings[1] != "\xff" {
+		t.Errorf("UnsupportedSettings = %q, want the call's own declined settings as bytes", b.UnsupportedSettings)
+	}
+
+	// An unknown member, in an entry and beside the list, is ignored (r2).
+	b, err = decodeBatch([]byte(`{"outcome":"accepted","at_merge":[{"row":0,"reason":"ttl_delete","x_future":{"a":[1]},"x_future_b64":"/w=="}],"x_future_list":[1]}`), nil)
+	if err != nil || len(b.AtMerge) != 1 || b.AtMerge[0].Reason != MergeTTLDelete || b.AtMerge[0].Column != nil {
+		t.Errorf("at_merge with unknown members = %+v, %v", b.AtMerge, err)
+	}
+
+	// Absent is empty: nothing would happen at a merge, and no call setting was declined.
+	for _, doc := range []string{`{"outcome":"accepted"}`, `{"outcome":"accepted","at_merge":null,"unsupported_settings":null}`} {
+		b, err = decodeBatch([]byte(doc), nil)
+		if err != nil || b.AtMerge != nil || b.UnsupportedSettings != nil {
+			t.Errorf("%s: AtMerge = %#v, UnsupportedSettings = %#v, %v; want both nil", doc, b.AtMerge, b.UnsupportedSettings, err)
+		}
+	}
+	b, err = decodeBatch([]byte(`{"outcome":"accepted","at_merge":[],"unsupported_settings":[]}`), nil)
+	if err != nil || len(b.AtMerge) != 0 || len(b.UnsupportedSettings) != 0 {
+		t.Errorf("empty lists = %+v, %v", b, err)
+	}
+
+	// A document that breaks its schema is an InternalError naming the key.
+	for _, bad := range []string{
+		`{"at_merge":[{"row":0,"reason":"ttl_column_reset","column":"c","column_b64":"Yw=="}]}`,
+		`{"at_merge":[{"row":0,"reason":"ttl_column_reset","column":"c","stored_b64":"!!"}]}`,
+		`{"at_merge":[{"row":0,"reason":"ttl_delete","input_rows":["x"]}]}`,
+		`{"at_merge":[{"row":0,"reason":"ttl_delete","input_rows":[-1]}]}`,
+		`{"at_merge":[{"row":0,"reason":7}]}`,
+		`{"at_merge":{"row":0}}`,
+		`{"unsupported_settings":["session_timezone"]}`,
+	} {
+		_, err := decodeBatch([]byte(bad), nil)
+		var ie *InternalError
+		if !errors.As(err, &ie) {
+			t.Errorf("%s: err = %v, want an *InternalError", bad, err)
+		}
+	}
+}
+
 func TestDecodeBatchFramingKnown(t *testing.T) {
 	doc := `{"outcome":"accepted","rows":[],"unconsumed":[],"framing":{"bom_skipped":false,"container":"array","header":{"consumed":true,"lines":1,"names":[{"name":"a"},{"name_b64":"/w=="}]}}}`
 	b, err := decodeBatch([]byte(doc), nil)

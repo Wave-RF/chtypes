@@ -64,6 +64,10 @@ var batchFixtures = map[string]string{
 	}`,
 	"byte-safe batch fields": `{"outcome":"rejected","code":27,"err_b64":"/w==","export_declined_b64":"/gA=","rows_read":"7"}`,
 	"storage transforms":     `{"outcome":"accepted","storage_transforms":[{"row":0,"column":"a","stored":"1"}]}`,
+	"at_merge, every shape":  atMergeBatchDoc,
+	"at_merge, nulls":        `{"outcome":"accepted","at_merge":[{"row":null,"reason":null,"column":null,"stored":null,"input_rows":null}],"unsupported_settings":null}`,
+	"at_merge, empty":        `{"outcome":"accepted","at_merge":[],"unsupported_settings":[]}`,
+	"at_merge, null list":    `{"outcome":"accepted","at_merge":null}`,
 }
 
 // rowFixtures are documents of one row, as decodeRow reads them; each also

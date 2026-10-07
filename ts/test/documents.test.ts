@@ -13,6 +13,8 @@ import {
   DefaultKind,
   defaultKindKnown,
   filterOutcomeKnown,
+  MergeReason,
+  mergeReasonKnown,
   Outcome,
   outcomeKnown,
   Reason,
@@ -269,6 +271,77 @@ describe('the batch document', () => {
     expect(b.outcome).toBe('skipped');
     expect(batchOutcomeKnown(b.outcome)).toBe(false);
     expect(b.rows[0]?.outcome).toBe(Outcome.Accepted);
+  });
+});
+
+// ABI v2's at_merge, in every shape the spec gives an entry, and the batch's
+// own unsupported_settings (public issue #544).
+const AT_MERGE_BATCH = {
+  outcome: 'accepted',
+  unsupported_settings: [{ name: 'session_timezone' }, { name_b64: b64([0xff]) }],
+  at_merge: [
+    { row: 0, reason: 'ttl_delete' },
+    { row: 1, reason: 'ttl_column_reset', column: 'c', stored: '0' },
+    { row: 2, reason: 'ttl_column_reset', column: 't' },
+    { row: 3, reason: 'ttl_column_reset', column_b64: b64([0xff, 0x00]), stored_b64: b64([0xff]) },
+    { row: 4, reason: 'ttl_delete', input_rows: [4, 7] },
+    { row: 5, reason: 'a_reason_nobody_listed', x_future: { a: [1] }, x_future_b64: '/w==' },
+    { row: 6, reason: 'ttl_column_reset', column: 'e', stored: '', input_rows: [] },
+  ],
+};
+
+describe('the batch document: at_merge and the batch\'s own unsupported_settings (ABI v2)', () => {
+  const bytes = (b: Buffer | undefined): number[] | undefined => (b === undefined ? undefined : [...b]);
+
+  it('decodes each at_merge entry one to one', () => {
+    const got = decodeBatch(enc(AT_MERGE_BATCH), undefined).atMerge.map((e) => ({
+      row: e.row,
+      reason: e.reason,
+      known: mergeReasonKnown(e.reason),
+      column: bytes(e.column),
+      stored: bytes(e.stored),
+      inputRows: e.inputRows,
+    }));
+    expect(got).toEqual([
+      { row: 0, reason: MergeReason.TtlDelete, known: true, column: undefined, stored: undefined, inputRows: undefined },
+      { row: 1, reason: MergeReason.TtlColumnReset, known: true, column: [0x63], stored: [0x30], inputRows: undefined },
+      // stored absent: the column's DEFAULT is decided at the merge
+      { row: 2, reason: MergeReason.TtlColumnReset, known: true, column: [0x74], stored: undefined, inputRows: undefined },
+      // both by their _b64 form
+      { row: 3, reason: MergeReason.TtlColumnReset, known: true, column: [0xff, 0x00], stored: [0xff], inputRows: undefined },
+      { row: 4, reason: MergeReason.TtlDelete, known: true, column: undefined, stored: undefined, inputRows: [4, 7] },
+      // an unlisted reason is its unknown(n), kept verbatim, and the unknown members are ignored (r2, r3)
+      { row: 5, reason: 'a_reason_nobody_listed', known: false, column: undefined, stored: undefined, inputRows: undefined },
+      // an empty stored is not an absent one
+      { row: 6, reason: MergeReason.TtlColumnReset, known: true, column: [0x65], stored: [], inputRows: [] },
+    ]);
+  });
+
+  it("reads the batch's own unsupported_settings as name objects, as bytes", () => {
+    const b = decodeBatch(enc(AT_MERGE_BATCH), undefined);
+    expect(b.unsupportedSettings.map((n) => [...n])).toEqual([[...Buffer.from('session_timezone')], [0xff]]);
+  });
+
+  it('reads an absent or empty at_merge and unsupported_settings as empty', () => {
+    for (const extra of [{}, { at_merge: [], unsupported_settings: [] }]) {
+      const b = decodeBatch(enc({ outcome: 'accepted', ...extra }), undefined);
+      expect(b.atMerge).toEqual([]);
+      expect(b.unsupportedSettings).toEqual([]);
+    }
+  });
+
+  it('refuses an at_merge that breaks its schema as an InternalError', () => {
+    for (const bad of [
+      { at_merge: [{ row: 0, reason: 'ttl_column_reset', column: 'c', column_b64: 'Yw==' }] },
+      { at_merge: [{ row: 0, reason: 'ttl_column_reset', column: 'c', stored_b64: '!!' }] },
+      { at_merge: [{ row: 0, reason: 'ttl_delete', input_rows: ['x'] }] },
+      { at_merge: [{ row: 0, reason: 'ttl_delete', input_rows: [-1] }] },
+      { at_merge: [{ row: 0, reason: 7 }] },
+      { at_merge: { row: 0 } },
+      { unsupported_settings: ['session_timezone'] },
+    ]) {
+      expect(() => decodeBatch(enc(bad), undefined), JSON.stringify(bad)).toThrow(InternalError);
+    }
   });
 });
 

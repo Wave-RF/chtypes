@@ -19,7 +19,9 @@
 
 use std::collections::BTreeMap;
 
-use crate::abi2::vocab_gen::{DefaultKind, FilterOutcome, Outcome, Reason, Source, Verdict};
+use crate::abi2::vocab_gen::{
+    DefaultKind, FilterOutcome, MergeReason, Outcome, Reason, Source, Verdict,
+};
 use crate::raw::RawText;
 
 /// A byte range of the input (or of an export): `off` and `len`.
@@ -106,6 +108,32 @@ pub struct EngineCell {
     pub value: Option<RawText>,
 }
 
+/// One thing an `OPTIMIZE TABLE ... FINAL` of the part the `INSERT` writes would
+/// do to one of its rows, at the call's clock instant: an entry of the batch's
+/// `at_merge` list (ABI v2). [`BatchResult::engine_rows`] stays exactly what the
+/// `INSERT` writer produces, so the two never contradict each other.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct AtMergeEntry {
+    /// Indexes [`BatchResult::engine_rows`]: the part's row, not the input
+    /// body's.
+    pub row: u64,
+    /// A `merge_reason` value. One the description does not list is
+    /// [`MergeReason::Unknown`] (rule r3).
+    pub reason: MergeReason,
+    /// The column a `ttl_column_reset` resets (from `column` or `column_b64`);
+    /// `None` when the entry names none.
+    pub column: Option<RawText>,
+    /// The column's value after the reset (from `stored` or `stored_b64`);
+    /// `None` when the document carries none, which it omits when the column's
+    /// DEFAULT reads the clock or a generator and the value is decided at the
+    /// merge.
+    pub stored: Option<RawText>,
+    /// The input rows, each by its index in the body, that formed the part's
+    /// row; `None` when the document carries none.
+    pub input_rows: Option<Vec<u64>>,
+}
+
 /// A row document, from `chs_preview_row`, and each entry of a batch's `rows`.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[non_exhaustive]
@@ -186,8 +214,17 @@ pub struct BatchResult {
     /// Every transformation in the batch with its `row`, storage transforms
     /// (TTL) included, as the library lists them.
     pub transformed: Vec<Transform>,
+    /// The call's own settings the library declined, from the batch's
+    /// top-level `unsupported_settings` (name objects), as bytes (ABI v2).
+    /// Empty when it names none.
+    pub unsupported_settings: Vec<RawText>,
     /// Each stored row after the engine's insert-time merge: a list of cells.
     pub engine_rows: Option<Vec<Vec<EngineCell>>>,
+    /// What an `OPTIMIZE TABLE ... FINAL` of the part would do to its rows, at
+    /// least: a later background merge can remove more as more rows expire, and
+    /// a row both removed and reset lists only `ttl_delete` (ABI v2). Empty
+    /// when the document carries none.
+    pub at_merge: Vec<AtMergeEntry>,
     /// The export bytes, present only when an export was asked for.
     pub payload: Option<Vec<u8>>,
     /// Each exported row's place in [`BatchResult::payload`].

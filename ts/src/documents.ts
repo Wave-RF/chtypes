@@ -38,6 +38,8 @@ import {
   defaultKindOf,
   filterOutcomeOf,
   type FilterOutcome,
+  type MergeReason,
+  mergeReasonOf,
   type Outcome,
   outcomeOf,
   type Reason,
@@ -84,6 +86,27 @@ export interface EngineCell {
   readonly null: boolean;
   /** The raw bytes of a scalar String or FixedString value (rule 6), when the document carries them. */
   readonly value: Buffer | undefined;
+}
+
+/**
+ * One thing an `OPTIMIZE TABLE ... FINAL` of the part the INSERT writes would do to one of its rows, at the
+ * call's clock instant: an entry of the batch's `at_merge` list (ABI v2). `engineRows` stays exactly what the
+ * INSERT writer produces, so the two never contradict each other.
+ */
+export interface AtMergeEntry {
+  /** Indexes `engineRows`: the part's row, not the input body's. */
+  readonly row: number;
+  /** A `MergeReason` value; one the description does not list is its unknown(n), kept verbatim (rule r3). */
+  readonly reason: MergeReason;
+  /** The column a `ttl_column_reset` resets, as bytes (`column` or `column_b64`); `undefined` when the entry names none. */
+  readonly column: Buffer | undefined;
+  /**
+   * The column's value after the reset, as bytes (`stored` or `stored_b64`); `undefined` when the document carries
+   * none, which it omits when the column's DEFAULT reads the clock or a generator and the value is decided at the merge.
+   */
+  readonly stored: Buffer | undefined;
+  /** The input rows, each by its index in the body, that formed the part's row; `undefined` when the document carries none. */
+  readonly inputRows: readonly number[] | undefined;
 }
 
 /** A silent change: what the input said, what is stored, and why. */
@@ -152,8 +175,16 @@ export interface BatchResult {
   readonly rowsSkipped: number;
   /** Every transform in the batch, with its `row`, as the library lists them. */
   readonly transformed: readonly Transform[];
+  /** The call's own settings the library declined, from the batch's top-level list (ABI v2); empty when it names none. */
+  readonly unsupportedSettings: readonly Buffer[];
   /** Each stored row after the engine's insert-time merge, as a list of cells. */
   readonly engineRows: readonly (readonly EngineCell[])[] | undefined;
+  /**
+   * What an `OPTIMIZE TABLE ... FINAL` of the part would do to its rows, at least: a later background merge can remove
+   * more as more rows expire, and a row both removed and reset lists only `ttl_delete` (ABI v2). Empty when the
+   * document carries none.
+   */
+  readonly atMerge: readonly AtMergeEntry[];
   /** The export buffer, present only when an export was asked for. */
   readonly payload: Buffer | undefined;
   /** Each exported row's place in `payload`. */
@@ -399,6 +430,27 @@ function engineCellOf(doc: string, v: unknown): EngineCell {
   return { column: nameOf(doc, o, 'name'), text: bytesOr(doc, o, 'stored'), null: nullFlag, value: bytesField(doc, o, 'value') };
 }
 
+/** One entry of `at_merge`. An unlisted reason is its unknown(n): kept, never a failure (r3). */
+function atMergeOf(doc: string, v: unknown): AtMergeEntry {
+  const o = asObject(doc, 'at_merge[]', v);
+  const reason: MergeReason = mergeReasonOf(strOr(doc, o, 'reason', ''));
+  const rowsRaw = o.input_rows;
+  return {
+    row: intOr(doc, o, 'row', 0),
+    reason,
+    column: bytesField(doc, o, 'column'),
+    stored: bytesField(doc, o, 'stored'),
+    inputRows:
+      rowsRaw === undefined || rowsRaw === null
+        ? undefined
+        : asArray(doc, 'at_merge[].input_rows', rowsRaw).map((n) => {
+            const i = intOf(doc, 'at_merge[].input_rows[]', n);
+            if (i < 0) bad(doc, 'at_merge[].input_rows[]', 'a non-negative integer', n);
+            return i;
+          }),
+  };
+}
+
 function spanOf(doc: string, key: string, v: unknown): Span {
   const o = asObject(doc, key, v);
   return { off: intOf(doc, `${key}.off`, o.off), len: intOf(doc, `${key}.len`, o.len) };
@@ -514,6 +566,7 @@ export function decodeBatch(bytes: Uint8Array, payload: Buffer | undefined): Bat
     rowsRead: intOr(doc, o, 'rows_read', 0),
     rowsSkipped: intOr(doc, o, 'rows_skipped', 0),
     transformed: listOf(doc, o, 'transformed').map((t) => transformOf(doc, t)),
+    unsupportedSettings: bytesListOf(doc, o, 'unsupported_settings'),
     engineRows:
       engineRaw === undefined
         ? undefined
@@ -526,6 +579,7 @@ export function decodeBatch(bytes: Uint8Array, payload: Buffer | undefined): Bat
     partitionCount: optInt(doc, o, 'partition_count'),
     unconsumed: listOf(doc, o, 'unconsumed').map((s) => spanOf(doc, 'unconsumed[]', s)),
     framing: o.framing === undefined ? undefined : framingOf(doc, o.framing),
+    atMerge: listOf(doc, o, 'at_merge').map((a) => atMergeOf(doc, a)),
   };
 }
 

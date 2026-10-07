@@ -33,6 +33,8 @@ export {
   Format,
   formatChName,
   formatKnown,
+  MergeReason,
+  mergeReasonKnown,
   Outcome,
   outcomeKnown,
   Reason,
@@ -65,6 +67,7 @@ export {
   UsageError,
 } from './abi2/index.js';
 export {
+  type AtMergeEntry,
   type BatchResult,
   type Column,
   type Computed,

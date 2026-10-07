@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from chtypes import DefaultKind, FilterOutcome, InternalError, Outcome, Verdict
+from chtypes import DefaultKind, FilterOutcome, InternalError, MergeReason, Outcome, Verdict
 from chtypes._decode import (
     decode_batch,
     decode_discovery,
@@ -202,6 +202,94 @@ def test_a_batch_decodes_rows_payload_framing_and_spans() -> None:
     assert batch.partition_count == 2 and batch.rows_passed == 1
     assert batch.framing.container == "array"
     assert batch.framing.header.names == (b"a", b"\xff")
+
+
+# ABI v2's at_merge, in every shape the spec gives an entry, and the batch's own
+# unsupported_settings (public issue #544).
+AT_MERGE_BATCH = {
+    "outcome": "accepted",
+    "unsupported_settings": [{"name": "session_timezone"}, {"name_b64": b64(b"\xff")}],
+    "at_merge": [
+        {"row": 0, "reason": "ttl_delete"},
+        {"row": 1, "reason": "ttl_column_reset", "column": "c", "stored": "0"},
+        {"row": 2, "reason": "ttl_column_reset", "column": "t"},
+        {
+            "row": 3,
+            "reason": "ttl_column_reset",
+            "column_b64": b64(b"\xff\x00"),
+            "stored_b64": b64(b"\xff"),
+        },
+        {"row": 4, "reason": "ttl_delete", "input_rows": [4, 7]},
+        {
+            "row": 5,
+            "reason": "a_reason_nobody_listed",
+            "x_future": {"a": [1]},
+            "x_future_b64": "/w==",
+        },
+        {"row": 6, "reason": "ttl_column_reset", "column": "e", "stored": "", "input_rows": []},
+    ],
+}
+
+
+def test_a_batch_decodes_at_merge_one_to_one() -> None:
+    entries = decode_batch(dumps(AT_MERGE_BATCH), None).at_merge
+    got = [(e.row, e.reason, e.reason.known, e.column, e.stored, e.input_rows) for e in entries]
+    assert got == [
+        (0, MergeReason.TTL_DELETE, True, None, None, None),
+        (1, MergeReason.TTL_COLUMN_RESET, True, b"c", b"0", None),
+        # stored absent: the column's DEFAULT is decided at the merge
+        (2, MergeReason.TTL_COLUMN_RESET, True, b"t", None, None),
+        # both by their _b64 form
+        (3, MergeReason.TTL_COLUMN_RESET, True, b"\xff\x00", b"\xff", None),
+        (4, MergeReason.TTL_DELETE, True, None, None, (4, 7)),
+        # an unlisted reason is its unknown(n), and the unknown members are ignored (r2, r3)
+        (5, "a_reason_nobody_listed", False, None, None, None),
+        # an empty stored is not an absent one
+        (6, MergeReason.TTL_COLUMN_RESET, True, b"e", b"", ()),
+    ]
+    assert (
+        isinstance(entries[5].reason, MergeReason)
+        and entries[5].reason.name == "unknown(a_reason_nobody_listed)"
+    )
+
+
+def test_a_batch_carries_its_own_unsupported_settings() -> None:
+    batch = decode_batch(dumps(AT_MERGE_BATCH), None)
+    assert batch.unsupported_settings == (b"session_timezone", b"\xff")
+
+
+@pytest.mark.parametrize(
+    "doc",
+    [
+        {},
+        {"at_merge": None, "unsupported_settings": None},
+        {"at_merge": [], "unsupported_settings": []},
+    ],
+)
+def test_absent_at_merge_and_unsupported_settings_are_empty(doc) -> None:
+    batch = decode_batch(dumps({"outcome": "accepted", **doc}), None)
+    assert batch.at_merge == () and batch.unsupported_settings == ()
+
+
+@pytest.mark.parametrize(
+    "doc",
+    [
+        {
+            "at_merge": [
+                {"row": 0, "reason": "ttl_column_reset", "column": "c", "column_b64": "Yw=="}
+            ]
+        },
+        {"at_merge": [{"row": 0, "reason": "ttl_column_reset", "column": "c", "stored_b64": "!!"}]},
+        {"at_merge": [{"row": 0, "reason": "ttl_delete", "input_rows": ["x"]}]},
+        {"at_merge": [{"row": 0, "reason": "ttl_delete", "input_rows": [-1]}]},
+        {"at_merge": [{"row": 0, "reason": 7}]},
+        {"at_merge": {"row": 0}},
+        {"unsupported_settings": ["session_timezone"]},
+    ],
+)
+def test_an_at_merge_that_breaks_its_schema_is_an_internal_error(doc) -> None:
+    with pytest.raises(InternalError):
+        decode_batch(dumps(doc), None)
 
 
 def test_unknown_is_never_false_and_never_empty() -> None:

@@ -280,15 +280,33 @@ func (r *reader) int(m map[string]any, key, path string) int {
 	if v == nil {
 		return 0
 	}
-	n, ok := r.number(v, path+"."+key)
+	return r.intOf(v, path+"."+key)
+}
+
+// intOf reads a non-negative integer (at most MaxInt32) that is present.
+func (r *reader) intOf(v any, path string) int {
+	n, ok := r.number(v, path)
 	if !ok {
 		return 0
 	}
 	i, err := strconv.ParseInt(string(n), 10, 64)
 	if err != nil || i < 0 || i > math.MaxInt32 {
-		r.fail(path+"."+key, "want a non-negative integer, got %s", n)
+		r.fail(path, "want a non-negative integer, got %s", n)
 	}
 	return int(i)
+}
+
+// intList reads a list of non-negative integers: nil when absent.
+func (r *reader) intList(m map[string]any, key, path string) []int {
+	arr := r.array(r.field(m, key), path+"."+key)
+	if arr == nil {
+		return nil
+	}
+	out := make([]int, 0, len(arr))
+	for i, e := range arr {
+		out = append(out, r.intOf(e, fmt.Sprintf("%s.%s[%d]", path, key, i)))
+	}
+	return out
 }
 
 func (r *reader) boolean(m map[string]any, key, path string) bool {
@@ -378,6 +396,32 @@ func (r *reader) transforms(m map[string]any, key, path string) []Transform {
 			Reason: reason,
 			Lossy:  reason.Lossy(),
 			Row:    r.int(em, "row", p),
+		})
+	}
+	return out
+}
+
+// atMerge reads a batch's at_merge list: what an OPTIMIZE TABLE ... FINAL of
+// the part would do to its rows. An unlisted reason is its unknown(n): kept,
+// never a failure (r3).
+func (r *reader) atMerge(m map[string]any, key, path string) []AtMergeEntry {
+	arr := r.array(r.field(m, key), path+"."+key)
+	if arr == nil {
+		return nil
+	}
+	out := make([]AtMergeEntry, 0, len(arr))
+	for i, e := range arr {
+		p := fmt.Sprintf("%s.%s[%d]", path, key, i)
+		em := r.object(e, p)
+		if em == nil {
+			return nil
+		}
+		out = append(out, AtMergeEntry{
+			Row:       r.int(em, "row", p),
+			Reason:    MergeReason(r.text(em, "reason", p)),
+			Column:    r.optBytes(em, "column", p),
+			Stored:    r.optBytes(em, "stored", p),
+			InputRows: r.intList(em, "input_rows", p),
 		})
 	}
 	return out
@@ -511,6 +555,10 @@ func decodeBatchGeneric(raw []byte, payload []byte) (BatchResult, error) {
 		RowsPassed:     r.u64(m, "rows_passed", "$"),
 		RowsCut:        r.u64(m, "rows_cut", "$"),
 		Unconsumed:     r.spans(m, "unconsumed", "$"),
+		// The call's own declined settings, and what a merge of the part would
+		// do (ABI v2): both absent on a document that predates them.
+		UnsupportedSettings: r.nameList(m, "unsupported_settings", "$"),
+		AtMerge:             r.atMerge(m, "at_merge", "$"),
 	}
 	if arr := r.array(r.field(m, "rows"), "$.rows"); arr != nil {
 		res.Rows = make([]RowResult, 0, len(arr))

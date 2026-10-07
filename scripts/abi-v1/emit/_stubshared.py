@@ -163,6 +163,10 @@ R2_DOCS = {
         "rows": [_R2_ROW],
         "transformed": [{"column": "s", "input": "1", "stored": "2", "reason": "date_clamp", "row": 0, **_UNK}],
         "storage_transforms": [{"row": 0, "column": "s", "stored": "2", "reason": "date_clamp", **_UNK}],
+        "unsupported_settings": [{"name": "st", **_UNK}],
+        "at_merge": [
+            {"row": 0, "reason": "ttl_column_reset", "column": "s", "stored": "", "input_rows": [0], **_UNK}
+        ],
         "engine_rows": [[{"name": "s", "stored": "abc", "null": False, "value_b64": "YWJj", **_UNK}]],
         "row_spans": [{"off": 0, "len": 3, **_UNK}],
         "export_declined": "",
@@ -255,6 +259,7 @@ R3_MUTATIONS = {
     "batch.rows.cols.src": ("batch", ("rows", 0, "cols", 0, "src"), "x_future_src"),
     "batch.transformed.reason": ("batch", ("transformed", 0, "reason"), "x_future_reason"),
     "batch.storage_transforms.reason": ("batch", ("storage_transforms", 0, "reason"), "x_future_reason"),
+    "batch.at_merge.reason": ("batch", ("at_merge", 0, "reason"), "x_future_reason"),
     "batch.framing.container": ("batch", ("framing", "container"), "x_future_container"),
     "filter.outcome": ("filter_result", ("outcome",), "x_future_outcome"),
     "filter.verdicts": ("filter_result", ("verdicts",), "tx"),

@@ -29,6 +29,10 @@ func decodeBatchReference(raw []byte, payload []byte) (BatchResult, error) {
 		RowsPassed:     r.u64(m, "rows_passed", "$"),
 		RowsCut:        r.u64(m, "rows_cut", "$"),
 		Unconsumed:     r.spans(m, "unconsumed", "$"),
+		// Added with ABI v2's at_merge (public issue #544), through the shared
+		// reader helpers, so the comparison covers the two new members too.
+		UnsupportedSettings: r.nameList(m, "unsupported_settings", "$"),
+		AtMerge:             r.atMerge(m, "at_merge", "$"),
 	}
 	if arr := r.array(r.field(m, "rows"), "$.rows"); arr != nil {
 		res.Rows = make([]RowResult, 0, len(arr))

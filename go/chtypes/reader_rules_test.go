@@ -66,6 +66,10 @@ func TestR2UnknownMembersAreIgnored(t *testing.T) {
 		len(b.EngineRows) != 1 || len(b.Spans) != 1 || len(b.Unconsumed) != 1 || b.Framing == nil ||
 		b.Framing.Header == nil || len(b.Framing.Header.Names) != 1 || string(b.Payload) != "{\"s\":\"abc\"}\n" {
 		t.Errorf("batch = %+v", b)
+	} else if len(b.UnsupportedSettings) != 1 || b.UnsupportedSettings[0] != "st" || len(b.AtMerge) != 1 ||
+		b.AtMerge[0].Reason != MergeTTLColumnReset || b.AtMerge[0].Column == nil || *b.AtMerge[0].Column != "s" ||
+		b.AtMerge[0].Stored == nil || *b.AtMerge[0].Stored != "" || len(b.AtMerge[0].InputRows) != 1 {
+		t.Errorf("batch at_merge %+v and unsupported_settings %q: an unknown member inside either is ignored (r2)", b.AtMerge, b.UnsupportedSettings)
 	}
 	filter, err := schema.CompileFilter("x > 1")
 	if err != nil {
@@ -139,6 +143,10 @@ func TestR3UnknownValuesAreKept(t *testing.T) {
 	}
 	if b := batch("batch.storage_transforms.reason"); b.Outcome != Accepted || len(b.Rows) != 1 {
 		t.Errorf("batch.storage_transforms.reason: the batch = %+v; an unlisted reason in a member this binding does not read must not fail it", b)
+	}
+	if b := batch("batch.at_merge.reason"); len(b.AtMerge) != 1 || b.AtMerge[0].Reason != "x_future_reason" || b.AtMerge[0].Reason.Known() ||
+		b.AtMerge[0].Column == nil || *b.AtMerge[0].Column != "s" || b.Outcome != Accepted || len(b.Rows) != 1 {
+		t.Errorf("batch.at_merge.reason: %+v; want unknown(x_future_reason) for that entry, the entry and the batch decoded", b.AtMerge)
 	}
 	if b := batch("batch.framing.container"); b.Framing == nil || b.Framing.Container != "x_future_container" {
 		t.Errorf("batch.framing.container: %+v; the schema's enum constrains the writer, never the reader (r3)", b.Framing)

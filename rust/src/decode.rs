@@ -26,14 +26,15 @@ use serde::de::{Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde_json::{Map, Value as Json};
 
 use crate::abi2::vocab_gen::{
-    BYTES_SUFFIX, DefaultKind, FilterOutcome, Outcome, Reason, Source, VALUE_BYTES, Verdict,
+    BYTES_SUFFIX, DefaultKind, FilterOutcome, MergeReason, Outcome, Reason, Source, VALUE_BYTES,
+    Verdict,
 };
 use crate::error::{Error, Result};
 use crate::raw::RawText;
 use crate::result::{
-    BatchResult, BuildInfo, Capabilities, Column, Computed, DiscoveredColumn, Discovery,
-    EngineCell, ErrorCodeEntry, ErrorCodeTable, FilterResult, FilterRowError, Framing, Header,
-    RowResult, SchemaDescription, SchemaReplicated, SchemaServer, Span, Transform, Value,
+    AtMergeEntry, BatchResult, BuildInfo, Capabilities, Column, Computed, DiscoveredColumn,
+    Discovery, EngineCell, ErrorCodeEntry, ErrorCodeTable, FilterResult, FilterRowError, Framing,
+    Header, RowResult, SchemaDescription, SchemaReplicated, SchemaServer, Span, Transform, Value,
 };
 
 // -------------------------------------------------------------- strict parse
@@ -521,6 +522,14 @@ pub(crate) fn batch(bytes: &[u8], payload: Option<Vec<u8>>) -> Result<BatchResul
         None => None,
         Some(f) => Some(framing_of(&f)?),
     };
+    let mut at_merge = Vec::new();
+    for (i, v) in o.array("at_merge")?.iter().enumerate() {
+        at_merge.push(at_merge_of(&Obj::of(
+            "batch",
+            format!("at_merge[{i}]"),
+            v,
+        )?)?);
+    }
     Ok(BatchResult {
         outcome: Outcome::from_wire(&o.string("outcome")?),
         err_code: o.int32("code")?,
@@ -529,7 +538,9 @@ pub(crate) fn batch(bytes: &[u8], payload: Option<Vec<u8>>) -> Result<BatchResul
         rows_read: o.uint64("rows_read")?,
         rows_skipped: o.uint64("rows_skipped")?,
         transformed: transforms(&o, "transformed")?,
+        unsupported_settings: o.name_objects("unsupported_settings")?,
         engine_rows,
+        at_merge,
         payload,
         spans: row_spans,
         export_declined: o.bytes("export_declined")?,
@@ -538,6 +549,27 @@ pub(crate) fn batch(bytes: &[u8], payload: Option<Vec<u8>>) -> Result<BatchResul
         partition_count: o.opt_uint64("partition_count")?,
         unconsumed: spans(&o, "unconsumed")?,
         framing,
+    })
+}
+
+/// One entry of `at_merge`. An unlisted reason is its `Unknown` (rule r3): kept,
+/// never a failure.
+fn at_merge_of(o: &Obj<'_>) -> Result<AtMergeEntry> {
+    let input_rows = match o.opt_array("input_rows")? {
+        None => None,
+        Some(items) => Some(
+            items
+                .iter()
+                .map(|v| o.uint64_of("input_rows", v))
+                .collect::<Result<Vec<u64>>>()?,
+        ),
+    };
+    Ok(AtMergeEntry {
+        row: o.uint64("row")?,
+        reason: MergeReason::from_wire(&o.string("reason")?),
+        column: o.bytes_opt("column")?.map(RawText::from),
+        stored: o.bytes_opt("stored")?.map(RawText::from),
+        input_rows,
     })
 }
 
@@ -733,7 +765,9 @@ pub(crate) fn build_info(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::abi2::vocab_gen::{DefaultKind, FilterOutcome, Outcome, Reason, Source, Verdict};
+    use crate::abi2::vocab_gen::{
+        DefaultKind, FilterOutcome, MergeReason, Outcome, Reason, Source, Verdict,
+    };
 
     fn internal(e: Error) -> String {
         match e {
@@ -1071,6 +1105,143 @@ mod tests {
         let m = live_handles(br#"{"chs_schema":2,"chs_filter":0}"#).unwrap();
         assert_eq!(m.get("chs_schema"), Some(&2));
         assert_eq!(m.get("chs_filter"), Some(&0));
+    }
+
+    /// ABI v2's `at_merge`, in every shape the spec gives an entry, and the
+    /// batch's own `unsupported_settings` (public issue #544).
+    const AT_MERGE_BATCH: &[u8] = br#"{
+        "outcome": "accepted",
+        "unsupported_settings": [{"name": "session_timezone"}, {"name_b64": "/w=="}],
+        "at_merge": [
+            {"row": 0, "reason": "ttl_delete"},
+            {"row": 1, "reason": "ttl_column_reset", "column": "c", "stored": "0"},
+            {"row": 2, "reason": "ttl_column_reset", "column": "t"},
+            {"row": 3, "reason": "ttl_column_reset", "column_b64": "/wA=", "stored_b64": "/w=="},
+            {"row": 4, "reason": "ttl_delete", "input_rows": [4, 7]},
+            {"row": 5, "reason": "a_reason_nobody_listed", "x_future": {"a": [1]}, "x_future_b64": "/w=="},
+            {"row": 6, "reason": "ttl_column_reset", "column": "e", "stored": "", "input_rows": []}
+        ]
+    }"#;
+
+    #[test]
+    fn a_batch_decodes_at_merge_one_to_one() {
+        let b = batch(AT_MERGE_BATCH, None).unwrap();
+        let bytes = |t: &Option<RawText>| t.as_ref().map(|r| r.as_bytes().to_vec());
+        let got: Vec<_> = b
+            .at_merge
+            .iter()
+            .map(|e| {
+                (
+                    e.row,
+                    e.reason.clone(),
+                    e.reason.is_known(),
+                    bytes(&e.column),
+                    bytes(&e.stored),
+                    e.input_rows.clone(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (0, MergeReason::TtlDelete, true, None, None, None),
+                (
+                    1,
+                    MergeReason::TtlColumnReset,
+                    true,
+                    Some(b"c".to_vec()),
+                    Some(b"0".to_vec()),
+                    None
+                ),
+                // stored absent: the column's DEFAULT is decided at the merge
+                (
+                    2,
+                    MergeReason::TtlColumnReset,
+                    true,
+                    Some(b"t".to_vec()),
+                    None,
+                    None
+                ),
+                // both by their _b64 form
+                (
+                    3,
+                    MergeReason::TtlColumnReset,
+                    true,
+                    Some(vec![0xff, 0x00]),
+                    Some(vec![0xff]),
+                    None
+                ),
+                (
+                    4,
+                    MergeReason::TtlDelete,
+                    true,
+                    None,
+                    None,
+                    Some(vec![4, 7])
+                ),
+                // an unlisted reason is its Unknown, and the unknown members are ignored (r2, r3)
+                (
+                    5,
+                    MergeReason::Unknown("a_reason_nobody_listed".into()),
+                    false,
+                    None,
+                    None,
+                    None
+                ),
+                // an empty stored is not an absent one
+                (
+                    6,
+                    MergeReason::TtlColumnReset,
+                    true,
+                    Some(b"e".to_vec()),
+                    Some(vec![]),
+                    Some(vec![])
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_batch_carries_its_own_unsupported_settings() {
+        let b = batch(AT_MERGE_BATCH, None).unwrap();
+        let names: Vec<&[u8]> = b
+            .unsupported_settings
+            .iter()
+            .map(RawText::as_bytes)
+            .collect();
+        assert_eq!(names, vec![&b"session_timezone"[..], &[0xff][..]]);
+    }
+
+    #[test]
+    fn absent_at_merge_and_unsupported_settings_are_empty() {
+        let docs: [&[u8]; 3] = [
+            br#"{"outcome":"accepted"}"#,
+            br#"{"outcome":"accepted","at_merge":null,"unsupported_settings":null}"#,
+            br#"{"outcome":"accepted","at_merge":[],"unsupported_settings":[]}"#,
+        ];
+        for doc in docs {
+            let b = batch(doc, None).unwrap();
+            assert!(
+                b.at_merge.is_empty() && b.unsupported_settings.is_empty(),
+                "{b:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_at_merge_that_breaks_its_schema_is_internal() {
+        let docs: [&[u8]; 7] = [
+            br#"{"at_merge":[{"row":0,"reason":"ttl_column_reset","column":"c","column_b64":"Yw=="}]}"#,
+            br#"{"at_merge":[{"row":0,"reason":"ttl_column_reset","column":"c","stored_b64":"!!"}]}"#,
+            br#"{"at_merge":[{"row":0,"reason":"ttl_delete","input_rows":["x"]}]}"#,
+            br#"{"at_merge":[{"row":0,"reason":"ttl_delete","input_rows":[-1]}]}"#,
+            br#"{"at_merge":[{"row":0,"reason":7}]}"#,
+            br#"{"at_merge":{"row":0}}"#,
+            br#"{"unsupported_settings":["session_timezone"]}"#,
+        ];
+        for doc in docs {
+            internal(batch(doc, None).unwrap_err());
+        }
     }
 
     #[test]

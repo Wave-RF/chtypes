@@ -28,9 +28,10 @@ import json
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from ._abi2._vocab import DefaultKind, FilterOutcome, Outcome, Reason, Source, Verdict
+from ._abi2._vocab import DefaultKind, FilterOutcome, MergeReason, Outcome, Reason, Source, Verdict
 from .errors import ArtifactCorruptError, internal
 from .results import (
+    AtMergeEntry,
     BatchResult,
     BuildInfo,
     Capabilities,
@@ -325,6 +326,29 @@ def _engine_cell(obj: dict[str, Any], where: str) -> EngineCell:
     )
 
 
+def _int_list(obj: Mapping[str, Any], key: str, where: str) -> tuple[int, ...] | None:
+    """A list of non-negative integers: None when absent."""
+    if obj.get(key) is None:
+        return None
+    out = []
+    for item in _list(obj, key, where):
+        if isinstance(item, bool) or not isinstance(item, int) or item < 0:
+            raise _wrong(where, key, "an array of non-negative integers", item)
+        out.append(item)
+    return tuple(out)
+
+
+def _at_merge(obj: dict[str, Any], where: str) -> AtMergeEntry:
+    # An unlisted reason is its unknown(n): kept, never a failure (rule r3).
+    return AtMergeEntry(
+        row=_int(obj, "row", where),
+        reason=MergeReason.of(_text(obj, "reason", where)),
+        column=_bytes_or_none(obj, "column", where),
+        stored=_bytes_or_none(obj, "stored", where),
+        input_rows=_int_list(obj, "input_rows", where),
+    )
+
+
 def _engine_rows(obj: Mapping[str, Any], where: str) -> tuple[tuple[EngineCell, ...], ...]:
     rows = []
     for i, row in enumerate(_list(obj, "engine_rows", where)):
@@ -411,6 +435,8 @@ def decode_batch(raw: bytes, export: bytes | None) -> BatchResult:
         framing=None
         if framing is None
         else _framing(_obj(framing, where, "framing"), f"{where}.framing"),
+        unsupported_settings=_name_list(obj, "unsupported_settings", where),
+        at_merge=_objects(obj, "at_merge", where, _at_merge),
     )
 
 
