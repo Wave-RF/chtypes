@@ -61,7 +61,7 @@ on:
         type: string
         default: ""
       interop_published_version:
-        description: "v1-cache-interop's ABI v2 matrix over the PUBLISHED dev CLIs: a channel version (2.0.0-dev.N). Go, TypeScript and Python are installed from their registries at it; Rust, and any binding at ABI v1, are built from this ref. Empty: all four are built from this ref."
+        description: "v1-cache-interop's ABI v2 matrix over the PUBLISHED dev CLIs: a channel version (2.0.0-dev.N). Go, TypeScript, Python and Rust are installed from their registries at it; any binding at ABI v1 is built from this ref. Empty: all four are built from this ref."
         required: false
         type: string
         default: ""
@@ -771,8 +771,8 @@ jobs:
     # read again as `nobody`. Everything a CLI is judged against comes from the
     # channel definition (scripts/release-channel.sh) and the registry itself,
     # never from another CLI. A dispatch that sets `interop_published_version`
-    # runs it over the PUBLISHED dev CLIs instead (Go, TypeScript and Python
-    # from their registries; Rust from this ref).
+    # runs it over the PUBLISHED dev CLIs instead (Go, TypeScript, Python and Rust
+    # from their registries).
     #
     # The hosted runner has sudo, and the CLIs are installed under one
     # world-readable prefix so `nobody` can run them. It fails if any cell
@@ -829,7 +829,7 @@ jobs:
       # is built for release, as an installed CLI is: its cells unpack and hash
       # the real ~300 MB library, which a debug build of the Rust decoder takes
       # minutes over. On a dispatch naming `interop_published_version`, Go,
-      # TypeScript and Python come from their registries at that version
+      # TypeScript, Python and Rust come from their registries at that version
       # instead, and each must say so in its --version.
       - name: build the four CLIs (or install the published dev CLIs, on a dispatch that names a version)
         env:
@@ -847,7 +847,7 @@ jobs:
             # below ever sees an arbitrary string; PyPI spells it by PEP 440.
             scripts/release-channel.sh tag go "go/v$PUBLISHED" > /dev/null
             pep440="$(printf '%s' "$PUBLISHED" | sed -E 's/-dev\.([0-9]+)$/.dev\1/')"
-            echo "v1-cache-interop: the PUBLISHED $PUBLISHED CLIs for go, ts and python (where at ABI v2); rust from this ref" | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "v1-cache-interop: the PUBLISHED $PUBLISHED CLIs for go, ts, python and rust (where at ABI v2)" | tee -a "$GITHUB_STEP_SUMMARY"
           fi
           if published go; then
             GOBIN="$X/gobin" go install "$(scripts/release-channel.sh get GO_MODULE)/cmd/chtypes@v$PUBLISHED"
@@ -871,7 +871,12 @@ jobs:
             cp -a ts/dist ts/node_modules ts/package.json "$X/ts/"
             printf '#!/usr/bin/env bash\nexec "%s" "%s/ts/dist/cli.js" "$@"\n' "$(command -v node)" "$X" > "$X/bin/cli-ts"
           fi
-          if is_v2 rust; then
+          if published rust; then
+            # --root keeps the install inside the prefix; --locked builds
+            # against the crate's own published Cargo.lock.
+            cargo install "$(scripts/release-channel.sh get CRATE)" --version "=$PUBLISHED" --locked --root "$X/rustp"
+            cp "$X/rustp/bin/chtypes" "$X/bin/cli-rust"
+          elif is_v2 rust; then
             (cd rust && cargo build --locked --release --bin chtypes)
             cp rust/target/release/chtypes "$X/bin/cli-rust"
           else
@@ -882,7 +887,7 @@ jobs:
           chmod a+x "$X"/bin/cli-*
           for b in go python ts rust; do "$X/bin/cli-$b" --version; done
           if [ -n "$PUBLISHED" ]; then
-            for b in go python ts; do
+            for b in go python ts rust; do
               published "$b" || continue
               got="$("$X/bin/cli-$b" --version)"
               case "$got" in
@@ -1063,7 +1068,7 @@ jobs:
       # is built for release, as an installed CLI is: its cells unpack and hash
       # the real ~300 MB library, which a debug build of the Rust decoder takes
       # minutes over. On a dispatch naming `interop_published_version`, Go,
-      # TypeScript and Python come from their registries at that version
+      # TypeScript, Python and Rust come from their registries at that version
       # instead, and each must say so in its --version.
       - name: build the four CLIs (or install the published dev CLIs, on a dispatch that names a version)
         env:
@@ -1081,7 +1086,7 @@ jobs:
             # below ever sees an arbitrary string; PyPI spells it by PEP 440.
             scripts/release-channel.sh tag go "go/v$PUBLISHED" > /dev/null
             pep440="$(printf '%s' "$PUBLISHED" | sed -E 's/-dev\.([0-9]+)$/.dev\1/')"
-            echo "v1-cache-interop: the PUBLISHED $PUBLISHED CLIs for go, ts and python (where at ABI v2); rust from this ref" | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "v1-cache-interop: the PUBLISHED $PUBLISHED CLIs for go, ts, python and rust (where at ABI v2)" | tee -a "$GITHUB_STEP_SUMMARY"
           fi
           if published go; then
             GOBIN="$X/gobin" go install "$(scripts/release-channel.sh get GO_MODULE)/cmd/chtypes@v$PUBLISHED"
@@ -1110,7 +1115,12 @@ jobs:
             cp "$(command -v node)" "$X/bin/node"
             printf '#!/usr/bin/env bash\nexec "%s/bin/node" "%s/ts/dist/cli.js" "$@"\n' "$X" "$X" > "$X/bin/cli-ts"
           fi
-          if is_v2 rust; then
+          if published rust; then
+            # --root keeps the install inside the prefix; --locked builds
+            # against the crate's own published Cargo.lock.
+            cargo install "$(scripts/release-channel.sh get CRATE)" --version "=$PUBLISHED" --locked --root "$X/rustp"
+            cp "$X/rustp/bin/chtypes" "$X/bin/cli-rust"
+          elif is_v2 rust; then
             (cd rust && cargo build --locked --release --bin chtypes)
             cp rust/target/release/chtypes "$X/bin/cli-rust"
           else
@@ -1121,7 +1131,7 @@ jobs:
           chmod a+x "$X"/bin/cli-*
           for b in go python ts rust; do "$X/bin/cli-$b" --version; done
           if [ -n "$PUBLISHED" ]; then
-            for b in go python ts; do
+            for b in go python ts rust; do
               published "$b" || continue
               got="$("$X/bin/cli-$b" --version)"
               case "$got" in
