@@ -1,12 +1,29 @@
 /**
  * The document decoders (`src/documents.ts`), over hand-written documents:
  * pure functions, so no library and no artifact is needed and nothing here can
- * skip. Each case pins one rule of `docs/reference/bindings-v1.md` §5.
+ * skip. Each case pins one rule of `docs/reference/bindings-v1.md` §5, under
+ * ABI v2's reader rules (`spec/abi-v2/docs.md`): r2 (unknown members ignored)
+ * and r3 (an unlisted vocabulary value is its unknown(n), kept for that field,
+ * never a failure and never a substitute).
  */
 
 import { describe, expect, it } from 'vitest';
-import { DefaultKind, Outcome, Reason, Source, verdictAnswered, Verdict } from '../src/abi1/index.js';
-import { InternalError } from '../src/abi1/errors.js';
+import {
+  batchOutcomeKnown,
+  DefaultKind,
+  defaultKindKnown,
+  filterOutcomeKnown,
+  Outcome,
+  outcomeKnown,
+  Reason,
+  reasonKnown,
+  Source,
+  sourceKnown,
+  verdictAnswered,
+  Verdict,
+  verdictKnown,
+} from '../src/abi2/index.js';
+import { InternalError } from '../src/abi2/errors.js';
 import {
   decodeBatch,
   decodeDiscovery,
@@ -65,7 +82,7 @@ describe('the row document', () => {
     expect(r.inputSpan).toEqual({ off: 0, len: 12 });
   });
 
-  it('reads a non-lossy reason as not lossy, and an unlisted reason as the fallback (value_changed: lossy), keeping its spelling', () => {
+  it('reads a non-lossy reason as not lossy, and an unlisted reason as its unknown(n), keeping its spelling, with the fallback\'s lossy fact (value_changed: lossy)', () => {
     const r = decodeRow(
       enc({
         ...doc,
@@ -77,15 +94,29 @@ describe('the row document', () => {
     );
     expect(r.transformed[0]?.lossy).toBe(false);
     expect(r.transformed[1]?.reason).toBe('a_reason_from_the_future');
+    expect(reasonKnown(r.transformed[1]?.reason ?? '')).toBe(false);
     expect(r.transformed[1]?.lossy).toBe(true);
   });
 
-  it('reads an unlisted outcome as the description fallback, unsupported', () => {
-    expect(decodeRow(enc({ ...doc, outcome: 'maybe' })).outcome).toBe(Outcome.Unsupported);
+  it('keeps an unlisted outcome as its unknown(n): never the fallback, never accepted (r3)', () => {
+    const r = decodeRow(enc({ ...doc, outcome: 'maybe' }));
+    expect(r.outcome).toBe('maybe');
+    expect(outcomeKnown(r.outcome)).toBe(false);
+    expect(r.outcome).not.toBe(Outcome.Accepted);
+    expect(r.columns).toHaveLength(4); // the rest of the row decoded
   });
 
-  it('refuses a source the vocabulary does not list: there is no is_stored fact to read', () => {
-    const bad = { ...doc, cols: [{ name: 'a', null: false, stored: '1', src: 'telepathy' }] };
+  it('keeps an unlisted source as its unknown(n) for that column alone: not stored, and the row decodes (r3)', () => {
+    const r = decodeRow(enc({ ...doc, cols: [{ name: 'a', null: false, stored: '1', src: 'telepathy' }, ...doc.cols] }));
+    expect(r.columns[0]?.source).toBe('telepathy');
+    expect(sourceKnown(r.columns[0]?.source ?? '')).toBe(false);
+    expect(r.columns[0]?.isStored).toBe(false);
+    expect(r.columns.slice(1).map((c) => c.source)).toEqual([Source.Input, Source.Default, Source.EphemeralInput, Source.Skipped]);
+    expect(r.outcome).toBe(Outcome.Accepted);
+  });
+
+  it('refuses a column that carries no source at all: an absent src is no value, not an unknown one', () => {
+    const bad = { ...doc, cols: [{ name: 'a', null: false, stored: '1' }] };
     expect(() => decodeRow(enc(bad))).toThrow(InternalError);
   });
 
@@ -233,8 +264,11 @@ describe('the batch document', () => {
     expect(b.partitionCount).toBeUndefined();
   });
 
-  it('refuses an outcome the batch vocabulary does not list only if it has no fallback (it has one: unsupported)', () => {
-    expect(decodeBatch(enc({ outcome: 'skipped' }), undefined).outcome).toBe(Outcome.Unsupported);
+  it('keeps an outcome the batch vocabulary does not list as its unknown(n), never accepted (r3)', () => {
+    const b = decodeBatch(enc({ outcome: 'skipped', rows: [{ outcome: 'accepted', cols: [] }] }), undefined);
+    expect(b.outcome).toBe('skipped');
+    expect(batchOutcomeKnown(b.outcome)).toBe(false);
+    expect(b.rows[0]?.outcome).toBe(Outcome.Accepted);
   });
 });
 
@@ -247,8 +281,18 @@ describe('the filter result document', () => {
     expect(f.errors[0]?.msg.toString()).toBe('bad');
   });
 
-  it('reads an unlisted verdict character as the fallback, the decline', () => {
-    expect(decodeFilterResult(enc({ outcome: 'ok', verdicts: 'tz' })).verdicts[1]).toBe(Verdict.Decline);
+  it('keeps an unlisted verdict character as its unknown(n), never an answer (the fallback d\'s fact), the others intact (r3)', () => {
+    const f = decodeFilterResult(enc({ outcome: 'ok', verdicts: 'tz' }));
+    expect(f.verdicts).toEqual([Verdict.True, 'z']);
+    expect(verdictKnown(f.verdicts[1] ?? '')).toBe(false);
+    expect(verdictAnswered(f.verdicts[1] ?? '')).toBe(false);
+  });
+
+  it('keeps an unlisted filter outcome as its unknown(n), never ok (r3)', () => {
+    const f = decodeFilterResult(enc({ outcome: 'maybe', verdicts: 't' }));
+    expect(f.outcome).toBe('maybe');
+    expect(filterOutcomeKnown(f.outcome)).toBe(false);
+    expect(f.verdicts).toEqual([Verdict.True]);
   });
 
   it('keeps a non-ok result as the document holds it', () => {
@@ -274,8 +318,11 @@ describe('the schema description, discovery, error-code and live-handle document
     expect([...(d.columns[1]?.name ?? [])]).toEqual([0xff]);
   });
 
-  it('refuses a default kind the vocabulary does not list', () => {
-    expect(() => decodeSchemaDescription(enc({ columns: [{ name: 'a', type: 'Int32', default_kind: 'MAGIC' }] }))).toThrow(InternalError);
+  it('keeps a default kind the vocabulary does not list as its unknown(n), the column decoded (r3)', () => {
+    const d = decodeSchemaDescription(enc({ columns: [{ name: 'a', type: 'Int32', default_kind: 'MAGIC' }] }));
+    expect(d.columns[0]?.defaultKind).toBe('MAGIC');
+    expect(defaultKindKnown(d.columns[0]?.defaultKind ?? '')).toBe(false);
+    expect(d.columns[0]?.name.toString()).toBe('a');
   });
 
   it('decodes discovered columns', () => {

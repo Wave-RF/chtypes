@@ -23,6 +23,14 @@ import {
 import { ArtifactCorruptError } from '../../src/ocifetch/errors.js';
 import { DSSE_PAYLOAD_TYPE } from '../../src/ocifetch/constants.gen.js';
 import type { TrustedKey } from '../../src/ocifetch/types.js';
+import { useFetchV1ForTests } from '../../src/ocifetch/channel.js';
+
+// This file tests the v1 fetch contract that the ABI v2 dev channel narrows
+// (src/ocifetch/channel.ts): its fixtures name their own registry and key, and
+// write schema-1 records, abi-1 predicates and locks. The dev channel's own
+// rules (spec/abi-v2/docs.md r5, r6) are test/ocifetch/devchannel.test.ts and
+// test/cli-devchannel.test.ts.
+useFetchV1ForTests();
 
 function freshKey(): { trusted: TrustedKey; privateKey: KeyObject } {
   const { publicKey, privateKey }: { publicKey: KeyObject; privateKey: KeyObject } = generateKeyPairSync('ed25519');

@@ -23,11 +23,11 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
+from chtypes._ocifetch import _channel
 from chtypes._ocifetch import _constants as C
 from chtypes._ocifetch._dsse import (
     TrustedKey,
     env_trusted_keys,
-    release_trusted_keys,
     verify_bundle,
 )
 from chtypes._ocifetch._errors import (
@@ -120,6 +120,12 @@ class Options:
     argument instead, since cache introspection (and `--lock`, which checks
     every DECLARED platform, almost always not the host's own) is not
     limited to "the machine this call happens to run on".
+
+    The active fetch contract (`_channel.py`) reads the rest: on the dev channel
+    `bases`, `trusted_keys` and `allow_unsigned` (and their environment
+    variables) are ignored, each named once, and `frozen`, `lock_path`,
+    `lock_write` and `update` are refused before any request (rule r6);
+    `cache_dir` is used through its `v2-dev` subroot (rule r5).
     """
 
     platform: str | None = None
@@ -148,7 +154,14 @@ class Options:
     # (PLAN §3.2 "index-race-reapply"). Never set outside tests.
     before_index_rename: Callable[[], None] | None = None
 
+    # The base, trust and unsigned settings, as the active fetch contract reads
+    # them (_channel.py): under the dev channel the options and their
+    # environment variables are ignored (rule r6; `_channel.enforce` names each
+    # one, once), and the contract's own base and key are the only ones.
     def resolved_bases(self) -> tuple[str, ...]:
+        channel = _channel.active()
+        if not channel.overridable:
+            return channel.bases
         if self.bases:
             return self.bases
         env = os.environ.get(C.ENV_BASES_NAME)
@@ -156,12 +169,18 @@ class Options:
             bases = tuple(b.strip() for b in env.split(C.BASE_SEPARATOR) if b.strip())
             if bases:
                 return bases
-        return C.DEFAULT_BASES
+        return channel.bases
 
     def resolved_trusted_keys(self) -> tuple[TrustedKey, ...]:
+        channel = _channel.active()
+        if not channel.overridable:
+            return _channel.trusted_keys(channel)
         if self.trusted_keys is not None:
             return self.trusted_keys
-        return env_trusted_keys() or release_trusted_keys()
+        return env_trusted_keys() or _channel.trusted_keys(channel)
+
+    def resolved_allow_unsigned(self) -> bool:
+        return _channel.active().overridable and self.allow_unsigned
 
     def resolved_platform(self) -> str:
         return self.platform or detect_host_platform()
@@ -256,7 +275,7 @@ def _record_to_resolved(
     warnings: Sequence[str] = (),
 ) -> Resolved:
     return Resolved(
-        abi_generation=C.ABI_GENERATION,
+        abi_generation=_channel.abi(),
         platform=record.platform,
         request=request_spelling,
         version=record.version,
@@ -281,9 +300,10 @@ def _record_to_resolved(
 
 def _check_predicate_matches_request(predicate: dict, platform_key: str, spelling: str) -> None:
     spec = _platform_spec(platform_key)
-    if predicate.get("abi") != C.ABI_GENERATION:
+    want_abi = _channel.abi()  # 2 on the dev channel (rule r6)
+    if predicate.get("abi") != want_abi:
         raise ArtifactCorruptError(
-            f"signed predicate abi={predicate.get('abi')!r}, want {C.ABI_GENERATION}"
+            f"signed predicate abi={predicate.get('abi')!r}, want {want_abi}"
         )
     if predicate.get("os") != spec["os"] or predicate.get("arch") != spec["architecture"]:
         raise ArtifactCorruptError(
@@ -734,7 +754,7 @@ def _ensure_floating(
 
     warnings: list[str] = []
     if found is None:
-        if not options.allow_unsigned:
+        if not options.resolved_allow_unsigned():
             raise ArtifactUntrustedError(
                 f"chtypes: no trusted signature for {request.spelling} ({platform_key})"
             )
@@ -968,6 +988,9 @@ def ensure(request: Request, options: Options) -> Resolved:
     of falling back to a floating resolve. `update=True` always ignores
     any existing pin and resolves the floating tag fresh.
     """
+    # The active contract first, the network above all: the dev channel refuses
+    # every pinning request and names each override it ignores (rule r6).
+    _channel.enforce(options)
     platform_key = options.resolved_platform()
     lock: Lock | None = None
     if options.lock_path is not None and os.path.exists(options.lock_path):
@@ -1189,6 +1212,7 @@ def resolve_installed(request: Request, platform: str, options: Options) -> Reso
     blobs before matching, so `--offline` still answers for a cache that
     was only ever pre-seeded (`oras copy --to-oci-layout`), never fetched.
     """
+    _channel.enforce(options)
     roots = search_roots(options.cache_dir, options.system_dirs)
     warnings = probe_roots(roots, options.resolved_strict())
     _verify_preseeded_entries(roots, options.resolved_trusted_keys())
@@ -1215,6 +1239,7 @@ def resolve_installed(request: Request, platform: str, options: Options) -> Reso
 def list_installed(options: Options) -> list[Resolved]:
     """Every verified install across the cache and the read-only system
     directories, cache-only (docs/guides/fetch-v1.md "The seam")."""
+    _channel.enforce(options)
     roots = search_roots(options.cache_dir, options.system_dirs)
     warnings = probe_roots(roots, options.resolved_strict())
     return [
@@ -1233,6 +1258,7 @@ def list_installed(options: Options) -> list[Resolved]:
 def verify_installed(options: Options) -> list[VerifyResult]:
     """Re-hash every installed library's on-disk bytes against its own
     `verified.json` record, cache-only."""
+    _channel.enforce(options)
     roots = search_roots(options.cache_dir, options.system_dirs)
     probe_roots(roots, options.resolved_strict())
     out = []
@@ -1289,6 +1315,7 @@ def fetch_signed(repository: str, ref: str, predicate_type: str, options: Option
     "bundle"}}`. Never dlopens or interprets the content — that is for the
     caller.
     """
+    _channel.enforce(options)
     try:
         return _fetch_signed_impl(repository, ref, predicate_type, options)
     except TransportError as e:
@@ -1310,7 +1337,7 @@ def _fetch_signed_impl(repository: str, ref: str, predicate_type: str, options: 
             policy=policy,
             retry=retry,
             trusted_keys=trusted_keys,
-            allow_unsigned=options.allow_unsigned,
+            allow_unsigned=options.resolved_allow_unsigned(),
             cache_root_path=cache_root_path,
             scratch_root=scratch_root,
         )
@@ -1332,7 +1359,7 @@ def _fetch_signed_impl(repository: str, ref: str, predicate_type: str, options: 
     bundle_digest: str | None = None
     statement_predicate: dict | None = None
     if found is None:
-        if not options.allow_unsigned:
+        if not options.resolved_allow_unsigned():
             raise ArtifactUntrustedError(f"chtypes: no trusted signature for {repository}@{ref}")
     else:
         verified, bundle_digest, _referrer_digest = found

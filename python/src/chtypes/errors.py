@@ -69,7 +69,7 @@ CODE_CACHE_UNUSABLE = "CHTYPES_CACHE_UNUSABLE"
 
 # `chs_status` value of CHS_INVALID_ARGUMENT. The binding's own misuse errors
 # carry it so a handler sees one shape whichever side caught the misuse. It is
-# the description's value (D3: closed and frozen); `chtypes._abi1._vocab.Status`
+# the description's value (D3: closed and frozen); `chtypes._abi2._vocab.Status`
 # is the generated copy, and a test pins the two together.
 _STATUS_INVALID_ARGUMENT = 3
 _STATUS_INTERNAL = 4

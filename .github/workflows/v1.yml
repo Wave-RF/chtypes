@@ -281,10 +281,21 @@ jobs:
               # "tests/ocifetch/..." substring appearing unprefixed in this
               # file (that file does not exist on `v1` yet; see the
               # runner_file step above).
+              # At ABI v2 the Python binding's dev channel narrows the
+              # contract these cases specify (spec/abi-v2/docs.md r5, r6): its
+              # own tests, beside the runner, run here too, in the same
+              # no-network sandbox.
               rel="${{ steps.runner_file.outputs.runner_file_path }}"
-              (cd python && uv run --offline --python "${{ matrix.toolchain }}" pytest -q "${rel#python/}")
+              (cd python && uv run --offline --python "${{ matrix.toolchain }}" pytest -q "${rel#python/}" \
+                && if [ "$(python3 ../scripts/abi-v1/majors.py get python)" != "1" ]; then
+                     uv run --offline --python "${{ matrix.toolchain }}" pytest -q -rA "$(dirname "${rel#python/}")/test_devchannel.py"
+                   fi)
               ;;
-            ts) (cd ts && pnpm exec vitest run test/ocifetch/conformance.test.ts) ;;
+            # At ABI v2 the TS binding's dev channel narrows the contract these
+            # cases specify (spec/abi-v2/docs.md r5, r6): its own tests run
+            # here too, in the same no-network sandbox.
+            ts) (cd ts && pnpm exec vitest run test/ocifetch/conformance.test.ts \
+                  && if [ "$(python3 ../scripts/abi-v1/majors.py get ts)" != "1" ]; then pnpm exec vitest run test/ocifetch/devchannel.test.ts; fi) ;;
             # At ABI v2 the Rust binding's dev channel narrows the contract
             # these cases specify (spec/abi-v2/docs.md r5, r6): its own tests
             # (tests/devchannel.rs) run here too, in the same sandbox.

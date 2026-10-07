@@ -1,5 +1,11 @@
 """chtypes: ClickHouse's own type system, per version, from Python.
 
+2.0.0-dev: UNSTABLE, staging only, not for production. This pre-release speaks
+the ABI v2 dev description (spec/abi-v2/docs.md): it fetches only from the
+staging dev channel and trusts only its key, refuses locks and frozen fetches,
+caches under its own `v2-dev` root, and refuses a library built from any other
+dev fingerprint (rules r5 and r6).
+
 One question, exactly: *if this row were inserted into this ClickHouse table on
 this ClickHouse version, what would happen?* The answer comes from ClickHouse's
 real C++ machinery, vendored per release into a shared library behind the frozen
@@ -40,9 +46,10 @@ from __future__ import annotations
 from importlib.metadata import PackageNotFoundError as _PackageNotFound
 from importlib.metadata import version as _package_version
 
-from ._abi1._vocab import (
+from ._abi2._vocab import (
     EXPORT_NONE,
     DefaultKind,
+    DiscoverQueryParam,
     DocFlags,
     FilterOutcome,
     Format,
@@ -140,6 +147,7 @@ __all__ = [
     "Column",
     "Computed",
     "DefaultKind",
+    "DiscoverQueryParam",
     "DiscoveredColumn",
     "Discovery",
     "EngineCell",

@@ -27,6 +27,7 @@ import pytest
 
 import chtypes._ocifetch._ensure as _ensure_module
 import chtypes._ocifetch._http as _http_module
+from chtypes._ocifetch import _channel
 from chtypes._ocifetch import _constants as C
 from chtypes._ocifetch._dsse import (
     TrustedKey,
@@ -583,6 +584,17 @@ def test_conformance_v1(
     tmp_path_factory,
     request_log: _RequestLog,
 ) -> None:
+    # This directory runs under the v1 fetch contract (conftest.py): the cases
+    # are its specification. The ABI v2 dev channel narrows it, and its own
+    # rules (r5, r6) are test_devchannel.py.
+    print(
+        f"fetch contract: {_channel.channel_name()} (the fetch-v1 cases' own; the dev channel "
+        "this binding ships is tested by tests/ocifetch/test_devchannel.py)"
+    )
+    assert _channel.channel_name() == "v1", (
+        f"the fetch-v1 conformance cases must run under the v1 contract, not "
+        f"{_channel.channel_name()!r}"
+    )
     results = []
     for case in cases_doc["cases"]:
         for transport in case["transports"]:

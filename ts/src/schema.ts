@@ -17,8 +17,8 @@
  * call is ever in flight while `close` runs.
  */
 
-import type { BlockHandle, Calls, FilterHandle, SchemaHandle } from './abi1/index.js';
-import { DocFlags, EXPORT_NONE, type Format } from './abi1/index.js';
+import type { BlockHandle, Calls, FilterHandle, SchemaHandle } from './abi2/index.js';
+import { DocFlags, EXPORT_NONE, type Format } from './abi2/index.js';
 import {
   type BatchResult,
   decodeBatch,

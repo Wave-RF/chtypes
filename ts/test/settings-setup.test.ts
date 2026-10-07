@@ -7,7 +7,7 @@ import { mkdtempSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { UsageError } from '../src/abi1/errors.js';
+import { UsageError } from '../src/abi2/errors.js';
 import { ArtifactMissingError } from '../src/ocifetch/errors.js';
 import { Registry } from '../src/registry.js';
 import { bytesIn, encodeColumns, encodeParams, encodeSettings } from '../src/settings.js';

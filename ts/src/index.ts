@@ -1,6 +1,10 @@
 /**
  * `@wavehouse/chtypes`: ClickHouse's own type system, per version, over the
- * ABI v1 C layer (`docs/reference/bindings-v1.md` is the contract).
+ * C ABI. This is the 2.0.0-dev binding: it speaks ABI v2, whose description is
+ * UNSTABLE (`spec/abi-v2/docs.md`), fetches only from the staging dev channel,
+ * and is not for production (public issue #511). `docs/reference/bindings-v1.md`
+ * is the shape it keeps; every vocabulary gains rule r3's unknown(n) member,
+ * told apart by its `*Known` function.
  *
  *   setup(...)                                    optional, once, before the first open
  *   Registry.open() --for(request)--> Library --compileTable(createTable)--> Schema --rows(...)--> BatchResult
@@ -17,22 +21,34 @@ export {
   type BuildInfo,
   type Capabilities,
   type BatchOutcome,
+  batchOutcomeKnown,
   DefaultKind,
+  defaultKindKnown,
   DiscoverQueryParam,
+  discoverQueryParamKnown,
   DocFlags,
   EXPORT_NONE,
   FilterOutcome,
+  filterOutcomeKnown,
   Format,
   formatChName,
+  formatKnown,
   Outcome,
+  outcomeKnown,
   Reason,
+  reasonKnown,
   reasonLossy,
   Source,
   sourceIsStored,
+  sourceKnown,
   Status,
+  statusKnown,
+  statusName,
+  type Unknown,
   Verdict,
   verdictAnswered,
-} from './abi1/index.js';
+  verdictKnown,
+} from './abi2/index.js';
 export {
   ArtifactCorruptError,
   ArtifactError,
@@ -47,7 +63,7 @@ export {
   SchemaError,
   UnsupportedError,
   UsageError,
-} from './abi1/index.js';
+} from './abi2/index.js';
 export {
   type BatchResult,
   type Column,

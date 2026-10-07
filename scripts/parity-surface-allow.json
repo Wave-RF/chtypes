@@ -542,6 +542,47 @@
       "reason": "The ABI v2 dev binding's rule r3 (spec/abi-v2/docs.md): every vocabulary has an unknown(n) member, an unlisted value kept per field, which Go spells as the raw value plus Known() false; discover_query_param is an enum like every other, so it gains its type. docs/reference/bindings-v1.md is the 1.x surface and names neither; the v2 surface document lands with the other three dev bindings (public issue #511), and this entry goes with it."
     },
     {
+      "binding": "python",
+      "kind": "extra",
+      "names": [
+        "Status.known",
+        "Format.known",
+        "Reason.known",
+        "Source.known",
+        "Outcome.known",
+        "FilterOutcome.known",
+        "Verdict.known",
+        "DefaultKind.known",
+        "DiscoverQueryParam",
+        "DiscoverQueryParam.DATABASE",
+        "DiscoverQueryParam.TABLE",
+        "DiscoverQueryParam.known",
+        "DiscoverQueryParam.of"
+      ],
+      "issue": 511,
+      "reason": "The ABI v2 dev binding's rule r3 (spec/abi-v2/docs.md), as Python spells it: an unlisted value of an enum class is that class's unknown(n) member (`Outcome(\"x\")`, named `unknown(x)`), and every vocabulary gains `known`, False for exactly that member (a property on the enum classes, a function on the plain-string Reason and Source); discover_query_param is an enum like every other, so it gains its type, with `of` like the other document vocabularies. docs/reference/bindings-v1.md is the 1.x surface and names neither; the v2 surface document lands with the other dev bindings (public issue #511), and this entry goes with it."
+    },
+    {
+      "binding": "ts",
+      "kind": "extra",
+      "names": [
+        "statusKnown",
+        "statusName",
+        "formatKnown",
+        "reasonKnown",
+        "sourceKnown",
+        "outcomeKnown",
+        "batchOutcomeKnown",
+        "filterOutcomeKnown",
+        "verdictKnown",
+        "defaultKindKnown",
+        "discoverQueryParamKnown",
+        "Unknown"
+      ],
+      "issue": 511,
+      "reason": "The ABI v2 dev binding's rule r3 (spec/abi-v2/docs.md): every vocabulary has an unknown(n) member, an unlisted value kept per field, which TypeScript spells as the raw value (each vocabulary's type is its listed values or Unknown<string | number>) plus a free <vocabulary>Known function, false for it (the same shape as reasonLossy: a const object cannot carry a member); statusName spells an unlisted status unknown(<n>). docs/reference/bindings-v1.md is the 1.x surface and names none of them; the v2 surface document lands with the other dev bindings (public issue #511), and this entry goes with it."
+    },
+    {
       "binding": "rust",
       "kind": "extra",
       "names": [

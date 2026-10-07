@@ -107,6 +107,10 @@ from gen import is_generated, produced_by_major, produced_outputs  # noqa: E402
 # The Go layer's directory at the major spec/binding-majors.json gives go
 # (go/internal/abi2 on the `v2` branch; scripts/abi-v1/majors.py).
 GO_LAYER = bmajors.layer_dir("go", bmajors.load().by_binding["go"])
+# The Python layer's, likewise (python/src/chtypes/_abi2 once python speaks ABI v2).
+PY_LAYER = bmajors.layer_dir("python", bmajors.load().by_binding["python"])
+# The TS layer's directory at the major the map gives ts (ts/src/abi2 on `v2`).
+TS_LAYER = bmajors.layer_dir("ts", bmajors.load().by_binding["ts"])
 # The Rust layer's, likewise (rust/src/abi2 once rust speaks ABI v2).
 RUST_LAYER = bmajors.layer_dir("rust", bmajors.load().by_binding["rust"])
 
@@ -130,8 +134,8 @@ SKIP_DIRS = {"node_modules", "target", ".venv", "__pycache__"}
 DECL_SOURCES = (
     ("go", f"{GO_LAYER}/abi_gen.go", r'dlsym\(\s*h\s*,\s*"{sym}"\s*\)'),
     ("go-linked", f"{GO_LAYER}/linked_gen.go", r"&{sym}\s*;"),
-    ("python", "python/src/chtypes/_abi1/_decls.py", r'_add\(\s*"{sym}"'),
-    ("ts", "ts/src/abi1/decls.gen.ts", r'"{sym}"\s*:\s*\{{'),
+    ("python", f"{PY_LAYER}/_decls.py", r'_add\(\s*"{sym}"'),
+    ("ts", f"{TS_LAYER}/decls.gen.ts", r'"{sym}"\s*:\s*\{{'),
     ("rust", f"{RUST_LAYER}/decls.rs", r'concat!\(\s*"{sym}"'),
 )
 
@@ -278,8 +282,8 @@ def check(root: str, produced: dict[int, frozenset[str]] | None = None) -> tuple
     # would most plausibly re-grow in.
     anchors = (
         f"{GO_LAYER}/loader.go",
-        "python/src/chtypes/_abi1/_loader.py",
-        "ts/src/abi1/loader.ts",
+        f"{PY_LAYER}/_loader.py",
+        f"{TS_LAYER}/loader.ts",
         f"{RUST_LAYER}/loader.rs",
     )
     for anchor in anchors:
@@ -336,10 +340,10 @@ PLANTS = (
     ),
     (
         "python re-grown rule",
-        "python/src/chtypes/_abi1/_planted.py",
+        f"{PY_LAYER}/_planted.py",
         None,
         '_unused = "`" + "x" + "`"\n',
-        "python/src/chtypes/_abi1/_planted.py:",
+        f"{PY_LAYER}/_planted.py:",
     ),
     (
         "ts re-grown rule",
@@ -378,17 +382,17 @@ PLANTS = (
     ),
     (
         "python declaration dropped",
-        "python/src/chtypes/_abi1/_decls.py",
+        f"{PY_LAYER}/_decls.py",
         '    "chs_quote_string",\n    "status",',
         '    "chs_absent_symbol",\n    "status",',
-        "python: python/src/chtypes/_abi1/_decls.py does not declare chs_quote_string",
+        f"python: {PY_LAYER}/_decls.py does not declare chs_quote_string",
     ),
     (
         "ts declaration dropped",
-        "ts/src/abi1/decls.gen.ts",
+        f"{TS_LAYER}/decls.gen.ts",
         '"chs_quote_string": {',
         '"chs_absent_symbol": {',
-        "ts: ts/src/abi1/decls.gen.ts does not declare chs_quote_string",
+        f"ts: {TS_LAYER}/decls.gen.ts does not declare chs_quote_string",
     ),
     (
         "rust declaration dropped",

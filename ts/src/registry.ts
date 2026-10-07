@@ -15,6 +15,12 @@
  *     5. loader steps 1-6, once per image; step 7 under the process setup
  *     6. the image's Library, whose `resolved` is the record that first opened it
  *
+ * This is the 2.0.0-dev registry: its fetch layer speaks the ABI v2 dev channel
+ * (`./ocifetch/channel.ts`; `spec/abi-v2/docs.md`, rules r5 and r6). A pinning
+ * option (`frozen`, `lockPath`, `lockWrite`, `update`) is refused at
+ * construction, as misuse, and a base or trust option is ignored with one
+ * warning.
+ *
  * Construction opens nothing: `Registry.open` is asynchronous only because the
  * fetch layer is, and nothing opens an artifact except a request for a version
  * or `preload`. The binding orders and matches no versions itself: which
@@ -22,8 +28,8 @@
  */
 
 import os from 'node:os';
-import { LoaderCorruptError, openAbi1 } from './abi1/index.js';
-import { usageError } from './abi1/index.js';
+import { LoaderCorruptError, openAbi2 } from './abi2/index.js';
+import { usageError } from './abi2/index.js';
 import { type Library, libraryOf } from './library.js';
 import {
   ArtifactMissingError,
@@ -33,7 +39,9 @@ import {
   isFilesystemError,
   listInstalled,
   missingNotes,
+  PinningRefusedError,
   type PlatformKey,
+  refusePinning,
   type Resolved,
   resolveInstalled,
   satisfiesRequest,
@@ -80,8 +88,14 @@ export class Registry {
     this.#autofetch = options.autofetch ?? envFlag(ENV_AUTOFETCH_NAME);
   }
 
-  /** Construct a registry. It opens nothing, except each `preload` request, in list order. */
+  /** Construct a registry. It opens nothing, except each `preload` request, in list order. A pinning fetch option is refused here, as a `UsageError` (rule r6). */
   static async open(options: RegistryOptions = {}): Promise<Registry> {
+    try {
+      refusePinning(options.fetch ?? {});
+    } catch (err) {
+      if (err instanceof PinningRefusedError) throw usageError(err.message);
+      throw err;
+    }
     const registry = new Registry(options);
     for (const request of options.preload ?? []) {
       checkSpelling(request);
@@ -129,7 +143,7 @@ export class Registry {
   async #openRequest(request: string, mayFetch: boolean): Promise<Library> {
     const platform: PlatformKey | undefined = this.#fetch.platform ?? hostPlatformKey(os.platform(), os.arch());
     if (platform === undefined) {
-      throw new ArtifactMissingError(`chtypes: no v1 artifact is published for this host (${os.platform()}-${os.arch()})`);
+      throw new ArtifactMissingError(`chtypes: no artifact is published for this host (${os.platform()}-${os.arch()})`);
     }
     let resolved: Resolved | undefined;
     try {
@@ -148,7 +162,7 @@ export class Registry {
     }
     const setup = commitSetup();
     // The adapter: the predicate goes through exactly as the fetch layer returned it.
-    const image = openAbi1({
+    const image = openAbi2({
       libraryPath: resolved.libraryPath,
       predicate: resolved.predicate,
       platform: resolved.platform,
