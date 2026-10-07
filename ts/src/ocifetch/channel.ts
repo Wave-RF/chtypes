@@ -61,9 +61,9 @@ export const DEV_ABI_GENERATION = 2;
  */
 export const ENV_OFFLINE_NAME = 'CHTYPES_OFFLINE';
 
-/** Whether offline mode is on: the option when it is set (true or false), else `CHTYPES_OFFLINE=1`. Read per call, with the other environment variables. */
+/** Whether offline mode is on: the option is true OR `CHTYPES_OFFLINE=1`; neither turns the other off. Read per call, with the other environment variables. */
 export function offlineMode(option: boolean | undefined): boolean {
-  return option ?? process.env[ENV_OFFLINE_NAME] === '1';
+  return option === true || process.env[ENV_OFFLINE_NAME] === '1';
 }
 
 /** What every lock, frozen or update request gets from a 2.0.0-dev SDK, before any network call (rule r6). */

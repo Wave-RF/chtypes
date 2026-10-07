@@ -61,7 +61,7 @@ pub struct FetchOptions {
     /// built-in list.
     pub system_dirs: Option<Vec<PathBuf>>,
     /// Never touch the network; read the cache only. `CHTYPES_OFFLINE=1` is the
-    /// same mode (public issue #528); this plain `bool` can only turn it on.
+    /// same mode (public issue #528); offline is on when this is set OR the variable is `1`; neither turns the other off.
     pub offline: bool,
     /// Perform no discovery: fetch exactly the lock's pinned digests.
     pub frozen: bool,

@@ -281,9 +281,22 @@ def test_offline_env_alone_is_artifact_missing_with_zero_requests(
     (the counter is `no_network`, as for the refusals above)."""
     monkeypatch.setenv(_channel.ENV_OFFLINE_NAME, "1")
     options = Options(cache_dir=tmp_path / "cache", system_dirs=(), platform="linux-arm64")
-    assert options.offline is None and options.resolved_offline() is True
+    assert options.offline is False and options.resolved_offline() is True
     with pytest.raises(ArtifactMissingError):
         ensure(Request("26.8"), options)
+    assert no_network == []
+    # The option explicitly false does not turn the variable off.
+    off = Options(
+        cache_dir=tmp_path / "cache", system_dirs=(), platform="linux-arm64", offline=False
+    )
+    with pytest.raises(ArtifactMissingError):
+        ensure(Request("26.8"), off)
+    assert no_network == []
+    # The option alone, with the variable unset, is offline too.
+    monkeypatch.delenv(_channel.ENV_OFFLINE_NAME)
+    on = Options(cache_dir=tmp_path / "cache", system_dirs=(), platform="linux-arm64", offline=True)
+    with pytest.raises(ArtifactMissingError):
+        ensure(Request("26.8"), on)
     assert no_network == []
 
 
@@ -301,13 +314,13 @@ def test_offline_env_with_an_installed_build_loads_it(
     assert no_network == []
 
 
-def test_offline_env_only_one_is_on_and_an_explicit_option_wins(
+def test_offline_env_only_one_is_on_and_the_two_are_ored(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     for value, want in (("1", True), ("0", False), ("", False), ("true", False)):
         monkeypatch.setenv(_channel.ENV_OFFLINE_NAME, value)
         assert Options().resolved_offline() is want, value
     monkeypatch.setenv(_channel.ENV_OFFLINE_NAME, "1")
-    assert Options(offline=False).resolved_offline() is False
+    assert Options(offline=False).resolved_offline() is True
     monkeypatch.delenv(_channel.ENV_OFFLINE_NAME)
     assert Options(offline=True).resolved_offline() is True

@@ -48,6 +48,27 @@ fn offline_env_makes_no_request_and_loads_an_installed_build() {
     }
     assert!(!cache.exists(), "an offline fetch made {}", cache.display());
 
+    // The option explicitly false does not turn the variable off.
+    let mut off = options();
+    off.offline = false;
+    assert!(
+        matches!(ensure::ensure("26.8", off), Err(Error::ArtifactMissing(_))),
+        "option false + CHTYPES_OFFLINE=1 must be offline"
+    );
+    assert!(!cache.exists(), "an offline fetch made {}", cache.display());
+    // The option alone, with the variable unset, is offline too.
+    // SAFETY: as above.
+    unsafe { std::env::remove_var("CHTYPES_OFFLINE") };
+    let mut on = options();
+    on.offline = true;
+    assert!(
+        matches!(ensure::ensure("26.8", on), Err(Error::ArtifactMissing(_))),
+        "option true, variable unset, must be offline"
+    );
+    assert!(!cache.exists(), "an offline fetch made {}", cache.display());
+    // SAFETY: as above.
+    unsafe { std::env::set_var("CHTYPES_OFFLINE", "1") };
+
     // A build installed by hand: it loads, still with no layout made.
     let cache_arg = cache.to_string_lossy().into_owned();
     let root = layout::cache_root(Some(cache_arg.as_str())).unwrap();

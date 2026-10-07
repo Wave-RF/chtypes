@@ -137,9 +137,9 @@ class Options:
     token: str | None = None
     trusted_keys: tuple[TrustedKey, ...] | None = None
     allow_unsigned: bool = False
-    # None reads CHTYPES_OFFLINE ("1" is on), else off; an explicit True or
-    # False wins over the variable (public issue #528).
-    offline: bool | None = None
+    # Offline mode is on when this is set OR CHTYPES_OFFLINE=1; neither turns
+    # the other off (public issue #528).
+    offline: bool = False
     frozen: bool = False
     lock_path: str | os.PathLike[str] | None = None
     lock_write: bool = False
@@ -188,9 +188,7 @@ class Options:
         return self.platform or detect_host_platform()
 
     def resolved_offline(self) -> bool:
-        if self.offline is not None:
-            return self.offline
-        return os.environ.get(_channel.ENV_OFFLINE_NAME) == "1"
+        return self.offline or os.environ.get(_channel.ENV_OFFLINE_NAME) == "1"
 
     def resolved_strict(self) -> bool:
         if self.strict_cache is not None:

@@ -81,10 +81,9 @@ class FetchOptions:
     token: str | None = None
     trusted_keys: Sequence[TrustedKey] | None = None
     allow_unsigned: bool | None = None
-    # None reads CHTYPES_OFFLINE ("1" is on), else off; an explicit True or
-    # False wins over the variable. Offline reads the cache only and makes no
-    # request (public issue #528).
-    offline: bool | None = None
+    # Offline reads the cache only and makes no request. It is on when this is
+    # set OR CHTYPES_OFFLINE=1; neither turns the other off (public issue #528).
+    offline: bool = False
     frozen: bool = False
     lock_path: str | os.PathLike[str] | None = None
     lock_write: bool = False

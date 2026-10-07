@@ -287,6 +287,21 @@ func TestDevOfflineEnvMakesNoRequestAndLoadsAnInstalledBuild(t *testing.T) {
 	if requests != 0 {
 		t.Fatalf("%d request(s) were made under CHTYPES_OFFLINE=1", requests)
 	}
+	// The option explicitly false does not turn the variable off (go has only
+	// the zero value for "not set", so this is the same call, named for the rule).
+	f := o()
+	f.Offline = false
+	if _, err := Ensure(context.Background(), req, f); !errors.As(err, &fe) || fe.Code != CodeArtifactMissing || requests != 0 {
+		t.Fatalf("option false + CHTYPES_OFFLINE=1 = %v, %d request(s); want %s and none", err, requests, CodeArtifactMissing)
+	}
+	// The option alone, with the variable unset, is offline too.
+	t.Setenv(EnvOfflineName, "")
+	on := o()
+	on.Offline = true
+	if _, err := Ensure(context.Background(), req, on); !errors.As(err, &fe) || fe.Code != CodeArtifactMissing || requests != 0 {
+		t.Fatalf("option true, variable unset = %v, %d request(s); want %s and none", err, requests, CodeArtifactMissing)
+	}
+	t.Setenv(EnvOfflineName, "1")
 
 	root, err := CacheRoot(o())
 	if err != nil {

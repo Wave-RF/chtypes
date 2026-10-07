@@ -267,8 +267,9 @@ describe('public issue #528: CHTYPES_OFFLINE=1 is the environment twin of the of
     clearEnv();
     vi.stubEnv('CHTYPES_OFFLINE', '1');
     const cacheDir = await tempDir();
-    for (const options of [{}, { offline: true }]) {
-      if ('offline' in options) vi.stubEnv('CHTYPES_OFFLINE', '');
+    const cases: FetchV1Options[] = [{}, { offline: false }, { offline: true }];
+    for (const options of cases) {
+      if (options.offline === true) vi.stubEnv('CHTYPES_OFFLINE', '');
       const requests = countRequests();
       let caught: unknown;
       try {
@@ -283,7 +284,7 @@ describe('public issue #528: CHTYPES_OFFLINE=1 is the environment twin of the of
     }
   });
 
-  it('with a build installed it loads it, still with no request; an explicit false wins over the variable; only "1" is on', async () => {
+  it('with a build installed it loads it, still with no request; an explicit false does not turn the variable off; only "1" is on', async () => {
     clearEnv();
     vi.stubEnv('CHTYPES_OFFLINE', '1');
     const cacheDir = await tempDir();
@@ -316,7 +317,7 @@ describe('public issue #528: CHTYPES_OFFLINE=1 is the environment twin of the of
       const got = await ensure('26.8', { cacheDir, systemDirs: [], platform: 'linux-arm64' });
       expect(got.dir).toBe(entry);
       expect(offlineMode(undefined)).toBe(true);
-      expect(offlineMode(false)).toBe(false);
+      expect(offlineMode(false)).toBe(true);
       vi.stubEnv('CHTYPES_OFFLINE', 'true');
       expect(offlineMode(undefined)).toBe(false);
       vi.stubEnv('CHTYPES_OFFLINE', '0');
