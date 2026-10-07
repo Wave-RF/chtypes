@@ -1968,6 +1968,32 @@ def selftest_v2() -> None:
             failed = dict(re.findall(r"^FAILED (.+? / (?:go|python|ts|rust|result)): (.*)$", buf_err.getvalue(), re.MULTILINE))
             return rc, failed, buf_out.getvalue() + buf_err.getvalue()
 
+    # main()'s own --abi 2 argument parsing, into a recorder: every flag must
+    # land on the parameter it names, and the defaults must be the module's.
+    global main_run_v2
+    real_run, seen = main_run_v2, []
+    main_run_v2 = lambda clis, **kw: seen.append((clis, kw)) or 0  # noqa: E731
+    saved_argv = sys.argv
+    try:
+        sys.argv = ["cache-interop.py", "--abi", "2", "--cli", "go=g --x", "--rounds", "5", "--coarse-rounds", "4", "--processes", "9",
+                    "--platform", "linux-arm64", "--other-user", "nobody", "--coarse-clock"]
+        if sys.platform.startswith("linux"):
+            assert main() == 0 and seen, seen
+            assert seen[-1] == ({"go": ["g", "--x"]}, {"other_user": "nobody", "coarse_clock": True, "platform": "linux-arm64",
+                                                       "processes": 9, "rounds": 5, "coarse_rounds": 4}), seen[-1]
+        sys.argv = ["cache-interop.py", "--abi", "2", "--cli", "rust=r"]
+        assert main() == 0 and seen[-1][1] == {"other_user": None, "coarse_clock": False, "platform": None, "processes": CONCURRENCY,
+                                                "rounds": V2_ROUNDS, "coarse_rounds": V2_COARSE_ROUNDS}, seen[-1]
+        for bad in (["--rounds", "0"], ["--system-dir", "/opt/chtypes/v1"], ["--abi", "3"]):
+            sys.argv = ["cache-interop.py", "--abi", "2", "--cli", "go=g", *bad]
+            with contextlib.redirect_stderr(io.StringIO()):
+                assert main() == 2, f"--abi 2 must refuse {bad}"
+        sys.argv = ["cache-interop.py", "--cli", "go=g", "--rounds", "5"]
+        with contextlib.redirect_stderr(io.StringIO()):
+            assert main() == 2, "the round counts belong to --abi 2"
+    finally:
+        main_run_v2, sys.argv = real_run, saved_argv
+
     rc, failed, log_text = run(list(BINDINGS), "")
     assert rc == 0 and not failed, f"positive control: four sound CLIs must pass every cell (rc {rc}):\n{log_text[-3000:]}"
     assert "go 8/8 installed" in log_text and "mixed x8 (go+python+ts+rust)" in log_text, log_text[-2000:]
@@ -2092,7 +2118,7 @@ def selftest() -> None:
         (root / "f").write_text("1")
         before = tree_state(root)
         (root / "blobs" / "sha256").mkdir(parents=True)
-        assert tree_state(root) != before and tree_state(root)["blobs/sha256"] == "dir", "a new empty dir is a change"
+        assert tree_state(root) != before and (tree_state(root) or {})["blobs/sha256"] == "dir", "a new empty dir is a change"
     # Part 6's sudo line carries the fetch environment and nothing else.
     argv = as_user("nobody", {"CHTYPES_CACHE": "/c", "PATH": "/bin", "HOME": "/h", "SECRET": "x"}, ["cli", "verify"])
     assert argv[:6] == ["sudo", "-n", "-u", "nobody", "env", "-i"], argv
@@ -2177,7 +2203,15 @@ def main() -> int:
         if coarse_clock and not sys.platform.startswith("linux"):
             print("cache-interop: --coarse-clock needs Linux (LD_PRELOAD)", file=sys.stderr)
             return 2
-        return main_run_v2(clis, other_user=other_user, coarse_clock=coarse_clock, platform=platform, **counts)
+        return main_run_v2(
+            clis,
+            other_user=other_user,
+            coarse_clock=coarse_clock,
+            platform=platform,
+            processes=counts.get("processes", CONCURRENCY),
+            rounds=counts.get("rounds", V2_ROUNDS),
+            coarse_rounds=counts.get("coarse_rounds", V2_COARSE_ROUNDS),
+        )
     if coarse_clock or platform is not None or counts:
         print("cache-interop: --coarse-clock, --platform, --processes and the round counts belong to --abi 2", file=sys.stderr)
         return 2
