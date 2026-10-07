@@ -38,7 +38,7 @@
       "message": "xyzabcdefgh"
     },
     {
-      "name": "neighbours-kept",
+      "name": "neighbors-kept",
       "why": "the code points just outside each removed range are kept, and so is every other character",
       "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"a\\u00a0b\\u200dc\\u2010d\\u2029e\\u202ff\\u2065g\\u206ah\\ufeffi\\u00e9j\"}]}",
       "message": "a\u00a0b\u200dc\u2010d\u2029e\u202ff\u2065g\u206ah\ufeffi\u00e9j"
