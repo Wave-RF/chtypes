@@ -105,6 +105,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -1518,14 +1519,32 @@ def vocab_members(vocab: Vocab, lang: str, surface: dict[str, str]) -> list[str]
     )
 
 
-def go_prefix(names: list[str]) -> str:
+def go_prefix(names: list[str], others: Iterable[frozenset[str]] = ()) -> str:
     """The word every Go member of a vocabulary starts with (`Status`, `Kind`),
-    cut at a word boundary, or "" (`Accepted`, `JSONEachRow`)."""
+    cut at a word boundary, or "" (`Accepted`, `JSONEachRow`).
+
+    When every value of a vocabulary starts with the same word of its own
+    (merge_reason's `ttl_delete` and `ttl_column_reset`), the longest common
+    prefix takes that word too (`MergeTTL`, where the type's prefix is
+    `Merge`). So given the other bindings' members, folded (`others`), the
+    longest word-boundary prefix whose remainders fold to one of those sets is
+    the prefix instead. A vocabulary whose longest prefix already matches, or
+    that matches nothing (real drift), keeps the longest."""
     if len(names) < 2:
         return ""
     prefix = os.path.commonprefix(names)
     while prefix and not all(len(n) > len(prefix) and n[len(prefix)].isupper() for n in names):
         prefix = prefix[:-1]
+    targets = set(others)
+    cut = prefix
+    while targets:
+        if frozenset(fold(n[len(cut) :]) for n in names) in targets:
+            return cut
+        if not cut:
+            break
+        cut = cut[:-1]
+        while cut and not all(n[len(cut)].isupper() for n in names):
+            cut = cut[:-1]
     return prefix
 
 
@@ -1549,12 +1568,18 @@ def compare(exp: Expected, surfaces: dict[str, dict[str, str]], allow: list[Entr
     for vocab in exp.vocabs:
         want = len(vocab_values(vocab.entries, description))
         folded: dict[str, dict[str, str]] = {}
+        # The other bindings' members, folded, which Go's prefix is cut against.
+        others = [
+            frozenset(fold(n.rsplit(".", 1)[-1]) for n in vocab_members(vocab, b, surface) if n not in extras_allowed[b])
+            for b, surface in surfaces.items()
+            if b != "go"
+        ]
         for b, surface in surfaces.items():
             members = [n for n in vocab_members(vocab, b, surface) if n not in extras_allowed[b]]
             claimed[b].update(members)
             short = [n.rsplit(".", 1)[-1] for n in members]
             if b == "go":
-                pre = go_prefix(short)
+                pre = go_prefix(short, others)
                 short = [n[len(pre) :] for n in short]
             folded[b] = {fold(s): full for s, full in zip(short, members)}
             if want and len(members) != want:
@@ -1887,6 +1912,32 @@ def selftest() -> int:
                 f"the green {b} fixture matched only {res.counts.get(b)} names; the reader or the doc "
                 "parser read too little"
             )
+
+    # A vocabulary whose every value starts with the same word of its own
+    # (merge_reason: ttl_delete, ttl_column_reset). Go's longest common prefix
+    # is MergeTTL, not the type's Merge; compare() cuts it against the other
+    # bindings, so the four agree, and a Go member that really differs still
+    # fails. Driven through compare() itself, which derives the other bindings'
+    # members, so the derivation is tested, not a value handed to go_prefix.
+    merge = Vocab("merge reasons", ["merge_reason"], {b: "MergeReason" for b in BINDINGS})
+    merge_exp = Expected(vocabs=[merge])
+
+    def merge_surfaces(go_reset: str) -> dict[str, dict[str, str]]:
+        return {
+            "go": {"MergeTTLDelete": "const:MergeReason", go_reset: "const:MergeReason"},
+            "python": {"MergeReason.TTL_DELETE": "value", "MergeReason.TTL_COLUMN_RESET": "value"},
+            "ts": {"MergeReason.TtlDelete": "value", "MergeReason.TtlColumnReset": "value"},
+            "rust": {"MergeReason.TtlDelete": "variant", "MergeReason.TtlColumnReset": "variant"},
+        }
+
+    agree = [f.line() for f in compare(merge_exp, merge_surfaces("MergeTTLColumnReset"), [], {}).findings if f.kind == "vocabulary"]
+    if agree:
+        failures.append("go: a vocabulary whose values share their first word read as drift:\n" + "\n".join(agree))
+    drift = compare(merge_exp, merge_surfaces("MergeTTLColumnWipe"), [], {}).findings
+    if not any(f.kind == "vocabulary" and f.binding == "go" for f in drift):
+        failures.append("go: a vocabulary member that differs from the other bindings did not fail as `vocabulary`")
+    if go_prefix(["MergeTTLDelete", "MergeTTLColumnReset"]) != "MergeTTL" or go_prefix(["KindNone", "KindDefault"]) != "Kind":
+        failures.append("go_prefix: the longest common word-boundary prefix changed without the other bindings given")
 
     inline = parse_api_report("```ts\nexport function f(options: {\n    allow: boolean;\n}): void;\n```\n")
     if inline != {"f": "function"}:
