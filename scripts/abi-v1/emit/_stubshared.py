@@ -243,6 +243,15 @@ class Variant:
         return [f"-D{k}" if v is None else f"-D{k}={v}" for k, v in self.defines]
 
 
+# Rule r7, variant "filter-observable" (-DCHS_STUB_FILTER_OBSERVABLE):
+# chs_preview_batch answers one of these two batch documents, by whether its
+# filter reached it. rows_passed is the only difference.
+FILTER_OBSERVABLE_DOCS = {
+    "filter": '{"outcome":"accepted","code":0,"err":"","rows_read":1,"rows_passed":1,"rows_cut":0}',
+    "none": '{"outcome":"accepted","code":0,"err":"","rows_read":1,"rows_passed":0,"rows_cut":0}',
+}
+
+
 def plan(model) -> list[Variant]:
     """Every stub library build-stubs.sh must produce, in a fixed,
     deterministic order: the two happy-path copies, the ten named
@@ -268,6 +277,8 @@ def plan(model) -> list[Variant]:
             "glibc_floor",
             predicate_overrides=(("glibc_floor", "99.0"),),
         ),
+        # Rule r7: whether a batch's filter reached the library.
+        Variant("filter-observable", (("CHS_STUB_FILTER_OBSERVABLE", "1"),), "accepted"),
     ]
     for sym in model.symbols():
         if sym == ABI_VERSION_SYMBOL:
