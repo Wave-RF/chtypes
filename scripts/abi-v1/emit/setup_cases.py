@@ -208,8 +208,153 @@ def _retry_case(model) -> dict:
     }
 
 
+# The statement the closed-server case compiles: any CREATE the stub accepts.
+SERVER_CASE_STATEMENT = "CREATE TABLE t (k UInt8) ENGINE = Memory"
+
+
+def _nullable_handle_params(model) -> list[tuple]:
+    """(function, parameter) for every handle parameter that may be NULL and
+    is not a free function's (free(NULL) does nothing, and a freed handle
+    passed there is no worse). Where NULL is a valid input with a meaning of
+    its own, the library cannot tell a freed handle from a deliberate NULL
+    (rule r7)."""
+    return [
+        (f, p)
+        for f in model.functions
+        if not f.name.endswith("_free")
+        for p in f.params
+        if p.kind == "handle" and p.nullable
+    ]
+
+
+# The nullable handle parameters the description has today. A new one must be
+# looked at for rule r7 before it is added here: if its NULL means something,
+# it needs its own conformance case.
+KNOWN_NULLABLE = (("chs_schema_create", "server"), ("chs_preview_batch", "filter"))
+
+
+def _closed_server_case(model) -> dict | None:
+    """Rule r7 (spec/abi-v2/docs.md): a closed handle is never passed as NULL.
+
+    The case is for chs_schema_create's `server`, whose NULL is the image's
+    own server. It reads everything off the stub's own live-handle counts,
+    which the stub's chs_schema_create makes truthful: a schema made with a
+    non-NULL server holds a counted reference to the server it RECEIVED, so a
+    closed server stays live exactly while such a schema does; a schema made
+    with NULL holds none. A compile that reached the library with NULL in
+    place of a closed server would therefore create a schema (live chs_schema
+    1) and hold no server, which the refused compile's `live` step below
+    rules out.
+
+    Rust cannot express it: a Server is freed only on its last Drop and a
+    compile borrows it, so a closed server is unreachable.
+
+    Rule r7 is a generation-2 rule, and generation 1 is frozen: its file has
+    no such case."""
+    if model.major < 2:  # generation 1 is frozen and has no server; r7 is a generation-2 rule
+        return None
+    params = _nullable_handle_params(model)
+    found = tuple((f.name, p.name) for f, p in params)
+    if found != KNOWN_NULLABLE:
+        raise ValueError(
+            f"rule r7: the nullable handle parameters are {found}, not {KNOWN_NULLABLE}: decide whether the "
+            f"new one's NULL means something and needs a conformance case, then extend {__file__}"
+        )
+    fn, param = params[0]
+    out = next(q for q in fn.params if q.kind == "out_handle")
+    server, schema = param.type, out.type
+    misuse = {"class": _class_of(model, "CHS_INVALID_ARGUMENT")}
+
+    def live(**counts: int) -> dict:
+        return {"op": "live", "live": counts}
+
+    return {
+        "id": "server.a_closed_server_is_never_passed_as_null",
+        "variant": "ok",
+        "rule": "r7",
+        "not_expressible": {
+            "rust": "a freed handle is unreachable: Server frees on its last Drop, and a compile borrows it",
+        },
+        "steps": [
+            {"op": "open", "expect": OK},
+            live(**{server: 0, schema: 0}),
+            # Control 1: an OPEN server reaches the library as non-NULL. The
+            # schema holds the server it received, so the server outlives its
+            # caller's close for exactly as long as the schema.
+            {"op": "server_new", "as": "open_server", "expect": OK},
+            {"op": "compile", "statement": SERVER_CASE_STATEMENT, "server": "open_server", "as": "on_server", "expect": OK},
+            {"op": "server_close", "server": "open_server"},
+            live(**{server: 1, schema: 1}),
+            {"op": "schema_close", "schema": "on_server"},
+            live(**{server: 0, schema: 0}),
+            # The rule: a CLOSED server is refused with the binding's usage
+            # error, and no schema exists afterwards. Had the binding passed
+            # NULL in its place, the library would have answered CHS_OK and
+            # one schema would be live.
+            {"op": "server_new", "as": "closed_server", "expect": OK},
+            {"op": "server_close", "server": "closed_server"},
+            live(**{server: 0, schema: 0}),
+            {"op": "compile", "statement": SERVER_CASE_STATEMENT, "server": "closed_server", "expect": misuse},
+            live(**{server: 0, schema: 0}),
+            # Control 2: with NO server the library receives NULL and answers;
+            # the schema holds no server.
+            {"op": "compile", "statement": SERVER_CASE_STATEMENT, "as": "no_server", "expect": OK},
+            live(**{server: 0, schema: 1}),
+            {"op": "schema_close", "schema": "no_server"},
+            live(**{server: 0, schema: 0}),
+        ],
+    }
+
+
+def _closed_filter_case(model) -> dict | None:
+    """Rule r7 for chs_preview_batch's `filter`, whose NULL is no filter.
+
+    A batch call mints no handle, so no live count shows whether a filter
+    reached it. The stub variant "filter-observable" (emit/stub.py,
+    _stubshared.FILTER_OBSERVABLE_DOCS) answers `rows_passed` 1 when the
+    filter reached it and 0 when it received NULL; the case reads that
+    through the public result, never a hand-set value. A closed filter must
+    be refused with the usage error: a binding that passed NULL instead would
+    return a result with `rows_passed` 0.
+
+    Rust cannot express it: a Filter is an owned value freed only on Drop."""
+    if model.major < 2:
+        return None
+    misuse = {"class": _class_of(model, "CHS_INVALID_ARGUMENT")}
+    rows = {"op": "rows", "schema": "schema", "format": "CSV", "body": "1\n"}
+    return {
+        "id": "filter.a_closed_filter_is_never_passed_as_null",
+        "variant": "filter-observable",
+        "rule": "r7",
+        "not_expressible": {
+            "rust": "a freed handle is unreachable: a Filter is an owned value that frees only on Drop",
+        },
+        "steps": [
+            {"op": "open", "expect": OK},
+            {"op": "compile", "statement": SERVER_CASE_STATEMENT, "as": "schema", "expect": OK},
+            {"op": "filter_new", "schema": "schema", "expression": "k > 1", "as": "open_filter", "expect": OK},
+            # Control 1: an OPEN filter reaches the library as non-NULL.
+            {**rows, "filter": "open_filter", "expect": OK, "rows_passed": 1},
+            # Control 2: with NO filter the library receives NULL.
+            {**rows, "expect": OK, "rows_passed": 0},
+            # The rule: a CLOSED filter is refused with the usage error.
+            {"op": "filter_close", "filter": "open_filter"},
+            {**rows, "filter": "open_filter", "expect": misuse},
+            # And the refusal leaves the schema usable, with no filter.
+            {**rows, "expect": OK, "rows_passed": 0},
+            {"op": "schema_close", "schema": "schema"},
+            {"op": "live", "live": {"chs_schema": 0, "chs_filter": 0}},
+        ],
+    }
+
+
 def build_cases(model) -> list[dict]:
-    return [_latch_case(model), _retry_case(model)]
+    cases = [_latch_case(model), _retry_case(model)]
+    for build in (_closed_server_case, _closed_filter_case):
+        case = build(model)
+        if case is not None:
+            cases.append(case)
+    return cases
 
 
 def render(model) -> str:

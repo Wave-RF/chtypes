@@ -224,6 +224,14 @@ def _strip_unknown(v):
     return v
 
 
+# Rule r7, variant "filter-observable" (-DCHS_STUB_FILTER_OBSERVABLE):
+# chs_preview_batch answers one of these two batch documents, by whether its
+# filter reached it. rows_passed is the only difference.
+FILTER_OBSERVABLE_DOCS = {
+    "filter": '{"outcome":"accepted","code":0,"err":"","rows_read":1,"rows_passed":1,"rows_cut":0}',
+    "none": '{"outcome":"accepted","code":0,"err":"","rows_read":1,"rows_passed":0,"rows_cut":0}',
+}
+
 # r3, variant "r3-unknown-values" (-DCHS_STUB_R3_VALUES): each document call
 # answers the CLEAN document of its kind (R3_BASE: no unknown member anywhere),
 # or, when the call's first bytes_in parameter is exactly b"!E:" + <id>, that
@@ -477,6 +485,8 @@ def plan(model) -> list[Variant]:
             Variant("r2-unknown-members", (("CHS_STUB_R2_MEMBERS", "1"),), "accepted"),
             Variant("r3-unknown-values", (("CHS_STUB_R3_VALUES", "1"),), "accepted"),
             Variant("r3-unknown-capabilities", (("CHS_STUB_R3_CAPABILITIES", "1"),), "accepted"),
+            # Rule r7: whether a batch's filter reached the library.
+            Variant("filter-observable", (("CHS_STUB_FILTER_OBSERVABLE", "1"),), "accepted"),
         ]
         # Rule r6 beats the symbol sweep (public issue #537): ANOTHER
         # fingerprint AND one declared symbol absent. Loader step 4's

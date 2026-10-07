@@ -35,6 +35,20 @@ type setupCaseStep struct {
 	Request  string          `json:"request"`
 	Allow    *bool           `json:"allow"`
 	Expect   setupCaseExpect `json:"expect"`
+	// The server ops (rule r7): a name a later step uses, the statement to
+	// compile, the named server it compiles on (none when empty), the named
+	// schema to close, and the live-handle counts to require.
+	As        string         `json:"as"`
+	Server    string         `json:"server"`
+	Schema    string         `json:"schema"`
+	Statement string         `json:"statement"`
+	Live      map[string]int `json:"live"`
+	// The filter ops (rule r7): the named schema and filter, the expression,
+	// the body (CSV), and the rows_passed a batch result must report.
+	Filter     string `json:"filter"`
+	Expression string `json:"expression"`
+	Body       string `json:"body"`
+	RowsPassed *int   `json:"rows_passed"`
 }
 
 type setupCasesDoc struct {
@@ -46,6 +60,8 @@ type setupCase struct {
 	ID      string          `json:"id"`
 	Variant string          `json:"variant"`
 	Steps   []setupCaseStep `json:"steps"`
+	// NotExpressible names the bindings that cannot express the case, and why.
+	NotExpressible map[string]string `json:"not_expressible"`
 }
 
 func loadSetupCases(t *testing.T) setupCasesDoc {
@@ -119,6 +135,9 @@ func setupStepOutcome(want setupCaseExpect, err error) string {
 	if !matched {
 		return fmt.Sprintf("want a %s error, got %T: %v", want.Class, err, err)
 	}
+	if want.Status == "" && want.ChCode == nil && want.ChName == nil {
+		return "" // a binding's own usage error, raised before any call, carries no call fields
+	}
 	ce, ok := AsCallError(err)
 	if !ok {
 		return fmt.Sprintf("%T carries no call error fields", err)
@@ -143,6 +162,9 @@ func TestSetupCases(t *testing.T) {
 	doc := loadSetupCases(t)
 	for _, c := range doc.Cases {
 		t.Run(c.ID, func(t *testing.T) {
+			if why, skip := c.NotExpressible["go"]; skip {
+				t.Skipf("not expressible in Go: %s", why)
+			}
 			resetSetup(t)
 			t.Setenv("CHTYPES_ALLOW_UNVERIFIED_LIBRARY", "1")
 			images := map[string]string{}
@@ -158,10 +180,74 @@ func TestSetupCases(t *testing.T) {
 			if len(c.Steps) == 0 {
 				t.Fatal("a case with no steps")
 			}
+			// The case's open library, and the servers and schemas its server
+			// ops (rule r7) name.
+			var current *Library
+			servers := map[string]*Server{}
+			schemas := map[string]*Schema{}
+			filters := map[string]*Filter{}
+			var rowsPassed *uint64
 			for i, s := range c.Steps {
 				var err error
 				var lib *Library
 				switch {
+				case s.Op == "server_close":
+					if err := servers[s.Server].Close(); err != nil {
+						t.Fatalf("step %d: closing server %q: %v", i, s.Server, err)
+					}
+					continue
+				case s.Op == "schema_close":
+					if err := schemas[s.Schema].Close(); err != nil {
+						t.Fatalf("step %d: closing schema %q: %v", i, s.Schema, err)
+					}
+					continue
+				case s.Op == "filter_close":
+					if err := filters[s.Filter].Close(); err != nil {
+						t.Fatalf("step %d: closing filter %q: %v", i, s.Filter, err)
+					}
+					continue
+				case s.Op == "filter_new":
+					var f *Filter
+					f, err = schemas[s.Schema].CompileFilter(s.Expression)
+					filters[s.As] = f
+				case s.Op == "rows":
+					var opts []RowsOption
+					if s.Filter != "" {
+						opts = append(opts, WithRowFilter(filters[s.Filter]))
+					}
+					var res BatchResult
+					res, err = schemas[s.Schema].Rows(CSV, []byte(s.Body), opts...)
+					rowsPassed = nil
+					if err == nil {
+						rowsPassed = &res.RowsPassed
+					}
+				case s.Op == "live":
+					// The stub's own live-handle counts, not a value the case
+					// sets by hand.
+					got, lerr := current.LiveHandles()
+					if lerr != nil {
+						t.Fatalf("step %d: live_handles: %v", i, lerr)
+					}
+					for kind, want := range s.Live {
+						if got[kind] != uint64(want) {
+							t.Fatalf("step %d: live %s = %d, want %d (%v)", i, kind, got[kind], want, got)
+						}
+					}
+					continue
+				case s.Op == "server_new":
+					var srv *Server
+					srv, err = current.NewServer(ServerProfile{Timezone: "UTC"})
+					servers[s.As] = srv
+				case s.Op == "compile":
+					var opts []CompileOption
+					if s.Server != "" {
+						opts = append(opts, OnServer(servers[s.Server]))
+					}
+					var schema *Schema
+					schema, err = current.CompileTable(s.Statement, opts...)
+					if s.As != "" {
+						schemas[s.As] = schema
+					}
 				case s.Op == "setup":
 					err = Setup(SetupOptions{Timezone: s.Timezone})
 				case s.Op == "open" && s.Request != "":
@@ -179,7 +265,13 @@ func TestSetupCases(t *testing.T) {
 				default:
 					t.Fatalf("step %d: an op this runner does not know: %q", i, s.Op)
 				}
+				if lib != nil {
+					current = lib
+				}
 				diff := setupStepOutcome(s.Expect, err)
+				if diff == "" && s.RowsPassed != nil && (rowsPassed == nil || *rowsPassed != uint64(*s.RowsPassed)) {
+					diff = fmt.Sprintf("rows_passed differs from %d (or the call failed): the stub says whether the filter reached the library", *s.RowsPassed)
+				}
 				if diff == "" && s.Expect.ImageZone != nil {
 					zone, perr := lib.ValidateType(doc.ImageZoneProbe)
 					switch {

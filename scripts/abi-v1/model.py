@@ -113,7 +113,7 @@ V0_JSON = spec(1).v0_json
 STABILITIES = ("unstable", "locked")
 # The rules every generation-2+ docs.md states in its `## Rules` section, by
 # label; load() refuses a Rules section that drops one.
-GENERATION_RULES = ("r1", "r2", "r3", "r4", "r5", "r6")
+GENERATION_RULES = ("r1", "r2", "r3", "r4", "r5", "r6", "r7")
 # The spelling readers reserve for the member an unlisted enum value maps to
 # (r3): no described value may take it.
 UNKNOWN = "unknown"
