@@ -22,6 +22,11 @@ const contractMessage = "chtypes/v1 is retired: use chtypes/v2 (this registry no
 // give one answer for every body in it.
 func TestRetiredMessageSharedTable(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "tests", "fixtures", "retired-message", "cases.json"))
+	if os.IsNotExist(err) {
+		// A bare copy of go/ (scripts/check-standalone.sh) has no fixtures:
+		// skip by name, as every other fixture-driven test here does.
+		t.Skipf("SKIPPED: the shared retired-message table is not beside this checkout (%v)", err)
+	}
 	if err != nil {
 		t.Fatalf("reading the shared table: %v", err)
 	}
