@@ -75,7 +75,7 @@ const USAGE = `usage: chtypes <command> [options]
   chtypes where [--strict] [--all]
 
   <version>   a ClickHouse version: 26.8, 26.8.15 or 26.8.15.10 (no "v", no channel suffix)
-  --all       every line (two-part version) the registry publishes for the platform; with `where`, every directory searched (the cache root first)
+  --all       every line (two-part version) the registry publishes for the platform; with 'where', every directory searched (the cache root first)
   --frozen    fetch exactly what the lock file pins, by digest; refuse anything it does not (default lock: chtypes.lock)
   --offline   never touch the network: an installed, verified build is fine, anything else fails
   --lock      record what was installed into this lock file

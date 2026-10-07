@@ -4,42 +4,42 @@
   "cases": [
     {
       "name": "explicit-directory-wins",
-      "env": { "CHTYPES_CACHE": "<TMP>/env", "XDG_CACHE_HOME": "<TMP>/xdg", "HOME": "<TMP>/home" },
+      "env": { "CHTYPES_CACHE": "<TMP>/env", "XDG_CACHE_HOME": "<TMP>/xdg", "HOME": "<TMP>/user" },
       "cache_dir": "<TMP>/explicit",
       "system_dirs": null,
       "search_dirs": ["<TMP>/explicit", "/usr/local/share/chtypes/v1", "/opt/chtypes/v1"]
     },
     {
-      "name": "chtypes-cache-env",
-      "env": { "CHTYPES_CACHE": "<TMP>/env", "XDG_CACHE_HOME": "<TMP>/xdg", "HOME": "<TMP>/home" },
+      "name": "cache-dir-env",
+      "env": { "CHTYPES_CACHE": "<TMP>/env", "XDG_CACHE_HOME": "<TMP>/xdg", "HOME": "<TMP>/user" },
       "cache_dir": null,
       "system_dirs": null,
       "search_dirs": ["<TMP>/env", "/usr/local/share/chtypes/v1", "/opt/chtypes/v1"]
     },
     {
       "name": "xdg-cache-home",
-      "env": { "XDG_CACHE_HOME": "<TMP>/xdg", "HOME": "<TMP>/home" },
+      "env": { "XDG_CACHE_HOME": "<TMP>/xdg", "HOME": "<TMP>/user" },
       "cache_dir": null,
       "system_dirs": null,
       "search_dirs": ["<TMP>/xdg/chtypes/v1", "/usr/local/share/chtypes/v1", "/opt/chtypes/v1"]
     },
     {
       "name": "home-dot-cache",
-      "env": { "HOME": "<TMP>/home" },
+      "env": { "HOME": "<TMP>/user" },
       "cache_dir": null,
       "system_dirs": null,
-      "search_dirs": ["<TMP>/home/.cache/chtypes/v1", "/usr/local/share/chtypes/v1", "/opt/chtypes/v1"]
+      "search_dirs": ["<TMP>/user/.cache/chtypes/v1", "/usr/local/share/chtypes/v1", "/opt/chtypes/v1"]
     },
     {
       "name": "custom-system-dirs-in-order",
-      "env": { "HOME": "<TMP>/home" },
+      "env": { "HOME": "<TMP>/user" },
       "cache_dir": "<TMP>/explicit",
       "system_dirs": ["<TMP>/sys-b", "<TMP>/sys-a"],
       "search_dirs": ["<TMP>/explicit", "<TMP>/sys-b", "<TMP>/sys-a"]
     },
     {
       "name": "empty-system-dirs-search-none",
-      "env": { "HOME": "<TMP>/home" },
+      "env": { "HOME": "<TMP>/user" },
       "cache_dir": "<TMP>/explicit",
       "system_dirs": [],
       "search_dirs": ["<TMP>/explicit"]

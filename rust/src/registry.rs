@@ -112,7 +112,7 @@ impl FetchOptions {
 /// [`Error::SourceIncompatible`] when no directory can be named: no explicit
 /// directory, no `CHTYPES_CACHE`, no `XDG_CACHE_HOME` and no `HOME`.
 pub fn cache_root(options: &FetchOptions) -> Result<PathBuf> {
-    layout::cache_root(options.cache_dir.as_deref())
+    Ok(layout::cache_root(options.cache_dir.as_deref())?)
 }
 
 /// Every directory a lookup reads for installed builds, in the order it reads
@@ -124,7 +124,7 @@ pub fn cache_root(options: &FetchOptions) -> Result<PathBuf> {
 /// # Errors
 /// As [`cache_root`].
 pub fn search_dirs(options: &FetchOptions) -> Result<Vec<PathBuf>> {
-    ensure::search_dirs(&options.to_options())
+    Ok(ensure::search_dirs(&options.to_options())?)
 }
 
 /// What a [`Registry`] is constructed with.
