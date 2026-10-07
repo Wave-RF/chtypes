@@ -1,6 +1,6 @@
 # playground — a runnable tour of chtypes, in four languages
 
-chtypes answers one question — _"if this row were inserted into this table on this ClickHouse version, what would happen?"_ — without a server. Each directory here is the same guided tour of that library from one SDK: **seventeen numbered sections, in the same order, against the same schemas and the same rows** in all four languages, so you can run two side by side and diff them. What survives the diff is the language's own idiom, which is exactly what `docs/reference/bindings-v1.md` says a binding may vary and nothing else.
+chtypes answers one question — _"if this row were inserted into this table on this ClickHouse version, what would happen?"_ — without a server. Each directory here is the same guided tour of that library from one SDK: **eighteen numbered sections, in the same order, against the same schemas and the same rows** in all four languages, so you can run two side by side and diff them. What survives the diff is the language's own idiom, which is exactly what `docs/reference/bindings-v1.md` says a binding may vary and nothing else.
 
 **The tours need a real artifact, and nothing else.** Each tour needs its language's toolchain plus one library in the per-user v1 cache (`${XDG_CACHE_HOME:-~/.cache}/chtypes/v1`, or the directory `CHTYPES_CACHE` names). No Docker, no ClickHouse server. Fetching that library is the only network step; after it the tours run offline, and even the discovery section runs against canned bytes (clearly labeled) shaped exactly like a real server's responses.
 
@@ -13,7 +13,7 @@ chtypes answers one question — _"if this row were inserted into this table on 
 ./chplay.sh --require-all --locked   # the CI form: a skip fails, lockfiles as committed
 ```
 
-`chplay.sh` checks prerequisites per language (a missing toolchain is a polite skip, not a failure). Before each tour it fetches one line through THAT binding's own `chtypes fetch` command, so a tour exercises the same fetch path a user gets. It then runs the tour, counts the sections the tour actually printed, and exits nonzero if a fetch or a tour failed or a tour printed fewer than seventeen sections.
+`chplay.sh` checks prerequisites per language (a missing toolchain is a polite skip, not a failure). Before each tour it fetches one line through THAT binding's own `chtypes fetch` command, so a tour exercises the same fetch path a user gets. It then runs the tour, counts the sections the tour actually printed, and exits nonzero if a fetch or a tour failed or a tour printed fewer than eighteen sections.
 
 | variable                | effect                                                                                                |
 | ----------------------- | ----------------------------------------------------------------------------------------------------- |
@@ -34,7 +34,7 @@ Or run any tour directly, after `chtypes fetch 26.8` with that binding's CLI:
 
 These are examples, not tests. The real suites live inside each binding (`../{go,python,ts,rust}/`) and the artifact producer's server-comparison suites. If a tour and a binding's test suite disagree, believe the test suite — then file the tour bug. CI type-checks or compiles every tour; it runs a tour only against a real artifact, and the `examples` check passes vacuously until the `V1_READY` marker is added to `examples/<lang>/`.
 
-## The seventeen sections
+## The eighteen sections
 
 Read any tour top to bottom as a tutorial; every section carries a comment block saying what it demonstrates, why an ingest pipeline cares, and what to look at in the output. A section whose v0 feature the v1 API deletes (`docs/reference/bindings-v1.md` section 7) keeps its number and prints which deletion removed it, so the four tours stay diffable.
 
@@ -55,7 +55,7 @@ Read any tour top to bottom as a tutorial; every section carries a comment block
 15. **Export: bytes + spans** — serializing the batch's accepted rows to wire bytes, addressed per row by index-aligned spans, and the fail-closed export declines.
 16. **Filters: WHERE semantics at the edge** — one boolean expression compiled against the schema and evaluated per row, query parameters, and the block twin.
 17. **The INSERT column list** — a list naming an `EPHEMERAL` column whose value is read and feeds a DEFAULT but is never stored, then one refusal.
-18. **The server profile (ABI v2; Go first)** — a server described by its timezone, a table compiled on it, and a `timezone()` DEFAULT filled with the server's zone. A build that does not compile on a server yet declines, and the section says SKIPPED by name. Python, TypeScript and Rust add this section in their own pull requests; until all four have it, `chplay.sh` still counts seventeen.
+18. **The server profile (ABI v2)** — a server described by its timezone, a table compiled on it, and a `timezone()` DEFAULT filled with the server's zone. A build that does not compile on a server yet declines, and the section says SKIPPED by name.
 
 ## Where the SDKs deliberately differ
 

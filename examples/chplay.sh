@@ -82,7 +82,7 @@ line_for() {
   printf '%s\n' "${line:-$LINE}"
 }
 # Every tour prints this many numbered section banners when it ran in full.
-EXPECTED_SECTIONS=17
+EXPECTED_SECTIONS=18
 ALL_LANGS=(go python ts rust)
 
 # Both default off: the interactive run is the forgiving one.

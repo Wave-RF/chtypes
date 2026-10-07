@@ -11,8 +11,7 @@
 // public API of the TypeScript SDK, from opening a library to the end of the
 // process, each with a comment saying what it demonstrates, why an ingest
 // pipeline cares and what to look at in the output. The same sections, with the
-// same numbering, schemas and rows, exist in the Go, Python and Rust tours
-// (section 18, the ABI v2 server profile, landed in Go first), so two of them
+// same numbering, schemas and rows, exist in the Go, Python and Rust tours, so two of them
 // can be diffed and only the language idioms differ.
 // The API is docs/reference/bindings-v1.md; this tour does not restate it.
 //

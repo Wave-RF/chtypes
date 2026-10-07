@@ -14,8 +14,7 @@
 // a comment saying what it demonstrates, why an ingest pipeline cares, and
 // what to look at in the output. The same sections exist in the Python,
 // TypeScript and Rust tours, so you can diff two tours and see only the
-// language idioms differ; section 18, the server profile, lands in Go first
-// and in the other three in their own pull requests.
+// language idioms differ.
 //
 // Everything runs offline against an INSTALLED artifact: fetch one first,
 //

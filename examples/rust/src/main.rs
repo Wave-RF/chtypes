@@ -10,9 +10,7 @@
 //! API of the Rust SDK, each with a comment saying what it demonstrates, why an
 //! ingest pipeline cares and what to look for in the output. The same section
 //! numbers, schemas and rows exist in the Go, Python and TypeScript tours, so
-//! two tours can be diffed and only the language idioms differ (section 18, the
-//! server profile, lands in Go first and in the others in their own pull
-//! requests). A section whose
+//! two tours can be diffed and only the language idioms differ. A section whose
 //! v0 feature the v1 API deletes (`bindings-v1.md` section 7) keeps its number
 //! and prints which deletion removed it.
 //!
