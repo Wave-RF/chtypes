@@ -57,3 +57,24 @@ def test_dev_fingerprint_refusal_through_a_load(
     err = info.value
     assert str(err) == r6_message(_decls.CHS_ABI_FINGERPRINT, OTHER)
     assert err.code == CODE_ARTIFACT_INCOMPATIBLE and err.reason == "fingerprint"
+
+
+def test_dev_fingerprint_beats_a_missing_symbol(
+    stubs_dir: Path, stubs_manifest: dict, tmp_path: Path, clean_process, monkeypatch
+) -> None:
+    """#537: a library with ANOTHER fingerprint that also lacks a symbol this SDK
+    declares gets rule r6's exact message (loader step 4), not
+    `missing_symbol:<name>` (step 6's sweep, which runs after the fingerprint
+    comparison). The stub variant is shared: every binding's loader conformance
+    runs the same `loader.fingerprint-other-missing-symbol` case."""
+    _unstable()
+    monkeypatch.setenv("CHTYPES_ALLOW_UNVERIFIED_LIBRARY", "1")
+    target = tmp_path / "fingerprint-other-missing-symbol.so"
+    entry = stubs_manifest["variants"]["fingerprint-other-missing-symbol"]
+    assert entry["reason"] == "fingerprint"
+    shutil.copyfile(stub_path(stubs_dir, entry), target)
+    with pytest.raises(ArtifactIncompatibleError) as info, pytest.warns(UserWarning):
+        library.open_unverified(target, allow=True)
+    err = info.value
+    assert str(err) == r6_message(_decls.CHS_ABI_FINGERPRINT, OTHER)
+    assert err.code == CODE_ARTIFACT_INCOMPATIBLE and err.reason == "fingerprint"
