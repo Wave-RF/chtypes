@@ -153,6 +153,8 @@ The verdict on one row: accepted, accepted but unreadable afterwards (the insert
 
 The verdict on a whole body. A batch is never skipped; its rows carry their own outcomes.
 
+The batch's outcome follows a fixed precedence. It is `rejected` if any row is definitely refused. Otherwise it is `unsupported` if any row is unsupported, or if the call's own settings are declined (the declined settings are named in the batch document's top-level `unsupported_settings`). Otherwise it is `accepted`. A declined call setting also withholds the export: every row reads `unsupported`, filter rows read `d`, and no export bytes are produced.
+
 ### filter_outcome
 
 Whether a filter evaluation completed at all. Per-row failures are verdicts, not outcomes.
@@ -210,7 +212,7 @@ One row's verdict and, as the flags ask, its columns' stored values, provenance 
 
 A body's verdict, counts and per-row documents (each a row document, with its own `input_span`), and, when an export was asked for, where each accepted row sits in the export bytes. `engine_rows`, present when the table's engine merges rows at insert, is a list of rows, each a list of cells: `{name, stored, null}`, plus `value_b64` for a String or FixedString value. `storage_transforms` entries carry `row`, `column`, `reason` and `stored`, plus `value_b64`; `transformed` entries carry `row`, `column`, `input`, `stored`, `reason` and `lossy`. Every name, rendering, `err` and `export_declined` follows the rule for byte strings in JSON.
 
-`unsupported_settings`, at the top level, is a list of name objects with the same shape as a row document's: the call's own settings that the library declined.
+`unsupported_settings`, at the top level, is a list of name objects with the same shape as a row document's: the call's own settings that the library declined. It is empty when none was, and when it is not empty the batch's outcome is at least `unsupported` (see `batch_outcome`).
 
 `at_merge` lists what an `OPTIMIZE TABLE ... FINAL` of the part this `INSERT` writes would do, at the call's clock instant. It is absent when nothing would happen. `engine_rows` stays exactly what the `INSERT` writer produces, so the two never contradict each other. Each entry is `{row, reason, column, stored, input_rows}`:
 
