@@ -1777,8 +1777,8 @@ def main_run_v2(
 # output shapes, a schema-2 record in the subroot, an install by renaming a
 # complete temporary directory, and three planted defects (FAKE_V2_PLANT,
 # "<defect>:<binding>"): `reader-rejects` reads no record at all,
-# `concurrent` installs by a mkdir that a second installer fails on, and
-# `ro-creates` makes the subroot on `list`.
+# `concurrent` installs on every online fetch by a mkdir that a second
+# installer fails on, and `ro-creates` makes the subroot on `list`.
 FAKE_V2_CLI = r'''
 import hashlib, json, os, shutil, sys, time
 binding, args = sys.argv[1], sys.argv[2:]
@@ -1848,7 +1848,10 @@ elif cmd == "verify":
             sys.exit(1)
 elif cmd == "fetch":
     spelling = args[0]
-    hits = [(n, rec) for n, rec in installed() if within(spelling, rec["version"])]
+    # The planted racer installs on every online fetch, hit or not, so a
+    # second installer meets the first one's entry whatever the timing.
+    racer = plant == "concurrent:" + binding and not offline
+    hits = [] if racer else [(n, rec) for n, rec in installed() if within(spelling, rec["version"])]
     if hits:
         print(os.path.join(base, hits[0][0]))
         sys.exit(0)
@@ -1865,7 +1868,7 @@ elif cmd == "fetch":
                        "bundle_manifest": None},
            "signed_by": cfg["key_id"], "predicate": {"abi": cfg["abi"]}}
     os.makedirs(base, exist_ok=True)
-    if plant == "concurrent:" + binding:
+    if racer:
         try:
             os.mkdir(final)
         except FileExistsError:
