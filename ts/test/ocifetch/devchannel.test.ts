@@ -9,7 +9,8 @@
  */
 
 import diagnosticsChannel from 'node:diagnostics_channel';
-import { cp, mkdtemp, rm, stat } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { cp, mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -22,6 +23,7 @@ import {
   DEV_KEY_HEX,
   DEV_KEY_ID,
   ignoredSettingsWarned,
+  offlineMode,
   PINNING_REFUSED,
   PinningRefusedError,
   useDevChannelForTests,
@@ -30,12 +32,13 @@ import {
 import { RELEASE_KEYS, TEST_KEYS } from '../../src/ocifetch/constants.gen.js';
 import { checkArtifactStatement, keyIdOfRawKey, parseStatement } from '../../src/ocifetch/dsse.js';
 import { effectiveFetchOptions, ensure, listInstalled, resolveInstalled } from '../../src/ocifetch/ensure.js';
-import { cacheRoot, decodeRecord, encodeRecord, systemDirs, type VerifiedRecord } from '../../src/ocifetch/layout.js';
+import { cacheRoot, decodeRecord, encodeRecord, systemDirs, unpackedDir, type VerifiedRecord } from '../../src/ocifetch/layout.js';
+import { ArtifactMissingError } from '../../src/ocifetch/errors.js';
 import type { ArtifactPredicate, FetchV1Options } from '../../src/ocifetch/types.js';
 
 useDevChannelForTests();
 
-const OVERRIDE_ENV = ['CHTYPES_ARTIFACTS_URL', 'CHTYPES_TRUSTED_KEYS', 'CHTYPES_ALLOW_UNSIGNED', 'CHTYPES_CACHE', 'CHTYPES_CACHE_STRICT'];
+const OVERRIDE_ENV = ['CHTYPES_ARTIFACTS_URL', 'CHTYPES_TRUSTED_KEYS', 'CHTYPES_ALLOW_UNSIGNED', 'CHTYPES_CACHE', 'CHTYPES_CACHE_STRICT', 'CHTYPES_OFFLINE'];
 
 function clearEnv(): void {
   for (const k of OVERRIDE_ENV) vi.stubEnv(k, '');
@@ -254,5 +257,74 @@ describe('rule r6: a signed predicate must say abi 2', () => {
       /not 2/,
     );
     expect(checkArtifactStatement(statement(2), 'https://artifacts.wavehouse.dev/spec/artifact/v1', `sha256:${layer}`, check).abi).toBe(2);
+  });
+});
+
+describe('public issue #528: CHTYPES_OFFLINE=1 is the environment twin of the offline option', () => {
+  const sha256 = (text: string): string => createHash('sha256').update(text).digest('hex');
+
+  it('with nothing installed it is ARTIFACT_MISSING and not one request is made; the option is the same answer', async () => {
+    clearEnv();
+    vi.stubEnv('CHTYPES_OFFLINE', '1');
+    const cacheDir = await tempDir();
+    const cases: FetchV1Options[] = [{}, { offline: false }, { offline: true }];
+    for (const options of cases) {
+      if (options.offline === true) vi.stubEnv('CHTYPES_OFFLINE', '');
+      const requests = countRequests();
+      let caught: unknown;
+      try {
+        await ensure('26.8', { ...options, cacheDir, systemDirs: [], platform: 'linux-arm64' });
+      } catch (err) {
+        caught = err;
+      } finally {
+        requests.stop();
+      }
+      expect(caught).toBeInstanceOf(ArtifactMissingError);
+      expect(requests.count()).toBe(0);
+    }
+  });
+
+  it('with a build installed it loads it, still with no request; an explicit false does not turn the variable off; only "1" is on', async () => {
+    clearEnv();
+    vi.stubEnv('CHTYPES_OFFLINE', '1');
+    const cacheDir = await tempDir();
+    const root = cacheRoot(cacheDir);
+    const library = 'library 26.8.1.1';
+    const hex = sha256(`${root}26.8.1.1`);
+    const record: VerifiedRecord = {
+      platform: 'linux-arm64',
+      version: '26.8.1.1',
+      channel: null,
+      build: '20260801.000001',
+      library: 'lib.so',
+      librarySha256: sha256(library),
+      libraryBytes: library.length,
+      indexDigest: null,
+      manifestDigest: `sha256:${hex}`,
+      layerDigest: `sha256:${'c'.repeat(64)}`,
+      bundleDigest: null,
+      bundleManifestDigest: null,
+      signedBy: null,
+      predicate: { clickhouse_version: '26.8.1.1', build: '20260801.000001' } as unknown as ArtifactPredicate,
+    };
+    const entry = unpackedDir(root, hex);
+    await mkdir(entry, { recursive: true });
+    await writeFile(path.join(entry, 'lib.so'), library);
+    await writeFile(path.join(entry, 'verified.json'), encodeRecord(record));
+
+    const requests = countRequests();
+    try {
+      const got = await ensure('26.8', { cacheDir, systemDirs: [], platform: 'linux-arm64' });
+      expect(got.dir).toBe(entry);
+      expect(offlineMode(undefined)).toBe(true);
+      expect(offlineMode(false)).toBe(true);
+      vi.stubEnv('CHTYPES_OFFLINE', 'true');
+      expect(offlineMode(undefined)).toBe(false);
+      vi.stubEnv('CHTYPES_OFFLINE', '0');
+      expect(offlineMode(undefined)).toBe(false);
+    } finally {
+      requests.stop();
+    }
+    expect(requests.count()).toBe(0);
   });
 });

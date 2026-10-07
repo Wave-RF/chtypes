@@ -5,7 +5,7 @@
                                          [--frozen] [--offline] [--update] [--strict]
     chtypes verify [--cache <dir>] [--strict]   re-verify every installed build
     chtypes list   [--cache <dir>] [--offline] [--strict]
-    chtypes where  [--cache <dir>] [--strict]   the cache root
+    chtypes where  [--cache <dir>] [--strict] [--all]   the cache root; --all: every search dir
 
 A spelling is `26.8`, `26.8.15` or `26.8.15.10`. Exit statuses come from the
 `errors` table of spec/fetch-v1/constants.json (generated into the fetch layer
@@ -137,7 +137,10 @@ def build_parser() -> argparse.ArgumentParser:
     fetch.add_argument(
         "--offline",
         action="store_true",
-        help="never touch a source: installed and verified, or CHTYPES_ARTIFACT_MISSING",
+        help=(
+            "never touch a source: installed and verified, or CHTYPES_ARTIFACT_MISSING "
+            "(or set CHTYPES_OFFLINE=1)"
+        ),
     )
 
     verify = sub.add_parser(
@@ -154,11 +157,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     cache_option(listing)
     listing.add_argument(
-        "--offline", action="store_true", help="list only what is installed; no network"
+        "--offline",
+        action="store_true",
+        help="list only what is installed; no network (or set CHTYPES_OFFLINE=1)",
     )
 
-    where = sub.add_parser("where", help="the cache root", description="Print the cache root.")
+    where = sub.add_parser(
+        "where",
+        help="the cache root",
+        description="Print the cache root; with --all, every directory searched.",
+    )
     cache_option(where)
+    where.add_argument(
+        "--all",
+        action="store_true",
+        help="every directory searched, in order, the cache root first (one per line)",
+    )
     return parser
 
 
@@ -294,7 +308,7 @@ def _cmd_list(args: argparse.Namespace) -> int:
         sys.stdout.write(f"installed {r.version} {r.platform} {r.dir}\n")
     sys.stdout.flush()
     _say_notes(options)
-    if not args.offline:
+    if not options.resolved_offline():
         for tag in _published_tags(options):
             sys.stdout.write(f"published {tag} support unknown\n")
     sys.stdout.flush()
@@ -306,6 +320,10 @@ def _cmd_where(args: argparse.Namespace) -> int:
     if options.resolved_strict():
         # Strict mode checks the root before naming it.
         probe_roots(search_roots(options.cache_dir, options.system_dirs), strict=True)
+    if args.all:
+        for directory in search_roots(options.cache_dir, options.system_dirs):
+            sys.stdout.write(f"{directory}\n")
+        return EXIT_OK
     sys.stdout.write(f"{resolve_cache_root(args.cache)}\n")
     return EXIT_OK
 

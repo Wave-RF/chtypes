@@ -33,7 +33,7 @@ type FetchOptions struct {
 	TrustedKeys     []string // raw hex ed25519 public keys; CHTYPES_TRUSTED_KEYS
 	Token           string   // CHTYPES_DOWNLOAD_TOKEN
 	AllowUnsigned   bool     // also set by CHTYPES_ALLOW_UNSIGNED=1
-	Offline         bool
+	Offline         bool     // also set by CHTYPES_OFFLINE=1 (public issue #528); the cache only, no request
 	Frozen          bool
 	LockPath        string
 	LockWrite       bool
@@ -55,6 +55,21 @@ func (o FetchOptions) internal() *ocifetch.Options {
 		ConnectTimeout: o.ConnectTimeout, IdleReadTimeout: o.IdleReadTimeout,
 	}
 }
+
+// CacheRoot is the cache root a fetch, list or `chtypes where` with o would
+// use: o.CacheDir, else CHTYPES_CACHE, each through the dev channel's v2-dev
+// subroot (spec/abi-v2/docs.md, rule r5), else
+// `${XDG_CACHE_HOME:-~/.cache}/chtypes/v2-dev`. It is the very resolution the
+// fetch layer runs, and it creates nothing and reads no cache. It is the first
+// entry of SearchDirs.
+func CacheRoot(o FetchOptions) (string, error) { return ocifetch.CacheRoot(o.internal()) }
+
+// SearchDirs is the ordered list of directories a lookup reads for installed
+// builds: the cache root first, then each read-only system directory
+// (o.SystemDirs, else the built-in list; an empty non-nil slice means none).
+// The order is the fetch layer's own, and on a tie the earlier directory wins.
+// It creates nothing and touches no file.
+func SearchDirs(o FetchOptions) ([]string, error) { return ocifetch.SearchDirs(o.internal()) }
 
 type registryConfig struct {
 	fetch     FetchOptions

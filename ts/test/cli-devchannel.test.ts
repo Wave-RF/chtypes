@@ -62,6 +62,27 @@ describe('the CLI on the dev channel, in process', () => {
     expect(await run('where')).toEqual({ code: EXIT_OK, out: `${path.join(xdg, 'chtypes', DEV_CACHE_DIR)}\n`, err: '' });
   });
 
+  it('where --all lists the subrooted search directories, the root first (public issues #530 and #527)', async () => {
+    for (const k of ['CHTYPES_CACHE', 'CHTYPES_OFFLINE']) vi.stubEnv(k, '');
+    const dir = tempDir();
+    expect(await run('where', '--all', '--cache', dir)).toEqual({
+      code: EXIT_OK,
+      out: `${path.join(dir, DEV_CACHE_DIR)}\n/usr/local/share/chtypes/v2-dev\n/opt/chtypes/v2-dev\n`,
+      err: '',
+    });
+  });
+
+  it('CHTYPES_OFFLINE=1 is --offline: list asks the registry for nothing, and fetch with nothing installed is ARTIFACT_MISSING (public issue #528)', async () => {
+    vi.stubEnv('CHTYPES_OFFLINE', '1');
+    const dir = tempDir();
+    const listed = await run('list', '--cache', dir);
+    expect(listed.code).toBe(EXIT_OK);
+    expect(listed.out).not.toContain('published');
+    const fetched = await run('fetch', '26.8', '--cache', dir, '--platform', 'linux-amd64');
+    expect(fetched.code).not.toBe(EXIT_OK);
+    expect(fetched.err).toContain('CHTYPES_ARTIFACT_MISSING');
+  });
+
   it('refuses --lock, --frozen and --update with the usage status and the dev-channel reason, before anything else (rule r6)', async () => {
     const lock = path.join(tempDir(), 'chtypes.lock');
     for (const argv of [

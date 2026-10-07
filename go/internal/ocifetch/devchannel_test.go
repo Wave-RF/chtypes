@@ -21,7 +21,7 @@ import (
 func devChannelForTest(t *testing.T) {
 	t.Helper()
 	t.Cleanup(UseDevChannelForTests())
-	for _, k := range []string{EnvBasesName, EnvTrustedKeysName, EnvAllowUnsignedName, EnvCacheName, EnvCacheStrictName} {
+	for _, k := range []string{EnvBasesName, EnvTrustedKeysName, EnvAllowUnsignedName, EnvCacheName, EnvCacheStrictName, EnvOfflineName} {
 		t.Setenv(k, "")
 	}
 }
@@ -262,5 +262,71 @@ func TestDevChannelNeverReadsAV1Cache(t *testing.T) {
 		if err != nil || got != nil {
 			t.Errorf("the dev channel resolved %s from a 1.x cache: %+v, %v", r.Version, got, err)
 		}
+	}
+}
+
+// #528: CHTYPES_OFFLINE=1 is the environment twin of the Offline option. With
+// nothing installed it is CHTYPES_ARTIFACT_MISSING and not one request is made
+// (the count is the OnRequest hook, as above); with a library installed it
+// resolves it, still with no request. The option is the same answer.
+func TestDevOfflineEnvMakesNoRequestAndLoadsAnInstalledBuild(t *testing.T) {
+	devChannelForTest(t)
+	t.Setenv(EnvOfflineName, "1")
+	cache := t.TempDir()
+	requests := 0
+	o := func() *Options {
+		return &Options{CacheDir: cache, SystemDirs: []string{}, OnRequest: func(*http.Request) { requests++ }}
+	}
+	req := Request{Spelling: "26.8", Platform: "linux-arm64"}
+
+	_, err := Ensure(context.Background(), req, o())
+	var fe *FetchError
+	if !errors.As(err, &fe) || fe.Code != CodeArtifactMissing {
+		t.Fatalf("Ensure under CHTYPES_OFFLINE=1 with nothing installed = %v, want %s", err, CodeArtifactMissing)
+	}
+	if requests != 0 {
+		t.Fatalf("%d request(s) were made under CHTYPES_OFFLINE=1", requests)
+	}
+	// The option explicitly false does not turn the variable off (go has only
+	// the zero value for "not set", so this is the same call, named for the rule).
+	f := o()
+	f.Offline = false
+	if _, err := Ensure(context.Background(), req, f); !errors.As(err, &fe) || fe.Code != CodeArtifactMissing || requests != 0 {
+		t.Fatalf("option false + CHTYPES_OFFLINE=1 = %v, %d request(s); want %s and none", err, requests, CodeArtifactMissing)
+	}
+	// The option alone, with the variable unset, is offline too.
+	t.Setenv(EnvOfflineName, "")
+	on := o()
+	on.Offline = true
+	if _, err := Ensure(context.Background(), req, on); !errors.As(err, &fe) || fe.Code != CodeArtifactMissing || requests != 0 {
+		t.Fatalf("option true, variable unset = %v, %d request(s); want %s and none", err, requests, CodeArtifactMissing)
+	}
+	t.Setenv(EnvOfflineName, "1")
+
+	root, err := CacheRoot(o())
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := writeRecordRoot(t, root, "26.8.1.1", "20260801.000001")
+	res, err := Ensure(context.Background(), req, o())
+	if err != nil || res == nil || res.Dir != entry {
+		t.Fatalf("Ensure under CHTYPES_OFFLINE=1 with a build installed = %v, %v; want %s", res, err, entry)
+	}
+	if requests != 0 {
+		t.Errorf("%d request(s) were made loading an installed build offline", requests)
+	}
+
+	// Anything but "1" is off: the variable is a switch, not a truthiness test.
+	t.Setenv(EnvOfflineName, "0")
+	ro, err := resolveOptions(o())
+	if err != nil || ro.offline {
+		t.Errorf("CHTYPES_OFFLINE=0 resolved offline = %v (%v)", ro.offline, err)
+	}
+	// The option alone, with the variable unset, is the same mode.
+	t.Setenv(EnvOfflineName, "")
+	opt := o()
+	opt.Offline = true
+	if ro, err := resolveOptions(opt); err != nil || !ro.offline {
+		t.Errorf("the Offline option did not resolve offline (%v)", err)
 	}
 }

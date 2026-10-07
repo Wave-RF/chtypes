@@ -200,13 +200,17 @@ impl VerifiedRecord {
 /// channel.
 pub fn cache_root(cache_env_override: Option<&str>) -> Result<PathBuf> {
     let contract = channel::active();
-    let explicit = cache_env_override.map(PathBuf::from).or_else(|| {
-        std::env::var(constants::ENV_CACHE_NAME)
-            .ok()
-            .filter(|dir| !dir.is_empty())
-            .map(PathBuf::from)
-    });
+    let explicit = cache_env_override
+        .filter(|d| !d.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var(constants::ENV_CACHE_NAME)
+                .ok()
+                .filter(|dir| !dir.is_empty())
+                .map(PathBuf::from)
+        });
     if let Some(dir) = explicit {
+        let dir = absolute_lexical(&dir)?;
         return Ok(match contract.subroot {
             Some(subroot) => dir.join(subroot),
             None => dir,
@@ -226,7 +230,43 @@ pub fn cache_root(cache_env_override: Option<&str>) -> Result<PathBuf> {
                 "neither CHTYPES_CACHE, XDG_CACHE_HOME nor HOME is set".to_string(),
             )
         })?;
-    Ok(base.join("chtypes").join(contract.root_leaf))
+    absolute_lexical(&base.join("chtypes").join(contract.root_leaf))
+}
+
+/// A relative cache directory is the process cwd's at this call, resolved here
+/// once so every path derived from it is absolute (docs/guides/fetch-v1.md §9,
+/// public issue #541). Lexical, like Go's `filepath.Abs` and Node's
+/// `path.resolve`: `.` and `..` are folded and no symlink is followed.
+fn absolute_lexical(p: &Path) -> Result<PathBuf> {
+    use std::path::Component;
+    let joined = if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|e| Error::SourceIncompatible(format!("resolving the cache directory: {e}")))?
+            .join(p)
+    };
+    let mut out = PathBuf::new();
+    for c in joined.components() {
+        match c {
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::CurDir => {}
+            other => out.push(other.as_os_str()),
+        }
+    }
+    Ok(out)
+}
+
+/// The one root order every lookup reads (docs/guides/fetch-v1.md §1): the
+/// cache root, then each read-only system directory in order. The public
+/// `chtypes::search_dirs` and the CLI's `where --all` report exactly this
+/// (public issue #530).
+pub fn search_roots(root: &Path, system_dirs: &[PathBuf]) -> Vec<PathBuf> {
+    std::iter::once(root.to_path_buf())
+        .chain(system_dirs.iter().cloned())
+        .collect()
 }
 
 /// Create the OCI image-layout skeleton (`oci-layout`, an empty `index.json`,

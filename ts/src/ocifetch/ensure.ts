@@ -11,7 +11,7 @@ import { unlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { asString, field, items, parseJsonValue } from '../json.js';
-import { activeChannel, allowUnsigned, noteIgnoredOverrides, refusePinning, warnIgnored } from './channel.js';
+import { activeChannel, allowUnsigned, noteIgnoredOverrides, offlineMode, refusePinning, warnIgnored } from './channel.js';
 import {
   BASE_SEPARATOR,
   CACHE_ANNOTATION_PREFIX,
@@ -206,6 +206,11 @@ export async function resolveInstalled(
 /** The cache, then every system directory in order: the one search order every lookup uses. */
 function searchRoots(options: FetchV1Options): readonly { readonly root: string; readonly source: string }[] {
   return [{ root: cacheRoot(options.cacheDir), source: 'cache' }, ...systemDirs(options.systemDirs).map((d) => ({ root: d, source: `system:${d}` }))];
+}
+
+/** The directories every lookup reads, in order: the cache root, then each system directory (public issue #530). It reads and creates nothing. */
+export function searchDirs(options: FetchV1Options = {}): readonly string[] {
+  return searchRoots(options).map((r) => r.root);
 }
 
 /** Two records by (version, build): the version numerically, part by part, then the fixed-width build. */
@@ -412,7 +417,7 @@ async function ensureIn(request: string, options: FetchV1Options): Promise<Resol
 
   // An offline lookup is read-only: it creates nothing, so a read-only mount
   // reads cleanly (guide §6; public issue #486). Only a fetch makes the layout.
-  if (options.offline === true) {
+  if (offlineMode(options.offline)) {
     const hit = await resolveInstalled(request, platform, options);
     if (hit === undefined) {
       throw new ArtifactMissingError(

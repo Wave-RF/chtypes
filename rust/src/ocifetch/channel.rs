@@ -353,6 +353,19 @@ pub fn allow_unsigned(option: bool) -> bool {
         && (option || std::env::var(constants::ENV_ALLOW_UNSIGNED_NAME).is_ok_and(|v| v == "1"))
 }
 
+/// The environment twin of the `offline` option (public issue #528):
+/// `CHTYPES_OFFLINE=1` reads the cache only and makes no request. It names no
+/// source, so rule r6 holds. Not a generated constant: the generated set is the
+/// v1 fetch contract's.
+pub const ENV_OFFLINE_NAME: &str = "CHTYPES_OFFLINE";
+
+/// Whether a call is offline: the option, or `CHTYPES_OFFLINE=1`. The option is a
+/// plain `bool`, so it can only turn the mode on; the variable is read per call,
+/// with the other environment variables.
+pub fn offline_mode(option: bool) -> bool {
+    option || std::env::var(ENV_OFFLINE_NAME).is_ok_and(|v| v == "1")
+}
+
 /// The pinning options `options` sets, if any, by name.
 pub fn pinning_requested(options: &Options) -> Vec<&'static str> {
     let mut set = Vec::new();

@@ -14,6 +14,8 @@ export {
   DEV_CACHE_DIR,
   DEV_CHANNEL_BASE,
   DEV_KEY_ID,
+  ENV_OFFLINE_NAME,
+  offlineMode,
   PINNING_REFUSED,
   PinningRefusedError,
   pinningRequested,
@@ -30,6 +32,7 @@ export {
   probeCache,
   resolveInstalled,
   satisfiesRequest,
+  searchDirs,
   verifyInstalled,
   withNotes,
 } from './ensure.js';

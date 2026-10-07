@@ -32,10 +32,11 @@ from ._ocifetch import _constants as _fetch_constants
 from ._ocifetch._dsse import TrustedKey
 from ._ocifetch._ensure import detect_host_platform, missing_notes, with_notes
 from ._ocifetch._errors import FetchError
+from ._ocifetch._layout import resolve_cache_root, search_roots
 from ._ocifetch._oci import version_within_request
 from .library import Library, open_image
 
-__all__ = ["FetchOptions", "Registry", "Resolved", "TrustedKey"]
+__all__ = ["FetchOptions", "Registry", "Resolved", "TrustedKey", "cache_root", "search_dirs"]
 
 _TRUTHY = ("1", "true", "yes", "on")
 
@@ -80,6 +81,8 @@ class FetchOptions:
     token: str | None = None
     trusted_keys: Sequence[TrustedKey] | None = None
     allow_unsigned: bool | None = None
+    # Offline reads the cache only and makes no request. It is on when this is
+    # set OR CHTYPES_OFFLINE=1; neither turns the other off (public issue #528).
     offline: bool = False
     frozen: bool = False
     lock_path: str | os.PathLike[str] | None = None
@@ -118,6 +121,27 @@ class FetchOptions:
             update=self.update,
             strict_cache=self.strict_cache,
         )
+
+
+def cache_root(options: FetchOptions | None = None) -> Path:
+    """The cache root a fetch, list or `chtypes where` with `options` would use:
+    `options.cache_dir`, else `CHTYPES_CACHE` (each used through its `v2-dev`
+    subroot, spec/abi-v2/docs.md rule r5), else
+    `${XDG_CACHE_HOME:-~/.cache}/chtypes/v2-dev`.
+
+    It is the fetch layer's own resolution, `search_dirs(options)[0]`. It
+    creates nothing and reads no cache."""
+    return resolve_cache_root((options or FetchOptions()).cache_dir)
+
+
+def search_dirs(options: FetchOptions | None = None) -> tuple[Path, ...]:
+    """Every directory a lookup reads for installed builds, in the order it reads
+    them: the cache root first, then each read-only system directory
+    (`options.system_dirs`; `None` is the built-in list, an empty sequence none).
+    The order is the fetch layer's own, and on a tie the earlier directory wins.
+    It creates nothing and touches no file."""
+    o = options or FetchOptions()
+    return search_roots(o.cache_dir, o.system_dirs)
 
 
 def _wrap(exc: FetchError) -> errors.ArtifactError:

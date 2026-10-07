@@ -54,6 +54,18 @@ export const DEV_RECORD_SCHEMA = 2;
 /** The abi a dev predicate must carry. */
 export const DEV_ABI_GENERATION = 2;
 
+/**
+ * The environment twin of the `offline` option (public issue #528): `CHTYPES_OFFLINE=1` reads the cache only and
+ * makes no request. It names no source, so rule r6 holds. Not a generated constant: the generated set is the v1
+ * fetch contract's.
+ */
+export const ENV_OFFLINE_NAME = 'CHTYPES_OFFLINE';
+
+/** Whether offline mode is on: the option is true OR `CHTYPES_OFFLINE=1`; neither turns the other off. Read per call, with the other environment variables. */
+export function offlineMode(option: boolean | undefined): boolean {
+  return option === true || process.env[ENV_OFFLINE_NAME] === '1';
+}
+
 /** What every lock, frozen or update request gets from a 2.0.0-dev SDK, before any network call (rule r6). */
 export const PINNING_REFUSED =
   '--lock, --frozen and --update are refused by a 2.0.0-dev SDK: a dev build is replaceable, ' +

@@ -137,6 +137,8 @@ class Options:
     token: str | None = None
     trusted_keys: tuple[TrustedKey, ...] | None = None
     allow_unsigned: bool = False
+    # Offline mode is on when this is set OR CHTYPES_OFFLINE=1; neither turns
+    # the other off (public issue #528).
     offline: bool = False
     frozen: bool = False
     lock_path: str | os.PathLike[str] | None = None
@@ -184,6 +186,9 @@ class Options:
 
     def resolved_platform(self) -> str:
         return self.platform or detect_host_platform()
+
+    def resolved_offline(self) -> bool:
+        return self.offline or os.environ.get(_channel.ENV_OFFLINE_NAME) == "1"
 
     def resolved_strict(self) -> bool:
         if self.strict_cache is not None:
@@ -1012,7 +1017,7 @@ def _ensure(
     request: Request, platform_key: str, options: Options, lock: Lock | None, roots: Sequence[Path]
 ) -> Resolved:
     try:
-        if options.offline:
+        if options.resolved_offline():
             resolved = resolve_installed(request, platform_key, options)
             if resolved is None:
                 raise ArtifactMissingError(

@@ -59,13 +59,25 @@ func lineLess(a, b string) bool {
 }
 
 // CacheRoot is the layout directory a call with opts would use: CacheDir,
-// else CHTYPES_CACHE, else the per-user default (§1).
+// else CHTYPES_CACHE, each through the dev channel's v2-dev subroot (rule r5),
+// else the per-user default (§1).
 func CacheRoot(opts *Options) (string, error) {
 	ro, err := resolveOptions(opts)
 	if err != nil {
 		return "", err
 	}
 	return ro.cacheDir, nil
+}
+
+// SearchDirs is every directory a lookup with opts reads, in the order it
+// reads them: the cache root (CacheRoot), then each system directory. It
+// creates and reads nothing.
+func SearchDirs(opts *Options) ([]string, error) {
+	ro, err := resolveOptions(opts)
+	if err != nil {
+		return nil, err
+	}
+	return ro.searchDirs(), nil
 }
 
 // ReadLock reads and validates a lock file (§6): schema 3 at this ABI

@@ -223,7 +223,8 @@ extern "C" {
  *   `session_timezone` here is the default session zone of the server's user.
  * - `macros`: the server's macros, as its `system.macros` lists them (`macro`, `substitution`).
  *   Absent, they are unknown; present, even as `{}`, they are the complete set (see
- *   `chs_server_create`).
+ *   `chs_server_create`). A macro name that ClickHouse's own macro reader refuses (for example
+ *   `a.b`) is refused with `CHS_INVALID_ARGUMENT` naming it.
  *
  * An input document of fixed purpose. Its members, as JSON Schema:
  *

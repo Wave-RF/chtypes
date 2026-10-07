@@ -29,7 +29,7 @@ from chtypes._ocifetch._ensure import (
     resolve_installed,
     verify_installed,
 )
-from chtypes._ocifetch._errors import ArtifactCorruptError
+from chtypes._ocifetch._errors import ArtifactCorruptError, ArtifactMissingError
 from chtypes._ocifetch._layout import VerifiedRecord, resolve_cache_root, search_roots
 
 REPO = Path(__file__).resolve().parents[3]
@@ -40,7 +40,12 @@ OVERRIDE_ENV = (C.ENV_BASES_NAME, C.ENV_TRUSTED_KEYS_NAME, C.ENV_ALLOW_UNSIGNED_
 @pytest.fixture(autouse=True)
 def dev_channel(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     restore = _channel.use_dev_channel_for_tests()
-    for name in (*OVERRIDE_ENV, C.ENV_CACHE_NAME, C.ENV_CACHE_STRICT_NAME):
+    for name in (
+        *OVERRIDE_ENV,
+        C.ENV_CACHE_NAME,
+        C.ENV_CACHE_STRICT_NAME,
+        _channel.ENV_OFFLINE_NAME,
+    ):
         monkeypatch.delenv(name, raising=False)
     try:
         yield
@@ -266,3 +271,56 @@ def test_the_seams_are_test_only(monkeypatch: pytest.MonkeyPatch) -> None:
         with pytest.raises(RuntimeError, match="test-only"):
             seam()
     assert _channel.channel_name() == "v2-dev"
+
+
+def test_offline_env_alone_is_artifact_missing_with_zero_requests(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, no_network: list[str]
+) -> None:
+    """#528: CHTYPES_OFFLINE=1 is the environment twin of the offline option. With
+    nothing installed it is CHTYPES_ARTIFACT_MISSING, and not one request is made
+    (the counter is `no_network`, as for the refusals above)."""
+    monkeypatch.setenv(_channel.ENV_OFFLINE_NAME, "1")
+    options = Options(cache_dir=tmp_path / "cache", system_dirs=(), platform="linux-arm64")
+    assert options.offline is False and options.resolved_offline() is True
+    with pytest.raises(ArtifactMissingError):
+        ensure(Request("26.8"), options)
+    assert no_network == []
+    # The option explicitly false does not turn the variable off.
+    off = Options(
+        cache_dir=tmp_path / "cache", system_dirs=(), platform="linux-arm64", offline=False
+    )
+    with pytest.raises(ArtifactMissingError):
+        ensure(Request("26.8"), off)
+    assert no_network == []
+    # The option alone, with the variable unset, is offline too.
+    monkeypatch.delenv(_channel.ENV_OFFLINE_NAME)
+    on = Options(cache_dir=tmp_path / "cache", system_dirs=(), platform="linux-arm64", offline=True)
+    with pytest.raises(ArtifactMissingError):
+        ensure(Request("26.8"), on)
+    assert no_network == []
+
+
+def test_offline_env_with_an_installed_build_loads_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, no_network: list[str]
+) -> None:
+    from .test_cache_roots import _write_record
+
+    monkeypatch.setenv(_channel.ENV_OFFLINE_NAME, "1")
+    cache = tmp_path / "cache"
+    options = Options(cache_dir=cache, system_dirs=(), platform="linux-arm64")
+    entry = _write_record(resolve_cache_root(cache), "26.8.1.1", "20260801.000001")
+    resolved = ensure(Request("26.8"), options)
+    assert resolved.dir == entry
+    assert no_network == []
+
+
+def test_offline_env_only_one_is_on_and_the_two_are_ored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for value, want in (("1", True), ("0", False), ("", False), ("true", False)):
+        monkeypatch.setenv(_channel.ENV_OFFLINE_NAME, value)
+        assert Options().resolved_offline() is want, value
+    monkeypatch.setenv(_channel.ENV_OFFLINE_NAME, "1")
+    assert Options(offline=False).resolved_offline() is True
+    monkeypatch.delenv(_channel.ENV_OFFLINE_NAME)
+    assert Options(offline=True).resolved_offline() is True

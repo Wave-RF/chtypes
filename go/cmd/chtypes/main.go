@@ -7,8 +7,8 @@
 //	                                    re-verify the installed cache
 //	chtypes list   [--cache <dir>] [--offline] [--strict]
 //	                                    what is installed, and what is published
-//	chtypes where  [--cache <dir>] [--strict]
-//	                                    the cache root
+//	chtypes where  [--cache <dir>] [--strict] [--all]
+//	                                    the cache root; --all: every search directory
 //
 // Run it without installing anything:
 //
@@ -55,10 +55,11 @@ const usageText = `usage:
                                       re-verify the installed cache
   chtypes list   [--cache <dir>] [--offline] [--strict]
                                       what is installed, and what is published
-  chtypes where  [--cache <dir>] [--strict]
-                                      the cache root
+  chtypes where  [--cache <dir>] [--strict] [--all]
+                                      the cache root; --all: every directory searched, in order
   chtypes --version
 
+--offline (or CHTYPES_OFFLINE=1): read the cache only, make no request
 --strict (or CHTYPES_CACHE_STRICT=1): a cache that cannot be read is CHTYPES_CACHE_UNUSABLE, never "not installed"
 exit statuses: 0 ok, 2 usage, otherwise the failure's own status (docs/guides/fetch-v1.md section 8)
 
@@ -187,7 +188,7 @@ func (c *commonFlags) bind(fs *flag.FlagSet, withPlatform, withOffline bool) {
 		fs.StringVar(&c.platform, "platform", "", "platform key <os>-<arch> (default: this host, or $CHTYPES_TARGET)")
 	}
 	if withOffline {
-		fs.BoolVar(&c.offline, "offline", false, "read the cache only; never the network")
+		fs.BoolVar(&c.offline, "offline", false, "read the cache only; never the network (default: $CHTYPES_OFFLINE=1)")
 	}
 }
 
@@ -205,6 +206,11 @@ func (c *commonFlags) options() *ocifetch.Options {
 // strictMode is whether strict mode is on: --strict, else CHTYPES_CACHE_STRICT=1.
 func (c *commonFlags) strictMode() bool {
 	return c.strict || os.Getenv(ocifetch.EnvCacheStrictName) == "1"
+}
+
+// offlineMode is whether the fetch is offline: --offline, else CHTYPES_OFFLINE=1.
+func (c *commonFlags) offlineMode() bool {
+	return c.offline || os.Getenv(ocifetch.EnvOfflineName) == "1"
 }
 
 // printNotes prints what the cache says about itself in the default mode: a
@@ -418,7 +424,7 @@ func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		fmt.Fprintf(stdout, "installed %s %s %s\n", r.Version, r.Platform, r.Dir)
 	}
 	printNotes(stderr, opts)
-	if cf.offline {
+	if cf.offlineMode() {
 		return nil
 	}
 	lines, err := ocifetch.ListTags(ctx, opts)
@@ -437,6 +443,7 @@ func cmdWhere(args []string, stdout, stderr io.Writer) error {
 	fs := newFlagSet("where", stderr)
 	var cf commonFlags
 	cf.bind(fs, false, false)
+	all := fs.Bool("all", false, "print every directory searched (the cache root first, then the system directories), one per line")
 	if rest, err := parseInterleaved(fs, args); err != nil {
 		return err
 	} else if len(rest) > 0 {
@@ -452,6 +459,16 @@ func cmdWhere(args []string, stdout, stderr io.Writer) error {
 		if _, err := ocifetch.ProbeCache(opts); err != nil {
 			return err
 		}
+	}
+	if *all {
+		dirs, err := ocifetch.SearchDirs(opts)
+		if err != nil {
+			return err
+		}
+		for _, d := range dirs {
+			fmt.Fprintln(stdout, d)
+		}
+		return nil
 	}
 	fmt.Fprintln(stdout, root)
 	return nil

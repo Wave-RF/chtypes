@@ -49,20 +49,30 @@ def _expand_template(template: str) -> str:
     return string.Template(out).safe_substitute(mapping)
 
 
+def _absolute(p: str | os.PathLike[str]) -> Path:
+    """A relative cache directory is the process cwd's at this call, resolved here
+    once so every path derived from it is absolute (fetch-v1.md section 9, public
+    issue #541). Lexical, like Go's `filepath.Abs`: no symlink is followed."""
+    return Path(os.path.abspath(p))
+
+
 def resolve_cache_root(cache_dir: str | os.PathLike[str] | None = None) -> Path:
     """`CHTYPES_CACHE` (or an explicit override) names the cache directory
     ITSELF, not a parent `chtypes/` to append to (constants: `cache.root_template`).
 
     The active fetch contract decides the rest (_channel.py): under the dev
-    channel an explicit cache is used through its subroot `<cache>/v2-dev`,
-    never as a whole layout, which a 1.x binding uses (rule r5, a MUST), and
-    the default root is `${XDG_CACHE_HOME:-~/.cache}/chtypes/v2-dev`."""
+    channel an explicit cache, from the environment or the option, is used
+    through its subroot `<cache>/v2-dev`, never as a whole layout, which a 1.x
+    binding uses (rule r5, a MUST), and the default root is
+    `${XDG_CACHE_HOME:-~/.cache}/chtypes/v2-dev`. The result is absolute (#541)."""
     channel = _channel.active()
-    explicit = cache_dir if cache_dir is not None else (os.environ.get(C.ENV_CACHE_NAME) or None)
-    if explicit is not None:
-        root = Path(explicit)
+    explicit = os.fspath(cache_dir) if cache_dir is not None else ""
+    if not explicit:
+        explicit = os.environ.get(C.ENV_CACHE_NAME) or ""
+    if explicit:
+        root = _absolute(explicit)
         return root / channel.subroot if channel.subroot else root
-    return Path(_expand_template(C.CACHE_ROOT_TEMPLATE)).parent / channel.root_leaf
+    return _absolute(Path(_expand_template(C.CACHE_ROOT_TEMPLATE)).parent / channel.root_leaf)
 
 
 def cache_root(cache_dir: str | os.PathLike[str] | None = None) -> Path:
