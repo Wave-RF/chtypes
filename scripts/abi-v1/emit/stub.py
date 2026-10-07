@@ -66,8 +66,16 @@ exercised against real memory).
     A probe (_stubshared.ZONE_PROBE) reads the committed zone back through
     `chs_type_validate`, so a public-API test can see which zone step 7 used.
   * `chs_live_handles` reports this image's own live count per handle kind
-    from five atomic counters (incremented on mint, decremented the instant
-    a handle's refcount reaches zero), never by walking a registry.
+    from one atomic counter per kind (incremented on mint, decremented the
+    instant a handle's refcount reaches zero), never by walking a registry.
+  * CLOSED INPUT DOCUMENTS (generation 2, rule r1). A bytes_in parameter
+    whose content is `input:<name>` is checked after the status injection
+    (_stubshared.INPUT_DOCUMENT): a document that is not a JSON object, or a
+    top-level key the named document's schema does not list, is
+    CHS_INVALID_ARGUMENT naming the key. Length 0 is `{}`.
+  * A NULLABLE PARENT. A handle the minted one `holds` may come from a
+    nullable parameter (chs_schema_create's `server`): the new handle holds
+    it only when the caller passed one.
 
 THE TWELVE HAND-WRITTEN FUNCTIONS (today; `classify()` reports the exact
 split against the tree's own description). Each has return-value semantics,
@@ -825,6 +833,139 @@ def _input_checks(model, fn) -> list[str]:
     return lines
 
 
+def _input_document_scanner(model) -> str:
+    """The C reader of a closed input document's top-level keys
+    (_stubshared.INPUT_DOCUMENT). Emitted only when the description has an
+    input document (generation 2 on), so ABI v1's stub is unchanged."""
+    if not model.inputs:
+        return ""
+    return """
+/* ------------------------------------------------------ closed input documents
+   (generation 2, rule r1: scripts/abi-v1/emit/_stubshared.py INPUT_DOCUMENT).
+   A test double: only the top-level keys are read, a key is compared as raw
+   bytes (no escape decoded), and a value is skipped by tracking strings and
+   nesting, never validated. */
+
+static size_t chs_stub_json_ws(const uint8_t *p, size_t n, size_t i) {
+    while (i < n && (p[i] == ' ' || p[i] == '\\t' || p[i] == '\\n' || p[i] == '\\r')) i++;
+    return i;
+}
+
+/* Past the closing quote of the JSON string that opens at p[i], or 0. */
+static size_t chs_stub_json_string_end(const uint8_t *p, size_t n, size_t i) {
+    for (i++; i < n; i++) {
+        if (p[i] == '\\\\') { i++; continue; }
+        if (p[i] == '"') return i + 1;
+    }
+    return 0;
+}
+
+/* Past the JSON value that starts at p[i] (strings and nesting tracked), or 0. */
+static size_t chs_stub_json_value_end(const uint8_t *p, size_t n, size_t i) {
+    int depth = 0;
+    while (i < n) {
+        uint8_t c = p[i];
+        if (c == '"') {
+            size_t e = chs_stub_json_string_end(p, n, i);
+            if (e == 0) return 0;
+            i = e;
+            if (depth == 0) return i;
+            continue;
+        }
+        if (c == '{' || c == '[') { depth++; i++; continue; }
+        if (c == '}' || c == ']') {
+            if (depth == 0) return i;
+            depth--; i++;
+            if (depth == 0) return i;
+            continue;
+        }
+        if (depth == 0 && c == ',') return i;
+        i++;
+    }
+    return depth == 0 ? i : 0;
+}
+
+/* 0 when p[0:n) is a JSON object (length 0 counts as `{}`) whose every
+   top-level key is one of allowed[0:na). Otherwise 1, with *key / *key_len
+   the first key that is not, or *key NULL when the document is not an object. */
+static int chs_stub_closed_keys(const uint8_t *p, size_t n, const char *const *allowed, size_t na,
+                                const uint8_t **key, size_t *key_len) {
+    *key = NULL;
+    *key_len = 0;
+    if (n == 0) return 0;
+    size_t i = chs_stub_json_ws(p, n, 0);
+    if (i >= n || p[i] != '{') return 1;
+    i = chs_stub_json_ws(p, n, i + 1);
+    if (i < n && p[i] == '}') return chs_stub_json_ws(p, n, i + 1) == n ? 0 : 1;
+    for (;;) {
+        if (i >= n || p[i] != '"') return 1;
+        size_t e = chs_stub_json_string_end(p, n, i);
+        if (e == 0) return 1;
+        const uint8_t *k = p + i + 1;
+        size_t kn = e - i - 2;
+        int known = 0;
+        for (size_t a = 0; a < na; a++)
+            if (strlen(allowed[a]) == kn && memcmp(allowed[a], k, kn) == 0) known = 1;
+        if (!known) {
+            *key = k;
+            *key_len = kn;
+            return 1;
+        }
+        i = chs_stub_json_ws(p, n, e);
+        if (i >= n || p[i] != ':') return 1;
+        i = chs_stub_json_ws(p, n, i + 1);
+        size_t v = chs_stub_json_value_end(p, n, i);
+        if (v == 0 || v == i) return 1;
+        i = chs_stub_json_ws(p, n, v);
+        if (i < n && p[i] == ',') { i = chs_stub_json_ws(p, n, i + 1); continue; }
+        if (i < n && p[i] == '}') return chs_stub_json_ws(p, n, i + 1) == n ? 0 : 1;
+        return 1;
+    }
+}
+"""
+
+
+def _input_documents(model, fn) -> list[str]:
+    """Rule r1's stand-in (_stubshared.INPUT_DOCUMENT): every bytes_in
+    parameter that carries an input document refuses a document that is not a
+    JSON object, or a top-level key its schema does not list, naming the key.
+    After the input checks and the status injection."""
+    rule = _stubshared.INPUT_DOCUMENT
+    lines: list[str] = []
+    for p in fn.params:
+        d = model.input_of(p)
+        if d is None:
+            continue
+        keys = list(d.schema.get("properties", {}))
+        prefix, _, suffix = _stubshared.input_document_message(p.name, d.name, "\0").partition("\0")
+        allowed = (
+            f"        static const char *const allowed[] = {{{', '.join(_c_str(k) for k in keys)}}};"
+            if keys
+            else "        static const char *const *const allowed = NULL;"
+        )
+        lines += [
+            "    {",
+            f"        /* rule r1's closed input document {d.name}: see scripts/abi-v1/emit/_stubshared.py INPUT_DOCUMENT */",
+            allowed,
+            "        const uint8_t *key; size_t key_len;",
+            f"        if (chs_stub_closed_keys({p.name}, {p.name}_len, allowed, {len(keys)}, &key, &key_len)) {{",
+            "            chs_sb m; chs_sb_init(&m);",
+            "            if (key != NULL) {",
+            f"                chs_sb_cat(&m, {_c_str(prefix)});",
+            "                chs_sb_append(&m, key, key_len);",
+            f"                chs_sb_cat(&m, {_c_str(suffix)});",
+            "            } else {",
+            f"                chs_sb_cat(&m, {_c_str(_stubshared.input_document_message(p.name, d.name, None))});",
+            "            }",
+            f"            chs_stub_set_err(err, chs_stub_make_error({rule['status']}, 0, \"\", 0, m.buf, m.len));",
+            "            free(m.buf);",
+            f"            return {rule['status']};",
+            "        }",
+            "    }",
+        ]
+    return lines
+
+
 def _status_injection(fn) -> list[str]:
     first_bytes = next((p for p in fn.params if p.kind == "bytes_in"), None)
     if first_bytes is None or fn.returns.kind != "status":
@@ -1107,7 +1248,11 @@ def _fill_outputs(model, fn) -> list[str]:
             body += [
                 f"{indent}{p.type} *nh = ({p.type} *) malloc(sizeof({p.type}));",
                 f"{indent}chs_stub_common_init((chs_handle_common *) nh, {kind_const});",
-                *[f"{indent}chs_stub_hold((chs_handle_common *) nh, (chs_handle_common *) {hp.name});" for hp in parents],
+                *[
+                    (f"{indent}if ({hp.name} != NULL) " if hp.nullable else indent)
+                    + f"chs_stub_hold((chs_handle_common *) nh, (chs_handle_common *) {hp.name});"
+                    for hp in parents
+                ],
                 f"{indent}*{p.name} = nh;",
             ]
             if p.nullable:
@@ -1250,6 +1395,7 @@ def _gen_generic(model, fn) -> str:
     body += [f"    (void) {cp.name};" for cp in fn.c_params]
     body += _input_checks(model, fn)
     body += _status_injection(fn)
+    body += _input_documents(model, fn)
     body += _one_create(fn)
     body += _image_zone(fn)
     body += _zone_probe(fn)
@@ -1408,6 +1554,7 @@ def render_stub_c(model) -> str:
         _ctor_section(),
         _unbound_section(),
         _image_zone_state(),
+        _input_document_scanner(model),
     ]
     # chs_build_info and chs_abi_version need their own omit/override handling,
     # woven around the hand-written and special bodies below.

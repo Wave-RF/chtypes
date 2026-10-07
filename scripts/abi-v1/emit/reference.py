@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import json
 
-from model import CONTENTS, THREADS
+from model import CONTENTS, INPUT_PREFIX, THREADS
 
 from . import Output, banner, marker_key
 
@@ -167,11 +167,20 @@ def render(model) -> str:
         "Every counted input and every `chs_buf` is a byte string; the content says what it carries.",
         "",
     ]
+    inputs_row = (
+        [(f"{INPUT_PREFIX}<name>", "a JSON object the library validates, listed under Input documents below")]
+        if model.inputs
+        else []
+    )
     out += table(
         ["content", "carries"],
         [
             [_code(k), v]
-            for k, v in [*CONTENTS.items(), ("document:<name>", "a JSON document, listed under Documents below")]
+            for k, v in [
+                *CONTENTS.items(),
+                ("document:<name>", "a JSON document, listed under Documents below"),
+                *inputs_row,
+            ]
         ],
     )
 
@@ -278,6 +287,34 @@ def render(model) -> str:
         else:
             out.append("The description fixes no field of this document; its prose above is the contract.")
 
+    if model.inputs:
+        out += [
+            "",
+            "### Input documents",
+            "",
+            "Each is a JSON object a caller passes in a `bytes_in` parameter whose content is "
+            f"`{INPUT_PREFIX}<name>`. The library refuses a key the document does not define, so each schema "
+            "closes every object (rule r1). An options document is the one a growable function takes the inputs "
+            "it gains in.",
+            "",
+        ]
+        taken: dict[str, list[str]] = {}
+        for f in model.functions:
+            for p in f.params:
+                d = model.input_of(p)
+                if d is not None:
+                    taken.setdefault(d.name, []).append(f"`{f.name}` `{p.name}`")
+        out += table(
+            ["input document", "options", "taken by"],
+            [
+                [_code(d.name), "yes" if d.options else "no", ", ".join(taken.get(d.name, [])) or "-"]
+                for d in model.inputs.values()
+            ],
+        )
+        for d in model.inputs.values():
+            out += ["", f"#### input `{d.name}`", "", d.doc, "", "Its members, as JSON Schema:", ""]
+            out += ["```json", compact_json(d.schema), "```"]
+
     out += ["", "### build_info", ""]
     props = model.build_info_schema.get("properties", {})
     req = set(model.build_info_schema.get("required", []))
@@ -331,6 +368,9 @@ def render(model) -> str:
             facts.append(f"- The pointer is borrowed from `{f.returns.borrows}`.")
         if f.returns.constant:
             facts.append(f"- Always returns `{f.returns.constant}`.")
+        opts = model.options_param(f)
+        if opts is not None:
+            facts.append(f"- Growable (rule r1): an input it gains is a new member of its options document, `{opts.name}`.")
         for p in f.params:
             bits = [p.kind]
             if p.type and p.kind != "out_error":

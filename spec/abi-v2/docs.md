@@ -6,13 +6,13 @@ Prose is deliberately outside the fingerprint: editing this file never changes `
 
 Each section is copied into a C comment, so it may not contain a comment opener or closer, or two question marks in a row.
 
-**UNSTABLE.** `spec/abi-v2/abi.json` declares `stability` `unstable`: generation 2 is being designed, and its fingerprint moves with every change to the description until the lock. It was seeded as generation 1's surface at generation 2, with nothing added; the additions land one pull request at a time. What generation 2 adds, and what the lock needs, are in public issue #511.
+**UNSTABLE.** `spec/abi-v2/abi.json` declares `stability` `unstable`: generation 2 is being designed, and its fingerprint moves with every change to the description until the lock. It was seeded as generation 1's surface at generation 2; the additions land one pull request at a time. The first is the server profile: the `chs_server` handle, `chs_server_create` and `chs_server_free`, a server and an options document on `chs_schema_create`, and the `server` and `replicated` members of `schema_description`. What generation 2 adds, and what the lock needs, are in public issue #511.
 
 ## Rules
 
 These rules bind generation 2 from its first draft: the library, every binding and the artifact producer. They are normative; `MUST`, `MUST NOT` and `SHOULD` are RFC 2119. `scripts/abi-v1/gen.py --major 2 --check` enforces the part of each rule that a description can be checked against, as each rule says. Rules (r5) and (r6) are binding behavior, which the dev bindings implement in their own pull requests.
 
-**(r1) A growable function takes an options document.** A function that may gain inputs after it first ships MUST take them in one options document, a `bytes_in` JSON object, never as more positional parameters. The library MUST validate that document and MUST refuse a key it does not know with `CHS_INVALID_ARGUMENT`, naming the key; it never ignores one. So a caller that sets an option the library does not implement is told so, instead of silently getting the old behavior. A binding passes the caller's options through and never drops or rewrites a key. Checked by `gen.py`: not yet. The description has no way to mark a function growable until the first such function lands, and that pull request brings the check.
+**(r1) A growable function takes an options document.** A function that may gain inputs after it first ships MUST take them in one options document, a `bytes_in` JSON object, never as more positional parameters. The library MUST validate that document and MUST refuse a key it does not know with `CHS_INVALID_ARGUMENT`, naming the key; it never ignores one. So a caller that sets an option the library does not implement is told so, instead of silently getting the old behavior. A binding passes the caller's options through and never drops or rewrites a key. The description marks such a function `growable`, and lists its documents under `inputs`; an options document is the entry with `options` true, and a document of fixed purpose (a server profile) has `options` false. Checked by `gen.py`: a function marked `growable` takes exactly one options document (a `bytes_in` parameter whose content is `input:<name>`); a function not marked `growable` takes no input document at all; every input document is a JSON object whose schema closes every object, with `additionalProperties: false` on a record, or an `additionalProperties` schema and no `properties` on a map whose keys are data (setting or macro names); and every input document is taken by some function. The first growable functions are `chs_server_create` and `chs_schema_create`.
 
 **(r2) Readers ignore unknown fields.** Every reader of a result document (each `document:<name>` output, and `chs_build_info()`) MUST ignore a member it does not know, at every object level, `_b64` members included, and decode the rest as if it were absent. Checked by `gen.py`: no document schema and no `build_info` schema in the description closes an object (`additionalProperties: false`). The released 1.x readers already behave this way: measured on the 1.0.4 bindings, all four on 12 CI legs, for every result document at every object level ([`v1-abi` run 37504999630](https://github.com/Wave-RF/chtypes/actions/runs/37504999630), the conformance legs of the unmerged probe, public pull request #509).
 
@@ -57,9 +57,9 @@ Errors. A fallible call returns a `chs_status` and, through an optional last `ch
 
 Threads. Every function has a thread class, listed in the reference. A handle is immutable once made, so every call that only reads handles is `shared`: any number of threads may call it at once, on the same handles too. The one thing a caller must never overlap with a call is a free of a handle that call uses. Process setup (`chs_initialize`, then `chs_set_defaults`) runs before the traffic it configures.
 
-Time zones. A library image has one server zone, set once by `chs_initialize`. A type compiled into a schema binds that image zone, as a server's table does after a restart. Each call can also carry a zone of its own: the `session_timezone` key in the call's settings, which ClickHouse applies through its own query context. That zone governs parsing a zone-less `DateTime` or `DateTime64`, rendering and export, DEFAULT evaluation and a filter's literals; the image zone governs `timezoneOf` over a column, MATERIALIZED expressions, PARTITION BY and TTL. Every zone name is validated by ClickHouse's own `DateLUT` on every platform. On darwin the file system is case-insensitive, so `DateLUT` there accepts a spelling such as `utc` that a Linux server refuses; that difference is documented, not patched.
+Time zones. A library image has one zone of its own, set once by `chs_initialize`: the image zone. A schema has a home zone, its server's `timezone` (`chs_server_create`), or else the image zone. The schema's types bind its home zone, as a server's table binds the server's zone after a restart, and so do the functions its DEFAULT, MATERIALIZED, ALIAS and CHECK expressions apply to its columns, its PARTITION BY expressions, and a Date-valued TTL under a merge. Each call runs in a zone too, the first of these that is set: the call's own `session_timezone` (a key in its settings, which ClickHouse applies through its own query context); the `session_timezone` in the schema's own settings; the one in its server's `settings`; the one set by `chs_set_defaults`; its server's `timezone`; the image zone. An empty `session_timezone` at any of these means the server's zone, the last two. The call's zone governs parsing and rendering a zone-less `DateTime` or `DateTime64`, export, a DEFAULT literal's fold, `toDateTimeOrZero` and a filter's literals. A `Date` partition id is the civil date in every zone. Every zone name is validated by ClickHouse's own `DateLUT`, which reads the library host's time zone database, on every platform. On darwin the file system is case-insensitive, so `DateLUT` there accepts a spelling such as `utc` that a Linux server refuses; that difference is documented, not patched.
 
-Settings. Every settings input is a JSON object whose values are JSON strings, and a binding never rewrites one. A call's settings layer over the defaults set by `chs_set_defaults`, which layer over the build's own. No call reads a server's version or its changed settings: that discovery is a recorded gap in this generation, so a caller that wants a server's settings passes them explicitly, through `chs_set_defaults` or each call's settings.
+Settings. Every settings input is a JSON object whose values are JSON strings, and a binding never rewrites one. A call's settings are layered, highest first: the call's own `settings`; the schema's own (`chs_schema_create`); its server's `settings` (`chs_server_create`); the defaults set by `chs_set_defaults`; the build's own. A server's settings are the ones its profile applies to every query, and they never change how a schema compiles. No call reads a server's version or its changed settings itself: that discovery is a recorded gap in this generation, so a caller that wants a server's settings passes them explicitly, in a server profile, through `chs_set_defaults` or in each call's settings.
 
 Documents. Every output document is valid JSON that a stock parser reads: every ClickHouse rendering (a stored value, an input value, an engine's row) is a JSON string, a number written bare is within plus or minus 2^53 (anything larger is a string), and there is never a bare `inf`, `-inf` or `nan`. Every column entry of a row carries `null`, the library's verdict that the stored value is NULL, poisoned cells included.
 
@@ -67,7 +67,9 @@ Byte strings in JSON. Every data-derived string a JSON document carries is a byt
 
 String values. Every entry that reports a stored value (a row's `cols`, `computed`, an engine row's cells, `storage_transforms`) carries `stored` or `stored_b64`, which is always ClickHouse's rendering of the value. For a scalar `String` or `FixedString` value, including one inside `Nullable` or `LowCardinality`, the entry also carries `value_b64`, the value's raw bytes in standard base64, whenever the value is not NULL, whether or not the bytes are valid UTF-8. A value nested in another type (`Array(String)`, `Map`, `Tuple`, and the like) carries no `value_b64`: that is a recorded gap in this generation, and its rendering is the only form.
 
-Input values. A JSON input (`settings`, `query_params`) cannot carry a value that is not valid UTF-8 in this generation. The workaround is to inline the value in the SQL as `unhex('<hex>')`, built from hex digits only, which keeps it injection-safe because hex digits cannot break out of the quoted literal. A later version would add an object form, `{"<key>": {"b64": ...}}`, never a `<key>_b64` member, which could collide with a real key.
+Input values. A JSON input (`settings`, `query_params`, an input document) cannot carry a value that is not valid UTF-8 in this generation. The workaround is to inline the value in the SQL as `unhex('<hex>')`, built from hex digits only, which keeps it injection-safe because hex digits cannot break out of the quoted literal. A later version would add an object form, `{"<key>": {"b64": ...}}`, never a `<key>_b64` member, which could collide with a real key.
+
+Input documents. A counted input whose content is `input:<name>` is a JSON object that the library validates against the document of that name (rule r1). A key the document does not define is `CHS_INVALID_ARGUMENT`, naming the key, and so is a document that is not a JSON object or a member of the wrong JSON type. Length 0 is `{}`, and a repeated member keeps its last value. The library never ignores a key, so a caller that sets an option a build does not implement is told so instead of silently getting the old behavior.
 
 Teardown. `chs_shutdown` stops what `chs_initialize` started. A loader never unloads a library: unloading or initializing an image again in one process is unsupported.
 
@@ -79,9 +81,13 @@ An owned, immutable byte buffer: every output of the library. Read it with `chs_
 
 The error a fallible call reports when its status is not `CHS_OK`: the status, ClickHouse's own error code and name, a message and the column concerned. Created only by the library, through a call's `err` out-parameter.
 
+### chs_server
+
+One ClickHouse server, as a profile describes it: its `timezone`, the settings its profile applies to every query, and its `<macros>`. Immutable once created, so any number of threads may use it at once. A schema created on it holds a counted reference to it, so the caller may free the server whenever it likes.
+
 ### chs_schema
 
-A compiled table: the columns, engine, keys, TTL, settings and constraints of exactly one `CREATE TABLE` statement, immutable once created, so any number of threads may use it at once.
+A compiled table: the columns, engine, keys, TTL, settings and constraints of exactly one `CREATE TABLE` statement, on the server it was created on, if any. Immutable once created, so any number of threads may use it at once.
 
 ### chs_filter
 
@@ -177,6 +183,11 @@ ClickHouse's own error-code table for this build: a JSON array of `{"code": int,
 
 A schema's columns, in declared order, with each column's canonical type, its `default_kind` (a value of the `default_kind` vocabulary) and default expression, and the facts a caller needs to build a row. The document is `{"columns": [...]}`, and each entry carries `name`, `type`, `default_kind` (a value of the `default_kind` vocabulary), `default_expression` (empty when there is none) and `default_is_literal`; the name, the type and the expression follow the rule for byte strings in JSON.
 
+Two members report the server a schema was created on. Both are absent on a schema created with `server` NULL, so that document is byte for byte what it was before servers existed.
+
+- `server`, on every schema created on a server, even one described by `{}`: `timezone` is the zone the schema's types bind (the profile's, or else the image zone, exactly as `chs_initialize` spelled it), so a reader never needs the image zone separately; `settings` is the server's settings as the profile gave them, `{}` when it gave none; `macros` is the server's macro set as the library holds it, present exactly when the profile carried `macros`. These are the caller's own JSON strings given back, not data-derived, so they are plain strings.
+- `replicated`, on a schema created on a server whose engine is a Replicated one: `zookeeper_path` and `replica_name`, the path and the replica name ClickHouse's own `TableZnodeInfo` resolved, fully expanded. The database and table names expanded into them are DDL bytes, so both follow the rule for byte strings in JSON. A caller can compare them with the server's own `system.replicas`.
+
 ### document:row
 
 One row's verdict and, as the flags ask, its columns' stored values, provenance and transformations. Every entry of `cols` carries its name, `null` (whether the stored value is NULL, poisoned cells included), its renderings (`input`, `stored`, `ref`, `wire`) and its types (`type`, `base`, `ref_type`), all by the rule for byte strings in JSON, and `value_b64` for a String or FixedString value. `unknown_fields` and `unsupported_settings` are lists of name objects; `computed` entries carry a name, a kind and a stored value; `err`, `verdict_err` and `partition_id` follow the rule too. The transformations come from the library, never from a binding: each is the `transformed` entry the SDK's parity fixtures pin, with its `reason` from `transform_reason`. `input_span` is `{off, len}`, the bytes of the input body the reader consumed for this record, read from the vendored reader's own position.
@@ -195,6 +206,22 @@ A filter evaluation: the call's outcome, one verdict character per row (`filter_
 ### document:discovery
 
 The column declarations reconstructed from a server's `system.columns` rows, formatted by ClickHouse's own formatter: `{"columns": [...], "columns_sql"}`, where each entry carries `name`, `type`, `default_kind` and `default_expression` as the server spelled them and `declaration`, the formatted declaration, and `columns_sql` joins the declarations for a `CREATE TABLE`. Every one of these is server or DDL text, so each follows the rule for byte strings in JSON.
+
+### input:server_profile
+
+A server's profile, `{"timezone": "<zone>", "settings": {"<name>": "<value>"}, "macros": {"<name>": "<value>"}}`. Every member is optional, so `{}` describes a server with nothing known about it. The profile holds server facts only, in the shape a server's own tables report them, so a caller can fill it from the server it describes; library knobs go in `chs_server_create`'s options instead.
+
+- `timezone`: the server's own zone, the zone its tables bind. An empty string, or no member, means the image zone. The name is validated by ClickHouse's own `DateLUT`, which reads the library host's time zone database.
+- `settings`: the settings the server's profile applies to every query, each value a JSON string, never rewritten. The library accepts exactly what the server's own SET check accepts. `session_timezone` here is the default session zone of the server's user.
+- `macros`: the server's macros, as its `system.macros` lists them (`macro`, `substitution`). Absent, they are unknown; present, even as `{}`, they are the complete set (see `chs_server_create`).
+
+### input:server_options
+
+The options of `chs_server_create` (rule r1). It defines no member yet, so `{}` (or length 0) is the only valid document, and any key is `CHS_INVALID_ARGUMENT`, naming the key. A library knob that is not a server fact lands here, as a new member.
+
+### input:schema_options
+
+The options of `chs_schema_create` (rule r1). It defines no member yet, so `{}` (or length 0) is the only valid document, and any key is `CHS_INVALID_ARGUMENT`, naming the key. A choice about how one statement is compiled lands here, as a new member: for example, compiling a server's own `create_table_query`, read back from the server, rather than a caller's CREATE.
 
 ### chs_abi_version
 
@@ -306,11 +333,35 @@ A name quoted only where this build's own `backQuoteIfNeed` says it must be. Whi
 
 A byte string spelled as a ClickHouse string literal by the vendored `quoteString`. The input may contain NUL; the answer escapes it.
 
+### chs_server_create
+
+Describes one ClickHouse server, from a profile document (`input:server_profile`): its `timezone`, judged by ClickHouse's own `DateLUT`; its `settings`, judged by the server's own SET check; and its `macros`, read by ClickHouse's own `Macros` configuration reader, as a server reads `<macros>`. Every member is optional, and a member the profile omits is not described: the image zone applies, there is no server settings layer, and the server's macros are unknown. `options` (`input:server_options`) defines no member yet.
+
+Everything is validated here, once, and the server never changes after it. A key the profile or the options document does not define is `CHS_INVALID_ARGUMENT`, naming the key, and so is a document that is not a JSON object, a member of the wrong JSON type, a NUL in the zone, an empty macro name, a NUL in a macro's name or value, or a macro set that ClickHouse's own reader does not read back exactly as given (a `.` in a name is one). A zone `DateLUT` cannot load is `CHS_REJECTED` with `DateLUT`'s own code and message (36, BAD_ARGUMENTS). A setting the server's SET check refuses is `CHS_REJECTED` with the server's own code and message: 115 (UNKNOWN_SETTING) for a name the server does not know, a library knob such as a `chtypes_*` setting included, because a server's profile holds ClickHouse settings only. Nothing is created on any refusal.
+
+`CHS_DECLINED` is reserved: a build that will not describe a profile declines it, which is never a wrong answer. The one decline foreseen is a setting outside the set that shapes an input, at a value other than its default, once that set is generated from the vendored source.
+
+The macros are the server's whole `system.macros` when `macros` is present, even as `{}`: a macro a Replicated engine's arguments name that the set lacks is then the server's own refusal (`CHS_REJECTED`, 139, NO_ELEMENTS_IN_CONFIG). When `macros` is absent the server's macros are unknown, and a schema whose engine reads one is declined, as it is without a server. A build that validates a profile's macros but does not yet apply them declines such a schema in both cases.
+
+The call reads no defaults and leaves `chs_set_defaults`' latch open. Like every call that is not the handshake, it is valid only after `chs_initialize`.
+
+### chs_server_free
+
+Releases the caller's reference to a server. Schemas created on it keep it alive. Freeing NULL does nothing.
+
 ### chs_schema_create
 
-Compiles exactly one `CREATE TABLE` statement (columns, engine, keys, TTL, settings and constraints) with ClickHouse's own parser and the checks a server's CREATE runs, under a profile of settings given as a JSON object of string values. A trailing semicolon is allowed. A second statement is refused the way ClickHouse's own parser refuses one in a single query (`CHS_REJECTED`, with its code and message), and a statement of any other kind is `CHS_INVALID_ARGUMENT`.
+Compiles exactly one `CREATE TABLE` statement (columns, engine, keys, TTL, settings and constraints) with ClickHouse's own parser and the checks a server's CREATE runs, on `server`, under a profile of settings given as a JSON object of string values. A trailing semicolon is allowed. A second statement is refused the way ClickHouse's own parser refuses one in a single query (`CHS_REJECTED`, with its code and message), and a statement of any other kind is `CHS_INVALID_ARGUMENT`.
 
-The result is immutable: nothing changes a schema after this call, so it replaces v0's column-list compile and its engine, TTL and partition-key setters, and any number of threads may use it at once. Its types bind the image zone set by `chs_initialize`, never the profile's `session_timezone`, which governs only this call's own evaluation.
+`server` is the server the table is on (`chs_server_create`), or NULL. On a server, the schema's home zone is the server's `timezone`: its zone-less `DateTime` and `DateTime64` columns bind it, as a restarted server binds its own, and every call on the schema that names no `session_timezone` runs in it. The server's `settings` layer under the schema's own, and a Replicated engine's ZooKeeper path and replica name expand the server's `macros`. With `server` NULL the schema is on the image's own server, exactly as before servers existed: the image zone, no server settings layer, and macros unknown. A freed server, a handle of another kind or a server from another library image is `CHS_INVALID_ARGUMENT`. The schema holds a counted reference to its server, so the caller may free the server at any time.
+
+`timezone()` (and its alias `timeZone()`) in a DEFAULT, MATERIALIZED or CHECK expression is admitted on a schema created on a server whose profile names a `timezone`, and its value is the vendored `FunctionTimezone`'s under that zone. On a schema with no server, or on a server whose profile names no `timezone`, it stays refused as a server constant. `serverTimezone()` stays refused on every schema: it reads the zone of the process, which no profile describes.
+
+`options` (`input:schema_options`) defines no member yet, so any key in it is `CHS_INVALID_ARGUMENT`, naming the key.
+
+A build that does not yet compile on a server declines a non-NULL `server`, and a schema whose compile needs its server's zone is declined on a host thread that already runs a ClickHouse query of its own. Each is `CHS_DECLINED`, which is never a wrong answer.
+
+The result is immutable: nothing changes a schema after this call, so it replaces v0's column-list compile and its engine, TTL and partition-key setters, and any number of threads may use it at once. Its types bind its home zone, never the `session_timezone` in its settings, which is the zone of this call and of the later calls on the schema that name none of their own.
 
 ### chs_schema_free
 

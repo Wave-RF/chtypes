@@ -280,8 +280,10 @@ impl Library {
         options: &CompileOptions,
     ) -> Result<Schema> {
         let settings = settings_object(&options.settings, options.session_timezone.as_deref())?;
+        // No server (NULL) and no options (length 0, `{}`): the schema is on the
+        // image's own server, exactly as before the server profile existed.
         let handle: SchemaHandle =
-            self.call(|api| api.schema_create(create_table.as_ref(), &settings))?;
+            self.call(|api| api.schema_create(None, create_table.as_ref(), &settings, &[]))?;
         Ok(Schema::new(Arc::clone(self), handle))
     }
 

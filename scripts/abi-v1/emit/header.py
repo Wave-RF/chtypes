@@ -26,9 +26,10 @@ from __future__ import annotations
 
 import textwrap
 
-from model import CONTENTS, DOCS_MD, THREADS
+from model import CONTENTS, DOCS_MD, THREADS, input_name
 
 from . import Output, banner, marker_key
+from .reference import compact_json
 
 MAJORS = (1, 2)
 HEADER = "include/chtypes.h"
@@ -133,9 +134,18 @@ def _function_facts(model, fn) -> str:
         facts.append(f"The pointer is borrowed from `{r.borrows}` and valid until it is freed; copy before freeing.")
     if r.constant:
         facts.append(f"Always returns {r.constant} ({model.constants[r.constant].value}).")
+    opts = model.options_param(fn)
+    if opts is not None:
+        facts.append(f"Growable (rule r1): an input it gains is a new member of its options document, `{opts.name}`.")
     lines = []
     for p in fn.params:
-        if p.kind == "bytes_in":
+        doc = input_name(p.content) if p.kind == "bytes_in" else None
+        if doc is not None:
+            lines.append(
+                f"- `{p.name}`, `{p.name}_len`: the input document `{doc}`; length 0 is `{{}}`, and the pointer "
+                "may then be NULL."
+            )
+        elif p.kind == "bytes_in":
             lines.append(
                 f"- `{p.name}`, `{p.name}_len`: {CONTENTS.get(p.content or '', p.content)}; "
                 "length 0 is none, and the pointer may then be NULL."
@@ -271,6 +281,23 @@ def render_header(model) -> str:
         "The data-derived fields, by document:\n\n" + "\n".join(lines),
         "byte strings",
     )
+
+    if model.inputs:
+        out += _section("input documents")
+        out += comment(
+            "An input whose content is an input document is a JSON object the library validates (rule r1): a key "
+            "the document does not define is CHS_INVALID_ARGUMENT, naming the key, and so is a document that is "
+            "not a JSON object or a member of the wrong JSON type. Length 0 is `{}`. An options document is the "
+            "one a growable function takes the inputs it gains in.",
+            "input documents",
+        )
+        for d in model.inputs.values():
+            kind = "An options document (rule r1)." if d.options else "An input document of fixed purpose."
+            schema = compact_json(d.schema, width=WIDTH - 3)
+            out += [""] + comment(
+                f"input:{d.name}: {d.doc}\n\n{kind} Its members, as JSON Schema:\n\n```json\n{schema}\n```",
+                f"input {d.name}",
+            )
 
     out += _section("handles")
     for h in model.handles.values():

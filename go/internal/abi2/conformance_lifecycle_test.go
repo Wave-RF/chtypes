@@ -82,6 +82,7 @@ func resolveArgs(t *Table, env map[string]interface{}, args []rArg, owned *[]han
 	return out, nil
 }
 
+func (r resolved) server() *Server { s, _ := r.handle.(*Server); return s }
 func (r resolved) schema() *Schema { s, _ := r.handle.(*Schema); return s }
 func (r resolved) filter() *Filter { f, _ := r.handle.(*Filter); return f }
 func (r resolved) block() *Block   { b, _ := r.handle.(*Block); return b }
@@ -129,11 +130,21 @@ func callResolved(t *Table, fn string, a []resolved) (*InvokeResult, error) {
 		return nil
 	}
 	switch fn {
-	case "chs_schema_create":
+	case "chs_server_create":
 		if err := need(2); err != nil {
 			return nil, err
 		}
-		h, ce := t.SchemaCreate(a[0].b(), a[1].b())
+		h, ce := t.ServerCreate(a[0].b(), a[1].b())
+		r, err := finishResult(t, fn, ce, nil)
+		if r != nil {
+			r.Handle = h
+		}
+		return r, err
+	case "chs_schema_create":
+		if err := need(4); err != nil {
+			return nil, err
+		}
+		h, ce := t.SchemaCreate(a[0].server(), a[1].b(), a[2].b(), a[3].b())
 		r, err := finishResult(t, fn, ce, nil)
 		if r != nil {
 			r.Handle = h

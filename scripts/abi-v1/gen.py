@@ -985,6 +985,103 @@ def _selftest_v2() -> list[str]:
         plant("no ## Rules section", lambda w: _edit(w / docs, "## Rules\n", ""), "no `## Rules` section")
         plant("a rule dropped", lambda w: _edit(w / docs, "(r4)", "(rX)", count=99), "does not state (r4)")
 
+        # (r1) a growable function takes exactly one options document, a
+        # function not marked growable takes none, and every input document is
+        # a JSON object that closes every object and is taken by a function.
+        def drop_param(fn_name: str, param: str):
+            def mutate(d: dict) -> None:
+                f = _fn_entry(d, fn_name)
+                f["params"] = [p for p in f["params"] if p["name"] != param]
+
+            return mutate
+
+        plant(
+            "(r1) a growable function with no options document",
+            lambda w: _json_edit(w / abi, drop_param("chs_schema_create", "options")),
+            "function chs_schema_create: is marked `growable`, so (r1) it takes exactly one options document "
+            "(a bytes_in parameter whose content is input:<name>, naming an `inputs` entry with `options` true); "
+            "it takes none",
+        )
+        plant(
+            "(r1) a growable function with two options documents",
+            lambda w: _json_edit(w / abi, lambda d: d["inputs"]["server_profile"].update(options=True)),
+            "function chs_server_create: is marked `growable`, so (r1) it takes exactly one options document "
+            "(a bytes_in parameter whose content is input:<name>, naming an `inputs` entry with `options` true); "
+            "it takes 2: profile (input:server_profile), options (input:server_options)",
+        )
+        plant(
+            "(r1) a function not marked growable that takes an input document",
+            lambda w: _json_edit(w / abi, lambda d: _fn_entry(d, "chs_schema_create").pop("growable")),
+            "function chs_schema_create: takes the input document 'schema_options' (parameter 'options') but is "
+            "not marked `growable`",
+        )
+        plant(
+            "(r1) an options document that does not close its object",
+            lambda w: _json_edit(w / abi, lambda d: d["inputs"]["server_options"]["schema"].pop("additionalProperties")),
+            "inputs.server_options.schema does not close its object",
+        )
+        plant(
+            "(r1) an open object nested in an input document",
+            lambda w: _json_edit(
+                w / abi,
+                lambda d: d["inputs"]["server_profile"]["schema"]["properties"].update(settings={"type": "object"}),
+            ),
+            "inputs.server_profile.schema/properties/settings does not close its object",
+        )
+        plant(
+            "(r1) a record whose unknown members take a schema instead of being refused",
+            lambda w: _json_edit(
+                w / abi,
+                lambda d: d["inputs"]["server_profile"]["schema"].update(additionalProperties={"type": "string"}),
+            ),
+            "inputs.server_profile.schema does not close its object",
+        )
+        plant(
+            "(r1) an input document that is not a JSON object",
+            lambda w: _json_edit(w / abi, lambda d: d["inputs"]["server_options"].update(schema={"type": "string"})),
+            "inputs.server_options.schema is not an object schema; (r1) an input document is a JSON object",
+        )
+
+        def orphan(w: Path) -> None:
+            _json_edit(
+                w / abi,
+                lambda d: d["inputs"].update(
+                    orphan={"options": True, "schema": {"type": "object", "additionalProperties": False}}
+                ),
+            )
+            _edit(w / docs, "### chs_abi_version\n", "### input:orphan\n\nProse.\n\n### chs_abi_version\n")
+
+        plant("(r1) an input document no function takes", orphan, "inputs.orphan is taken by no function's bytes_in")
+        plant(
+            "(r1) an input content naming no input document",
+            lambda w: _json_edit(
+                w / abi,
+                lambda d: [
+                    p.update(content="input:nowhere")
+                    for p in _fn_entry(d, "chs_schema_create")["params"]
+                    if p["name"] == "options"
+                ],
+            ),
+            "content 'input:nowhere' names no entry in inputs",
+        )
+
+        def not_growable_takes_none(w: Path) -> None:
+            def mutate(d: dict) -> None:
+                drop_param("chs_schema_create", "options")(d)
+                _fn_entry(d, "chs_schema_create").pop("growable")
+                del d["inputs"]["schema_options"]
+
+            _json_edit(w / abi, mutate)
+            _drop_section(w / docs, "input:schema_options")
+
+        plant(
+            "(r1) the positive control: a function not marked growable that takes no input document generates and "
+            "checks, beside a growable one that takes exactly one",
+            not_growable_takes_none,
+            None,
+            (("--major", "2", "--write"), ("--major", "2", "--check")),
+        )
+
         # (r2) no result schema closes an object.
         plant(
             "(r2) a document schema closed to new fields",
@@ -1126,7 +1223,8 @@ def selftest() -> int:
         "gen.py --selftest: ok: RFC 8785 vectors and refusals, the schema validator, --write deterministic, "
         "the byte_strings rule, and every planted drift, schema, JCS, D1.3, tombstone, docs, prose, marker, thread-class, "
         "byte-field, needle and stale case refused; and ABI v2 beside it: neither major touches the other's outputs, "
-        "and every generation-2 rule (abi == major, stability, the Rules section, r2, r3, r4) refused; and "
+        "and every generation-2 rule (abi == major, stability, the Rules section, r1 both ways with a positive "
+        "control, r2, r3, r4) refused; and "
         "spec/binding-majors.json: a binding moved without regenerating is caught in both majors, a binding given a "
         "major its emitter lacks and a map missing a binding are refused, and regenerating both makes them agree"
     )

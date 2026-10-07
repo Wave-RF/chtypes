@@ -212,7 +212,9 @@ func (l *Library) CompileTable(createTable string, opts ...CompileOption) (*Sche
 	if err != nil {
 		return nil, err
 	}
-	h, cerr := l.tbl.SchemaCreate([]byte(createTable), settings)
+	// No server (NULL) and no options (length 0, `{}`): the schema is on the
+	// image's own server, exactly as before the server profile existed.
+	h, cerr := l.tbl.SchemaCreate(nil, []byte(createTable), settings, nil)
 	if cerr != nil {
 		return nil, callError(cerr)
 	}

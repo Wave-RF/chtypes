@@ -327,6 +327,31 @@ ONE_CREATE = {
     "message": "Multi-statements are not allowed",
 }
 
+# Generation 2, rule r1: a closed input document (a bytes_in parameter whose
+# content is `input:<name>`), as the stub models it and as the cases that probe
+# it expect it. emit/stub.py generates the C check from this dict and from each
+# input document's schema in the description, and emit/cases.py the cases, so
+# the two can never disagree. The stub is a test double: it reads only the
+# document's top-level keys (no escape inside a key is decoded, and a value is
+# only skipped, tracking strings and nesting), and refuses one the document's
+# schema does not name in its `properties`, or a document that is not a JSON
+# object. Length 0 is `{}`. What a real library answers is the same status
+# naming the same key; its message is the library's own, not this one.
+INPUT_DOCUMENT = {
+    "status": "CHS_INVALID_ARGUMENT",
+    "unknown_key": '{param}: unknown key "{key}" in the input document {doc}',
+    "not_object": "{param}: the input document {doc} is not a JSON object",
+}
+
+
+def input_document_message(param: str, doc: str, key: str | None) -> str:
+    """The message the stub's INPUT_DOCUMENT check gives: naming `key`, or
+    saying the document is not a JSON object when `key` is None."""
+    if key is None:
+        return INPUT_DOCUMENT["not_object"].format(param=param, doc=doc)
+    return INPUT_DOCUMENT["unknown_key"].format(param=param, doc=doc, key=key)
+
+
 # The image zone's process-once rule (chs_initialize), as the stub models it
 # and as the cases that probe it expect it: emit/stub.py generates the C from
 # this dict, and emit/cases.py (the call-level cases) and emit/setup_cases.py

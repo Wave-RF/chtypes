@@ -26,9 +26,15 @@
       "free": "chs_error_free",
       "holds": []
     },
+    "chs_server": {
+      "free": "chs_server_free",
+      "holds": []
+    },
     "chs_schema": {
       "free": "chs_schema_free",
-      "holds": []
+      "holds": [
+        "chs_server"
+      ]
     },
     "chs_filter": {
       "free": "chs_filter_free",
@@ -481,7 +487,9 @@
       "byte_fields": [
         "columns[].name",
         "columns[].type",
-        "columns[].default_expression"
+        "columns[].default_expression",
+        "replicated.zookeeper_path",
+        "replicated.replica_name"
       ],
       "schema": {
         "$defs": {
@@ -602,6 +610,79 @@
             "items": {
               "$ref": "#/$defs/column"
             }
+          },
+          "server": {
+            "type": "object",
+            "required": [
+              "timezone",
+              "settings"
+            ],
+            "properties": {
+              "timezone": {
+                "type": "string"
+              },
+              "settings": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "macros": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "replicated": {
+            "type": "object",
+            "properties": {
+              "zookeeper_path": {
+                "type": "string"
+              },
+              "zookeeper_path_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "replica_name": {
+                "type": "string"
+              },
+              "replica_name_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              }
+            },
+            "allOf": [
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "zookeeper_path"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "zookeeper_path_b64"
+                    ]
+                  }
+                ]
+              },
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "replica_name"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "replica_name_b64"
+                    ]
+                  }
+                ]
+              }
+            ]
           }
         }
       }
@@ -2583,6 +2664,49 @@
       }
     }
   },
+  "inputs": {
+    "server_profile": {
+      "options": false,
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "timezone": {
+            "type": "string"
+          },
+          "settings": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "macros": {
+            "type": "object",
+            "propertyNames": {
+              "minLength": 1
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "server_options": {
+      "options": true,
+      "schema": {
+        "type": "object",
+        "additionalProperties": false
+      }
+    },
+    "schema_options": {
+      "options": true,
+      "schema": {
+        "type": "object",
+        "additionalProperties": false
+      }
+    }
+  },
   "build_info": {
     "schema": {
       "type": "object",
@@ -3209,13 +3333,74 @@
       ]
     },
     {
-      "name": "chs_schema_create",
+      "name": "chs_server_create",
       "class": "api",
       "thread": "any",
+      "growable": true,
       "returns": {
         "kind": "status"
       },
       "params": [
+        {
+          "name": "profile",
+          "kind": "bytes_in",
+          "content": "input:server_profile"
+        },
+        {
+          "name": "options",
+          "kind": "bytes_in",
+          "content": "input:server_options"
+        },
+        {
+          "name": "out",
+          "kind": "out_handle",
+          "type": "chs_server"
+        },
+        {
+          "name": "err",
+          "kind": "out_error"
+        }
+      ],
+      "may_return": [
+        "CHS_OK",
+        "CHS_REJECTED",
+        "CHS_DECLINED",
+        "CHS_INVALID_ARGUMENT",
+        "CHS_INTERNAL"
+      ]
+    },
+    {
+      "name": "chs_server_free",
+      "class": "api",
+      "thread": "handle_serial",
+      "returns": {
+        "kind": "void"
+      },
+      "params": [
+        {
+          "name": "server",
+          "kind": "handle",
+          "type": "chs_server",
+          "nullable": true
+        }
+      ]
+    },
+    {
+      "name": "chs_schema_create",
+      "class": "api",
+      "thread": "shared",
+      "growable": true,
+      "returns": {
+        "kind": "status"
+      },
+      "params": [
+        {
+          "name": "server",
+          "kind": "handle",
+          "type": "chs_server",
+          "const": true,
+          "nullable": true
+        },
         {
           "name": "create_table",
           "kind": "bytes_in",
@@ -3225,6 +3410,11 @@
           "name": "settings",
           "kind": "bytes_in",
           "content": "json_object_string_values"
+        },
+        {
+          "name": "options",
+          "kind": "bytes_in",
+          "content": "input:schema_options"
         },
         {
           "name": "out",

@@ -129,7 +129,7 @@ def _case_record(api: Any, case: dict, setup_id: str, platform: str) -> dict:
     try:
         try:
             schema = api.schema_create(
-                _b64d(schema_in["create_table_b64"]), _b64d(schema_in["settings_b64"])
+                None, _b64d(schema_in["create_table_b64"]), _b64d(schema_in["settings_b64"]), None
             )
         except CallError as err:
             return failed("schema_create", err)

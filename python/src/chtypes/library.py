@@ -399,5 +399,7 @@ class Library:
         a compiled type always takes the image zone, never the profile's."""
         statement = to_bytes(create_table, "create_table")
         settings_bytes = settings_json(settings, session_timezone)
-        handle = self._api.schema_create(statement, settings_bytes)
+        # No server (NULL) and no options (none, which is `{}`): the schema is on
+        # the image's own server, exactly as before the server profile existed.
+        handle = self._api.schema_create(None, statement, settings_bytes, None)
         return Schema(self, handle)
