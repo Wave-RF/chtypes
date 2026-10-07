@@ -12,10 +12,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func devChannelForTest(t *testing.T) {
@@ -328,5 +331,90 @@ func TestDevOfflineEnvMakesNoRequestAndLoadsAnInstalledBuild(t *testing.T) {
 	opt.Offline = true
 	if ro, err := resolveOptions(opt); err != nil || !ro.offline {
 		t.Errorf("the Offline option did not resolve offline (%v)", err)
+	}
+}
+
+// The alias step (docs/guides/fetch-v1.md §3): the dev channel names its alias
+// with its OWN fingerprint, the generated constant, which is the header's; the
+// v1 contract has no alias; and only a version spelling gets one.
+func TestDevChannelAliasIsItsOwnGeneratedFingerprint(t *testing.T) {
+	devChannelForTest(t)
+	hexFP, ok := strings.CutPrefix(DevABIFingerprint, "sha256:")
+	if !ok || !fingerprintHex.MatchString(hexFP) {
+		t.Fatalf("DevABIFingerprint = %q, want sha256: and 64 lowercase hex", DevABIFingerprint)
+	}
+	header := filepath.Join("..", "..", "..", "include", "v2", "chtypes.h")
+	if b, err := os.ReadFile(header); err != nil {
+		t.Logf("SKIPPED the header cross-check: %s is not beside this checkout (%v)", header, err)
+	} else if !bytes.Contains(b, []byte(`#define CHS_ABI_FINGERPRINT "`+DevABIFingerprint+`"`)) {
+		t.Errorf("%s does not define CHS_ABI_FINGERPRINT as %s: the fetch layer's copy is not the binding's fingerprint", header, DevABIFingerprint)
+	}
+	for tag, want := range map[string]string{
+		"26.9":       "26.9--fp-" + hexFP,
+		"26.9.8":     "26.9.8--fp-" + hexFP,
+		"26.9.8.3":   "26.9.8.3--fp-" + hexFP,
+		"latest":     "",
+		"sha256-abc": "",
+	} {
+		if got := active().aliasTag(tag); got != want {
+			t.Errorf("dev channel aliasTag(%q) = %q, want %q", tag, got, want)
+		}
+	}
+	if got := len(active().aliasTag("26.9")); got != 73 {
+		t.Errorf("the alias of 26.9 is %d characters, want 73", got)
+	}
+	restore := UseFetchV1ForTests()
+	defer restore()
+	if got := active().aliasTag("26.9"); got != "" {
+		t.Errorf("the v1 contract's aliasTag(26.9) = %q, want none", got)
+	}
+}
+
+// The dev channel itself, against a registry with no alias: the FIRST manifest
+// request is its own alias, the tag follows only on a 404; and a 5xx on the
+// alias is that failure, with the tag never requested.
+func TestDevChannelResolvesItsOwnAliasFirst(t *testing.T) {
+	t.Cleanup(AllowOverridesForTests())
+	for _, k := range []string{EnvBasesName, EnvTrustedKeysName, EnvAllowUnsignedName, EnvCacheName, EnvCacheStrictName, EnvOfflineName} {
+		t.Setenv(k, "")
+	}
+	alias := "/v2/chtypes/v2-dev/manifests/26.9--fp-" + strings.TrimPrefix(DevABIFingerprint, "sha256:")
+	tag := "/v2/chtypes/v2-dev/manifests/26.9"
+	for _, tc := range []struct {
+		name        string
+		aliasStatus int
+		wantPaths   []string
+		wantCode    ErrorCode
+	}{
+		{"alias 404, then the tag", http.StatusNotFound, []string{alias, tag}, CodeArtifactUnpublished},
+		{"alias 503, never the tag", http.StatusServiceUnavailable, []string{alias, alias, alias, alias, alias}, CodeSourceUnreachable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var mu sync.Mutex
+			var paths []string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				paths = append(paths, r.URL.Path)
+				mu.Unlock()
+				if r.URL.Path == alias {
+					w.WriteHeader(tc.aliasStatus)
+					return
+				}
+				w.WriteHeader(http.StatusNotFound)
+			}))
+			defer srv.Close()
+			clock := Clock{Now: time.Now, Sleep: func(context.Context, time.Duration) {}}
+			_, err := Ensure(context.Background(), Request{Spelling: "26.9", Platform: "linux-amd64"},
+				&Options{Bases: []string{srv.URL + "/chtypes/v2-dev"}, CacheDir: t.TempDir(), SystemDirs: []string{}, Clock: &clock})
+			var fe *FetchError
+			if !errors.As(err, &fe) || fe.Code != tc.wantCode {
+				t.Errorf("Ensure = %v, want %s", err, tc.wantCode)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if strings.Join(paths, " ") != strings.Join(tc.wantPaths, " ") {
+				t.Errorf("requested %q, want %q", paths, tc.wantPaths)
+			}
+		})
 	}
 }

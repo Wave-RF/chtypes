@@ -693,7 +693,11 @@ def _ensure_floating(
     scratch_root = _scratch_root(cache_root_path)
 
     index_doc, index_bytes, index_digest = fetch_manifest_by_tag(
-        bases, request.spelling, policy=policy, retry=retry
+        bases,
+        request.spelling,
+        policy=policy,
+        retry=retry,
+        alias=_channel.alias_tag(request.spelling),
     )
     platform_desc = resolve_platform_manifest(index_doc, platform_key)
     manifest_hex = parse_digest(platform_desc.digest)

@@ -18,6 +18,15 @@
 //!   subroot `<cache>/v2-dev`, never as a whole layout;
 //! * a signed predicate must say abi 2.
 //!
+//! It also resolves one tag the v1 contract never asks for: a version request
+//! fetches `<tag>--fp-<its own fingerprint>` first, the newest dev build of the
+//! ABI this crate speaks, and falls back to `<tag>` only when no base has that
+//! alias (docs/guides/fetch-v1.md §3, "The dev channel's alias step"), so a dev
+//! build of a newer fingerprint never strands this one. It is automatic, with no
+//! override; the trust checks are unchanged, and a listing never shows an alias.
+//! The fingerprint is the generated [`DEV_ABI_FINGERPRINT`], never a
+//! hand-written copy.
+//!
 //! The v1 contract itself stays in this module tree, unchanged, because the
 //! fetch-v1 conformance cases (tests/fixtures/fetch-v1) are its specification
 //! and the dev channel shares every other rule with it. Only a test build
@@ -31,8 +40,10 @@
 use std::collections::BTreeSet;
 use std::sync::Mutex;
 
+use super::abi_fingerprint::DEV_ABI_FINGERPRINT;
 use super::constants;
 use super::ensure::Options;
+use super::oci::VersionRequest;
 
 /// The only base a 2.0.0-dev SDK fetches from (rule r6).
 pub const DEV_CHANNEL_BASE: &str = "https://registry-staging.wavehouse.dev/chtypes/v2-dev";
@@ -49,6 +60,10 @@ pub const DEV_CACHE_DIR: &str = "v2-dev";
 pub const DEV_RECORD_SCHEMA: u64 = 2;
 /// The `abi` a dev predicate must carry.
 pub const DEV_ABI_GENERATION: u32 = 2;
+
+/// Joins a tag and a fingerprint into the dev channel's alias tag:
+/// `<tag>--fp-<64 lowercase hex>` (docs/guides/fetch-v1.md §3).
+pub const ALIAS_SEPARATOR: &str = "--fp-";
 
 /// What every lock, frozen or update request gets from a 2.0.0-dev SDK,
 /// before any network call (rule r6).
@@ -78,6 +93,10 @@ pub struct Channel {
     pub overridable: bool,
     /// Whether lock, frozen and update are honored.
     pub pinnable: bool,
+    /// The fingerprint whose alias tag a version request resolves before the
+    /// tag itself (64 lowercase hex, a `sha256:` prefix ignored); `None` never
+    /// tries an alias (the v1 contract and every production channel).
+    pub alias_fingerprint: Option<&'static str>,
 }
 
 /// What a 2.0.0-dev SDK speaks, and what every non-test build of this crate
@@ -93,6 +112,8 @@ pub const DEV_CHANNEL: Channel = Channel {
     keys: &[(DEV_KEY_ID, DEV_KEY_HEX)],
     overridable: false,
     pinnable: false,
+    // The generated constant (abi_fingerprint.rs), never a hand-written one.
+    alias_fingerprint: Some(DEV_ABI_FINGERPRINT),
 };
 
 /// The v1 contract the fetch-v1 conformance cases specify, from the generated
@@ -112,6 +133,7 @@ const FETCH_V1_CHANNEL: Channel = Channel {
     )],
     overridable: true,
     pinnable: true,
+    alias_fingerprint: None,
 };
 
 #[cfg(test)]
@@ -173,6 +195,43 @@ pub fn allow_overrides_for_tests() -> ChannelGuard {
         overridable: true,
         ..DEV_CHANNEL
     })
+}
+
+/// Make this TEST thread's active contract resolve a version request through
+/// the alias tag of `fingerprint` (64 lowercase hex) first, as the dev channel
+/// does with its own: the fetch-v1 conformance cases that carry
+/// `request.alias_fingerprint` run under it, against fixture registries whose
+/// aliases name a fixture fingerprint. Everything else stays the active
+/// contract's. Panics on a fingerprint that is not 64 lowercase hex.
+#[cfg(test)]
+pub fn use_alias_fingerprint_for_tests(fingerprint: &str) -> ChannelGuard {
+    assert!(
+        fingerprint.len() == 64
+            && fingerprint
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+        "use_alias_fingerprint_for_tests: {fingerprint:?} is not 64 lowercase hex"
+    );
+    // A test-only seam: the leaked copy lives as long as the process, as the
+    // `&'static str` every other channel field is.
+    let fingerprint: &'static str = Box::leak(fingerprint.to_string().into_boxed_str());
+    use_channel(Channel {
+        alias_fingerprint: Some(fingerprint),
+        ..active()
+    })
+}
+
+/// The alias a version request resolves first under the active contract, or
+/// `None` when it resolves its tag alone: under the v1 contract and every
+/// production channel, and for a request that is not a version spelling (an
+/// arbitrary tag has no alias).
+pub fn alias_tag(request: &VersionRequest) -> Option<String> {
+    let fingerprint = active().alias_fingerprint?;
+    if request.is_literal() {
+        return None;
+    }
+    let hex = fingerprint.strip_prefix("sha256:").unwrap_or(fingerprint);
+    Some(format!("{}{ALIAS_SEPARATOR}{hex}", request.tag()))
 }
 
 /// Make this TEST thread speak the dev channel exactly as a non-test build does

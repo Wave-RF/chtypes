@@ -18,13 +18,13 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { Readable } from 'node:stream';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { ensure, fetchSigned, resolveInstalled } from '../../src/ocifetch/ensure.js';
+import { ensure, fetchSigned, listTags, resolveInstalled } from '../../src/ocifetch/ensure.js';
 import { FIXTURES_REPO_SUFFIX, PREDICATE_TYPE_FIXTURES, PREDICATE_TYPE_GOLDENS, RELEASE_KEYS, TEST_KEYS } from '../../src/ocifetch/constants.gen.js';
 import { ArtifactMissingError, type FetchV1ErrorCode } from '../../src/ocifetch/errors.js';
 import { verifyAndInstallFromLocalBlobs } from '../../src/ocifetch/localverify.js';
 import { readLock, type LockFile } from '../../src/ocifetch/lock.js';
 import type { Clock, PlatformKey } from '../../src/ocifetch/types.js';
-import { channelName, useFetchV1ForTests } from '../../src/ocifetch/channel.js';
+import { channelName, useAliasFingerprintForTests, useFetchV1ForTests } from '../../src/ocifetch/channel.js';
 
 // This file tests the v1 fetch contract that the ABI v2 dev channel narrows
 // (src/ocifetch/channel.ts): its fixtures name their own registry and key, and
@@ -67,6 +67,8 @@ interface ConformanceCase {
     readonly allow_unsigned: boolean;
     readonly trust: 'release' | 'test';
     readonly bases: readonly string[];
+    /** The dev channel's alias step under this fixture fingerprint (guide §3); null runs the v1 contract as it is. */
+    readonly alias_fingerprint: string | null;
   };
   readonly env: Readonly<Record<string, string>>;
   readonly expect: {
@@ -80,6 +82,8 @@ interface ConformanceCase {
     readonly warnings: readonly string[];
     readonly requests: { readonly max: number | null; readonly none_matching: readonly string[]; readonly auth_on_second_origin: boolean };
     readonly lock_after: string | null;
+    /** A `list-tags-` case's listing, in order. */
+    readonly tags: readonly string[] | null;
   };
 }
 
@@ -329,11 +333,20 @@ async function runOne(
       ...(beforeIndexRename !== undefined ? { beforeIndexRename } : {}),
     };
 
+    // The dev channel's alias step (guide §3), under the case's fixture
+    // fingerprint; a null one leaves the v1 contract as it is.
+    const restoreAlias = c.request.alias_fingerprint === null ? undefined : useAliasFingerprintForTests(c.request.alias_fingerprint);
     let resultDetail: string;
-    if (c.id.startsWith('goldens-') || c.id.startsWith('fixtures-')) {
-      resultDetail = await runGenericFetch(c, bases, baseOptions);
-    } else {
-      resultDetail = await runEnsure(c, baseOptions, lockPath, conformanceDir);
+    try {
+      if (c.id.startsWith('goldens-') || c.id.startsWith('fixtures-')) {
+        resultDetail = await runGenericFetch(c, bases, baseOptions);
+      } else if (c.id.startsWith('list-tags-')) {
+        resultDetail = await runListTags(c, baseOptions);
+      } else {
+        resultDetail = await runEnsure(c, baseOptions, lockPath, conformanceDir);
+      }
+    } finally {
+      restoreAlias?.();
     }
     if (resultDetail !== '') return resultDetail;
 
@@ -399,6 +412,25 @@ async function runEnsure(c: ConformanceCase, baseOptions: EnsureOptions, lockPat
       if (!locksEqual(actual, expected)) {
         return `lock_after mismatch:\n  got: ${JSON.stringify(actual)}\n  want: ${JSON.stringify(expected)}`;
       }
+    }
+    return '';
+  } catch (err) {
+    if (c.expect.ok) return `unexpected throw: ${err instanceof Error ? err.message : String(err)}`;
+    const code = (err as { code?: string }).code;
+    if (c.expect.code !== null && code !== c.expect.code) {
+      return `code ${code} != expected ${c.expect.code} (${err instanceof Error ? err.message : String(err)})`;
+    }
+    return '';
+  }
+}
+
+/** A `list-tags-` case (guide §10): what `chtypes list` names as published, from the registry's tags/list. */
+async function runListTags(c: ConformanceCase, baseOptions: EnsureOptions): Promise<string> {
+  try {
+    const listed = await listTags(baseOptions);
+    if (!c.expect.ok) return `expected failure (code ${c.expect.code}), got the listing [${listed.join(', ')}]`;
+    if (c.expect.tags !== null && listed.join(' ') !== c.expect.tags.join(' ')) {
+      return `listed [${listed.join(', ')}] != expected [${c.expect.tags.join(', ')}]`;
     }
     return '';
   } catch (err) {

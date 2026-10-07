@@ -60,7 +60,7 @@
           "type": "object",
           "additionalProperties": false,
           "required": ["spelling", "platform", "offline", "frozen", "lock_write", "update",
-                       "allow_unsigned", "trust", "bases"],
+                       "allow_unsigned", "trust", "bases", "alias_fingerprint"],
           "properties": {
             "spelling": {"type": "string"},
             "platform": {"type": "string", "enum": ["linux-amd64", "linux-arm64", "darwin-arm64"]},
@@ -75,6 +75,11 @@
               "minItems": 1,
               "items": {"type": "string"},
               "description": "Base URL templates; `{base}` expands per transport (docs/guides/fetch-v1.md §2)."
+            },
+            "alias_fingerprint": {
+              "type": ["string", "null"],
+              "pattern": "^[0-9a-f]{64}$",
+              "description": "The dev channel's alias step (docs/guides/fetch-v1.md §3): a fixture ABI fingerprint, 64 lowercase hex, the runner hands its binding's alias seam, so a version request resolves `<tag>--fp-<this>` before `<tag>`. null runs the case with no alias step, as the v1 contract and every production channel do."
             }
           }
         },
@@ -87,7 +92,7 @@
           "type": "object",
           "additionalProperties": false,
           "required": ["ok", "version", "build", "manifest", "library_sha256", "code", "sleeps",
-                       "warnings", "requests", "lock_after"],
+                       "warnings", "requests", "lock_after", "tags"],
           "properties": {
             "ok": {"type": "boolean"},
             "version": {"type": ["string", "null"]},
@@ -121,6 +126,11 @@
             "lock_after": {
               "type": ["string", "null"],
               "description": "The name of an expected-lock fixture under locks/ this case's resulting lock file must equal, or null when the case does not write a lock."
+            },
+            "tags": {
+              "type": ["array", "null"],
+              "items": {"type": "string"},
+              "description": "For a `list-tags-` case (docs/guides/fetch-v1.md §10), the published tags the binding's listing must return, in order: the tree's tags/list less every alias. null for every other case."
             }
           }
         }

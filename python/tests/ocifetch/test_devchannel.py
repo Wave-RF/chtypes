@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 import chtypes._ocifetch._http as http_module
+from chtypes._abi2._decls import CHS_ABI_FINGERPRINT
 from chtypes._ocifetch import _channel
 from chtypes._ocifetch import _constants as C
 from chtypes._ocifetch._ensure import (
@@ -29,7 +30,13 @@ from chtypes._ocifetch._ensure import (
     resolve_installed,
     verify_installed,
 )
-from chtypes._ocifetch._errors import ArtifactCorruptError, ArtifactMissingError
+from chtypes._ocifetch._errors import (
+    ArtifactCorruptError,
+    ArtifactMissingError,
+    ArtifactUnpublishedError,
+    SourceUnreachableError,
+)
+from chtypes._ocifetch._http import Clock, HttpResponse
 from chtypes._ocifetch._layout import VerifiedRecord, resolve_cache_root, search_roots
 
 REPO = Path(__file__).resolve().parents[3]
@@ -267,6 +274,7 @@ def test_the_seams_are_test_only(monkeypatch: pytest.MonkeyPatch) -> None:
         _channel.use_fetch_v1_for_tests,
         _channel.allow_overrides_for_tests,
         _channel.use_dev_channel_for_tests,
+        lambda: _channel.use_alias_fingerprint_for_tests("0" * 64),
     ):
         with pytest.raises(RuntimeError, match="test-only"):
             seam()
@@ -324,3 +332,62 @@ def test_offline_env_only_one_is_on_and_the_two_are_ored(
     assert Options(offline=False).resolved_offline() is True
     monkeypatch.delenv(_channel.ENV_OFFLINE_NAME)
     assert Options(offline=True).resolved_offline() is True
+
+
+def test_the_dev_channel_aliases_with_its_own_generated_fingerprint() -> None:
+    """The alias step (docs/guides/fetch-v1.md §3): the dev channel names its alias
+    with its OWN fingerprint, the ABI layer's generated constant, which is the
+    header's; only a version spelling gets one; the v1 contract has none."""
+    hex_fp = CHS_ABI_FINGERPRINT.removeprefix("sha256:")
+    assert len(hex_fp) == 64 and all(ch in "0123456789abcdef" for ch in hex_fp)
+    header = REPO / "include" / "v2" / "chtypes.h"
+    if header.is_file():
+        assert f'#define CHS_ABI_FINGERPRINT "{CHS_ABI_FINGERPRINT}"' in header.read_text()
+    for tag in ("26.9", "26.9.8", "26.9.8.3"):
+        assert _channel.alias_tag(tag) == f"{tag}--fp-{hex_fp}"
+    assert len(_channel.alias_tag("26.9") or "") == 73
+    assert _channel.alias_tag("latest") is None
+    assert _channel.alias_tag("sha256-abc") is None
+    restore = _channel.use_fetch_v1_for_tests()
+    try:
+        assert _channel.alias_tag("26.9") is None
+    finally:
+        restore()
+
+
+class _NoSleep(Clock):
+    def sleep(self, seconds: float) -> None:
+        pass
+
+
+@pytest.mark.parametrize(
+    ("alias_status", "attempts", "error"),
+    [(404, 1, ArtifactUnpublishedError), (503, 5, SourceUnreachableError)],
+)
+def test_the_dev_channel_requests_its_own_alias_first(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    alias_status: int,
+    attempts: int,
+    error: type[Exception],
+) -> None:
+    """The dev channel itself, against a registry with no alias: the FIRST manifest
+    request is its own alias, and the tag follows only on a 404; a 5xx on the alias
+    is that failure, after the retry table, with the tag never requested."""
+    api = "https://registry-staging.wavehouse.dev/v2/chtypes/v2-dev/manifests/"
+    alias = api + "26.9--fp-" + CHS_ABI_FINGERPRINT.removeprefix("sha256:")
+    seen: list[str] = []
+
+    def registry(url: str, **_kwargs: object) -> HttpResponse:
+        seen.append(url)
+        status = alias_status if url == alias else 404
+        return HttpResponse(status=status, headers={}, body=b"", url=url)
+
+    monkeypatch.setattr(http_module, "_single_request", registry)
+    options = Options(
+        cache_dir=tmp_path / "cache", system_dirs=(), platform="linux-amd64", clock=_NoSleep()
+    )
+    with pytest.raises(error):
+        ensure(Request("26.9"), options)
+    want = [alias] * attempts + ([api + "26.9"] if alias_status == 404 else [])
+    assert seen == want

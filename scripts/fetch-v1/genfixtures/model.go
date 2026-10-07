@@ -50,6 +50,11 @@ type Request struct {
 	AllowUnsigned bool     `json:"allow_unsigned"`
 	Trust         string   `json:"trust"`
 	Bases         []string `json:"bases"`
+	// AliasFingerprint, when set, is the 64-hex fingerprint the runner hands
+	// its binding's alias seam: the case runs with the dev channel's alias
+	// step (docs/guides/fetch-v1.md §3) under a fixture fingerprint. nil runs
+	// it with none, as the v1 contract and every production channel do.
+	AliasFingerprint *string `json:"alias_fingerprint"`
 }
 
 type ExpectRequests struct {
@@ -69,6 +74,10 @@ type Expect struct {
 	Warnings      []string       `json:"warnings"`
 	Requests      ExpectRequests `json:"requests"`
 	LockAfter     *string        `json:"lock_after"`
+	// Tags is what a `list-tags-` case's listing must return, in order: the
+	// tree's own tags/list less every alias (aliascases.go). nil for every
+	// other case.
+	Tags []string `json:"tags"`
 }
 
 // newCase returns a Case with every schema-required array/object field

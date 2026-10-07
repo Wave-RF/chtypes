@@ -57,6 +57,10 @@ type confRequest struct {
 	AllowUnsigned bool     `json:"allow_unsigned"`
 	Trust         string   `json:"trust"`
 	Bases         []string `json:"bases"`
+	// AliasFingerprint, when set, runs the case with the dev channel's
+	// alias step under that fixture fingerprint (UseAliasFingerprintForTests);
+	// null runs it under the v1 contract exactly, which never tries an alias.
+	AliasFingerprint *string `json:"alias_fingerprint"`
 }
 
 type confExpect struct {
@@ -70,6 +74,7 @@ type confExpect struct {
 	Warnings      []string           `json:"warnings"`
 	Requests      confRequestsExpect `json:"requests"`
 	LockAfter     *string            `json:"lock_after"`
+	Tags          *[]string          `json:"tags"` // a list-tags- case's listing
 }
 
 type confRequestsExpect struct {
@@ -392,6 +397,12 @@ func runOneCase(t *testing.T, fixturesDir string, port, port2 int, registryBase 
 		opts.HookBeforeIndexRename = indexRenameHookFor(*c.Setup.BeforeIndexRenameHook, cacheDir)
 	}
 
+	// The dev channel's alias step (docs/guides/fetch-v1.md §3), under the
+	// case's fixture fingerprint; a null one leaves the v1 contract as it is.
+	if fp := c.Request.AliasFingerprint; fp != nil {
+		defer UseAliasFingerprintForTests(*fp)()
+	}
+
 	for k, v := range c.Env {
 		switch k {
 		case EnvCacheName:
@@ -408,7 +419,7 @@ func runOneCase(t *testing.T, fixturesDir string, port, port2 int, registryBase 
 
 	var resolvedManifest, resolvedLibrarySHA256 string
 	var resolvedVersion, resolvedBuild *string
-	var warnings []string
+	var warnings, listedTags []string
 	var runErr error
 
 	switch {
@@ -434,6 +445,10 @@ func runOneCase(t *testing.T, fixturesDir string, port, port2 int, registryBase 
 			resolvedManifest, resolvedLibrarySHA256 = string(signed.Digests.Manifest), hex.EncodeToString(sum[:])
 			warnings = signed.Warnings
 		}
+	case strings.HasPrefix(c.ID, "list-tags-"):
+		// The listing (docs/guides/fetch-v1.md §10): what `chtypes list`
+		// names as published, from the registry's tags/list.
+		listedTags, runErr = ListTags(ctx, opts)
 	case strings.HasPrefix(c.ID, "resolve-installed-"):
 		// The cache-only seam entry (docs/guides/fetch-v1.md §10): a miss is
 		// reported as CHTYPES_ARTIFACT_MISSING, the code --offline gives.
@@ -463,6 +478,10 @@ func runOneCase(t *testing.T, fixturesDir string, port, port2 int, registryBase 
 		row.Verdict, row.Detail = "fail", detail
 		return row
 	}
+	if c.Expect.Tags != nil && runErr == nil && strings.Join(listedTags, " ") != strings.Join(*c.Expect.Tags, " ") {
+		row.Verdict, row.Detail = "fail", fmt.Sprintf("listed %q, want %q", listedTags, *c.Expect.Tags)
+		return row
+	}
 
 	reqMu.Lock()
 	reqSnapshot := append([]string(nil), reqTexts...)
@@ -470,6 +489,21 @@ func runOneCase(t *testing.T, fixturesDir string, port, port2 int, registryBase 
 	if detail := checkRequests(c.Expect.Requests, reqSnapshot, sawAuthOnSecondOrigin); detail != "" {
 		row.Verdict, row.Detail = "fail", detail
 		return row
+	}
+	// Over http, the same expectations hold for what the registry itself
+	// logged (GET /_log/s-<case-id>, docs/guides/fetch-v1.md §10), which every
+	// binding's runner reads: what was served, not what this process believes
+	// it asked for.
+	if transport == "http" {
+		logged, authOnSecond, err := serverRequestLog(port, c.ID)
+		if err != nil {
+			row.Verdict, row.Detail = "fail", "reading the registry's request log: "+err.Error()
+			return row
+		}
+		if detail := checkRequests(c.Expect.Requests, logged, authOnSecond); detail != "" {
+			row.Verdict, row.Detail = "fail", "registry log: "+detail
+			return row
+		}
 	}
 
 	if c.Expect.LockAfter != nil {
@@ -676,6 +710,45 @@ func checkRequests(expect confRequestsExpect, reqTexts []string, sawAuthOnSecond
 		return fmt.Sprintf("auth_on_second_origin = %v, want %v", sawAuthOnSecondOrigin, expect.AuthOnSecondOrigin)
 	}
 	return ""
+}
+
+// serverRequestLog reads one case's request log from the fixture server
+// (server.py: GET /_log/s-<case-id>, never reset within a run), as
+// "METHOD path" lines, and whether any request to the second origin carried
+// an Authorization header.
+func serverRequestLog(port int, caseID string) ([]string, bool, error) {
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/_log/s-%s", port, caseID), nil)
+	if err != nil {
+		return nil, false, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, false, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, false, fmt.Errorf("status %d", resp.StatusCode)
+	}
+	var entries []struct {
+		Method  string            `json:"method"`
+		Path    string            `json:"path"`
+		Origin  string            `json:"origin"`
+		Headers map[string]string `json:"headers"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {
+		return nil, false, err
+	}
+	texts := make([]string, 0, len(entries))
+	authOnSecond := false
+	for _, e := range entries {
+		texts = append(texts, e.Method+" "+e.Path)
+		for k := range e.Headers {
+			if e.Origin == "second" && strings.EqualFold(k, "Authorization") {
+				authOnSecond = true
+			}
+		}
+	}
+	return texts, authOnSecond, nil
 }
 
 // noneMatchingViolated reports whether text matches pattern. Go's RE2

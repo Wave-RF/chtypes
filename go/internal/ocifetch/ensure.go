@@ -343,6 +343,9 @@ func hostPlatformKey() (string, bool) {
 // network-touching helper in this package uses.
 type session struct {
 	client *client
+	// ch is the contract this call resolved its options under: its alias
+	// fingerprint decides whether a version request tries an alias first.
+	ch *channel
 	// hookBeforeIndexRename is test-only: it lets a conformance case
 	// (index-race-reapply) simulate a concurrent cache writer completing
 	// between this call's index.json read and its rename.
@@ -352,6 +355,7 @@ type session struct {
 func newSession(ro resolvedOptions) *session {
 	return &session{
 		client:                newClient(ro.clock, ro.connectTimeout, ro.idleReadTimeout, ro.token, ro.tokenHosts, ro.onRequest),
+		ch:                    ro.ch,
 		hookBeforeIndexRename: ro.hookBeforeIndexRename,
 	}
 }

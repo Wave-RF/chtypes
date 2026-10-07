@@ -191,6 +191,62 @@ pub fn fetch_by_tag(source: &Source<'_>, tag: &str) -> Result<Fetched> {
     }
 }
 
+/// The tag resolve of a version request (docs/guides/fetch-v1.md §3). Under a
+/// contract with an alias fingerprint (the dev channel) a version spelling
+/// resolves `<tag>--fp-<fingerprint>` first ([`fetch_alias`]), and its tag
+/// ([`fetch_by_tag`]) only when every base answered the alias 404. What the
+/// alias names is then checked exactly as the tag's answer would be.
+pub fn fetch_by_request(source: &Source<'_>, request: &VersionRequest) -> Result<Fetched> {
+    let found = match super::channel::alias_tag(request) {
+        Some(alias) => fetch_alias(source, &alias)?,
+        None => None,
+    };
+    match found {
+        Some(found) => Ok(found),
+        None => fetch_by_tag(source, &request.tag()),
+    }
+}
+
+/// Fetch the dev channel's alias tag across the base list: `Ok(None)` only
+/// when EVERY base answered 404, the one outcome its caller answers with the
+/// tag itself. Any other failure on any base (a 5xx or a transport error once
+/// the retries are spent, a 401, a 403) is returned as that failure, so a
+/// transient error can never route a request to the tag, which may name a
+/// build of another fingerprint.
+pub fn fetch_alias(source: &Source<'_>, alias: &str) -> Result<Option<Fetched>> {
+    let suffix = format!("manifests/{alias}");
+    let accept = manifest_accept_header();
+    let mut failure: Option<Error> = None;
+    for base in source.bases {
+        match get_from_base(
+            source,
+            base,
+            &suffix,
+            &accept,
+            constants::MANIFEST_MAX_BYTES,
+        ) {
+            Ok((200, bytes)) => {
+                return Ok(Some(Fetched {
+                    bytes,
+                    base: base.clone(),
+                }));
+            }
+            Ok((404, _)) => {}
+            Ok((status, _)) => {
+                failure = Some(status_error(
+                    status,
+                    &format!("{base}: unexpected status {status} resolving tag {alias:?}"),
+                ));
+            }
+            Err(e) => failure = Some(e),
+        }
+    }
+    match failure {
+        Some(e) => Err(e),
+        None => Ok(None),
+    }
+}
+
 /// A non-200, non-404 status as the shared error code it names
 /// (docs/guides/fetch-v1.md §8): 401 `SourceUnauthorized`, 403
 /// `SourceForbidden`, anything else `SourceUnreachable`.

@@ -21,6 +21,15 @@
  *     subroot `<cache>/v2-dev`, never as a whole layout;
  *   - a signed predicate must say abi 2.
  *
+ * It also resolves one tag the v1 contract never asks for: a version request
+ * fetches `<tag>--fp-<its own fingerprint>` first, the newest dev build of the
+ * ABI this binding speaks, and falls back to `<tag>` only when no base has that
+ * alias (`docs/guides/fetch-v1.md` §3, "The dev channel's alias step"), so a
+ * dev build of a newer fingerprint never strands this one. It is automatic,
+ * with no override; the trust checks are unchanged, and a listing never shows
+ * an alias. The fingerprint is the ABI layer's generated `ABI_FINGERPRINT`,
+ * never a hand-written copy.
+ *
  * The v1 contract itself stays in this module, unchanged, because the
  * fetch-v1 conformance cases (`tests/fixtures/fetch-v1`) are its
  * specification and the dev channel shares every other rule with it. Only a
@@ -29,6 +38,7 @@
  * package's entry point, so neither is an override a user can reach.
  */
 
+import { ABI_FINGERPRINT } from '../abi2/decls.gen.js';
 import {
   ABI_GENERATION,
   DEFAULT_BASES,
@@ -37,6 +47,7 @@ import {
   ENV_TRUSTED_KEYS_NAME,
   RELEASE_KEYS,
   SCHEMA_VERSION,
+  SPELLING_REGEX,
   SYSTEM_CACHE_DIRS,
 } from './constants.gen.js';
 import type { FetchV1Options, TrustedKey } from './types.js';
@@ -53,6 +64,9 @@ export const DEV_CACHE_DIR = 'v2-dev';
 export const DEV_RECORD_SCHEMA = 2;
 /** The abi a dev predicate must carry. */
 export const DEV_ABI_GENERATION = 2;
+
+/** Joins a tag and a fingerprint into the dev channel's alias tag: `<tag>--fp-<64 lowercase hex>` (`docs/guides/fetch-v1.md` §3). */
+export const ALIAS_SEPARATOR = '--fp-';
 
 /**
  * The environment twin of the `offline` option (public issue #528): `CHTYPES_OFFLINE=1` reads the cache only and
@@ -92,6 +106,8 @@ export interface Channel {
   readonly overridable: boolean;
   /** Whether lock, frozen and update are honored. */
   readonly pinnable: boolean;
+  /** The fingerprint, 64 lowercase hex, whose alias tag a version request resolves before the tag itself; `''` never tries an alias (the v1 contract and every production channel). */
+  readonly aliasFingerprint: string;
 }
 
 /** What a 2.0.0-dev SDK speaks, and what every process speaks unless a test selected another contract. */
@@ -106,6 +122,8 @@ const DEV_CHANNEL: Channel = {
   keys: [{ keyid: DEV_KEY_ID, ed25519Hex: DEV_KEY_HEX }],
   overridable: false,
   pinnable: false,
+  // The generated constant (src/abi2/decls.gen.ts), never a hand-written one.
+  aliasFingerprint: ABI_FINGERPRINT.slice('sha256:'.length),
 };
 
 /** The v1 contract the fetch-v1 conformance cases specify, from the generated constants. Only `useFetchV1ForTests` selects it. */
@@ -120,6 +138,7 @@ const FETCH_V1_CHANNEL: Channel = {
   keys: RELEASE_KEYS.map((k) => ({ keyid: k.keyid, ed25519Hex: k.ed25519Hex })),
   overridable: true,
   pinnable: true,
+  aliasFingerprint: '',
 };
 
 let current: Channel | undefined;
@@ -175,6 +194,34 @@ export function useFetchV1ForTests(): () => void {
 export function allowOverridesForTests(): () => void {
   testOnly('allowOverridesForTests');
   return use({ ...DEV_CHANNEL, overridable: true });
+}
+
+/**
+ * Makes this TEST process's active contract resolve a version request through
+ * the alias tag of `fingerprint` (64 lowercase hex) first, as the dev channel
+ * does with its own: the fetch-v1 conformance cases that carry
+ * `request.alias_fingerprint` run under it, against fixture registries whose
+ * aliases name a fixture fingerprint. Everything else stays the active
+ * contract's. Returns the restore function; throws outside a vitest worker or
+ * on a fingerprint that is not 64 lowercase hex.
+ */
+export function useAliasFingerprintForTests(fingerprint: string): () => void {
+  testOnly('useAliasFingerprintForTests');
+  if (!/^[0-9a-f]{64}$/.test(fingerprint)) {
+    throw new Error(`chtypes: useAliasFingerprintForTests: ${JSON.stringify(fingerprint)} is not 64 lowercase hex`);
+  }
+  return use({ ...activeChannel(), aliasFingerprint: fingerprint });
+}
+
+/**
+ * The alias a version request for `tag` resolves first under a contract with
+ * an alias fingerprint, or `undefined` when it resolves `tag` alone: under the
+ * v1 contract and every production channel, and for a request that is not a
+ * version spelling (an arbitrary tag has no alias).
+ */
+export function aliasTag(tag: string, channel: Channel = activeChannel()): string | undefined {
+  if (channel.aliasFingerprint === '' || !new RegExp(SPELLING_REGEX).test(tag)) return undefined;
+  return `${tag}${ALIAS_SEPARATOR}${channel.aliasFingerprint}`;
 }
 
 /** Makes this TEST process speak the dev channel exactly as every other process does (undoing either function above). Returns the restore function. */

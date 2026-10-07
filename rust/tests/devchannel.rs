@@ -376,3 +376,149 @@ fn the_dev_channel_never_reads_a_v1_cache() {
     }
     let _ = std::fs::remove_dir_all(&cache);
 }
+
+/// The alias step (docs/guides/fetch-v1.md §3): the dev channel names its alias
+/// with its OWN fingerprint, the generated constant, which is the header's;
+/// only a version spelling gets one; the v1 contract (the control, under its
+/// seam) has none.
+#[test]
+fn the_dev_channel_aliases_with_its_own_generated_fingerprint() {
+    let fp = ocifetch::abi_fingerprint::DEV_ABI_FINGERPRINT;
+    let hex = fp
+        .strip_prefix("sha256:")
+        .expect("the fingerprint is sha256:<hex>");
+    assert!(
+        hex.len() == 64
+            && hex
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+        "{fp} is not sha256: and 64 lowercase hex"
+    );
+    let header = Path::new(env!("CARGO_MANIFEST_DIR")).join("../include/v2/chtypes.h");
+    match std::fs::read_to_string(&header) {
+        Ok(text) => assert!(
+            text.contains(&format!("#define CHS_ABI_FINGERPRINT \"{fp}\"")),
+            "{} does not define CHS_ABI_FINGERPRINT as {fp}",
+            header.display()
+        ),
+        Err(e) => eprintln!(
+            "SKIPPED the header cross-check: {} is not beside this checkout ({e})",
+            header.display()
+        ),
+    }
+    let alias_of = |spelling: &str| {
+        channel::alias_tag(&VersionRequest::parse(spelling).expect("the spelling parses"))
+    };
+    for tag in ["26.9", "26.9.8", "26.9.8.3"] {
+        assert_eq!(alias_of(tag), Some(format!("{tag}--fp-{hex}")));
+    }
+    assert_eq!(alias_of("26.9").map(|a| a.len()), Some(73));
+    assert_eq!(alias_of("latest"), None);
+    let _v1 = channel::use_fetch_v1_for_tests();
+    assert_eq!(alias_of("26.9"), None);
+}
+
+/// A clock whose sleeps return at once, so the retry table runs instantly.
+struct NoSleep;
+
+impl ocifetch::http::Clock for NoSleep {
+    fn now(&self) -> std::time::SystemTime {
+        std::time::SystemTime::now()
+    }
+
+    fn sleep(&self, _seconds: f64) {}
+}
+
+/// A loopback registry (127.0.0.1 only) that answers `alias_path` with
+/// `alias_status` and every other GET with 404, each with an empty body, and
+/// records every path it was asked for, in order.
+fn loopback_registry(
+    alias_path: String,
+    alias_status: u16,
+) -> (u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+    use std::io::{BufRead, BufReader, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind a loopback port");
+    let port = listener.local_addr().expect("the bound address").port();
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let log = seen.clone();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let Ok(clone) = stream.try_clone() else {
+                continue;
+            };
+            let mut reader = BufReader::new(clone);
+            let mut request_line = String::new();
+            if reader.read_line(&mut request_line).is_err() {
+                continue;
+            }
+            loop {
+                let mut header = String::new();
+                match reader.read_line(&mut header) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) if header == "\r\n" => break,
+                    Ok(_) => {}
+                }
+            }
+            let path = request_line
+                .split_whitespace()
+                .nth(1)
+                .unwrap_or_default()
+                .to_string();
+            let status = if path == alias_path {
+                alias_status
+            } else {
+                404
+            };
+            log.lock().unwrap().push(path);
+            let _ = write!(
+                stream,
+                "HTTP/1.1 {status} Scripted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            );
+        }
+    });
+    (port, seen)
+}
+
+/// The dev channel itself (its base overridden to a loopback registry with no
+/// alias): the FIRST manifest request is its own alias, and the tag follows
+/// only on a 404; a 5xx on the alias is that failure, after the retry table,
+/// with the tag never requested.
+#[test]
+fn the_dev_channel_requests_its_own_alias_first() {
+    let _overrides = channel::allow_overrides_for_tests();
+    let hex = ocifetch::abi_fingerprint::DEV_ABI_FINGERPRINT
+        .strip_prefix("sha256:")
+        .expect("the fingerprint is sha256:<hex>");
+    let alias = format!("/v2/chtypes/v2-dev/manifests/26.9--fp-{hex}");
+    let tag = "/v2/chtypes/v2-dev/manifests/26.9".to_string();
+    for (alias_status, attempts, code) in [
+        (404, 1, "CHTYPES_ARTIFACT_UNPUBLISHED"),
+        (503, 5, "CHTYPES_SOURCE_UNREACHABLE"),
+    ] {
+        let (port, seen) = loopback_registry(alias.clone(), alias_status);
+        let cache = scratch(&format!("alias-first-{alias_status}"));
+        let result = ensure::ensure(
+            "26.9",
+            Options {
+                platform: Some("linux-amd64".to_string()),
+                bases: Some(vec![format!("http://127.0.0.1:{port}/chtypes/v2-dev")]),
+                cache_dir: Some(cache.to_string_lossy().into_owned()),
+                system_dirs: Vec::new(),
+                clock: Some(Box::new(NoSleep)),
+                ..Options::default()
+            },
+        );
+        let err = match result {
+            Ok(_) => panic!("alias {alias_status}: resolved, though nothing is published"),
+            Err(e) => e,
+        };
+        assert_eq!(err.code(), code, "alias {alias_status}: {err}");
+        let mut want = vec![alias.clone(); attempts];
+        if alias_status == 404 {
+            want.push(tag.clone());
+        }
+        assert_eq!(*seen.lock().unwrap(), want, "alias {alias_status}");
+        let _ = std::fs::remove_dir_all(&cache);
+    }
+}

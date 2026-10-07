@@ -325,7 +325,7 @@ fn ensure_online(
         client: &res.client,
         auth: &res.auth,
     };
-    let fetched_index = oci::fetch_by_tag(&source, &version_request.tag())?;
+    let fetched_index = oci::fetch_by_request(&source, version_request)?;
     let index = oci::parse_index(&fetched_index.bytes, &format!("index for {request:?}"))?;
     let descriptor = oci::select_platform(&index, &res.platform)?;
 
@@ -489,7 +489,7 @@ fn lock_entries_for_all_platforms(
         client: &res.client,
         auth: &res.auth,
     };
-    let fetched_index = oci::fetch_by_tag(&source, &version_request.tag())?;
+    let fetched_index = oci::fetch_by_request(&source, version_request)?;
     let index = oci::parse_index(&fetched_index.bytes, "index")?;
 
     let mut out = Vec::new();
