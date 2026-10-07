@@ -599,15 +599,16 @@ def section7(lib: chtypes.Library) -> None:
 # SECTION 8 - Engines, MergeTree settings, TTL and partitions
 #
 # WHAT: declare the table's engine, TTL and partition key IN the statement,
-# then watch the STORAGE layer change what a batch stores, including storing
-# nothing at all.
+# then watch the STORAGE layer change what a batch stores.
 # WHY: a row can be accepted per row and absent per batch. SummingMergeTree
-# folds rows at insert; a TTL already in the past deletes them at merge, with
-# no error at any point. A gateway reading only per-row verdicts previews rows
-# the table will never hold.
-# LOOK FOR: engine_rows (the stored truth) being SHORTER than the input; the
-# TTL batch whose row is accepted and whose engine_rows is empty; the
-# refusal-versus-decline pair on a MergeTree SETTINGS clause; the partition id.
+# folds rows at insert, so a gateway reading only per-row verdicts previews
+# rows the table will never hold. A TTL is different: it deletes at the next
+# MERGE, which a preview does not perform, so engine_rows matches the INSERT.
+# LOOK FOR: engine_rows (the stored truth) being SHORTER than the input for
+# SummingMergeTree; the TTL batch whose row is accepted and whose engine_rows
+# still HOLDS it (before build 20261007.120436 it was empty and a ttl_expired
+# transform was reported); the refusal-versus-decline pair on a MergeTree
+# SETTINGS clause; the partition id.
 # C API: chs_schema_create, chs_preview_batch.
 # ---------------------------------------------------------------------------
 def section8(lib: chtypes.Library) -> None:
@@ -652,8 +653,10 @@ def section8(lib: chtypes.Library) -> None:
                 "  batch transform",
                 f"row={t.row} column={show(t.column)} reason={t.reason} lossy={t.lossy}",
             )
-        note("accepted per ROW, stored nowhere per BATCH: on a real server this is a")
-        note("silent merge-time delete, and the ttl_expired transform is the only warning")
+        note("accepted per ROW, and engine_rows keeps it: a server's INSERT still writes the")
+        note("row and the next merge deletes it, which a preview does not perform. On builds")
+        note("before 20261007.120436 engine_rows was empty and a ttl_expired transform was")
+        note("reported; the loop above now prints nothing")
     blank()
 
     kv(

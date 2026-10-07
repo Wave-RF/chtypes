@@ -754,15 +754,16 @@ func section7(lib *chtypes.Library, reg *chtypes.Registry) {
 // SECTION 8 — Engines, MergeTree settings, and TTL
 //
 // WHAT: declare the table's engine, settings and TTL IN the statement, then
-// watch the STORAGE layer change what a batch stores, including storing
-// nothing at all.
+// watch the STORAGE layer change what a batch stores.
 // WHY: a row can be accepted per row and absent per batch. SummingMergeTree
-// folds rows at insert; a TTL already in the past deletes them at merge, with
-// no error at any point. A gateway reading only per-row verdicts previews
-// rows the table will never hold.
-// LOOK FOR: EngineRows (the stored truth) being SHORTER than the input; the
-// TTL batch whose row is accepted and whose EngineRows is empty; and the
-// refusal-vs-decline pair on MergeTree settings (the class decides which).
+// folds rows at insert, so a gateway reading only per-row verdicts previews
+// rows the table will never hold. A TTL is different: it deletes at the next
+// MERGE, which a preview does not perform, so EngineRows matches the INSERT.
+// LOOK FOR: EngineRows (the stored truth) being SHORTER than the input for
+// SummingMergeTree; the TTL batch whose row is accepted and whose EngineRows
+// still HOLDS it (before build 20261007.120436 it was empty and a ttl_expired
+// transform was reported); and the refusal-vs-decline pair on MergeTree
+// settings (the class decides which).
 // C API: chs_schema_create (the engine is part of the statement),
 // chs_preview_batch.
 // ---------------------------------------------------------------------------
@@ -815,7 +816,7 @@ func section8(lib *chtypes.Library) {
 	note("not change.")
 	blank()
 
-	// (c) TTL: accepted per row, gone per batch.
+	// (c) TTL: accepted per row, and still written by the INSERT.
 	ttlDDL := "CREATE TABLE t (ts DateTime, v UInt8) ENGINE = MergeTree ORDER BY ts TTL ts + INTERVAL 1 DAY"
 	s5, err := lib.CompileTable(ttlDDL)
 	if err != nil {
@@ -835,10 +836,11 @@ func section8(lib *chtypes.Library) {
 	for _, t := range bt.Transformed {
 		kv("  batch transform", fmt.Sprintf("row=%d column=%q reason=%s lossy=%v", t.Row, t.Column, t.Reason, t.Lossy))
 	}
-	note("accepted per ROW, stored nowhere per BATCH: a 2020 timestamp is")
-	note("already past a one-day TTL, so the part holds nothing. On a real")
-	note("server this is a silent merge-time delete; the ttl_expired transform")
-	note("is the only warning anyone gets.")
+	note("accepted per ROW, and EngineRows keeps it: a 2020 timestamp is already")
+	note("past a one-day TTL, but a server's INSERT still writes the row and the")
+	note("next merge deletes it, which a preview does not perform. On builds")
+	note("before 20261007.120436 EngineRows was empty and a ttl_expired")
+	note("transform was reported; the loop above now prints nothing.")
 	blank()
 
 	// (d) A TTL this library will not guess at.

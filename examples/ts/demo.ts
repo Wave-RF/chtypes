@@ -478,7 +478,7 @@ function section6(lib: Library): void {
     kv('  outcome / errCode', `${r2.outcome} / ${r2.errCode}`);
     for (const v of r2.columns) if (v.column.toString() === 'ts') kv('  ts.source', v.source);
     note('a volatile DEFAULT past the caller\'s clock-skew budget is not substituted:');
-    note('a timestamp too far in the past under a TTL is silently deleted at merge time');
+    note('a timestamp too far in the past under a TTL is deleted at the next merge, not at insert');
   });
 }
 
@@ -573,15 +573,16 @@ async function section7(lib: Library, registry: Registry, lines: readonly string
 // SECTION 8: Engines, MergeTree settings and TTL, in the CREATE TABLE
 //
 // WHAT: declare the engine and the TTL in the one CREATE TABLE statement, then
-// watch the STORAGE layer change what a batch stores, including storing nothing.
+// watch the STORAGE layer change what a batch stores.
 // WHY: a row can be accepted per row and absent per batch. SummingMergeTree
-// folds rows at insert; a TTL already in the past deletes them at merge, with no
-// error at any point. A gateway reading only per-row verdicts previews rows the
-// table will never hold. (The v0 setters setEngine/setTtl are gone: a schema is
+// folds rows at insert, so a gateway reading only per-row verdicts previews rows
+// the table will never hold. A TTL is different: it deletes at the next MERGE,
+// which a preview does not perform, so engineRows matches the INSERT. (The v0 setters setEngine/setTtl are gone: a schema is
 // immutable and the statement says it all, bindings-v1.md §7.)
-// LOOK FOR: engineRows being SHORTER than the input; the TTL batch whose row is
-// accepted and whose engineRows is empty; the refusal-vs-decline pair on a
-// MergeTree setting and on a clock-reading TTL.
+// LOOK FOR: engineRows being SHORTER than the input for SummingMergeTree; the
+// TTL batch whose row is accepted and whose engineRows still HOLDS it (before
+// build 20261007.120436 it was empty and a ttl_expired transform was reported);
+// the refusal-vs-decline pair on a MergeTree setting and on a clock-reading TTL.
 // C API: chs_schema_create, chs_preview_batch.
 // ---------------------------------------------------------------------------
 function section8(lib: Library): void {
@@ -620,9 +621,10 @@ function section8(lib: Library): void {
     for (const t of batch.transformed) {
       kv('  batch transform', `row=${t.row} column=${JSON.stringify(t.column.toString())} reason=${t.reason} lossy=${t.lossy}`);
     }
-    note('accepted per ROW, stored nowhere per BATCH: the 2020 timestamp is already past the');
-    note('TTL. On a real server this is a silent merge-time delete; the ttl_expired');
-    note('transform is the only warning anyone gets.');
+    note('accepted per ROW, and engineRows keeps it: the 2020 timestamp is already past the');
+    note("TTL, but a server's INSERT still writes the row and the next merge deletes it, which");
+    note('a preview does not perform. On builds before 20261007.120436 engineRows was empty');
+    note('and a ttl_expired transform was reported; the loop above now prints nothing.');
   });
   blank();
 
