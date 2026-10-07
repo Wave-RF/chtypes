@@ -37,6 +37,7 @@ verify-empty-strict verify --strict --cache @EMPTY@
 list-offline-empty-strict list --offline --strict --cache @EMPTY@
 where where --cache @CACHE@
 where-strict where --strict --cache @CACHE@
+where-all where --all --cache @CACHE@
 usage-no-arguments
 usage-unknown-command frobnicate
 usage-short-version -V
@@ -169,18 +170,23 @@ case "$1" in
     exit 0 ;;
   verify | list | where)
     cmd="$1"; shift
-    cache=""; strict=0
+    cache=""; strict=0; all=0
     while [ $# -gt 0 ]; do
       case "$1" in
         --cache) cache="$2"; shift ;;
         --strict) strict=1 ;;
         --offline) [ "$cmd" = list ] || bad ;;
+        --all) [ "$cmd" = where ] || bad; all=1 ;;
         --platform) [ "$brk" = platform-accepted ] || bad; shift ;;
         *) bad ;;
       esac
       shift
     done
-    if [ "$cmd" = where ]; then echo "$cache"; fi
+    if [ "$cmd" = where ]; then
+      echo "$cache"
+      # --all: every directory searched, the cache root first (public issue #530)
+      if [ "$all" = 1 ] && [ "$brk" != where-all-root-only ]; then echo /usr/local/share/chtypes/v1; echo /opt/chtypes/v1; fi
+    fi
     # A verify that verified nothing says so on stderr, and in strict mode
     # fails as CHTYPES_ARTIFACT_MISSING (public issue #486).
     if [ "$cmd" = verify ]; then
@@ -202,7 +208,7 @@ selftest() {
   # would prove nothing.
   FAKE_BREAK="" compare fake "$scratch" >/dev/null || { echo "check-cli-parity --selftest: the conforming fake CLI does not match the expectation" >&2; cat "$scratch/diff-fake.txt" >&2; exit 1; }
   local brk
-  for brk in help-stderr version-bare list-header platform-accepted; do
+  for brk in help-stderr version-bare list-header platform-accepted where-all-root-only; do
     if FAKE_BREAK="$brk" compare fake "$scratch" >/dev/null 2>&1; then
       echo "check-cli-parity --selftest: the planted mismatch '$brk' was NOT caught" >&2
       exit 1

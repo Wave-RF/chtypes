@@ -48,15 +48,22 @@ def _expand_template(template: str) -> str:
     return string.Template(out).safe_substitute(mapping)
 
 
+def _absolute(p: str | os.PathLike[str]) -> Path:
+    """A relative cache directory is the process cwd's at this call, resolved here
+    once so every path derived from it is absolute (fetch-v1.md section 9, public
+    issue #541). Lexical, like Go's `filepath.Abs`: no symlink is followed."""
+    return Path(os.path.abspath(p))
+
+
 def resolve_cache_root(cache_dir: str | os.PathLike[str] | None = None) -> Path:
     """`CHTYPES_CACHE` (or an explicit override) names the layout directory
     ITSELF, not a parent `chtypes/` to append to (constants: `cache.root_template`)."""
-    if cache_dir is not None:
-        return Path(cache_dir)
+    if cache_dir is not None and os.fspath(cache_dir) != "":
+        return _absolute(cache_dir)
     env = os.environ.get(C.ENV_CACHE_NAME)
     if env:
-        return Path(env)
-    return Path(_expand_template(C.CACHE_ROOT_TEMPLATE))
+        return _absolute(env)
+    return _absolute(_expand_template(C.CACHE_ROOT_TEMPLATE))
 
 
 def cache_root(cache_dir: str | os.PathLike[str] | None = None) -> Path:

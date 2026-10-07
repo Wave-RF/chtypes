@@ -9,6 +9,7 @@ verify-empty-strict | exit=1 | stderr=nonempty | stdout=
 list-offline-empty-strict | exit=0 | stderr=empty | stdout=
 where | exit=0 | stderr=empty | stdout=<DIR>|
 where-strict | exit=0 | stderr=empty | stdout=<DIR>|
+where-all | exit=0 | stderr=empty | stdout=<DIR>|/usr/local/share/chtypes/v1|/opt/chtypes/v1|
 usage-no-arguments | exit=2 | stderr=nonempty | stdout=
 usage-unknown-command | exit=2 | stderr=nonempty | stdout=
 usage-short-version | exit=2 | stderr=nonempty | stdout=

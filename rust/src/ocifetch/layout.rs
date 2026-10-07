@@ -192,12 +192,12 @@ impl VerifiedRecord {
 /// itself; otherwise `${XDG_CACHE_HOME:-$HOME/.cache}/chtypes/v1`
 /// (`constants::CACHE_ROOT_TEMPLATE`).
 pub fn cache_root(cache_env_override: Option<&str>) -> Result<PathBuf> {
-    if let Some(dir) = cache_env_override {
-        return Ok(PathBuf::from(dir));
+    if let Some(dir) = cache_env_override.filter(|d| !d.is_empty()) {
+        return absolute_lexical(Path::new(dir));
     }
     if let Ok(dir) = std::env::var(constants::ENV_CACHE_NAME) {
         if !dir.is_empty() {
-            return Ok(PathBuf::from(dir));
+            return absolute_lexical(Path::new(&dir));
         }
     }
     let base = std::env::var("XDG_CACHE_HOME")
@@ -214,7 +214,43 @@ pub fn cache_root(cache_env_override: Option<&str>) -> Result<PathBuf> {
                 "neither CHTYPES_CACHE, XDG_CACHE_HOME nor HOME is set".to_string(),
             )
         })?;
-    Ok(base.join("chtypes").join("v1"))
+    absolute_lexical(&base.join("chtypes").join("v1"))
+}
+
+/// A relative cache directory is the process cwd's at this call, resolved here
+/// once so every path derived from it is absolute (docs/guides/fetch-v1.md §9,
+/// public issue #541). Lexical, like Go's `filepath.Abs` and Node's
+/// `path.resolve`: `.` and `..` are folded and no symlink is followed.
+fn absolute_lexical(p: &Path) -> Result<PathBuf> {
+    use std::path::Component;
+    let joined = if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|e| Error::SourceIncompatible(format!("resolving the cache directory: {e}")))?
+            .join(p)
+    };
+    let mut out = PathBuf::new();
+    for c in joined.components() {
+        match c {
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::CurDir => {}
+            other => out.push(other.as_os_str()),
+        }
+    }
+    Ok(out)
+}
+
+/// The one root order every lookup reads (docs/guides/fetch-v1.md §1): the
+/// cache root, then each read-only system directory in order. The public
+/// `chtypes::search_dirs` and the CLI's `where --all` report exactly this
+/// (public issue #530).
+pub fn search_roots(root: &Path, system_dirs: &[PathBuf]) -> Vec<PathBuf> {
+    std::iter::once(root.to_path_buf())
+        .chain(system_dirs.iter().cloned())
+        .collect()
 }
 
 /// Create the OCI image-layout skeleton (`oci-layout`, an empty `index.json`,

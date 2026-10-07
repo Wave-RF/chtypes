@@ -27,6 +27,7 @@ import { usageError } from './abi1/index.js';
 import { type Library, libraryOf } from './library.js';
 import {
   ArtifactMissingError,
+  cacheRoot as fetchCacheRoot,
   ensure,
   type FetchV1Options,
   hostPlatformKey,
@@ -37,6 +38,7 @@ import {
   type Resolved,
   resolveInstalled,
   satisfiesRequest,
+  searchDirs as fetchSearchDirs,
   withNotes,
 } from './ocifetch/index.js';
 import { ENV_AUTOFETCH_NAME, SPELLING_REGEX } from './ocifetch/constants.gen.js';
@@ -45,6 +47,24 @@ import { commitSetup, latchSetup, settleFailedOpen, setupGeneration } from './se
 
 /** The fetch layer's options (bases, cache directory, system directories, trusted keys, token, allow-unsigned, offline, frozen, lock path, ...) without its test-only hooks. */
 export type FetchOptions = Omit<FetchV1Options, 'beforeIndexRename' | 'httpLog' | 'clock'>;
+
+/**
+ * The cache root a fetch, list or `chtypes where` with `options` would use: `options.cacheDir`, else
+ * `CHTYPES_CACHE`, else `${XDG_CACHE_HOME:-~/.cache}/chtypes/v1` (`docs/guides/fetch-v1.md` §1). It is the
+ * fetch layer's own resolution and the first entry of {@link searchDirs}; it creates nothing and reads no cache.
+ */
+export function cacheRoot(options: FetchOptions = {}): string {
+  return fetchCacheRoot(options.cacheDir);
+}
+
+/**
+ * Every directory a lookup reads for installed builds, in the order it reads them: the cache root first, then
+ * each read-only system directory (`options.systemDirs`; undefined is the built-in list, `[]` none). The order is
+ * the fetch layer's own, and on a tie the earlier directory wins. It creates nothing and touches no file.
+ */
+export function searchDirs(options: FetchOptions = {}): readonly string[] {
+  return fetchSearchDirs(options);
+}
 
 export interface RegistryOptions {
   readonly fetch?: FetchOptions | undefined;

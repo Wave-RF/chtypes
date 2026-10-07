@@ -68,6 +68,17 @@ func CacheRoot(opts *Options) (string, error) {
 	return ro.cacheDir, nil
 }
 
+// SearchDirs is every directory a lookup with opts reads, in the order it
+// reads them: the cache root (CacheRoot), then each system directory
+// (§1, one root order). It creates and reads nothing.
+func SearchDirs(opts *Options) ([]string, error) {
+	ro, err := resolveOptions(opts)
+	if err != nil {
+		return nil, err
+	}
+	return ro.searchDirs(), nil
+}
+
 // ReadLock reads and validates a lock file (§6): schema 3 at this ABI
 // generation, or CHTYPES_ARTIFACT_PINNED naming re-lock.
 func ReadLock(path string) (*Lock, error) { return readLock(path) }

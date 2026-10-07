@@ -81,7 +81,7 @@ export {
   SourceUnauthorizedError,
   SourceUnreachableError,
 } from './ocifetch/index.js';
-export { type FetchOptions, Registry, type RegistryOptions } from './registry.js';
+export { cacheRoot, type FetchOptions, Registry, type RegistryOptions, searchDirs } from './registry.js';
 export {
   Block,
   type CompileOptions,

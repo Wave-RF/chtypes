@@ -5,7 +5,7 @@
                                          [--frozen] [--offline] [--update] [--strict]
     chtypes verify [--cache <dir>] [--strict]   re-verify every installed build
     chtypes list   [--cache <dir>] [--offline] [--strict]
-    chtypes where  [--cache <dir>] [--strict]   the cache root
+    chtypes where  [--cache <dir>] [--strict] [--all]   the cache root; --all: every search dir
 
 A spelling is `26.8`, `26.8.15` or `26.8.15.10`. Exit statuses come from the
 `errors` table of spec/fetch-v1/constants.json (generated into the fetch layer
@@ -141,8 +141,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--offline", action="store_true", help="list only what is installed; no network"
     )
 
-    where = sub.add_parser("where", help="the cache root", description="Print the cache root.")
+    where = sub.add_parser(
+        "where",
+        help="the cache root",
+        description="Print the cache root; with --all, every directory searched.",
+    )
     cache_option(where)
+    where.add_argument(
+        "--all",
+        action="store_true",
+        help="every directory searched, in order, the cache root first (one per line)",
+    )
     return parser
 
 
@@ -286,6 +295,10 @@ def _cmd_where(args: argparse.Namespace) -> int:
     if options.resolved_strict():
         # Strict mode checks the root before naming it.
         probe_roots(search_roots(options.cache_dir, options.system_dirs), strict=True)
+    if args.all:
+        for directory in search_roots(options.cache_dir, options.system_dirs):
+            sys.stdout.write(f"{directory}\n")
+        return EXIT_OK
     sys.stdout.write(f"{resolve_cache_root(args.cache)}\n")
     return EXIT_OK
 

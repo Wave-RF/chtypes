@@ -90,6 +90,13 @@ describe('commands that touch no network', () => {
     expect(r.out).toBe(`${path.resolve(cache)}\n`);
   });
 
+  it('where --all lists every directory searched, the cache root first; the default stays the root alone (public issue #530)', async () => {
+    const all = await run('where', '--all', '--cache', cache);
+    expect(all.code).toBe(EXIT_OK);
+    expect(all.out).toBe(`${path.resolve(cache)}\n/usr/local/share/chtypes/v1\n/opt/chtypes/v1\n`);
+    expect((await run('where', '--cache', cache)).out).toBe(`${path.resolve(cache)}\n`);
+  });
+
   it('verify and list --offline on an empty cache succeed and say nothing is installed', async () => {
     const verify = await run('verify', '--cache', cache);
     expect(verify.code).toBe(EXIT_OK);

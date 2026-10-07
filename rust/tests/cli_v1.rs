@@ -127,3 +127,23 @@ fn strict_flag() {
     }
     let _ = std::fs::remove_dir_all(&base);
 }
+
+/// `where --all` lists every directory searched, the cache root first, one per
+/// line; the default output stays the root alone (public issue #530).
+#[test]
+fn where_all_lists_the_search_dirs() {
+    let base = scratch("where-all");
+    let c = base.to_str().unwrap();
+    let (code, out, err) = run(&["where", "--all", "--cache", c]);
+    assert_eq!(
+        (code, out.as_str(), err.as_str()),
+        (
+            0,
+            format!("{c}\n/usr/local/share/chtypes/v1\n/opt/chtypes/v1\n").as_str(),
+            ""
+        )
+    );
+    let (code, out, _) = run(&["where", "--cache", c]);
+    assert_eq!((code, out), (0, format!("{c}\n")));
+    let _ = std::fs::remove_dir_all(&base);
+}

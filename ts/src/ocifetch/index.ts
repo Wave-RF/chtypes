@@ -18,6 +18,7 @@ export {
   probeCache,
   resolveInstalled,
   satisfiesRequest,
+  searchDirs,
   verifyInstalled,
   withNotes,
 } from './ensure.js';
