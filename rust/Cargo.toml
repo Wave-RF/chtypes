@@ -1,6 +1,6 @@
 [package]
 name = "chtypes"
-version = "2.0.0-dev.3"
+version = "2.0.0-dev.4"
 edition = "2024"
 # 1.87, not 1.85: ruzstd (the v1 zstd decoder) declares rust-version = "1.87"
 # in every current release (0.8.3 and 0.9.0). v1 is a breaking 1.0 release, so
