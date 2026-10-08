@@ -19,7 +19,7 @@ The library is native code, so a platform works only if the registry serves a bu
 
 - `linux-amd64`
 - `linux-arm64`
-- `darwin-arm64` — a development floor, not an oracle; see [macOS artifacts are for development; Linux is the reference](limitations.md#macos-artifacts-are-for-development-linux-is-the-reference)
+- `darwin-arm64` — matches ClickHouse on macOS; on 26.3, float text parses by platform; see [macOS artifacts match ClickHouse on macOS](limitations.md#macos-artifacts-match-clickhouse-on-macos-on-263-match-the-servers-platform)
 
 A host on any other platform gets `CHTYPES_ARTIFACT_UNPUBLISHED` from a fetch, naming what the registry does offer.
 

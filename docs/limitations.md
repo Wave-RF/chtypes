@@ -6,13 +6,17 @@ When you get one, fall back to the server: validate cautiously, forward the row 
 
 <a id="macos-is-a-development-floor-not-an-oracle"></a>
 
-## macOS artifacts are for development; Linux is the reference
+## macOS artifacts match ClickHouse on macOS; on 26.3, match the server's platform
 
-The darwin artifacts exist so you can develop and run the suites on a laptop. They are not the reference for what a server does; Linux artifacts and live servers are.
+**Requirement: run the library on the same operating system and CPU architecture as your ClickHouse server.** That is the caller's responsibility; the library does not detect or decline a mismatch. Its answers, filter verdicts included, are guaranteed relative to a ClickHouse server on the same platform.
 
-macOS's `long double` is 53-bit, so some float parses diverge from a real server. Measured: on Linux the float corpus matches in full; on macOS none of it does. That is not a near miss to be tolerated — it is a systematic difference in a whole class of values.
+The darwin artifacts give exactly the answers ClickHouse itself gives on macOS, on every supported line. The artifact producer measured this against official macOS ClickHouse binaries.
 
-**Float expectations must come from a Linux artifact or a live ClickHouse.** Everything else on a Mac is trustworthy for development.
+**On 26.7, 26.8 and 26.9,** ClickHouse agrees on every platform (macOS, Linux amd64, Linux arm64), float text included. On these lines, a mismatch of platform changes nothing.
+
+**On 26.3,** ClickHouse's own parse of Float values from text input formats differs across platforms (macOS, Linux amd64, Linux arm64; mostly 1 ULP), and none is correctly rounded. So stored Float values, and comparisons involving them, can differ across architectures, and a verdict computed on another platform can differ from the server's.
+
+(An earlier version of this page said every macOS float parse diverged from a server. That was measured on 25.8 and no longer holds on any supported line.)
 
 ## EPHEMERAL columns cannot be previewed through a format stream
 
