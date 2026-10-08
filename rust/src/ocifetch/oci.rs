@@ -199,14 +199,18 @@ pub fn fetch_by_tag(source: &Source<'_>, tag: &str) -> Result<Fetched> {
 /// resolves `<tag>--fp-<fingerprint>` first ([`fetch_alias`]), and its tag
 /// ([`fetch_by_tag`]) only when every base answered the alias 404. What the
 /// alias names is then checked exactly as the tag's answer would be.
-pub fn fetch_by_request(source: &Source<'_>, request: &VersionRequest) -> Result<Fetched> {
-    let found = match super::channel::alias_tag(request) {
-        Some(alias) => fetch_alias(source, &alias)?,
-        None => None,
+///
+/// The `bool` is `alias_absent`: the alias was asked for and every base
+/// answered it 404, so the registry has no build at this SDK's fingerprint,
+/// and the build the tag names is checked against it
+/// ([`super::channel::ahead_of_registry`]).
+pub fn fetch_by_request(source: &Source<'_>, request: &VersionRequest) -> Result<(Fetched, bool)> {
+    let Some(alias) = super::channel::alias_tag(request) else {
+        return Ok((fetch_by_tag(source, &request.tag())?, false));
     };
-    match found {
-        Some(found) => Ok(found),
-        None => fetch_by_tag(source, &request.tag()),
+    match fetch_alias(source, &alias)? {
+        Some(found) => Ok((found, false)),
+        None => Ok((fetch_by_tag(source, &request.tag())?, true)),
     }
 }
 

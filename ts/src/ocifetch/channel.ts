@@ -54,6 +54,7 @@ import {
   SPELLING_REGEX,
   SYSTEM_CACHE_DIRS,
 } from './constants.gen.js';
+import { ArtifactUnpublishedError } from './errors.js';
 import type { FetchV1Options, TrustedKey } from './types.js';
 
 /** The only base a 2.0.0-dev SDK fetches from (rule r6). */
@@ -239,6 +240,42 @@ export function aliasTag(tag: string, channel: Channel = activeChannel()): strin
 export function visibleToChannel(predicate: { readonly abi_fingerprint?: unknown }, channel: Channel = activeChannel()): boolean {
   if (channel.ownFingerprint === '') return true;
   return predicate.abi_fingerprint === `sha256:${channel.ownFingerprint}`;
+}
+
+/**
+ * The dev channel's answer for an SDK whose fingerprint no published build
+ * carries yet (`docs/guides/fetch-v1.md` §3; public issue #578): when every
+ * base answered its own alias 404 (`aliasAbsent`) and the build the tag names
+ * is signed for another fingerprint (`predicate`, the SIGNED predicate, the
+ * field `visibleToChannel` keys on), it throws `ArtifactUnpublishedError`, the
+ * code a request no build answers gets, naming both fingerprints. Nothing is
+ * installed and an install of that build is never reported, because the
+ * lookup this SDK opens through would refuse it. It returns in every other
+ * case: the alias answered, the tag's build is this SDK's own, or the contract
+ * has no own fingerprint.
+ */
+export function aheadOfRegistry(
+  aliasAbsent: boolean,
+  predicate: { readonly abi_fingerprint?: unknown; readonly build?: unknown },
+  channel: Channel = activeChannel(),
+): void {
+  if (!aliasAbsent || visibleToChannel(predicate, channel)) return;
+  throw new ArtifactUnpublishedError(`chtypes: ${aheadMessage(channel.ownFingerprint, predicate)}`);
+}
+
+/**
+ * `aheadOfRegistry`'s message: "no published build for this SDK's fingerprint
+ * <own>; newest published on this channel is <fp> (build <id>)", each
+ * fingerprint 64 lowercase hex without its `sha256:` prefix, the parenthesis
+ * dropped when the predicate names no build, and "unnamed" for a predicate
+ * that names no fingerprint.
+ */
+function aheadMessage(own: string, predicate: { readonly abi_fingerprint?: unknown; readonly build?: unknown }): string {
+  const named = typeof predicate.abi_fingerprint === 'string' ? predicate.abi_fingerprint : '';
+  const theirs = named.startsWith('sha256:') ? named.slice('sha256:'.length) : named;
+  let message = `no published build for this SDK's fingerprint ${own}; newest published on this channel is ${theirs === '' ? 'unnamed' : theirs}`;
+  if (typeof predicate.build === 'string' && predicate.build !== '') message += ` (build ${predicate.build})`;
+  return message;
 }
 
 /** Makes this TEST process speak the dev channel exactly as every other process does (undoing either function above). Returns the restore function. */

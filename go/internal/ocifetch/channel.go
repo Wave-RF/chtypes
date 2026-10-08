@@ -223,6 +223,41 @@ func (c *channel) visible(pred map[string]any) bool {
 	return fp == "sha256:"+c.ownFingerprint
 }
 
+// aheadOfRegistry is the dev channel's answer for an SDK whose fingerprint
+// no published build carries yet (docs/guides/fetch-v1.md §3; public issue
+// #578): when every base answered its own alias 404 (aliasAbsent) and the
+// build the tag names is signed for another fingerprint (pred, the SIGNED
+// predicate, the field visible keys on), it is CHTYPES_ARTIFACT_UNPUBLISHED,
+// the code a request no build answers gets, naming both fingerprints. Nothing
+// is installed and an install of that build is never reported, because the
+// lookup this SDK opens through would refuse it. nil in every other case:
+// the alias answered, the tag's build is this SDK's own, or the contract has
+// no own fingerprint.
+func (c *channel) aheadOfRegistry(aliasAbsent bool, pred map[string]any, request, platform string) error {
+	if !aliasAbsent || c.visible(pred) {
+		return nil
+	}
+	return newError(CodeArtifactUnpublished, request, platform, "", nil, "%s", aheadMessage(c.ownFingerprint, pred))
+}
+
+// aheadMessage is aheadOfRegistry's message: "no published build for this
+// SDK's fingerprint <own>; newest published on this channel is <fp> (build
+// <id>)", each fingerprint 64 lowercase hex without its "sha256:" prefix, the
+// parenthesis dropped when the predicate names no build, and "unnamed" for a
+// predicate that names no fingerprint.
+func aheadMessage(own string, pred map[string]any) string {
+	theirs, _ := pred["abi_fingerprint"].(string)
+	theirs = strings.TrimPrefix(theirs, "sha256:")
+	if theirs == "" {
+		theirs = "unnamed"
+	}
+	msg := "no published build for this SDK's fingerprint " + own + "; newest published on this channel is " + theirs
+	if build, _ := pred["build"].(string); build != "" {
+		msg += " (build " + build + ")"
+	}
+	return msg
+}
+
 // UseDevChannelForTests makes this TEST binary speak the dev channel exactly
 // as a non-test binary does (undoing either function above, for a test that
 // checks the dev channel itself). It returns the restore function.

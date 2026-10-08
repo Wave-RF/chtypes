@@ -310,14 +310,19 @@ func (s *session) fetchAcrossBases(ctx context.Context, bases []string, suffix s
 // policy, and falls back to the tag only when every base answered the alias
 // 404 (docs/guides/fetch-v1.md §3). What it returns is then trusted exactly as
 // the tag's own answer would be: nothing about an alias is a credential.
-func (s *session) fetchTag(ctx context.Context, bases []string, tag string, opts requestOptions) (*httpResult, string, error) {
+// aliasAbsent reports that fallback: the alias was asked for and every base
+// answered it 404, so the registry has no build at this SDK's fingerprint and
+// whatever the tag names is checked against it (channel.aheadOfRegistry).
+func (s *session) fetchTag(ctx context.Context, bases []string, tag string, opts requestOptions) (result *httpResult, base string, aliasAbsent bool, err error) {
 	if alias := s.ch.aliasTag(tag); alias != "" {
-		result, base, err := s.fetchAcrossBases(ctx, bases, "manifests/"+alias, notFoundAlias, opts)
-		if !errors.Is(err, errAliasNotFound) {
-			return result, base, err
+		aliasResult, aliasBase, aliasErr := s.fetchAcrossBases(ctx, bases, "manifests/"+alias, notFoundAlias, opts)
+		if !errors.Is(aliasErr, errAliasNotFound) {
+			return aliasResult, aliasBase, false, aliasErr
 		}
+		aliasAbsent = true
 	}
-	return s.fetchAcrossBases(ctx, bases, "manifests/"+tag, notFoundUnpublished, opts)
+	result, base, err = s.fetchAcrossBases(ctx, bases, "manifests/"+tag, notFoundUnpublished, opts)
+	return result, base, aliasAbsent, err
 }
 
 // resolveIndex fetches the OCI image index for spelling, trying bases in
@@ -325,21 +330,22 @@ func (s *session) fetchTag(ctx context.Context, bases []string, tag string, opts
 // (fetchTag). The returned digest is computed from the
 // bytes received: the index itself is informational only (§7.4; it is
 // computed by the host, not stored, so there is no descriptor to verify it
-// against).
-func (s *session) resolveIndex(ctx context.Context, bases []string, spelling string) (*ImageIndex, Digest, string, error) {
-	result, base, err := s.fetchTag(ctx, bases, spelling, requestOptions{maxBytes: ManifestMaxBytes, accept: manifestAccept})
+// against). aliasAbsent is fetchTag's: the index is the tag's, reached after
+// every base answered this SDK's own alias 404.
+func (s *session) resolveIndex(ctx context.Context, bases []string, spelling string) (idx *ImageIndex, indexDigest Digest, base string, aliasAbsent bool, err error) {
+	result, base, aliasAbsent, err := s.fetchTag(ctx, bases, spelling, requestOptions{maxBytes: ManifestMaxBytes, accept: manifestAccept})
 	if err != nil {
-		return nil, "", "", err
+		return nil, "", "", false, err
 	}
-	var idx ImageIndex
-	if uerr := strictUnmarshal(result.body, &idx); uerr != nil {
-		return nil, "", "", newError(CodeArtifactCorrupt, spelling, "", result.url, uerr, "index at %s is not valid JSON: %v", result.url, uerr)
+	idx = &ImageIndex{}
+	if uerr := strictUnmarshal(result.body, idx); uerr != nil {
+		return nil, "", "", false, newError(CodeArtifactCorrupt, spelling, "", result.url, uerr, "index at %s is not valid JSON: %v", result.url, uerr)
 	}
 	if idx.MediaType != MediaTypeIndex {
-		return nil, "", "", newError(CodeSourceIncompatible, spelling, "", result.url, nil,
+		return nil, "", "", false, newError(CodeSourceIncompatible, spelling, "", result.url, nil,
 			"index at %s has unrecognized mediaType %q", result.url, idx.MediaType)
 	}
-	return &idx, digestOf(result.body), base, nil
+	return idx, digestOf(result.body), base, aliasAbsent, nil
 }
 
 // selectPlatformDescriptor finds the single descriptor in idx for

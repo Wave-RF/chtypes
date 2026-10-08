@@ -125,10 +125,24 @@ func buildAliasCases(fs *FileSet) []Case {
 	exact.Expect.Requests.NoneMatching = []string{tagPathPattern("26.8.14.2")}
 	cases = append(cases, exact)
 
-	// 2. No alias for this fingerprint (a 404): the tag answers, as today.
-	absent := newAliasCase("dev-alias-absent", "26.8", strp(fixtureFingerprintB), "file", "http")
+	// 2. No alias for this fingerprint (a 404), and the tag names a build of
+	// this SDK's own fingerprint (N): the tag answers, as today.
+	absent := newAliasCase("dev-alias-absent", "26.8", strp(fixtureFingerprintN), "file", "http")
 	want(&absent, floating268["linux-arm64"])
 	cases = append(cases, absent)
+
+	// An SDK ahead of the registry (public issue #578): no alias for this
+	// SDK's fingerprint (B) on any base, and the tag names a build signed for
+	// another (N). Refused as a request no build answers, with a message
+	// naming both fingerprints and the tag build's id, from the signed
+	// statement: the layer is never requested, so nothing is installed.
+	aheadMessage := "no published build for this SDK's fingerprint " + fixtureFingerprintB +
+		"; newest published on this channel is " + fixtureFingerprintN + " (build " + floating268["linux-arm64"].Predicate.Build + ")"
+	ahead := newAliasCase("fp-ahead-tag-other-fp", "26.8", strp(fixtureFingerprintB), "file", "http")
+	refused(&ahead, "CHTYPES_ARTIFACT_UNPUBLISHED")
+	ahead.Expect.MessageContains = strp(aheadMessage)
+	ahead.Expect.Requests.NoneMatching = []string{"GET .*/blobs/" + floating268["linux-arm64"].LayerDesc.Digest}
+	cases = append(cases, ahead)
 
 	// 6. The fetch-v1 channel (no alias fingerprint) never requests an alias,
 	// from a registry that serves them: the tag answers, and no request in the
@@ -266,6 +280,17 @@ func buildAliasCases(fs *FileSet) []Case {
 	ownOffline.Expect.Requests.Max = intp(0)
 	ownOffline.Expect.RecordsIntact = []string{foreign.ManifestDesc.Digest}
 	cases = append(cases, ownOffline)
+
+	// (c) The tag's build of another fingerprint (N) is already installed, and
+	// this SDK's (B) has no alias: the same refusal as with an empty cache,
+	// never "already installed", and the install stays as it was.
+	aheadCached := newAliasCase("fp-ahead-cached-other-fp", "26.8", strp(fixtureFingerprintB), "file", "http")
+	aheadCached.Setup.Cache = "dev-alias-foreign-newer"
+	refused(&aheadCached, "CHTYPES_ARTIFACT_UNPUBLISHED")
+	aheadCached.Expect.MessageContains = strp(aheadMessage)
+	aheadCached.Expect.Requests.NoneMatching = []string{"GET .*/blobs/" + foreign.LayerDesc.Digest}
+	aheadCached.Expect.RecordsIntact = []string{foreign.ManifestDesc.Digest}
+	cases = append(cases, aheadCached)
 
 	// The control: with no own fingerprint (the fetch-v1 channel), the same
 	// cache answers with the newest build of the line, whoever's it is.

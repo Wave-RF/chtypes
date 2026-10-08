@@ -11,7 +11,7 @@ import { unlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { asString, field, items, parseJsonValue } from '../json.js';
-import { activeChannel, allowUnsigned, noteIgnoredOverrides, offlineMode, refusePinning, visibleToChannel, warnIgnored } from './channel.js';
+import { activeChannel, aheadOfRegistry, allowUnsigned, noteIgnoredOverrides, offlineMode, refusePinning, visibleToChannel, warnIgnored } from './channel.js';
 import {
   BASE_SEPARATOR,
   CACHE_ANNOTATION_PREFIX,
@@ -459,6 +459,10 @@ async function ensureIn(request: string, options: FetchV1Options): Promise<Resol
   let alreadyInstalled: boolean;
 
   if (existing !== undefined) {
+    // An install of another fingerprint's build, reached through the tag
+    // because the registry has none at this SDK's own, is never reported
+    // installed (public issue #578): refused before the cache is touched.
+    aheadOfRegistry(resolveResult.aliasAbsent, existing.predicate);
     record = existing;
     alreadyInstalled = true;
     // A NEWER build within the request, installed beside it, is still the
@@ -505,6 +509,11 @@ async function ensureIn(request: string, options: FetchV1Options): Promise<Resol
     } else {
       predicate = trust.statement.predicate as unknown as ArtifactPredicate;
       signedBy = trust.signedBy;
+      // An SDK ahead of the registry (public issue #578): the alias for its
+      // own fingerprint answered 404 on every base, and the tag's build is
+      // signed for another. Refused from the signed statement, before the
+      // layer is requested, so nothing is downloaded or installed.
+      aheadOfRegistry(resolveResult.aliasAbsent, predicate);
     }
 
     const monotonic = await checkMonotonic(root, platform, request, predicate);
