@@ -1090,7 +1090,7 @@ CHS_API void chs_filter_free(chs_filter *filter);
  * row. `settings` governs parsing the body, and `session_timezone` there is this call's zone. When
  * a server would not accept an INSERT of the body, because `chs_preview_batch`'s verdict over the
  * same body and settings, with no filter, is not `accepted`, every verdict is `d` and the outcome
- * mirrors that verdict (`filter_outcome`). To know which a body is, the call parses it twice.
+ * mirrors that verdict (`filter_outcome`).
  *
  * Class: api. Thread: shared. Returns one of: CHS_OK, CHS_REJECTED, CHS_DECLINED,
  * CHS_INVALID_ARGUMENT, CHS_INTERNAL.
@@ -1119,7 +1119,7 @@ CHS_API chs_status chs_filter_eval_body(
  * `settings` governs the parse, `session_timezone` there included, and `columns` is read as
  * `chs_preview_row` reads it. The block holds a counted reference to the schema. It also records
  * `chs_preview_batch`'s verdict over the same body, settings and columns, with no filter, which
- * `chs_filter_eval_block` answers by, so it parses the body twice.
+ * `chs_filter_eval_block` answers by.
  *
  * Class: api. Thread: shared. Returns one of: CHS_OK, CHS_REJECTED, CHS_DECLINED,
  * CHS_INVALID_ARGUMENT, CHS_INTERNAL.
