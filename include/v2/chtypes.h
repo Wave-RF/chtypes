@@ -63,11 +63,13 @@
  * zones, above). One exception: a type gate in the schema's own settings binds the CREATE only, and
  * a WHERE's CAST validates under the session layers, every layer but the schema's own. Each setting
  * that reaches a WHERE is honored (applied to it), passed through (accepted and ignored), or
- * declined (`chs_filter_create` says how). A server's settings are the ones its profile applies to
- * every query, and they never change how a schema compiles. No call reads a server's version or its
- * changed settings itself: that discovery is a recorded gap in this generation, so a caller that
- * wants a server's settings passes them explicitly, in a server profile, through `chs_set_defaults`
- * or in each call's settings.
+ * declined (`chs_filter_create` says how). A server resource limit (an `execution`-tier setting,
+ * e.g. a small `max_columns_to_read`) can make the server refuse a query the library answers; that
+ * is resource policy, not row access, and the library does not model it. A server's settings are
+ * the ones its profile applies to every query, and they never change how a schema compiles. No call
+ * reads a server's version or its changed settings itself: that discovery is a recorded gap in this
+ * generation, so a caller that wants a server's settings passes them explicitly, in a server
+ * profile, through `chs_set_defaults` or in each call's settings.
  *
  * Documents. Every output document is valid JSON that a stock parser reads: every ClickHouse
  * rendering (a stored value, an input value, an engine's row) is a JSON string, a number written
@@ -1042,7 +1044,8 @@ CHS_API chs_status chs_preview_batch(
  * key in this build's honor set is applied to the WHERE; a key passed through is accepted and
  * ignored; and a key this build's filters do not honor is reported at evaluation, as a declined
  * setting from the `chs_set_defaults` or schema layer is (`filter_result`'s `unsupported_settings`,
- * and `chs_preview_batch`'s).
+ * and `chs_preview_batch`'s). Every key still meets the server's own SET check first, so a name the
+ * server does not know is `CHS_REJECTED` with ch_code 115.
  *
  * A filter under a per-call `session_timezone` answers as the artifact producer has measured
  * against live servers, including how the zone in an evaluation's settings combines with the zone
