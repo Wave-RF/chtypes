@@ -10,6 +10,8 @@ Each section is copied into a C comment, so it may not contain a comment opener 
 
 **UNSTABLE.** `spec/abi-v2/abi.json` declares `stability` `unstable`: generation 2 is being designed, and its fingerprint moves with every change to the description until the lock. It was seeded as generation 1's surface at generation 2; the additions land one pull request at a time. The first is the server profile: the `chs_server` handle, `chs_server_create` and `chs_server_free`, a server and an options document on `chs_schema_create`, and the `server` and `replicated` members of `schema_description`. The second is the batch document's `at_merge` list, with its `merge_reason` vocabulary, and a top-level `unsupported_settings` (public issue #544). What generation 2 adds, and what the lock needs, are in public issue #511.
 
+**Platform requirement.** A caller runs the library on the same operating system and CPU architecture as the ClickHouse server it models: every answer is guaranteed relative to a server on the same platform. On 26.7 and later, every platform agrees. On 26.3, ClickHouse's own float text parse differs across platforms, so stored Float values and Float-literal or Float-parameter comparisons can differ by 1 ULP across architectures (`docs/limitations.md`).
+
 ## Rules
 
 These rules bind generation 2 from its first draft: the library, every binding and the artifact producer. They are normative; `MUST`, `MUST NOT` and `SHOULD` are RFC 2119. `scripts/abi-v1/gen.py --major 2 --check` enforces the part of each rule that a description can be checked against, as each rule says. Rules (r5), (r6) and (r7) are binding behavior, which the dev bindings implement in their own pull requests.

@@ -8,11 +8,13 @@ When you get one, fall back to the server: validate cautiously, forward the row 
 
 ## macOS artifacts match ClickHouse on macOS; on 26.3, match the server's platform
 
+**Requirement: run the library on the same operating system and CPU architecture as your ClickHouse server.** That is the caller's responsibility; the library does not detect or decline a mismatch. Its answers, filter verdicts included, are guaranteed relative to a ClickHouse server on the same platform.
+
 The darwin artifacts give exactly the answers ClickHouse itself gives on macOS, on every supported line. The artifact producer measured this against official macOS ClickHouse binaries.
 
-**On 26.7, 26.8 and 26.9,** ClickHouse on macOS and on Linux agree bit for bit, so a darwin artifact answers as a Linux server does. That includes float text.
+**On 26.7, 26.8 and 26.9,** ClickHouse agrees on every platform (macOS, Linux amd64, Linux arm64), float text included. On these lines, a mismatch of platform changes nothing.
 
-**On 26.3,** ClickHouse's own parse of float text differs by operating system and by architecture: Linux amd64 and Linux arm64 differ too. It is not correctly rounded on any of them. So on 26.3, run the library on the same operating system and architecture as the server whose answers you need. A float verdict from another platform can differ from that server's.
+**On 26.3,** ClickHouse's own float text parse differs across platforms: macOS, Linux amd64 and Linux arm64 all differ, and none is correctly rounded. So stored Float values, and Float-literal or Float-parameter comparisons, can differ by 1 ULP across architectures. A float verdict computed on another platform can differ from the server's.
 
 (An earlier version of this page said every macOS float parse diverged from a server. That was measured on 25.8 and no longer holds on any supported line.)
 
