@@ -14,7 +14,7 @@ The darwin artifacts give exactly the answers ClickHouse itself gives on macOS, 
 
 **On 26.7, 26.8 and 26.9,** ClickHouse agrees on every platform (macOS, Linux amd64, Linux arm64), float text included. On these lines, a mismatch of platform changes nothing.
 
-**On 26.3,** ClickHouse's own float text parse differs across platforms: macOS, Linux amd64 and Linux arm64 all differ, and none is correctly rounded. So stored Float values, and Float-literal or Float-parameter comparisons, can differ by 1 ULP across architectures. A float verdict computed on another platform can differ from the server's.
+**On 26.3,** ClickHouse's own parse of Float values from text input formats differs across platforms (macOS, Linux amd64, Linux arm64; mostly 1 ULP), and none is correctly rounded. So stored Float values, and comparisons involving them, can differ across architectures, and a verdict computed on another platform can differ from the server's.
 
 (An earlier version of this page said every macOS float parse diverged from a server. That was measured on 25.8 and no longer holds on any supported line.)
 

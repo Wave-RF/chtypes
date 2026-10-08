@@ -71,6 +71,6 @@ Artifacts are **Elastic License 2.0**, a different license from the Apache 2.0 b
 
 ## Two notes about platforms
 
-**macOS artifacts match ClickHouse on macOS.** On 26.7 and later, macOS and Linux ClickHouse agree bit for bit. On 26.3, ClickHouse's float text parse differs by operating system and architecture, so running the library on the server's own operating system and architecture is a requirement. See [`../limitations.md`](../limitations.md#macos-artifacts-match-clickhouse-on-macos-on-263-match-the-servers-platform).
+**macOS artifacts match ClickHouse on macOS.** On 26.7 and later, macOS and Linux ClickHouse agree bit for bit. On 26.3, ClickHouse's own parse of Float values from text input formats differs by operating system and architecture, so running the library on the server's own operating system and architecture is a requirement. See [`../limitations.md`](../limitations.md#macos-artifacts-match-clickhouse-on-macos-on-263-match-the-servers-platform).
 
 **Which lines exist is a question the registry answers.** `chtypes list` prints the lines it publishes, and [`../support-v1.md`](../support-v1.md) says what this repository can and cannot claim about them: the v1 channel carries no statement of which lines are supported, so a line's support reads unknown, never unsupported.
