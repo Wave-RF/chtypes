@@ -49,7 +49,7 @@ A loader never opens bytes the fetch layer has not verified, and never trusts a 
 - **The glibc floor** is recorded per build in the signed statement (see above). A host below it is refused with `CHTYPES_ARTIFACT_INCOMPATIBLE`.
 - **Many versions in one process.** A library needs no static thread-local storage, so a process may `dlopen` as many as it wants on glibc with no tunable set; the artifact producer proves it per build. A library built before 2026-09-10 for 24.8 or 25.3 is the one historical exception (it failed on the third load with `cannot allocate memory in static TLS block`), and a v1 fetch never selects one.
 - **rpath.** A shipped binary that links a library statically needs an rpath relative to itself, or its RUNPATH points at the builder's filesystem. cgo accepts `$ORIGIN` on Linux; a relocatable darwin binary needs `-ldflags "-r @loader_path"` because cgo's flag validator rejects `@loader_path`.
-- **macOS artifacts are for development; Linux is the reference.** macOS's `long double` is 53-bit, so float parses diverge from a real server. Float expectations MUST come from a Linux artifact or a live server. See [`limitations.md`](../limitations.md#macos-artifacts-are-for-development-linux-is-the-reference).
+- **macOS artifacts match ClickHouse on macOS.** On 26.7 and later, macOS and Linux ClickHouse agree bit for bit. On 26.3, ClickHouse's float text parse differs by operating system and architecture, so a float expectation for a 26.3 server MUST come from the server's own platform. See [`limitations.md`](../limitations.md#macos-artifacts-match-clickhouse-on-macos-on-263-match-the-servers-platform).
 
 ## The one failure mode to design against
 

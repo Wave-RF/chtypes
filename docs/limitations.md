@@ -6,13 +6,15 @@ When you get one, fall back to the server: validate cautiously, forward the row 
 
 <a id="macos-is-a-development-floor-not-an-oracle"></a>
 
-## macOS artifacts are for development; Linux is the reference
+## macOS artifacts match ClickHouse on macOS; on 26.3, match the server's platform
 
-The darwin artifacts exist so you can develop and run the suites on a laptop. They are not the reference for what a server does; Linux artifacts and live servers are.
+The darwin artifacts give exactly the answers ClickHouse itself gives on macOS, on every supported line. The artifact producer measured this against official macOS ClickHouse binaries.
 
-macOS's `long double` is 53-bit, so some float parses diverge from a real server. Measured: on Linux the float corpus matches in full; on macOS none of it does. That is not a near miss to be tolerated — it is a systematic difference in a whole class of values.
+**On 26.7, 26.8 and 26.9,** ClickHouse on macOS and on Linux agree bit for bit, so a darwin artifact answers as a Linux server does. That includes float text.
 
-**Float expectations must come from a Linux artifact or a live ClickHouse.** Everything else on a Mac is trustworthy for development.
+**On 26.3,** ClickHouse's own parse of float text differs by operating system and by architecture: Linux amd64 and Linux arm64 differ too. It is not correctly rounded on any of them. So on 26.3, run the library on the same operating system and architecture as the server whose answers you need. A float verdict from another platform can differ from that server's.
+
+(An earlier version of this page said every macOS float parse diverged from a server. That was measured on 25.8 and no longer holds on any supported line.)
 
 ## EPHEMERAL columns cannot be previewed through a format stream
 
