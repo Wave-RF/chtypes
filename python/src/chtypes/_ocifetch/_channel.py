@@ -291,7 +291,7 @@ def ahead_of_registry(
     channel = channel or active()
     if not alias_absent or visible(predicate, channel):
         return
-    raise ArtifactUnpublishedError(_ahead_message(channel.own_fingerprint, predicate))
+    raise ArtifactUnpublishedError(f"chtypes: {_ahead_message(channel.own_fingerprint, predicate)}")
 
 
 def _ahead_message(own: str, predicate: object) -> str:
