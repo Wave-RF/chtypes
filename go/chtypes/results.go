@@ -183,8 +183,10 @@ type FilterResult struct {
 	ErrMsg              string
 	RowsRead            uint64
 	UnsupportedSettings []string
-	// Verdicts is one verdict per row. A caller enforcing visibility fails
-	// closed on every verdict whose Answered is false.
+	// Verdicts is one verdict per row. A verdict counts only when Outcome is
+	// FilterOK; for any other outcome, treat every verdict as VerdictDecline,
+	// whatever the verdict string holds. Under FilterOK, a caller enforcing
+	// visibility fails closed on every verdict whose Answered is false.
 	Verdicts []Verdict
 	Errors   []FilterRowError
 }

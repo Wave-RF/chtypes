@@ -223,8 +223,10 @@ class FilterRowError:
 
 @dataclass(frozen=True, slots=True)
 class FilterResult:
-    """The `filter_result` document. `e` and `d` are never answers, and a caller
-    enforcing visibility fails closed on both; `Verdict.answered` says which."""
+    """The `filter_result` document. A verdict counts only when `outcome` is `ok`;
+    otherwise treat every verdict as `d`, whatever the verdict string holds. Under
+    `ok`, `e` and `d` are never answers, and a caller enforcing visibility fails
+    closed on both; `Verdict.answered` says which."""
 
     outcome: FilterOutcome
     err_code: int

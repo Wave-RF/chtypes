@@ -1051,7 +1051,10 @@ CHS_API void chs_filter_free(chs_filter *filter);
 
 /*
  * chs_filter_eval_body: Evaluates the filter over every row of a body, returning one verdict per
- * row. `settings` governs parsing the body, and `session_timezone` there is this call's zone.
+ * row. `settings` governs parsing the body, and `session_timezone` there is this call's zone. When
+ * a server would not accept an INSERT of the body, because `chs_preview_batch`'s verdict over the
+ * same body and settings, with no filter, is not `accepted`, every verdict is `d` and the outcome
+ * mirrors that verdict (`filter_outcome`). To know which a body is, the call parses it twice.
  *
  * Class: api. Thread: shared. Returns one of: CHS_OK, CHS_REJECTED, CHS_DECLINED,
  * CHS_INVALID_ARGUMENT, CHS_INTERNAL.
@@ -1078,7 +1081,9 @@ CHS_API chs_status chs_filter_eval_body(
 /*
  * chs_block_create: Parses a body once under the schema, for evaluating many filters over it.
  * `settings` governs the parse, `session_timezone` there included, and `columns` is read as
- * `chs_preview_row` reads it. The block holds a counted reference to the schema.
+ * `chs_preview_row` reads it. The block holds a counted reference to the schema. It also records
+ * `chs_preview_batch`'s verdict over the same body, settings and columns, with no filter, which
+ * `chs_filter_eval_block` answers by, so it parses the body twice.
  *
  * Class: api. Thread: shared. Returns one of: CHS_OK, CHS_REJECTED, CHS_DECLINED,
  * CHS_INVALID_ARGUMENT, CHS_INTERNAL.
@@ -1115,10 +1120,17 @@ CHS_API chs_status chs_block_create(
 CHS_API void chs_block_free(chs_block *block);
 
 /*
- * chs_filter_eval_block: Evaluates the filter over a parsed block, with the same answers
- * `chs_filter_eval_body` gives for the same body. It takes no settings: the filter brings the
- * settings it was compiled under and the block those it was parsed under. The filter and the block
- * must come from the same schema; a pair from two schemas is `CHS_INVALID_ARGUMENT`.
+ * chs_filter_eval_block: Evaluates the filter over a parsed block. Over a body a server would
+ * accept, it gives the same answers `chs_filter_eval_body` gives for that body. Over one it would
+ * not (the verdict `chs_block_create` recorded is not `accepted`), the outcome mirrors that verdict
+ * as for `chs_filter_eval_body`, and every verdict from the first refused row on is `d`. The first
+ * refused row is the first row of that batch whose outcome is neither `accepted` nor `skipped`.
+ * When the refusal belongs to no row (a whole-body step, a poisoned value, the call's own
+ * settings), it is the first row of the block. The rows before it keep their evaluated verdicts. A
+ * caller treats those as `d` too: any non-`ok` outcome, including `unsupported`, means every
+ * verdict is `d`. It takes no settings: the filter brings the settings it was compiled under and
+ * the block those it was parsed under. The filter and the block must come from the same schema; a
+ * pair from two schemas is `CHS_INVALID_ARGUMENT`.
  *
  * Class: api. Thread: shared. Returns one of: CHS_OK, CHS_REJECTED, CHS_DECLINED,
  * CHS_INVALID_ARGUMENT, CHS_INTERNAL.

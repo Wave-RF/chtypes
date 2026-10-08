@@ -211,7 +211,7 @@ export interface FilterResult {
   readonly errMsg: Buffer;
   readonly rowsRead: number;
   readonly unsupportedSettings: readonly Buffer[];
-  /** One verdict per row, each read through the generated table. `error` and `decline` are never answers. */
+  /** One verdict per row, each read through the generated table. A verdict counts only when `outcome` is `ok`; otherwise treat every verdict as `decline`, whatever the verdict string holds. Under `ok`, `error` and `decline` are never answers. */
   readonly verdicts: readonly Verdict[];
   readonly errors: readonly FilterRowError[];
 }

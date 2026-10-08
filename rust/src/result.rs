@@ -274,7 +274,9 @@ pub struct FilterResult {
     pub rows_read: u64,
     /// Settings this build does not support (name objects), as bytes.
     pub unsupported_settings: Vec<RawText>,
-    /// One verdict per row. `Error` and `Decline` are never answers; a caller
+    /// One verdict per row. A verdict counts only when the outcome is `Ok`;
+    /// otherwise treat every verdict as `Decline`, whatever the verdict string
+    /// holds. Under `Ok`, `Error` and `Decline` are never answers; a caller
     /// enforcing visibility fails closed on both ([`Verdict::answered`]).
     pub verdicts: Vec<Verdict>,
     /// Each error or declined row, itemized.

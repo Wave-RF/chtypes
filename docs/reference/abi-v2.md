@@ -332,6 +332,8 @@ The batch answers the first of these that applies:
 
 A skipped row never changes the verdict. Steps 2 and 3 depart from "rejected if any row is refused" for one reason: never a refusal that is not definite. Both answer `unsupported`, which a caller never scores as agreement.
 
+A filter's verdicts follow the batch. When the batch's outcome is not `accepted`, by any of steps 1 to 4, every row's filter verdict is `d`. A row the parse accepted carries `verdict_code` -2 and `verdict_err` `batch outcome is '<outcome>': only a fully accepted batch has filter verdicts`; a refused row carries its own code and message. Nothing from such a batch is stored for a WHERE to read, exported or counted, so no verdict of it is an answer.
+
 FIRM; an unrecognized value is read as `unsupported`.
 
 | value               |
@@ -343,7 +345,9 @@ FIRM; an unrecognized value is read as `unsupported`.
 
 #### `filter_outcome`
 
-Whether a filter evaluation completed at all. Per-row failures are verdicts, not outcomes.
+Whether a filter evaluation answers its body. `ok`: every row carries its own verdict, and per-row failures are verdicts, not outcomes. Any non-`ok` outcome, including `unsupported`, means: treat every verdict as `d`. A caller MUST do so whatever the verdict string holds.
+
+`chs_filter_eval_body` and `chs_filter_eval_block` answer `ok` only for a body a server would accept, that is, when `chs_preview_batch`'s verdict over the same body and settings, with no filter, is `accepted`. Otherwise the outcome mirrors that verdict: `rejected` with its code and message; `unsupported` with its code and message, a call-level decline included; and `unsupported` with code -2 for `accepted_poisoned`, which this vocabulary does not hold and which is no refusal of the INSERT. A body the parse itself refuses answers `rejected` or `unsupported` with no verdicts.
 
 FIRM; an unrecognized value is read as `unsupported`.
 
@@ -355,7 +359,7 @@ FIRM; an unrecognized value is read as `unsupported`.
 
 #### `filter_verdict`
 
-One character per row of a filter evaluation. `t` and `f` are answers (true; false or NULL); `e` (the predicate raised an error on this row) and `d` (this build declines the row) are not, and a caller enforcing visibility must fail closed on both.
+One character per row of a filter evaluation. `t` and `f` are answers (true; false or NULL); `e` (the predicate raised an error on this row) and `d` (this build declines the row) are not, and a caller enforcing visibility must fail closed on both. A verdict is an answer only for a body a server would accept: in a batch whose outcome is not `accepted` every verdict is `d`, and in a filter document whose outcome is not `ok` (any non-`ok` outcome, including `unsupported`) a caller MUST treat every verdict as `d` (`batch_outcome`, `filter_outcome`).
 
 FIRM; an unrecognized value is read as `d`.
 
@@ -1947,7 +1951,7 @@ CHS_API chs_status chs_filter_eval_body(const chs_filter *filter, chs_format for
 - `out`: out_handle, `chs_buf`, `document:filter_result`.
 - `err`: out_error.
 
-Evaluates the filter over every row of a body, returning one verdict per row. `settings` governs parsing the body, and `session_timezone` there is this call's zone.
+Evaluates the filter over every row of a body, returning one verdict per row. `settings` governs parsing the body, and `session_timezone` there is this call's zone. When a server would not accept an INSERT of the body, because `chs_preview_batch`'s verdict over the same body and settings, with no filter, is not `accepted`, every verdict is `d` and the outcome mirrors that verdict (`filter_outcome`). To know which a body is, the call parses it twice.
 
 #### `chs_block_create`
 
@@ -1965,7 +1969,7 @@ CHS_API chs_status chs_block_create(const chs_schema *schema, chs_format format,
 - `out`: out_handle, `chs_block`.
 - `err`: out_error.
 
-Parses a body once under the schema, for evaluating many filters over it. `settings` governs the parse, `session_timezone` there included, and `columns` is read as `chs_preview_row` reads it. The block holds a counted reference to the schema.
+Parses a body once under the schema, for evaluating many filters over it. `settings` governs the parse, `session_timezone` there included, and `columns` is read as `chs_preview_row` reads it. The block holds a counted reference to the schema. It also records `chs_preview_batch`'s verdict over the same body, settings and columns, with no filter, which `chs_filter_eval_block` answers by, so it parses the body twice.
 
 #### `chs_block_free`
 
@@ -1991,7 +1995,7 @@ CHS_API chs_status chs_filter_eval_block(const chs_filter *filter, const chs_blo
 - `out`: out_handle, `chs_buf`, `document:filter_result`.
 - `err`: out_error.
 
-Evaluates the filter over a parsed block, with the same answers `chs_filter_eval_body` gives for the same body. It takes no settings: the filter brings the settings it was compiled under and the block those it was parsed under. The filter and the block must come from the same schema; a pair from two schemas is `CHS_INVALID_ARGUMENT`.
+Evaluates the filter over a parsed block. Over a body a server would accept, it gives the same answers `chs_filter_eval_body` gives for that body. Over one it would not (the verdict `chs_block_create` recorded is not `accepted`), the outcome mirrors that verdict as for `chs_filter_eval_body`, and every verdict from the first refused row on is `d`. The first refused row is the first row of that batch whose outcome is neither `accepted` nor `skipped`. When the refusal belongs to no row (a whole-body step, a poisoned value, the call's own settings), it is the first row of the block. The rows before it keep their evaluated verdicts. A caller treats those as `d` too: any non-`ok` outcome, including `unsupported`, means every verdict is `d`. It takes no settings: the filter brings the settings it was compiled under and the block those it was parsed under. The filter and the block must come from the same schema; a pair from two schemas is `CHS_INVALID_ARGUMENT`.
 
 #### `chs_discover_query`
 
