@@ -458,11 +458,11 @@ Releases the caller's reference to a filter. Freeing NULL does nothing.
 
 ### chs_filter_eval_body
 
-Evaluates the filter over every row of a body, returning one verdict per row. `settings` governs parsing the body, and `session_timezone` there is this call's zone. When a server would not accept an INSERT of the body, because `chs_preview_batch`'s verdict over the same body and settings, with no filter, is not `accepted`, every verdict is `d` and the outcome mirrors that verdict (`filter_outcome`).
+Evaluates the filter over every row of a body, returning one verdict per row. `settings` governs parsing the body, and `session_timezone` there is this call's zone. When a server would not accept an INSERT of the body, because `chs_preview_batch`'s verdict over the same body and settings, with no filter, is not `accepted`, every verdict is `d` and the outcome mirrors that verdict (`filter_outcome`). The call reads an accepted body once, for its verdicts and that batch verdict together.
 
 ### chs_block_create
 
-Parses a body once under the schema, for evaluating many filters over it. `settings` governs the parse, `session_timezone` there included, and `columns` is read as `chs_preview_row` reads it. The block holds a counted reference to the schema. It also records `chs_preview_batch`'s verdict over the same body, settings and columns, with no filter, which `chs_filter_eval_block` answers by.
+Parses a body once under the schema, for evaluating many filters over it. `settings` governs the parse, `session_timezone` there included, and `columns` is read as `chs_preview_row` reads it. The block holds a counted reference to the schema. It also records `chs_preview_batch`'s verdict over the same body, settings and columns, with no filter, which `chs_filter_eval_block` answers by. An accepted body is read once, for the block and that verdict together.
 
 ### chs_block_free
 
