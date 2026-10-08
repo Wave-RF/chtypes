@@ -15,7 +15,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 
-use chtypes::{Error, FetchOptions, Library, Registry, RegistryOptions, SetupOptions, status};
+use chtypes::{
+    CompileOptions, Error, FetchOptions, FilterOptions, Library, Registry, RegistryOptions, Schema,
+    SchemaDescription, Server, ServerProfile, SetupOptions, status,
+};
 use serde_json::Value;
 
 const ENV_STUBS: &str = "CHTYPES_ABI2_STUBS";
@@ -125,6 +128,57 @@ fn outcome(want: &Value, got: &Result<(), Error>) -> Result<(), String> {
             return Err(format!("ch_name {:?}, want {name:?}", call.ch_name));
         }
     }
+    if let Some(message) = want.get("message").and_then(Value::as_str) {
+        if call.message.as_bytes() != message.as_bytes() {
+            return Err(format!(
+                "message {:?}, want {message:?}",
+                call.message.to_lossy()
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// What differs between a description's server `filter_declined_settings` and
+/// a describe step's expectation: each entry's name as hex of its bytes, its
+/// tier's raw spelling, and whether the description lists that tier (rule r3).
+fn declined(described: Option<&SchemaDescription>, want: &Value) -> Result<(), String> {
+    let want = want
+        .as_array()
+        .ok_or("a describe step names no declined list")?;
+    let server = described
+        .and_then(|d| d.server.as_ref())
+        .ok_or("the description carries no server")?;
+    let got = &server.filter_declined_settings;
+    if got.len() != want.len() {
+        return Err(format!(
+            "filter_declined_settings has {} entries, want {}: {got:?}",
+            got.len(),
+            want.len()
+        ));
+    }
+    for (i, (g, w)) in got.iter().zip(want).enumerate() {
+        let hex: String = g
+            .name
+            .as_bytes()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        if Some(hex.as_str()) != w["name_hex"].as_str() {
+            return Err(format!("entry {i}: name {hex}, want hex {}", w["name_hex"]));
+        }
+        if Some(g.tier.as_str()) != w["tier"].as_str()
+            || Some(g.tier.is_known()) != w["known"].as_bool()
+        {
+            return Err(format!(
+                "entry {i}: tier {:?} (known {}), want {} (known {})",
+                g.tier.as_str(),
+                g.tier.is_known(),
+                w["tier"],
+                w["known"]
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -165,6 +219,16 @@ fn run_case(stubs: &Path, probe: &str, case: &Value) {
 
     let steps = case["steps"].as_array().expect("case steps");
     assert!(!steps.is_empty(), "case {id}: a case with no steps");
+    // The case's open library, and the servers and schemas its steps name.
+    let mut current: Option<Arc<Library>> = None;
+    let mut servers: BTreeMap<String, Server> = BTreeMap::new();
+    let mut schemas: BTreeMap<String, Schema> = BTreeMap::new();
+    let name = |step: &Value, key: &str| -> String {
+        step[key]
+            .as_str()
+            .unwrap_or_else(|| panic!("case {id}: a step names no {key}"))
+            .to_string()
+    };
     for (i, step) in steps.iter().enumerate() {
         let op = step["op"].as_str().expect("step op");
         let zone = step.get("timezone").and_then(Value::as_str).unwrap_or("");
@@ -175,6 +239,8 @@ fn run_case(stubs: &Path, probe: &str, case: &Value) {
         let request = step.get("request").and_then(Value::as_str);
         let allow = step.get("allow").and_then(Value::as_bool).unwrap_or(true);
         let mut opened: Option<Arc<Library>> = None;
+        let mut described: Option<SchemaDescription> = None;
+        let library = || current.clone().expect("a step that needs an open library");
         let got: Result<(), Error> = match (op, request) {
             ("setup", _) => chtypes::setup(SetupOptions {
                 timezone: Some(zone.to_string()),
@@ -200,11 +266,49 @@ fn run_case(stubs: &Path, probe: &str, case: &Value) {
             ("open", None) => {
                 Library::open_unverified(image(variant), allow).map(|l| opened = Some(l))
             }
+            ("server_new", _) => library()
+                .new_server(&ServerProfile {
+                    timezone: Some("UTC".to_string()),
+                    ..Default::default()
+                })
+                .map(|s| {
+                    servers.insert(name(step, "as"), s);
+                }),
+            ("compile", _) => {
+                let options = CompileOptions {
+                    server: step
+                        .get("server")
+                        .and_then(Value::as_str)
+                        .map(|s| servers[s].clone()),
+                    ..Default::default()
+                };
+                library()
+                    .compile_table(name(step, "statement"), &options)
+                    .map(|schema| {
+                        if let Some(as_name) = step.get("as").and_then(Value::as_str) {
+                            schemas.insert(as_name.to_string(), schema);
+                        }
+                    })
+            }
+            ("describe", _) => schemas[&name(step, "schema")]
+                .describe()
+                .map(|d| described = Some(d)),
+            ("filter_new", _) => schemas[&name(step, "schema")]
+                .compile_filter(name(step, "expression"), &FilterOptions::default())
+                .map(|_| ()),
             (other, _) => {
                 panic!("case {id} step {i}: an op this runner does not know: {other:?}")
             }
         };
+        if let Some(library) = &opened {
+            current = Some(Arc::clone(library));
+        }
         let mut checked = outcome(&step["expect"], &got);
+        if checked.is_ok() && op == "describe" {
+            // The list as this binding decoded it from the document the stub
+            // answered, never a value the case sets by hand.
+            checked = declined(described.as_ref(), &step["declined"]);
+        }
         if let (Ok(()), Some(want)) = (&checked, step["expect"].get("image_zone")) {
             let want = want.as_str().expect("image_zone is a string");
             let library = opened

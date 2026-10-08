@@ -119,7 +119,8 @@
         "FilterOutcome.of",
         "Verdict.of",
         "DefaultKind.of",
-        "MergeReason.of"
+        "MergeReason.of",
+        "DeclinedTier.of"
       ],
       "reason": "Generated from the description by scripts/abi-v1/gen.py: each string vocabulary's decoder from a document's text, with the description's fallback. The decoders use it; §3 names the vocabularies and their facts, not their decoders."
     },
@@ -265,7 +266,8 @@
         "Verdict.as_str",
         "Verdict.as_char",
         "DefaultKind.as_str",
-        "MergeReason.as_str"
+        "MergeReason.as_str",
+        "DeclinedTier.as_str"
       ],
       "reason": "A string vocabulary's document spelling. Rust's vocabularies are enums, so the text is a method, where Python's StrEnum member and TypeScript's const-object value are the string itself and Go's type is a string. Generated from the description by scripts/abi-v1/gen.py."
     },
@@ -539,6 +541,7 @@
         "Verdict.Known",
         "DefaultKind.Known",
         "MergeReason.Known",
+        "DeclinedTier.Known",
         "DiscoverQueryParam",
         "DiscoverQueryParam.Known",
         "QueryParamDatabase",
@@ -560,6 +563,7 @@
         "Verdict.known",
         "DefaultKind.known",
         "MergeReason.known",
+        "DeclinedTier.known",
         "DiscoverQueryParam",
         "DiscoverQueryParam.DATABASE",
         "DiscoverQueryParam.TABLE",
@@ -584,6 +588,7 @@
         "verdictKnown",
         "defaultKindKnown",
         "mergeReasonKnown",
+        "declinedTierKnown",
         "discoverQueryParamKnown",
         "Unknown"
       ],
@@ -613,6 +618,9 @@
         "MergeReason.Unknown",
         "MergeReason.from_wire",
         "MergeReason.is_known",
+        "DeclinedTier.Unknown",
+        "DeclinedTier.from_wire",
+        "DeclinedTier.is_known",
         "Status",
         "Status.*",
         "Reason",

@@ -62,7 +62,8 @@ unlisted value decodes to it for that field alone and never fails the
 document, a fallback names only whose facts `Unknown` reports, `value_src`
 and `transform_reason` become types of their own (`Source`, `Reason`), the
 call status gains a `Status` type, `discover_query_param` gains
-`DiscoverQueryParam`, `merge_reason` (v2 only) is `MergeReason`, and `DESCRIBED_VOCABULARIES` with
+`DiscoverQueryParam`, `merge_reason` (v2 only) is `MergeReason`, `declined_tier` (v2 only) is
+`DeclinedTier` (a hyphen in a wire value is a word boundary, as an underscore is), and `DESCRIBED_VOCABULARIES` with
 `described_vocabulary` reaches every enum the description defines, for the
 r3 tests, without a hand-kept list. ABI v1's outputs are produced by the
 untouched v1 path, byte for byte as before.
@@ -1379,6 +1380,7 @@ _RUST_VOCAB = {
     "discover_query_param": ("DiscoverQueryParam", "string"),
     "default_kind": ("DefaultKind", "string"),
     "merge_reason": ("MergeReason", "string"),
+    "declined_tier": ("DeclinedTier", "string"),
 }
 
 _UNKNOWN_STRING_DOC = (
@@ -1748,6 +1750,19 @@ def render_vocab_v2(model) -> str:
         doc=(
             "What a merge would do to one row of the part an `INSERT` writes, as a batch's `at_merge` reports it.\n"
             "A reason the description does not list is `Unknown`, and the entry decodes on (rule r3)."
+        ),
+    )
+
+    out += _string_enum_v2(
+        model,
+        "declined_tier",
+        "DeclinedTier",
+        # A hyphen (`predicate-unflipped`) is a word boundary, as an underscore is.
+        variant=lambda w: _words(w.replace("-", "_")),
+        doc=(
+            "The WHERE-settings tier of a setting a server profile sets and this build's filters do not honor in a\n"
+            "WHERE, as a `DeclinedSetting` reports it. A tier the description does not list is `Unknown`, and the\n"
+            "entry decodes on (rule r3)."
         ),
     )
 

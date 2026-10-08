@@ -348,12 +348,130 @@ def _closed_filter_case(model) -> dict | None:
     }
 
 
+DECLINED_VARIANT = "declined-settings"
+# The vocabulary a filter_declined_settings entry's tier is a value of.
+DECLINED_TIER_VOCAB = "declined_tier"
+# The expression the declined-settings cases compile: any the stub accepts.
+DECLINED_FILTER_EXPRESSION = "k > 1"
+
+
+def _declined_entries(model, sel: str) -> list[dict]:
+    """What a binding must decode from the document the stub answers for
+    `sel` (_stubshared.declined_document): each entry's name as hex of its
+    bytes, its tier as the raw spelling, and whether the description lists
+    that tier (rule r3: an unlisted tier is the vocabulary's unknown(n),
+    never a failure). Read from the stub's own lists and from the
+    description, never written by hand."""
+    listed = {v.value for v in model.enums[DECLINED_TIER_VOCAB].values}
+    return [
+        {"name_hex": _stubshared.declined_name(e).hex(), "tier": e["tier"], "known": e["tier"] in listed}
+        for e in _stubshared.DECLINED_LISTS[sel]
+    ]
+
+
+def _declined_steps(model, sel: str) -> list[dict]:
+    """Open, describe a server, compile the statement that selects `sel` on
+    it, and describe the schema: the steps every declined-settings case
+    starts with."""
+    return [
+        {"op": "open", "expect": OK},
+        {"op": "server_new", "as": "server", "expect": OK},
+        {
+            "op": "compile",
+            "statement": _stubshared.DECLINED["prefix"] + sel,
+            "server": "server",
+            "as": "schema",
+            "expect": OK,
+        },
+        {"op": "describe", "schema": "schema", "expect": OK, "declined": _declined_entries(model, sel)},
+    ]
+
+
+def _declined_cases(model) -> list[dict]:
+    """The server's filter-declined settings (spec/abi-v2/docs.md:
+    schema_description's server.filter_declined_settings, and
+    chs_filter_create), through each binding's public API over the stub
+    variant "declined-settings" (_stubshared.DECLINED).
+
+    Four describe cases: an empty list, two entries in the profile's own
+    order (not name order), an entry whose name is `name_b64`, and an entry
+    whose tier the description does not list. Each step reads the list from
+    the binding's own decode of the document the stub answered. Then the
+    decline: on a schema whose server lists two settings, a filter compile
+    surfaces as the binding's declined error (sdk.json's class for
+    CHS_DECLINED) carrying the stub's status, ch_code and message; on a
+    schema whose server lists none, the same compile succeeds."""
+    if model.major < 2:  # generation 1 is frozen and has no server
+        return []
+    rule = _stubshared.DECLINED
+    if rule["status"] not in model.function("chs_filter_create").may_return:
+        raise ValueError(f"chs_filter_create: {rule['status']} is not in its may_return")
+    if DECLINED_VARIANT not in {v.name for v in _stubshared.plan(model)}:
+        raise ValueError(f"_stubshared.plan has no {DECLINED_VARIANT!r} variant")
+    cases = []
+    for sel, what in (
+        ("none", "empty"),
+        ("two", "in_profile_order"),
+        ("name_b64", "name_b64"),
+        ("unknown_tier", "unknown_tier"),
+    ):
+        cases.append(
+            {
+                "id": f"server.filter_declined_settings_{what}",
+                "variant": DECLINED_VARIANT,
+                "steps": _declined_steps(model, sel),
+            }
+        )
+    message = _stubshared.declined_message("two")
+    declined = {
+        "class": _class_of(model, rule["status"]),
+        "status": rule["status"],
+        "ch_code": rule["ch_code"],
+        "ch_name": "",
+        "message": message.decode("utf-8"),
+    }
+    cases.append(
+        {
+            "id": "filter.declined_when_the_server_lists_declined_settings",
+            "variant": DECLINED_VARIANT,
+            "steps": [
+                *_declined_steps(model, "two"),
+                {
+                    "op": "filter_new",
+                    "schema": "schema",
+                    "expression": DECLINED_FILTER_EXPRESSION,
+                    "as": "filter",
+                    "expect": declined,
+                },
+                # The control: a schema whose server lists none compiles the
+                # same filter, so the decline comes from the list.
+                {
+                    "op": "compile",
+                    "statement": _stubshared.DECLINED["prefix"] + "none",
+                    "server": "server",
+                    "as": "plain",
+                    "expect": OK,
+                },
+                {
+                    "op": "filter_new",
+                    "schema": "plain",
+                    "expression": DECLINED_FILTER_EXPRESSION,
+                    "as": "filter",
+                    "expect": OK,
+                },
+            ],
+        }
+    )
+    return cases
+
+
 def build_cases(model) -> list[dict]:
     cases = [_latch_case(model), _retry_case(model)]
     for build in (_closed_server_case, _closed_filter_case):
         case = build(model)
         if case is not None:
             cases.append(case)
+    cases += _declined_cases(model)
     return cases
 
 

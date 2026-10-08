@@ -12,7 +12,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { InternalError, Status, UsageError } from '../../src/abi2/index.js';
+import { DeclinedTier, declinedTierKnown, InternalError, Status, UsageError } from '../../src/abi2/index.js';
 import { type LoadedImage, openAbi2, type Predicate } from '../../src/abi2/loader.js';
 import { decodeSchemaDescription } from '../../src/documents.js';
 import { type Library, libraryOf } from '../../src/library.js';
@@ -127,6 +127,54 @@ describe('the description decoder: server and replicated (no library)', () => {
     ]) {
       expect(() => decode(doc), doc).toThrow(InternalError);
       expect(() => decode(doc), doc).toThrow(/schema_description/);
+    }
+  });
+});
+
+describe('the description decoder: the server\'s filter_declined_settings (no library)', () => {
+  const cols = '"columns":[{"name":"k","type":"UInt8","default_kind":"","default_expression":""}]';
+  const decode = (s: string) => decodeSchemaDescription(Buffer.from(s, 'utf8'));
+  const server = (list: string) =>
+    decode(`{${cols},"server":{"timezone":"UTC","settings":{"final":"1","aggregate_functions_null_for_empty":"1"},"filter_declined_settings":${list}}}`);
+
+  it('[] is present and empty; absent reads as empty too, never a failure', () => {
+    expect(server('[]').server?.filterDeclinedSettings).toEqual([]);
+    expect(decode(`{${cols},"server":{"timezone":"UTC","settings":{}}}`).server?.filterDeclinedSettings).toEqual([]);
+  });
+
+  it('entries in the profile\'s own order, a name_b64 entry, an unlisted tier (rule r3) and unknown members (rule r2)', () => {
+    const got = server(
+      '[{"name":"final","tier":"result-content","x_future":1},' +
+        '{"name":"aggregate_functions_null_for_empty","tier":"predicate"},' +
+        '{"name_b64":"eP95","tier":"predicate-unflipped"},' +
+        '{"name":"x_future_setting","tier":"x_future_tier","x_future_obj":{"a":[1]}}]',
+    ).server?.filterDeclinedSettings;
+    expect(got?.map((e) => e.name.toString('hex'))).toEqual([
+      Buffer.from('final').toString('hex'),
+      Buffer.from('aggregate_functions_null_for_empty').toString('hex'),
+      '78ff79',
+      Buffer.from('x_future_setting').toString('hex'),
+    ]);
+    expect(got?.map((e) => e.tier)).toEqual([
+      DeclinedTier.ResultContent,
+      DeclinedTier.Predicate,
+      DeclinedTier.PredicateUnflipped,
+      'x_future_tier',
+    ]);
+    expect(got?.map((e) => declinedTierKnown(e.tier))).toEqual([true, true, true, false]);
+  });
+
+  it('refusals are each an InternalError naming the document', () => {
+    for (const list of [
+      '{"name":"final","tier":"predicate"}',
+      '["final"]',
+      '[{"name":"final","name_b64":"ZmluYWw=","tier":"predicate"}]',
+      '[{"tier":"predicate"}]',
+      '[{"name_b64":"*","tier":"predicate"}]',
+      '[{"name":"final","tier":1}]',
+    ]) {
+      expect(() => server(list), list).toThrow(InternalError);
+      expect(() => server(list), list).toThrow(/schema_description/);
     }
   });
 });

@@ -7,6 +7,7 @@ package chtypes
 // CHTYPES_ABI2_STUBS it skips LOUDLY by name.
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,9 +24,21 @@ type setupCaseExpect struct {
 	ChCode *int32  `json:"ch_code"`
 	ChName *string `json:"ch_name"`
 	Reason string  `json:"reason"`
+	// Message, on an error the library answered, is the message it must
+	// carry, byte for byte.
+	Message *string `json:"message"`
 	// ImageZone, on a successful open, is the zone the image was set up
 	// with, read back with the document's image_zone_probe.
 	ImageZone *string `json:"image_zone"`
+}
+
+// declinedExpect is one entry a describe step must decode from the server's
+// filter_declined_settings: the name's bytes as hex, the tier's raw spelling,
+// and whether the description lists that tier (rule r3).
+type declinedExpect struct {
+	NameHex string `json:"name_hex"`
+	Tier    string `json:"tier"`
+	Known   bool   `json:"known"`
 }
 
 type setupCaseStep struct {
@@ -49,6 +62,9 @@ type setupCaseStep struct {
 	Expression string `json:"expression"`
 	Body       string `json:"body"`
 	RowsPassed *int   `json:"rows_passed"`
+	// The describe op: the server's filter_declined_settings the named
+	// schema's description must decode to, in order.
+	Declined []declinedExpect `json:"declined"`
 }
 
 type setupCasesDoc struct {
@@ -151,6 +167,30 @@ func setupStepOutcome(want setupCaseExpect, err error) string {
 	if want.ChName != nil && ce.ChName != *want.ChName {
 		return fmt.Sprintf("ch_name %q, want %q", ce.ChName, *want.ChName)
 	}
+	if want.Message != nil && ce.Message != *want.Message {
+		return fmt.Sprintf("message %q, want %q", ce.Message, *want.Message)
+	}
+	return ""
+}
+
+// declinedOutcome compares a description's server filter_declined_settings
+// with a describe step's expectation, and returns what differs, or "".
+func declinedOutcome(d SchemaDescription, want []declinedExpect) string {
+	if d.Server == nil {
+		return "the description carries no server"
+	}
+	got := d.Server.FilterDeclinedSettings
+	if len(got) != len(want) {
+		return fmt.Sprintf("filter_declined_settings has %d entries, want %d: %+v", len(got), len(want), got)
+	}
+	for i, w := range want {
+		if hex.EncodeToString([]byte(got[i].Name)) != w.NameHex {
+			return fmt.Sprintf("entry %d: name %q, want hex %s", i, got[i].Name, w.NameHex)
+		}
+		if string(got[i].Tier) != w.Tier || got[i].Tier.Known() != w.Known {
+			return fmt.Sprintf("entry %d: tier %q (known %v), want %q (known %v)", i, got[i].Tier, got[i].Tier.Known(), w.Tier, w.Known)
+		}
+	}
 	return ""
 }
 
@@ -187,6 +227,7 @@ func TestSetupCases(t *testing.T) {
 			schemas := map[string]*Schema{}
 			filters := map[string]*Filter{}
 			var rowsPassed *uint64
+			var described *SchemaDescription
 			for i, s := range c.Steps {
 				var err error
 				var lib *Library
@@ -206,6 +247,13 @@ func TestSetupCases(t *testing.T) {
 						t.Fatalf("step %d: closing filter %q: %v", i, s.Filter, err)
 					}
 					continue
+				case s.Op == "describe":
+					var d SchemaDescription
+					d, err = schemas[s.Schema].Describe()
+					described = nil
+					if err == nil {
+						described = &d
+					}
 				case s.Op == "filter_new":
 					var f *Filter
 					f, err = schemas[s.Schema].CompileFilter(s.Expression)
@@ -269,6 +317,11 @@ func TestSetupCases(t *testing.T) {
 					current = lib
 				}
 				diff := setupStepOutcome(s.Expect, err)
+				if diff == "" && s.Op == "describe" {
+					// The list as this binding decoded it from the document the
+					// stub answered, never a value the case sets by hand.
+					diff = declinedOutcome(*described, s.Declined)
+				}
 				if diff == "" && s.RowsPassed != nil && (rowsPassed == nil || *rowsPassed != uint64(*s.RowsPassed)) {
 					diff = fmt.Sprintf("rows_passed differs from %d (or the call failed): the stub says whether the filter reached the library", *s.RowsPassed)
 				}

@@ -20,7 +20,7 @@
 use std::collections::BTreeMap;
 
 use crate::abi2::vocab_gen::{
-    DefaultKind, FilterOutcome, MergeReason, Outcome, Reason, Source, Verdict,
+    DeclinedTier, DefaultKind, FilterOutcome, MergeReason, Outcome, Reason, Source, Verdict,
 };
 use crate::raw::RawText;
 
@@ -328,6 +328,25 @@ pub struct SchemaServer {
     /// macros (unknown), and `Some`, even of an empty map, when it did (the
     /// complete set).
     pub macros: Option<BTreeMap<String, String>>,
+    /// The settings the profile sets that this build's filters do not honor
+    /// in a WHERE, in the profile's own order, from `filter_declined_settings`;
+    /// empty when it lists none. A schema on a server that lists any is one
+    /// [`crate::Schema::compile_filter`] declines ([`crate::Error::Unsupported`]),
+    /// and a consumer that streams rows refuses such a tenant
+    /// (`spec/abi-v2/where-settings/README.md`).
+    pub filter_declined_settings: Vec<DeclinedSetting>,
+}
+
+/// One setting a server's profile sets that this build's filters do not honor
+/// in a WHERE: an entry of the server's `filter_declined_settings` (ABI v2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct DeclinedSetting {
+    /// The setting's name (from `name` or `name_b64`).
+    pub name: RawText,
+    /// The tier this build line's WHERE-settings list gives it. One the
+    /// description does not list is [`DeclinedTier::Unknown`] (rule r3).
+    pub tier: DeclinedTier,
 }
 
 /// What ClickHouse's own `TableZnodeInfo` resolved for a Replicated engine,

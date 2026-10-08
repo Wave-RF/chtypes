@@ -236,6 +236,80 @@ FILTER_OBSERVABLE_DOCS = {
     "none": '{"outcome":"accepted","code":0,"err":"","rows_read":1,"rows_passed":0,"rows_cut":0}',
 }
 
+# The server's filter-declined settings, variant "declined-settings"
+# (-DCHS_STUB_DECLINED_SETTINGS): a schema on a server whose profile sets
+# settings this build's filters do not honor in a WHERE (spec/abi-v2/docs.md:
+# schema_description's server.filter_declined_settings, and chs_filter_create).
+# A chs_schema_create whose statement is exactly DECLINED["prefix"] + <id>
+# selects DECLINED_LISTS[<id>]; chs_schema_describe then answers
+# declined_document(<id>), and chs_filter_create, after its input checks and
+# the status injection, answers DECLINED["status"] with ch_code 0 and
+# declined_message(<id>) when that list is not empty, and its usual filter
+# otherwise. Any other statement selects nothing, and both calls answer as the
+# ok build does. Like the r3 variant's describe, the selection is the image's
+# LAST chs_schema_create, never a field of the handle: a test double, enough for
+# the one schema each case compiles. The message is the specification's text,
+# rendered here once for the stub's C and for the cases that expect it.
+DECLINED = {
+    "prefix": "!F:",
+    "status": "CHS_DECLINED",
+    "ch_code": 0,
+    "message": (
+        "chs_filter_create: this schema's server profile sets {names}, which this build's filters do not "
+        "honor in a WHERE (listed in chs_schema_describe's server.filter_declined_settings); declined "
+        "rather than answered"
+    ),
+}
+# id -> the server's filter_declined_settings, in the profile's own order. Each
+# entry is {name | name_b64, tier}: "two" is deliberately not in name order, so
+# a reader that sorted would fail; "name_b64" carries a name that is not valid
+# UTF-8 (the byte strings rule; a JSON profile cannot spell one today, and every
+# reader decodes it all the same); "unknown_tier" carries a tier the description
+# does not list (rule r3).
+DECLINED_LISTS: dict[str, list[dict[str, str]]] = {
+    "none": [],
+    "two": [
+        {"name": "final", "tier": "result-content"},
+        {"name": "aggregate_functions_null_for_empty", "tier": "predicate"},
+    ],
+    "name_b64": [{"name_b64": "eP95", "tier": "predicate-unflipped"}],
+    "unknown_tier": [{"name": "x_future_setting", "tier": "x_future_tier"}],
+}
+
+
+def declined_name(entry: dict[str, str]) -> bytes:
+    """An entry's name as bytes, from either of its two forms."""
+    import base64
+
+    return entry["name"].encode("utf-8") if "name" in entry else base64.b64decode(entry["name_b64"], validate=True)
+
+
+def declined_document(sel: str) -> dict:
+    """The schema_description chs_schema_describe answers for selection `sel`:
+    one column, and a server whose profile set each listed name (a plain
+    name's value given back in `settings`)."""
+    entries = DECLINED_LISTS[sel]
+    return {
+        "columns": [{"name": "k", "type": "UInt8", "default_kind": "", "default_expression": ""}],
+        "server": {
+            "timezone": "UTC",
+            "settings": {e["name"]: "1" for e in entries if "name" in e},
+            "filter_declined_settings": entries,
+        },
+    }
+
+
+def declined_message(sel: str) -> bytes | None:
+    """The message chs_filter_create declines with for selection `sel`, naming
+    the list's names in its order; None when the list is empty (no decline)."""
+    entries = DECLINED_LISTS[sel]
+    if not entries:
+        return None
+    names = b", ".join(declined_name(e) for e in entries)
+    head, tail = DECLINED["message"].split("{names}")
+    return head.encode("utf-8") + names + tail.encode("utf-8")
+
+
 # r3, variant "r3-unknown-values" (-DCHS_STUB_R3_VALUES): each document call
 # answers the CLEAN document of its kind (R3_BASE: no unknown member anywhere),
 # or, when the call's first bytes_in parameter is exactly b"!E:" + <id>, that
@@ -492,6 +566,8 @@ def plan(model) -> list[Variant]:
             Variant("r3-unknown-capabilities", (("CHS_STUB_R3_CAPABILITIES", "1"),), "accepted"),
             # Rule r7: whether a batch's filter reached the library.
             Variant("filter-observable", (("CHS_STUB_FILTER_OBSERVABLE", "1"),), "accepted"),
+            # The server's filter-declined settings: see DECLINED above.
+            Variant("declined-settings", (("CHS_STUB_DECLINED_SETTINGS", "1"),), "accepted"),
         ]
         # Rule r6 beats the symbol sweep (public issue #537): ANOTHER
         # fingerprint AND one declared symbol absent. Loader step 4's

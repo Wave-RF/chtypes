@@ -427,6 +427,29 @@ func (r *reader) atMerge(m map[string]any, key, path string) []AtMergeEntry {
 	return out
 }
 
+// declinedSettings reads a server's filter_declined_settings: each entry a
+// name (name or name_b64) and its tier. An unlisted tier is its unknown(n):
+// kept, never a failure (r3).
+func (r *reader) declinedSettings(m map[string]any, key, path string) []DeclinedSetting {
+	arr := r.array(r.field(m, key), path+"."+key)
+	if arr == nil {
+		return nil
+	}
+	out := make([]DeclinedSetting, 0, len(arr))
+	for i, e := range arr {
+		p := fmt.Sprintf("%s.%s[%d]", path, key, i)
+		em := r.object(e, p)
+		if em == nil {
+			return nil
+		}
+		out = append(out, DeclinedSetting{
+			Name: r.name(em, "name", p),
+			Tier: DeclinedTier(r.text(em, "tier", p)),
+		})
+	}
+	return out
+}
+
 // row reads one row document (a chs_preview_row document, or an entry of a
 // batch's rows).
 func (r *reader) row(m map[string]any, path string) RowResult {
@@ -683,9 +706,10 @@ func decodeSchemaDescription(raw []byte) (SchemaDescription, error) {
 	if v := r.field(m, "server"); v != nil {
 		if sm := r.object(v, "$.server"); sm != nil {
 			res.Server = &SchemaServer{
-				Timezone: r.text(sm, "timezone", "$.server"),
-				Settings: r.stringMap(sm, "settings", "$.server"),
-				Macros:   r.stringMap(sm, "macros", "$.server"),
+				Timezone:               r.text(sm, "timezone", "$.server"),
+				Settings:               r.stringMap(sm, "settings", "$.server"),
+				Macros:                 r.stringMap(sm, "macros", "$.server"),
+				FilterDeclinedSettings: r.declinedSettings(sm, "filter_declined_settings", "$.server"),
 			}
 		}
 	}

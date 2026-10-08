@@ -28,18 +28,17 @@ Output-format settings that reach a WHERE (through `formatRow`, `toJSONString` o
 
 This is part of the v2 contract.
 
-A consumer passes the server's changed settings in the server profile (`settings`, see `input:server_profile` in `spec/abi-v2/docs.md`). It refuses to stream when:
+A consumer passes the server's changed settings in the server profile (`settings`, see `input:server_profile` in `spec/abi-v2/docs.md`). Then it must **refuse a tenant whose server describe lists any `filter_declined_settings`, or that changes a `result-content` setting**.
 
-1. any of those settings is one the library DECLINES BY NAME, or
-2. any `result-content` setting is set to a non-default value.
+The server describe is the `server` member of `chs_schema_describe` on any schema created on that server. Its `filter_declined_settings` lists every profile setting this build's filters do not honor in a WHERE, each with its tier from these lists. On such a schema, `chs_filter_create` declines (`CHS_DECLINED`): this is the backstop for a consumer that did not read the list.
 
 A `result-truncate` setting never makes a consumer refuse: it is outside a row verdict's scope, since a stream can deliver rows that a paged SELECT would cut off.
 
-**The lists are documentation of which settings matter. They are not the refuse key.** What the library declines is decided by the library, by name.
+**The lists are documentation of which settings matter. They are not the refuse key.** What the library declines is decided by the library, by name, and listed in `filter_declined_settings`.
 
 <!-- remove-at-v2-lock -->
 
-**Dev-only note.** v2-dev builds that come BEFORE the build that declines by name (its release notice names it) do not decline by name. A consumer testing those builds treats a setting whose `tier` is `predicate`, `predicate-unflipped` or `result-content` as a reason to refuse.
+**Dev-only note.** v2-dev builds before the first one at fingerprint `sha256:28c7445ce6b5c6d0ae33177fd60eb7b3b5654a966c842b8d812aea622824dc72` do not list declined settings: their `server` member has no `filter_declined_settings`, and a dev SDK at that fingerprint or later refuses them (rule r6). A consumer testing those builds treats a setting whose `tier` is `predicate`, `predicate-unflipped` or `result-content` as a reason to refuse.
 
 <!-- /remove-at-v2-lock -->
 

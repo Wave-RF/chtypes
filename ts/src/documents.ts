@@ -34,6 +34,8 @@
 
 import {
   batchOutcomeOf,
+  type DeclinedTier,
+  declinedTierOf,
   type DefaultKind,
   defaultKindOf,
   filterOutcomeOf,
@@ -224,6 +226,14 @@ export interface Column {
   readonly defaultExpr: Buffer;
 }
 
+/** One setting a server's profile sets that this build's filters do not honor in a WHERE: an entry of the server's `filter_declined_settings` (ABI v2). */
+export interface DeclinedSetting {
+  /** The setting's name, as bytes (`name` or `name_b64`). */
+  readonly name: Buffer;
+  /** The tier this build line's WHERE-settings list gives it; one the description does not list is its unknown(n), kept verbatim (rule r3). */
+  readonly tier: DeclinedTier;
+}
+
 /**
  * The server a schema was compiled on, as the library holds it. Its strings are
  * the caller's own profile values given back, so they are plain text.
@@ -235,6 +245,8 @@ export interface SchemaServer {
   readonly settings: Readonly<Record<string, string>> | undefined;
   /** The server's macro set: `undefined` exactly when the profile carried no macros (unknown); present, even `{}`, is the complete set. */
   readonly macros: Readonly<Record<string, string>> | undefined;
+  /** The settings the profile sets that this build's filters do not honor in a WHERE, in the profile's own order; empty when it lists none. A schema on a server that lists any is one `compileFilter` declines (`UnsupportedError`), and a consumer that streams rows refuses such a tenant (`spec/abi-v2/where-settings/README.md`). */
+  readonly filterDeclinedSettings: readonly DeclinedSetting[];
 }
 
 /** What ClickHouse's own TableZnodeInfo resolved for a Replicated engine, fully expanded. Both expand DDL bytes, so both are bytes. */
@@ -622,6 +634,7 @@ export function decodeSchemaDescription(bytes: Uint8Array): SchemaDescription {
       timezone: strOr(doc, so, 'timezone', ''),
       settings: stringMapOf(doc, so, 'settings', '$.server'),
       macros: stringMapOf(doc, so, 'macros', '$.server'),
+      filterDeclinedSettings: declinedSettingsOf(doc, so),
     };
   }
   let replicated: SchemaReplicated | undefined;
@@ -639,6 +652,16 @@ export function decodeSchemaDescription(bytes: Uint8Array): SchemaDescription {
       return { name: nameOf(doc, co, 'name'), type: bytesOr(doc, co, 'type'), defaultKind, defaultExpr: bytesOr(doc, co, 'default_expression') };
     }),
   };
+}
+
+/** A server's `filter_declined_settings`: absent (or `null`) is empty, as in every binding. An unlisted tier is its unknown(n): kept, never a failure (r3). */
+function declinedSettingsOf(doc: string, so: Obj): readonly DeclinedSetting[] {
+  const v = so.filter_declined_settings;
+  if (v === undefined || v === null) return [];
+  return asArray(doc, '$.server.filter_declined_settings', v).map((e) => {
+    const eo = asObject(doc, '$.server.filter_declined_settings[]', e);
+    return { name: nameOf(doc, eo, 'name'), tier: declinedTierOf(strOr(doc, eo, 'tier', '')) };
+  });
 }
 
 /** An object whose values are plain JSON strings: `undefined` when absent, an object (even an empty one) when present, so absent and `{}` stay apart. */

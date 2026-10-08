@@ -153,7 +153,7 @@
             "required": ["value"],
             "propertyNames": {"pattern": "^[a-z][a-z0-9_]*$"},
             "properties": {
-              "value": {"type": "string", "pattern": "^[A-Za-z0-9_]*$", "description": "The exact string a document carries: ASCII letters, digits and underscores, and possibly empty (ClickHouse's own spellings, such as a default kind, are kept as ClickHouse spells them)."}
+              "value": {"type": "string", "pattern": "^([A-Za-z0-9_]+(-[A-Za-z0-9_]+)*)?$", "description": "The exact string a document carries: ASCII letters, digits and underscores, with a single hyphen allowed between two words, and possibly empty (ClickHouse's own spellings, such as a default kind, are kept as ClickHouse spells them, and a WHERE-settings tier as the artifact producer's lists spell it, such as predicate-unflipped). Every binding spells a hyphen as a word boundary in its identifiers."}
             }
           }
         }

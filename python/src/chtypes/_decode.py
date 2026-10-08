@@ -28,7 +28,16 @@ import json
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from ._abi2._vocab import DefaultKind, FilterOutcome, MergeReason, Outcome, Reason, Source, Verdict
+from ._abi2._vocab import (
+    DeclinedTier,
+    DefaultKind,
+    FilterOutcome,
+    MergeReason,
+    Outcome,
+    Reason,
+    Source,
+    Verdict,
+)
 from .errors import ArtifactCorruptError, internal
 from .results import (
     AtMergeEntry,
@@ -37,6 +46,7 @@ from .results import (
     Capabilities,
     Column,
     Computed,
+    DeclinedSetting,
     DiscoveredColumn,
     Discovery,
     EngineCell,
@@ -493,11 +503,22 @@ def _string_map(obj: Mapping[str, Any], key: str, where: str) -> dict[str, str] 
     return out
 
 
+def _declined_setting(obj: dict[str, Any], where: str) -> DeclinedSetting:
+    # An unlisted tier is its unknown(n): kept, never a failure (rule r3).
+    return DeclinedSetting(
+        name=_name(obj, "name", where),
+        tier=DeclinedTier.of(_text(obj, "tier", where)),
+    )
+
+
 def _server(obj: dict[str, Any], where: str) -> SchemaServer:
     return SchemaServer(
         timezone=_text(obj, "timezone", where),
         settings=_string_map(obj, "settings", where) or {},
         macros=_string_map(obj, "macros", where),
+        filter_declined_settings=_objects(
+            obj, "filter_declined_settings", where, _declined_setting
+        ),
     )
 
 

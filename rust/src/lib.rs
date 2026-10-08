@@ -112,8 +112,8 @@ mod server;
 mod setup;
 
 pub use abi2::vocab_gen::{
-    DefaultKind, DiscoverQueryParam, DocFlags, FilterOutcome, Format, MergeReason, Outcome, Reason,
-    Source, Status, Verdict, reason, source, status,
+    DeclinedTier, DefaultKind, DiscoverQueryParam, DocFlags, FilterOutcome, Format, MergeReason,
+    Outcome, Reason, Source, Status, Verdict, reason, source, status,
 };
 pub use error::{CacheFault, CallError, Error, Refusal, Result};
 pub use library::Library;
@@ -121,9 +121,10 @@ pub use ocifetch::ensure::Resolved;
 pub use raw::RawText;
 pub use registry::{FetchOptions, Registry, RegistryOptions, cache_root, search_dirs};
 pub use result::{
-    AtMergeEntry, BatchResult, BuildInfo, Capabilities, Column, Computed, DiscoveredColumn,
-    Discovery, EngineCell, ErrorCodeEntry, ErrorCodeTable, FilterResult, FilterRowError, Framing,
-    Header, RowResult, SchemaDescription, SchemaReplicated, SchemaServer, Span, Transform, Value,
+    AtMergeEntry, BatchResult, BuildInfo, Capabilities, Column, Computed, DeclinedSetting,
+    DiscoveredColumn, Discovery, EngineCell, ErrorCodeEntry, ErrorCodeTable, FilterResult,
+    FilterRowError, Framing, Header, RowResult, SchemaDescription, SchemaReplicated, SchemaServer,
+    Span, Transform, Value,
 };
 pub use schema::{
     Block, CompileOptions, EvalOptions, Filter, FilterOptions, RowOptions, RowsOptions, Schema,

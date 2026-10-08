@@ -840,7 +840,9 @@ _MEMBER_NAMES: dict[tuple[str, str], str] = {
 
 
 def _member(vocab: str, value: str) -> str:
-    name = _MEMBER_NAMES.get((vocab, value), value.upper())
+    # A hyphen (declined_tier's `predicate-unflipped`) is a word boundary, as an
+    # underscore is; no ABI v1 value carries one, so its file is unchanged.
+    name = _MEMBER_NAMES.get((vocab, value), value.upper().replace("-", "_"))
     if not name.isidentifier():
         raise ValueError(f"python.py: {vocab} value {value!r} has no identifier spelling")
     return name
@@ -1084,6 +1086,7 @@ _PY_VOCAB = {
     "discover_query_param": "DiscoverQueryParam",
     "default_kind": "DefaultKind",
     "merge_reason": "MergeReason",
+    "declined_tier": "DeclinedTier",
 }
 
 _KNOWN_PROPERTY = (
@@ -1188,10 +1191,10 @@ def render_vocab_v2(model: Model) -> str:
     parts.append(
         f'"""The Python binding\'s generated vocabularies, from spec/abi-v{model.major}/abi.json: the C\n'
         "enums (`Format`, `Status`), the document vocabularies (`Outcome`, `FilterOutcome`,\n"
-        "`Verdict`, `DefaultKind`, `MergeReason`, `Reason`, `Source`, `DiscoverQueryParam`) with the\n"
-        "facts the description attaches to each value (`Format.ch_name`, `Reason` lossy,\n"
-        "`Source` is_stored, `Verdict.answered`), and the `DocFlags` groups. No other file in\n"
-        "this package keeps a copy of any of it.\n"
+        "`Verdict`, `DefaultKind`, `MergeReason`, `DeclinedTier`, `Reason`, `Source`,\n"
+        "`DiscoverQueryParam`) with the facts the description attaches to each value\n"
+        "(`Format.ch_name`, `Reason` lossy, `Source` is_stored, `Verdict.answered`), and the\n"
+        "`DocFlags` groups. No other file in this package keeps a copy of any of it.\n"
         "\n"
         f"Rule r3 (spec/abi-v{model.major}/docs.md): every vocabulary has an unknown(n) member, and a\n"
         "value the description does not list reads as it, carrying the raw value, for that\n"
@@ -1316,6 +1319,17 @@ def render_vocab_v2(model: Model) -> str:
             "merge_reason",
             "What a merge would do to one row of the part an INSERT writes, as a batch's\n"
             "    `at_merge` reports it.",
+        )
+    )
+    parts.append("")
+    parts.append("")
+    parts.append(
+        _str_enum_v2(
+            model,
+            "DeclinedTier",
+            "declined_tier",
+            "The WHERE-settings tier of a setting a server profile sets and this build's\n"
+            "    filters do not honor in a WHERE, as a `DeclinedSetting` reports it.",
         )
     )
     parts.append("")
