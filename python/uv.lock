@@ -74,7 +74,7 @@ wheels = [
 
 [[package]]
 name = "chtypes"
-version = "2.0.0.dev4"
+version = "2.0.0.dev5"
 source = { editable = "." }
 dependencies = [
     { name = "backports-zstd", marker = "python_full_version < '3.14'" },
