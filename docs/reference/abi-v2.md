@@ -198,7 +198,7 @@ A body parsed once under a schema, for evaluating many filters without parsing a
 The verdict of every fallible call, in five values whose numbering is frozen.
 
 - `CHS_OK`: the call succeeded and its outputs are set.
-- `CHS_REJECTED`: ClickHouse's own refusal, with its own code, name and message, which a server would also give. A deep input the server's stack check refuses (an expression, a statement, a body, a document, a settings or profile object nested deeper than the calling thread's stack allows) is `CHS_REJECTED` with ch_code 306, TOO_DEEP_RECURSION, at every entry point that takes one, never `CHS_INTERNAL`.
+- `CHS_REJECTED`: ClickHouse's own refusal, with its own code, name and message, which a server would also give. A call's compile-time input that the server's stack check refuses for depth (an expression, a statement, a type, a settings or profile object nested deeper than the calling thread's stack allows) is `CHS_REJECTED` with ch_code 306, TOO_DEEP_RECURSION, never `CHS_INTERNAL`. A body the server would refuse for depth is not a call status: like every refused body, it is answered in the call's document with code 306, and the call is `CHS_OK`.
 - `CHS_DECLINED`: this build will not answer; a server might accept. Never scored as agreement.
 - `CHS_INVALID_ARGUMENT`: caller misuse, such as a NULL pointer with a nonzero length, a wrong-kind, freed or cross-library handle, or a NULL required out-parameter.
 - `CHS_INTERNAL`: a guarded exception inside the library, which is a library bug.
