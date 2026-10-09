@@ -2,7 +2,7 @@
 
 A filter compiles **one boolean expression** against a schema's physical columns and answers it per row, using ClickHouse's own comparison functions. It is the read-side twin of the insert path: same rows, same artifact, different question. The **block twin** is its parse-once variant: parse a body into a block once, then evaluate several filters against that same block.
 
-> **Enforcement gate.** A filter verdict is enforcement-grade against a ClickHouse server of the same line on the same operating system and architecture, for the `(line, platform)` pairs a CHANGELOG entry has lifted; `26.3` on `darwin-arm64` is not yet covered, and a server that refuses every query is outside the guarantee. See [`limitations.md` → Filters are enforcement-grade against a same-platform server, per lifted (line, platform)](../limitations.md#filters-are-enforcement-grade-against-a-same-platform-server-per-lifted-line-platform).
+> **Enforcement gate.** A filter verdict is enforcement-grade against a ClickHouse server of the same line on the same operating system and architecture, for the `(line, platform)` pairs a CHANGELOG entry has lifted; `26.3` on `darwin-arm64` is not covered (a documented platform limitation), and a server that refuses every query is outside the guarantee. See [`limitations.md` → Filters are enforcement-grade against a same-platform server, per lifted (line, platform)](../limitations.md#filters-are-enforcement-grade-against-a-same-platform-server-per-lifted-line-platform).
 
 ## WHERE-side semantics, which are not insert-side semantics
 

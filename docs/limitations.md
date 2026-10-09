@@ -10,11 +10,13 @@ When you get one, fall back to the server: validate cautiously, forward the row 
 
 **Requirement: run the library on the same operating system and CPU architecture as your ClickHouse server.** That is the caller's responsibility; the library does not detect or decline a mismatch. Its answers, filter verdicts included, are guaranteed relative to a ClickHouse server on the same platform.
 
-The darwin artifacts give exactly the answers ClickHouse itself gives on macOS, on every supported line. The artifact producer measured this against official macOS ClickHouse binaries.
+The darwin artifacts give exactly the answers ClickHouse itself gives on macOS, on every supported line, with one exception on 26.3 (deep nesting, below). The artifact producer measured this against official macOS ClickHouse binaries.
 
 **On 26.7, 26.8 and 26.9,** ClickHouse agrees on every platform (macOS, Linux amd64, Linux arm64), float text included. On these lines, a mismatch of platform changes nothing.
 
 **On 26.3,** ClickHouse's own parse of Float values from text input formats differs across platforms (macOS, Linux amd64, Linux arm64; mostly 1 ULP), and none is correctly rounded. So stored Float values, and comparisons involving them, can differ across architectures, and a verdict computed on another platform can differ from the server's.
+
+**On 26.3, deep nesting** also differs on macOS: the macOS 26.3 server refuses deeply nested expressions and types that the library answers, because its threads have a smaller stack. That is a documented platform limitation of that one pair; the measured band is under [Not covered: `26.3` on `darwin-arm64`](#filters-are-enforcement-grade-against-a-same-platform-server-per-lifted-line-platform).
 
 (An earlier version of this page said every macOS float parse diverged from a server. That was measured on 25.8 and no longer holds on any supported line.)
 
@@ -57,14 +59,14 @@ The rules genuinely differ: `256` into a `UInt8` column stores `0`, while `x = 2
 
 **The gate lifts per `(ClickHouse line, platform)`, never all at once.** Eleven pairs are lifted:
 
-| line   | `linux-amd64` | `linux-arm64` | `darwin-arm64`  |
-| ------ | ------------- | ------------- | --------------- |
-| `26.3` | lifted        | lifted        | not yet covered |
-| `26.7` | lifted        | lifted        | lifted          |
-| `26.8` | lifted        | lifted        | lifted          |
-| `26.9` | lifted        | lifted        | lifted          |
+| line   | `linux-amd64` | `linux-arm64` | `darwin-arm64`                              |
+| ------ | ------------- | ------------- | ------------------------------------------- |
+| `26.3` | lifted        | lifted        | not covered: documented platform limitation |
+| `26.7` | lifted        | lifted        | lifted                                      |
+| `26.8` | lifted        | lifted        | lifted                                      |
+| `26.9` | lifted        | lifted        | lifted                                      |
 
-**Not yet covered: `26.3` on `darwin-arm64`.** Deep nesting that the macOS 26.3 server refuses (306, its smaller thread stack) is answered by the library. That pair is under review and stays under the gate: run it beside your existing enforcement and compare, do not replace.
+**Not covered: `26.3` on `darwin-arm64`, a documented platform limitation.** The macOS 26.3 server runs its connection threads on a 512 KiB stack, and ClickHouse's own stack check refuses deep nesting there with 306 (TOO_DEEP_RECURSION): nested lambdas from a depth between about 27 and 54, depending on their shape; `if`, `multiIf` and `CASE` chains, and `NOT`/`OR` chains in a `DEFAULT`, from depth 54; and `Array(…)` types nested 368 deep. The library answers or accepts those inputs. The band is fixed and measured, and specific to the 26.3 macOS server build: on 26.7 and later the macOS server matches the library, as every Linux pair does. The pair is not lifted and has no CHANGELOG lift entry: run it beside your existing enforcement and compare, do not replace, or refuse inputs nested that deep yourself. See also [macOS artifacts match ClickHouse on macOS; on 26.3, match the server's platform](#macos-artifacts-match-clickhouse-on-macos-on-263-match-the-servers-platform).
 
 **Each lift is announced in the CHANGELOG, by `(line, platform)`, as its own entry** — the fixed shape is in [`CONTRIBUTING.md`](../CONTRIBUTING.md#changelog-entries). A pair stays gated until its own CHANGELOG entry says otherwise.
 
