@@ -1,0 +1,875 @@
+{
+ "schema": "chtypes.filter-declines/1",
+ "generator": "chtypes filter-declines generator",
+ "lines": [
+  "26.3",
+  "26.7",
+  "26.8",
+  "26.9"
+ ],
+ "declines": [
+  {
+   "id": "param-not-string",
+   "class": "create-decline",
+   "trigger": "a query parameter whose JSON value is not a string",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "none",
+   "description": "A server receives every query parameter as text, so a JSON null, boolean, number, array or object has no meaning; the create is declined and names the parameter. Pass the parameter's text as a JSON string."
+  },
+  {
+   "id": "non-reproducible-expression",
+   "class": "create-decline",
+   "trigger": "an expression that reads the clock or calls a non-deterministic or stateful function",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "none",
+   "description": "A server would evaluate now(), rand() or a server constant with its own values, so no verdict computed here could be trusted; the scan runs after parameter substitution, so a parameter cannot smuggle one in."
+  },
+  {
+   "id": "expression-nul-byte",
+   "class": "create-decline",
+   "trigger": "a filter expression that holds a NUL byte",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "none",
+   "description": "The compile reads the expression as a C string, and a NUL would cut it short, which could admit more rows; the create is declined until a counted compile path exists."
+  },
+  {
+   "id": "settings-not-json-object",
+   "class": "create-decline",
+   "trigger": "a settings input that is not a JSON object",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "none",
+   "description": "The filter's settings must be a JSON object of string values; any other JSON text is declined rather than read as no settings."
+  },
+  {
+   "id": "server-profile-setting",
+   "class": "create-decline",
+   "trigger": "a schema whose server profile sets a setting the filter's WHERE cannot honor",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "when the setting is honored (a reviewed change per setting)",
+   "description": "A schema whose server profile sets a setting that a server's WHERE would read, and that this build does not apply, has no filter at all; the names are listed in the schema description under server.filter_declined_settings."
+  },
+  {
+   "id": "session-timezone-unattachable",
+   "class": "create-decline",
+   "trigger": "a filter whose session_timezone cannot be attached or under which it does not compile",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_create",
+    "chs_filter_eval_body",
+    "chs_filter_eval_block"
+   ],
+   "retirement": "none",
+   "description": "A filter is compiled and evaluated under one session_timezone, as a server analyzes a WHERE per query; where that zone cannot be attached, or the expression does not compile under it, the create (or the evaluation) is declined rather than answered in another zone."
+  },
+  {
+   "id": "library-not-initialized",
+   "class": "create-decline",
+   "trigger": "a filter created before the library process is initialized",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "none",
+   "description": "The filter compile needs the process context that initialization builds; without it the create is declined."
+  },
+  {
+   "id": "alias-expansion",
+   "class": "decline",
+   "trigger": "a WHERE that refers to an alias it defines",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "when the new-analyzer filter path ships",
+   "description": "A server expands such a WHERE and checks its expanded size with an analyzer count this build cannot run, so every row is declined; an alias that is defined and never used is answered."
+  },
+  {
+   "id": "index-hint",
+   "class": "decline",
+   "trigger": "a filter that calls indexHint, anywhere in the expression",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "when the new-analyzer filter path ships",
+   "description": "indexHint is 1 on every row it is evaluated on, and the server's answer is the granules its primary-key analysis keeps, which no row-level verdict can reproduce; every row is declined."
+  },
+  {
+   "id": "array-exists-fixed-string",
+   "class": "decline",
+   "trigger": "arrayExists over a lambda that compares an element with a constant, where the element or the constant holds a FixedString",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.7"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "when 26.7 leaves the supported set",
+   "description": "On the lines where the server rewrites such an arrayExists to has(), and has() compares a FixedString with a String differently from equals(), the server answers differently with the rewrite on and off; every row is declined."
+  },
+  {
+   "id": "projection-filter-type",
+   "class": "decline",
+   "trigger": "a filter whose result type the projection pass refuses, over a schema that declares a projection",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "when 26.3 leaves the supported set",
+   "description": "On the lines where the server's projection pass tests the filter's type more strictly than its WHERE does, a table with a projection refuses the query for such a type; this build cannot run that pass, so every row is declined."
+  },
+  {
+   "id": "preimage-zone",
+   "class": "decline",
+   "trigger": "a comparison of a date function of a zone-less DateTime or DateTime64 column with a constant, evaluated in a zone that is not the column's",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "when the last declining line leaves the supported set",
+   "description": "On the lines where the server's preimage rewrite parses the range bounds in the query's zone while the unrewritten comparison reads the column's zone, the server disagrees with itself whenever the zones differ; every row is declined in that case."
+  },
+  {
+   "id": "setting-new-analyzer-or-planner",
+   "class": "decline",
+   "trigger": "a setting the server's new analyzer or planner reads, named in the filter's settings, the schema's profile or the defaults",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "when the setting is honored (a reviewed change per setting)",
+   "description": "The setting is read by passes or plan steps that the filter path does not run, so this build cannot apply it as the server does; every row is declined and the setting is named in unsupported_settings."
+  },
+  {
+   "id": "setting-format-field",
+   "class": "decline",
+   "trigger": "a setting that sets a FormatSettings field the conversion and formatting functions read",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "when the setting is honored (a reviewed change per setting)",
+   "description": "No measured case shows the filter path applying the field as the server does; every row is declined and the setting is named in unsupported_settings."
+  },
+  {
+   "id": "setting-not-shown-honored",
+   "class": "decline",
+   "trigger": "a setting that a WHERE could read and that no measured case shows this build applying as the server does",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "when the setting is honored (a reviewed change per setting)",
+   "description": "The safe default for a listed setting without a reviewed classification; every row is declined and the setting is named in unsupported_settings."
+  },
+  {
+   "id": "setting-analyzer-switch",
+   "class": "decline",
+   "trigger": "a setting that switches the analyzer or the parser a server runs the query through",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "when the setting is honored (a reviewed change per setting)",
+   "description": "This build compiles a filter on the old analyzer's expression path only; every row is declined and the setting is named in unsupported_settings."
+  },
+  {
+   "id": "setting-result-content",
+   "class": "decline",
+   "trigger": "a setting that makes a SELECT return rows chosen by content beyond the WHERE",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "when the setting is honored (a reviewed change per setting)",
+   "description": "A verdict over the row alone cannot follow a SELECT whose result is chosen by an additional filter or similar; every row is declined and the setting is named in unsupported_settings."
+  },
+  {
+   "id": "setting-aggregate-rename",
+   "class": "decline",
+   "trigger": "a setting that renames aggregate functions to their OrNull form",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "when the setting is honored (a reviewed change per setting)",
+   "description": "A filter holds no aggregate and no measured case shows this build following the rename; every row is declined and the setting is named in unsupported_settings."
+  },
+  {
+   "id": "setting-projection-plan",
+   "class": "decline",
+   "trigger": "a setting that controls projection use in the server's plan",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "when the setting is honored (a reviewed change per setting)",
+   "description": "The filter path runs no plan; every row is declined and the setting is named in unsupported_settings."
+  },
+  {
+   "id": "setting-preimage-pass",
+   "class": "decline",
+   "trigger": "the setting that turns the server's preimage rewrite on or off",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "when the setting is honored (a reviewed change per setting)",
+   "description": "The filter path runs no such pass, and the preimage zone decline covers the lines where the pass matters; every row is declined and the setting is named in unsupported_settings."
+  },
+  {
+   "id": "setting-alias-shadow",
+   "class": "decline",
+   "trigger": "the setting that makes an alias shadow a column in identifier resolution",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "when the setting is honored (a reviewed change per setting)",
+   "description": "The server's analyzer resolves the shadowing and this build does not; every row is declined and the setting is named in unsupported_settings."
+  },
+  {
+   "id": "setting-compatibility-moves",
+   "class": "decline",
+   "trigger": "a compatibility setting that moves a listed setting outside the set the build honors",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "when the moved setting is honored (a reviewed change per setting)",
+   "description": "The compatibility setting rewrites the default of a listed setting that this build does not apply; every row is declined and the message names the moved setting."
+  },
+  {
+   "id": "ast-limits",
+   "class": "server-check",
+   "trigger": "a WHERE whose query exceeds the server's size, depth or AST limits",
+   "code": {
+    "chs": "CHS_REJECTED",
+    "ch": [
+     168,
+     167,
+     306,
+     62
+    ]
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "none",
+   "description": "The server's own parser and AST checks run over the smallest query that carries the WHERE, with the parameters substituted; the server's code and message are returned. A caller's own query is longer and meets the limits sooner."
+  },
+  {
+   "id": "type-gates",
+   "class": "server-check",
+   "trigger": "a CAST or :: to a type the server's default type gates refuse",
+   "code": {
+    "chs": "CHS_REJECTED",
+    "ch": [
+     455,
+     44
+    ]
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "none",
+   "description": "The filter is analyzed under a copy of the context whose type gates are the tree's own defaults, so a suspicious LowCardinality, a large FixedString, similar Variant types or a gated Nullable(Tuple) is refused as a stock server refuses it."
+  },
+  {
+   "id": "like-trailing-escape",
+   "class": "server-check",
+   "trigger": "a LIKE-family constant pattern that ends in an unescaped backslash",
+   "code": {
+    "chs": "CHS_REJECTED",
+    "ch": [
+     25
+    ]
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "when the new-analyzer filter path ships",
+   "description": "The server's own pattern conversion refuses such a pattern for the whole query, unless a rewrite to startsWith or endsWith applies on that line; the same conversion runs at create and its error is returned."
+  },
+  {
+   "id": "regex-pattern",
+   "class": "server-check",
+   "trigger": "a regular-expression function whose constant pattern is invalid",
+   "code": {
+    "chs": "CHS_REJECTED",
+    "ch": [
+     427,
+     36
+    ]
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "when the new-analyzer filter path ships",
+   "description": "The function runs once at create over one row that holds the haystack type's default; its own exception, from the pattern's compile, refuses the filter."
+  },
+  {
+   "id": "result-type",
+   "class": "server-check",
+   "trigger": "a filter whose result type cannot be used as a WHERE",
+   "code": {
+    "chs": "CHS_REJECTED",
+    "ch": [
+     59
+    ]
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "none",
+   "description": "A server refuses such a filter for the whole query, before it reads a row; the server's own check runs at create and its code and message are returned."
+  },
+  {
+   "id": "query-parameter",
+   "class": "server-check",
+   "trigger": "a query parameter that is unbound, or whose value does not parse as its declared type",
+   "code": {
+    "chs": "CHS_REJECTED",
+    "ch": [
+     456,
+     457
+    ]
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "none",
+   "description": "The server's own substitution runs before analysis; an unbound name is its UNKNOWN_QUERY_PARAMETER and an unparseable value is its BAD_QUERY_PARAMETER or the serialization's own error."
+  },
+  {
+   "id": "expression-refused",
+   "class": "server-check",
+   "trigger": "an expression the server's analyzer refuses",
+   "code": {
+    "chs": "CHS_REJECTED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "none",
+   "description": "An unknown identifier, an unknown function or a type error is the server's own refusal with its code and message, returned at create."
+  },
+  {
+   "id": "predicate-threw",
+   "class": "server-check",
+   "trigger": "a predicate that throws on a row's values",
+   "code": {
+    "chs": "ch",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "A server fails the whole query when its WHERE throws on any row; here the row is an `e` verdict that carries the server's code and message, and a caller enforcing security fails closed on it."
+  },
+  {
+   "id": "call-setting-session-timezone",
+   "class": "call-decline",
+   "trigger": "a per-call session_timezone the call cannot attach or whose constant folds it moves",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "The whole call is unsupported with the setting named, so every row of an attached filter is declined; the rows were read in a context the call did not ask for."
+  },
+  {
+   "id": "call-setting-process-only-key",
+   "class": "call-decline",
+   "trigger": "a process-only chtypes_ setting passed with a call",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "The evaluation-budget and custom-prefix keys are set for the process, not per call; passing one with a call declines the whole call and names it."
+  },
+  {
+   "id": "call-setting-clock-value",
+   "class": "call-decline",
+   "trigger": "a clock setting whose value is not an integer",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "The clock keys take an integer of nanoseconds; any other value declines the whole call and names the key."
+  },
+  {
+   "id": "call-setting-materialized-list",
+   "class": "call-decline",
+   "trigger": "an INSERT column list that names a MATERIALIZED column",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "A server admits a MATERIALIZED column in the list only under insert_allow_materialized_columns, which this build does not model; the whole call is unsupported and the setting is named."
+  },
+  {
+   "id": "call-setting-unappliable",
+   "class": "call-decline",
+   "trigger": "a default, server-profile or schema-profile setting that the build fails to apply",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "A setting that passed the checks at the time it was set but fails to apply when a call resolves its settings is recorded as unsupported instead of being dropped; the whole call is declined."
+  },
+  {
+   "id": "preview-batch-zone-mismatch",
+   "class": "call-decline",
+   "trigger": "chs_preview_batch with a filter whose create zone differs from the batch's zone",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "One parse evaluates the attached filter in the batch's zone only, so a pairing with a different create zone is declined; parse the body with chs_block_create and evaluate with chs_filter_eval_block instead."
+  },
+  {
+   "id": "batch-not-accepted",
+   "class": "batch-precedence",
+   "trigger": "a body whose batch outcome is rejected, unsupported or accepted_poisoned",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "A server stores none of a refused body's rows, an unsupported batch is not the server's answer, and a poisoned one stores a value no SELECT reads back; every row is declined and the document's outcome mirrors the batch's."
+  },
+  {
+   "id": "row-not-storable",
+   "class": "row-decline",
+   "trigger": "a row that cannot be stored: it is rejected, skipped, unsupported or poisoned, or its stored view cannot be built",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "A row that cannot exist in the table has no WHERE truth, and a poisoned value is unreadable by the server itself; the row is declined with its own reason."
+  },
+  {
+   "id": "drawn-value",
+   "class": "row-decline",
+   "trigger": "a filter that reads a column whose value in this row the library drew itself from a clock or a generator",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "The library and the server each compute their own clock read or generated value, so a filter that reads such a column has no answer for a row that omitted it; supply the value to get a verdict."
+  },
+  {
+   "id": "admission-envelope",
+   "class": "row-decline",
+   "trigger": "an evaluation that exceeds the admission memory or wall budget",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "A filter is tenant-authored code; an evaluation that trips the envelope is declined for that row, never reported as an error or as false."
+  }
+ ]
+}
