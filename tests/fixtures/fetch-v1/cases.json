@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "source": {
-    "generator_commit": "ddab6b8d6c6c042a9b729076ff3c664a13c8ce62",
+    "generator_commit": "742a060c64e9f5d10af56d52287769eb6f31d97b",
     "go_sum_sha256": "e998462ee1660f7d0b42c45fd0e16ddef8c688e81aaa22c466ada3c69565eec9"
   },
   "cases": [
@@ -7638,6 +7638,60 @@
           "sha256:04c5dc762ea2d565054ccd112c279bfeb6de9b41afc83863ae8f9a829263e529"
         ],
         "message_contains": "no published build for this SDK's fingerprint 6b9cf343c1a27657ae1abb846b206d5a4abcd0e220cf98cef2538cc09e7cc9df; newest published on this channel is b60d9a4c4b6577df1dbfe62cf497d7e7f16868fe1701b993a28a754af57b0886 (build 20261005.120000)",
+        "message_excludes": []
+      }
+    },
+    {
+      "id": "fp-ahead-cached-own-fp",
+      "tree": "dev-alias",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "dev-alias-own-cached-alias-expired",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null
+      },
+      "request": {
+        "spelling": "26.8",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": "6b9cf343c1a27657ae1abb846b206d5a4abcd0e220cf98cef2538cc09e7cc9df"
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_ARTIFACT_UNPUBLISHED",
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": null,
+          "none_matching": [
+            "GET .*/blobs/sha256:583bded76f0cb85b4d1b5cc8d455b29942e4d6d335fd67a92c8c19acce2c02ce"
+          ],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [
+          "sha256:9f5d66fca8a27f4d8b9817780361451d8519a8e1e49065ee506333f16263e3bc"
+        ],
+        "message_contains": "no published build for this SDK's fingerprint 6b9cf343c1a27657ae1abb846b206d5a4abcd0e220cf98cef2538cc09e7cc9df; newest published on this channel is b60d9a4c4b6577df1dbfe62cf497d7e7f16868fe1701b993a28a754af57b0886 (build 20261005.120000); a cached build for this fingerprint (build 20260910.120000) is still usable by open; upgrade the SDK to get newer builds",
         "message_excludes": []
       }
     },

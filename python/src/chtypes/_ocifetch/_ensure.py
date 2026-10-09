@@ -716,7 +716,11 @@ def _ensure_floating(
         # An install of another fingerprint's build, reached through the tag
         # because the registry has none at this SDK's own, is never reported
         # installed (public issue #578): refused before the cache is touched.
-        _channel.ahead_of_registry(alias_absent, existing_record.predicate)
+        _channel.ahead_of_registry(
+            alias_absent,
+            existing_record.predicate,
+            cached_own_build=lambda: _cached_own_build(roots, platform_key, request.spelling),
+        )
         # A NEWER build within the request, installed beside it, is still the
         # answer ("monotonic-warning", docs/guides/fetch-v1.md §9).
         newer = _newer_installed(
@@ -812,7 +816,11 @@ def _ensure_floating(
         # own fingerprint answered 404 on every base, and the tag's build is
         # signed for another. Refused from the signed statement, before the
         # layer is requested, so nothing is downloaded or installed.
-        _channel.ahead_of_registry(alias_absent, predicate)
+        _channel.ahead_of_registry(
+            alias_absent,
+            predicate,
+            cached_own_build=lambda: _cached_own_build(roots, platform_key, request.spelling),
+        )
     newer = _newer_installed(roots, platform_key, predicate, request.spelling)
     if newer is not None:
         newer_dir, newer_record, warning = newer
@@ -1233,6 +1241,25 @@ def with_notes(message: str, notes: Sequence[str]) -> str:
     if not notes:
         return message
     return f"{message}. {' '.join(notes)}"
+
+
+def _cached_own_build(
+    roots: Sequence[Path], platform_key: str, request_spelling: str
+) -> str | None:
+    """The build id of the newest cached record of this SDK's OWN fingerprint
+    that answers the request (`resolve_installed`'s filter), "" when it names
+    none, or None when the cache holds no such record (public issue #581)."""
+    candidates = [
+        record
+        for _dir, record in list_verified_records(roots)
+        if record.platform == platform_key
+        and version_within_request(record.version, request_spelling)
+        and _channel.visible(record.predicate)
+    ]
+    if not candidates:
+        return None
+    best = max(candidates, key=lambda r: (spelling_components(r.version), r.build))
+    return best.build or ""
 
 
 def resolve_installed(request: Request, platform: str, options: Options) -> Resolved | None:

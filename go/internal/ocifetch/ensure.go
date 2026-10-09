@@ -518,7 +518,7 @@ func (s *session) resolveAndInstall(ctx context.Context, ro resolvedOptions, l *
 	// none at this SDK's own, is never reported installed: it is refused
 	// before the cache is touched (aheadOfRegistry; public issue #578).
 	if rec, dir, ok := readInstalledRecord(l, manifestDigest); ok {
-		if err := ro.ch.aheadOfRegistry(aliasAbsent, rec.Predicate, req.Spelling, platform.Key); err != nil {
+		if err := ro.ch.aheadOfRegistry(l, aliasAbsent, rec.Predicate, req.Spelling, platform.Key); err != nil {
 			return nil, nil, err
 		}
 		if err := l.writeBlob(desc.Digest, manifestBody); err != nil {
@@ -544,7 +544,7 @@ func (s *session) resolveAndInstall(ctx context.Context, ro resolvedOptions, l *
 	// for another. Refused from the signed statement, before the layer is
 	// requested, so nothing is downloaded or installed.
 	if stmt != nil {
-		if err := ro.ch.aheadOfRegistry(aliasAbsent, stmt.Statement.Predicate, req.Spelling, platform.Key); err != nil {
+		if err := ro.ch.aheadOfRegistry(l, aliasAbsent, stmt.Statement.Predicate, req.Spelling, platform.Key); err != nil {
 			return nil, nil, err
 		}
 	}

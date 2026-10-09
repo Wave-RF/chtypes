@@ -372,7 +372,9 @@ fn ensure_online(
         // installed check below and before the layer is requested, so an
         // install of that build is never reported and nothing is downloaded
         // or installed.
-        channel::ahead_of_registry(alias_absent, &predicate)?;
+        channel::ahead_of_registry(alias_absent, &predicate, || {
+            cached_own_build(&res.root, &res.system_dirs, &version_request, &res.platform)
+        })?;
     }
 
     let already = is_fully_installed(&layout::unpacked_dir(&res.root, &descriptor.digest)?)?;
@@ -795,6 +797,37 @@ pub fn with_notes(message: &str, notes: &[String]) -> String {
     } else {
         format!("{message}. {}", notes.join(" "))
     }
+}
+
+/// The build id of the newest cached record of this SDK's OWN fingerprint that
+/// answers the request (`find_installed`'s filter), empty when it names none,
+/// or `None` when the cache holds no such record (public issue #581).
+fn cached_own_build(
+    root: &Path,
+    system_dirs: &[PathBuf],
+    version_request: &VersionRequest,
+    platform: &str,
+) -> Option<String> {
+    let mut best: Option<VerifiedRecord> = None;
+    let dirs = std::iter::once(root).chain(system_dirs.iter().map(PathBuf::as_path));
+    for dir in dirs {
+        for (_, record) in layout::list_verified(dir).unwrap_or_default() {
+            if record.platform != platform
+                || !version_request.matches(&record.version)
+                || !channel::visible(&record.predicate)
+            {
+                continue;
+            }
+            let better = best.as_ref().is_none_or(|b| {
+                (version_key(&record.version), build_key(&record.build))
+                    > (version_key(&b.version), build_key(&b.build))
+            });
+            if better {
+                best = Some(record);
+            }
+        }
+    }
+    best.map(|r| r.build)
 }
 
 /// `resolve_installed(request, platform, options)`: never touches the
