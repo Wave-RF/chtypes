@@ -173,6 +173,28 @@
    "description": "A server expands such a WHERE and checks its expanded size with an analyzer count this build cannot run, so every row is declined; an alias that is defined and never used is answered."
   },
   {
+   "id": "lambda-depth",
+   "class": "decline",
+   "trigger": "a filter whose lambdas nest more than 64 deep, each inside the body of the one before",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "when the new-analyzer filter path ships",
+   "description": "A server's planner refuses such a WHERE with 80 (INCORRECT_QUERY) while it builds the WHERE's actions from its analyzer's query tree, a step this build does not run, so every row is declined. A lambda passed as an array argument, outside another lambda's body, adds no depth."
+  },
+  {
    "id": "index-hint",
    "class": "decline",
    "trigger": "a filter that calls indexHint, anywhere in the expression",
@@ -212,6 +234,65 @@
    ],
    "retirement": "when 26.7 leaves the supported set",
    "description": "On the lines where the server rewrites such an arrayExists to has(), and has() compares a FixedString with a String differently from equals(), the server answers differently with the rewrite on and off; every row is declined."
+  },
+  {
+   "id": "array-exists-numeric",
+   "class": "decline",
+   "trigger": "arrayExists over a lambda that compares an element with a constant, where the element and the constant are different native number types that has() and equals() compare differently",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.7",
+    "26.8"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "when 26.7 and 26.8 leave the supported set",
+   "description": "On the lines where the server rewrites such an arrayExists to has() by default, and has() compares two native numbers with a plain machine comparison, a negative value can match a large unsigned constant or an integer a float; every row is declined."
+  },
+  {
+   "id": "fixed-const-header",
+   "class": "decline",
+   "trigger": "a filter that is constant false over the server's empty header because length() of a FixedString or QBit, or a fixed-to-constant CRC, is 0 there",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.7"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "when 26.3 and 26.7 leave the supported set",
+   "description": "On the lines where length() of a FixedString or QBit is 0 over the server's empty header, a filter that is constant false there returns no row when the server's WHERE stays a WHERE and the matching rows when the server moves it to PREWHERE; which one runs is the server's plan, so every row is declined."
+  },
+  {
+   "id": "fixed-const-block",
+   "class": "decline",
+   "trigger": "a filter that calls CRC32, CRC32IEEE or CRC64 over a FixedString",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "when 26.3 leaves the supported set",
+   "description": "On the lines where a CRC over a FixedString answers every row of a block with the CRC of the block's first row, a batch evaluated as one block gives a row another row's answer; every row of such a filter is declined."
   },
   {
    "id": "projection-filter-type",
@@ -318,6 +399,28 @@
    ],
    "retirement": "when the setting is honored (a reviewed change per setting)",
    "description": "The safe default for a listed setting without a reviewed classification; every row is declined and the setting is named in unsupported_settings."
+  },
+  {
+   "id": "setting-beyond-availability",
+   "class": "decline",
+   "trigger": "a setting whose effect goes beyond permitting a function, a type or a form to be named, named in the filter's settings, the schema's profile or the defaults",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "when the setting is honored (a reviewed change per setting)",
+   "description": "The setting changes a value, a type, a parse, a plan or an evaluation, not only what may be named, and no measured case shows this build applying it as the server does; every row is declined and the setting is named in unsupported_settings."
   },
   {
    "id": "setting-analyzer-switch",
@@ -499,6 +602,31 @@
    "description": "The server's own parser and AST checks run over the smallest query that carries the WHERE, with the parameters substituted; the server's code and message are returned. A caller's own query is longer and meets the limits sooner."
   },
   {
+   "id": "stack-depth",
+   "class": "server-check",
+   "trigger": "an expression, or a document the library walks, nested deeper than the calling thread's stack allows",
+   "code": {
+    "chs": "CHS_REJECTED",
+    "ch": [
+     306
+    ]
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_create",
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "Each recursive walk the library itself writes runs the server's own stack check first: once the calling thread has used half its stack, the call is refused with the server's code and message (TOO_DEEP_RECURSION) instead of overflowing the stack. The depth this allows depends on the calling thread's stack size; on a small stack it is less than a server's."
+  },
+  {
    "id": "type-gates",
    "class": "server-check",
    "trigger": "a CAST or :: to a type the server's default type gates refuse",
@@ -652,6 +780,74 @@
    ],
    "retirement": "none",
    "description": "A server fails the whole query when its WHERE throws on any row; here the row is an `e` verdict that carries the server's code and message, and a caller enforcing security fails closed on it."
+  },
+  {
+   "id": "every-query-tree-size",
+   "class": "server-check",
+   "trigger": "max_expanded_ast_elements set to 0 at any layer, under which the server refuses every query",
+   "code": {
+    "chs": "CHS_REJECTED",
+    "ch": [
+     36
+    ]
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "none",
+   "description": "The server's analyzer checks the size of every node it resolves, so at 0 it refuses every query; the same check runs at create with the value the layers give, and its code and message are returned. A positive value refuses by the query's shape, which this build does not resolve."
+  },
+  {
+   "id": "temporary-columns-limit",
+   "class": "server-check",
+   "trigger": "max_temporary_columns at a value the filter's own expression actions exceed",
+   "code": {
+    "chs": "CHS_REJECTED",
+    "ch": [
+     165
+    ]
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "none",
+   "description": "The value the layers give is applied to the context the filter's expression actions are built in, so the server's own limit check runs on them at create and its code and message are returned. At 1 the server refuses every query, while a filter over one column is answered here."
+  },
+  {
+   "id": "temporary-non-const-columns-limit",
+   "class": "server-check",
+   "trigger": "max_temporary_non_const_columns at a value the filter's own expression actions exceed while they run",
+   "code": {
+    "chs": "ch",
+    "ch": [
+     166
+    ]
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "The value the layers give is applied to the context the filter's expression actions are built in, so the server's own limit check runs as they execute; each row is an `e` verdict that carries its code and message."
   },
   {
    "id": "call-setting-session-timezone",

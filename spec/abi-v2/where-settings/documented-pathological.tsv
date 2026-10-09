@@ -1,0 +1,36 @@
+# Settings values under which a ClickHouse server refuses a filter's query outright while the library answers its rows,
+# DOCUMENTED as pathological or not modeled. The filter differential's judge counts and prints
+# each such cell under its own heading, and it does not block the gate. Nothing else is excused:
+#   * one row is one EXACT cell: one setting, one value, one line, one layer, and the server's exact refusal code;
+#     the loader refuses a wildcard, a range, a list or a word standing for many values;
+#   * it holds only that cell's OA_REFUSED rows (the library answers `t` where the server refuses with that code);
+#     any other failure of the cell, and any OA_REFUSED, OA or OR on a cell not listed here, still fails the gate;
+#   * a listed cell that stops failing (it agrees with the server, or the corpus no longer holds it) FAILS the gate
+#     until its row is removed, so the list cannot outlive the behavior it records.
+# Adding a row needs the lead's sign-off, as a declined-by-design case does; `ruling` names it.
+# This file is public data: it names no issue, no repository and no internal label.
+# Columns (tab-separated):
+#   setting  the setting's name
+#   value    the exact value, as the filter, the schema or the server profile sets it
+#   line     the ClickHouse line (major.minor)
+#   layer    profile (the server profile), schema (the schema's settings) or filter (the filter's own settings)
+#   server   the server's answer for every row: e:<code>
+#   rule     why the server refuses: refuses-every-query (a pathological configuration, which never returns a row), or
+#            refuses-by-query-size (a size limit the server applies to the query it resolves, which the library does not
+#            build)
+#   ruling   who signed the row off, and when
+# setting	value	line	layer	server	rule	ruling
+max_expanded_ast_elements	1	26.3	profile	e:36	refuses-by-query-size	the lead, 2026-10-09
+max_expanded_ast_elements	1	26.3	filter	e:36	refuses-by-query-size	the lead, 2026-10-09
+max_expanded_ast_elements	1	26.7	profile	e:36	refuses-by-query-size	the lead, 2026-10-09
+max_expanded_ast_elements	1	26.7	filter	e:36	refuses-by-query-size	the lead, 2026-10-09
+max_expanded_ast_elements	1	26.8	profile	e:36	refuses-by-query-size	the lead, 2026-10-09
+max_expanded_ast_elements	1	26.8	filter	e:36	refuses-by-query-size	the lead, 2026-10-09
+max_expanded_ast_elements	1	26.9	profile	e:36	refuses-by-query-size	the lead, 2026-10-09
+max_expanded_ast_elements	1	26.9	filter	e:36	refuses-by-query-size	the lead, 2026-10-09
+page	1	26.8	profile	e:36	refuses-every-query	the lead, 2026-10-09
+page	1	26.8	schema	e:36	refuses-every-query	the lead, 2026-10-09
+page	1	26.8	filter	e:36	refuses-every-query	the lead, 2026-10-09
+page	1	26.9	profile	e:36	refuses-every-query	the lead, 2026-10-09
+page	1	26.9	schema	e:36	refuses-every-query	the lead, 2026-10-09
+page	1	26.9	filter	e:36	refuses-every-query	the lead, 2026-10-09
