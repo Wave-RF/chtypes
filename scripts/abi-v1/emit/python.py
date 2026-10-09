@@ -1087,6 +1087,7 @@ _PY_VOCAB = {
     "default_kind": "DefaultKind",
     "merge_reason": "MergeReason",
     "declined_tier": "DeclinedTier",
+    "declined_layer": "DeclinedLayer",
 }
 
 _KNOWN_PROPERTY = (
@@ -1191,8 +1192,8 @@ def render_vocab_v2(model: Model) -> str:
     parts.append(
         f'"""The Python binding\'s generated vocabularies, from spec/abi-v{model.major}/abi.json: the C\n'
         "enums (`Format`, `Status`), the document vocabularies (`Outcome`, `FilterOutcome`,\n"
-        "`Verdict`, `DefaultKind`, `MergeReason`, `DeclinedTier`, `Reason`, `Source`,\n"
-        "`DiscoverQueryParam`) with the facts the description attaches to each value\n"
+        "`Verdict`, `DefaultKind`, `MergeReason`, `DeclinedTier`, `DeclinedLayer`, `Reason`,\n"
+        "`Source`, `DiscoverQueryParam`) with the facts the description attaches to each value\n"
         "(`Format.ch_name`, `Reason` lossy, `Source` is_stored, `Verdict.answered`), and the\n"
         "`DocFlags` groups. No other file in this package keeps a copy of any of it.\n"
         "\n"
@@ -1328,8 +1329,19 @@ def render_vocab_v2(model: Model) -> str:
             model,
             "DeclinedTier",
             "declined_tier",
-            "The WHERE-settings tier of a setting a server profile sets and this build's\n"
+            "The WHERE-settings tier of a setting a settings layer sets and this build's\n"
             "    filters do not honor in a WHERE, as a `DeclinedSetting` reports it.",
+        )
+    )
+    parts.append("")
+    parts.append("")
+    parts.append(
+        _str_enum_v2(
+            model,
+            "DeclinedLayer",
+            "declined_layer",
+            "The settings layer a `DeclinedSetting` comes from, the highest one that sets\n"
+            "    the name: `defaults`, `server` or `schema`, lowest first.",
         )
     )
     parts.append("")

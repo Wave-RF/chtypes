@@ -4,13 +4,13 @@ This file holds the prose for `spec/abi-v2/abi.json`, one `###` section per hand
 
 Prose is deliberately outside the fingerprint: editing this file never changes `CHS_ABI_FINGERPRINT`, so it never invalidates a built library. The rule that follows is that anything a binding or the artifact producer must act on is structured in `abi.json` (a nullability, an ownership, a status a call may return, a thread class, a vocabulary), never only stated here.
 
-The WHERE-affecting settings lists for each supported ClickHouse line are in `spec/abi-v2/where-settings/` (with a README); they are documentation, outside the fingerprint. The consumer rule (v2.0 and later) is in that README: refuse a tenant whose server describe lists any `filter_declined_settings`, or that changes a `result-content` setting.
+The WHERE-affecting settings lists for each supported ClickHouse line are in `spec/abi-v2/where-settings/` (with a README); they are documentation, outside the fingerprint. The consumer rule (v2.0 and later) is in that README: refuse a tenant if `filter_declined_settings` is non-empty, or a `result-content` setting is changed.
 
 The catalog of every reason the library declines or refuses a filter, per supported line, is in `spec/abi-v2/declines/` (with a README); it is documentation, outside the fingerprint. A consumer maps a decline it receives to its entry there; the verdict model is `filter_verdict` below.
 
 Each section is copied into a C comment, so it may not contain a comment opener or closer, or two question marks in a row.
 
-**UNSTABLE.** `spec/abi-v2/abi.json` declares `stability` `unstable`: generation 2 is being designed, and its fingerprint moves with every change to the description until the lock. It was seeded as generation 1's surface at generation 2; the additions land one pull request at a time. The first is the server profile: the `chs_server` handle, `chs_server_create` and `chs_server_free`, a server and an options document on `chs_schema_create`, and the `server` and `replicated` members of `schema_description`. The second is the batch document's `at_merge` list, with its `merge_reason` vocabulary, and a top-level `unsupported_settings` (public issue #544). The third is the settings a server profile sets that this build's filters do not honor in a WHERE: `schema_description`'s `server.filter_declined_settings`, with its `declined_tier` vocabulary, `chs_filter_create`'s decline on a schema whose server lists any, and the declined names from the other settings layers at evaluation. What generation 2 adds, and what the lock needs, are in public issue #511.
+**UNSTABLE.** `spec/abi-v2/abi.json` declares `stability` `unstable`: generation 2 is being designed, and its fingerprint moves with every change to the description until the lock. It was seeded as generation 1's surface at generation 2; the additions land one pull request at a time. The first is the server profile: the `chs_server` handle, `chs_server_create` and `chs_server_free`, a server and an options document on `chs_schema_create`, and the `server` and `replicated` members of `schema_description`. The second is the batch document's `at_merge` list, with its `merge_reason` vocabulary, and a top-level `unsupported_settings` (public issue #544). The third is the settings a server profile sets that this build's filters do not honor in a WHERE: `schema_description`'s `server.filter_declined_settings`, with its `declined_tier` vocabulary, `chs_filter_create`'s decline on a schema whose server lists any, and the declined names from the other settings layers at evaluation. The fourth makes that one list over every layer known at schema compile (public issue #588): `schema_description`'s top-level `filter_declined_settings`, each entry with its `declined_layer` (`defaults`, `server` or `schema`), replaces `server.filter_declined_settings`, which is removed. **Changed by the fourth:** a declined setting from the `chs_set_defaults` or the schema layer, which the third named at evaluation, now declines `chs_filter_create`, at create time; a filter's own settings and an evaluation's stay evaluation-time. It also lists `CHS_REJECTED` (306, a deep input) in `chs_schema_describe`'s statuses. What generation 2 adds, and what the lock needs, are in public issue #511.
 
 **Platform requirement.** A caller runs the library on the same operating system and CPU architecture as the ClickHouse server it models: every answer is guaranteed relative to a server on the same platform. On 26.7 and later, every platform agrees. On 26.3, ClickHouse's own parse of Float values from text input formats differs across platforms (macOS, Linux amd64, Linux arm64; mostly 1 ULP), so stored Float values, and comparisons involving them, can differ across architectures (`docs/limitations.md`).
 
@@ -118,7 +118,7 @@ A body parsed once under a schema, for evaluating many filters without parsing a
 The verdict of every fallible call, in five values whose numbering is frozen.
 
 - `CHS_OK`: the call succeeded and its outputs are set.
-- `CHS_REJECTED`: ClickHouse's own refusal, with its own code, name and message, which a server would also give.
+- `CHS_REJECTED`: ClickHouse's own refusal, with its own code, name and message, which a server would also give. A deep input the server's stack check refuses (an expression, a statement, a body, a document, a settings or profile object nested deeper than the calling thread's stack allows) is `CHS_REJECTED` with ch_code 306, TOO_DEEP_RECURSION, at every entry point that takes one, never `CHS_INTERNAL`.
 - `CHS_DECLINED`: this build will not answer; a server might accept. Never scored as agreement.
 - `CHS_INVALID_ARGUMENT`: caller misuse, such as a NULL pointer with a nonzero length, a wrong-kind, freed or cross-library handle, or a NULL required out-parameter.
 - `CHS_INTERNAL`: a guarded exception inside the library, which is a library bug.
@@ -143,7 +143,11 @@ A column's default kind, as ClickHouse names it: `DEFAULT`, `MATERIALIZED`, `ALI
 
 ### declined_tier
 
-The tier of a setting a server profile sets and this build's filters do not honor in a WHERE, as `schema_description`'s `server.filter_declined_settings` reports it, spelled as this build line's WHERE-settings list (`spec/abi-v2/where-settings/<line>.json`) spells it: `predicate` (measured to change a verdict), `predicate-unflipped` (read in the WHERE's scope, though no value the flip test tried changed a verdict) or `result-content` (selects rows by content). The lists' other tiers (`execution`, `result-truncate` and `output`) never appear here: those settings are passed through and ignored. A tier added later is a new value, which a reader reads as its `unknown(n)` (rule r3).
+The tier of a setting a settings layer sets and this build's filters do not honor in a WHERE, as `schema_description`'s `filter_declined_settings` reports it, spelled as this build line's WHERE-settings list (`spec/abi-v2/where-settings/<line>.json`) spells it: `predicate` (measured to change a verdict), `predicate-unflipped` (read in the WHERE's scope, though no value the flip test tried changed a verdict) or `result-content` (selects rows by content). The lists' other tiers (`execution`, `result-truncate` and `output`) never appear here: those settings are passed through and ignored. A tier added later is a new value, which a reader reads as its `unknown(n)` (rule r3).
+
+### declined_layer
+
+The settings layer a `schema_description` `filter_declined_settings` entry comes from, the highest one that sets the name: `defaults` (the defaults `chs_set_defaults` set, as `chs_schema_create` captured them), `server` (the server profile's `settings`, `chs_server_create`) or `schema` (`chs_schema_create`'s own `settings`). The values are in layer order, lowest first, which is the list's order. A layer added later is a new value, which a reader reads as its `unknown(n)` (rule r3).
 
 ### discover_query_param
 
@@ -245,15 +249,25 @@ A schema's columns, in declared order, with each column's canonical type, its `d
 
 Two members report the server a schema was created on. Both are absent on a schema created with `server` NULL, so that document is byte for byte what it was before servers existed.
 
-- `server`, on every schema created on a server, even one described by `{}`: `timezone` is the zone the schema's types bind (the profile's, or else the image zone, exactly as `chs_initialize` spelled it), so a reader never needs the image zone separately; `settings` is the server's settings as the profile gave them, `{}` when it gave none; `macros` is the server's macro set as the library holds it, present exactly when the profile carried `macros`. These are the caller's own JSON strings given back, not data-derived, so they are plain strings. `filter_declined_settings` is required: an array, `[]` when nothing is declined, present on every `server` member, after `macros` (or after `settings` when there are no macros). It is described below.
+- `server`, on every schema created on a server, even one described by `{}`: `timezone` is the zone the schema's types bind (the profile's, or else the image zone, exactly as `chs_initialize` spelled it), so a reader never needs the image zone separately; `settings` is the server's settings as the profile gave them, `{}` when it gave none; `macros` is the server's macro set as the library holds it, present exactly when the profile carried `macros`. These are the caller's own JSON strings given back, not data-derived, so they are plain strings. The member no longer carries `filter_declined_settings`: that list is the top-level one, below, over every layer.
 - `replicated`, on a schema created on a server whose engine is a Replicated one: `zookeeper_path` and `replica_name`, the path and the replica name ClickHouse's own `TableZnodeInfo` resolved, fully expanded. The database and table names expanded into them are DDL bytes, so both follow the rule for byte strings in JSON. A caller can compare them with the server's own `system.replicas`.
 
-`filter_declined_settings` lists the settings the server's profile sets that this build's filters do not honor in a WHERE, the list `chs_server_create` computes. Each entry is `{name, tier}`: `name` follows the rule for byte strings in JSON (`name` or `name_b64`), and `tier` is a `declined_tier` value, the tier this build line's WHERE-settings list gives the name. The entries are:
+`filter_declined_settings` is required on every schema description, with or without a server: an array, `[]` when nothing is declined. It lists the settings the schema compiles under that this build's filters do not honor in a WHERE, over every layer known when `chs_schema_create` ran, and `chs_schema_create` computes it. The layers, lowest first, are the `declined_layer` values:
 
-- every name in the profile's `settings` that the line's list carries at tier `predicate`, `predicate-unflipped` or `result-content` and that is not in this build's honor set (the settings it applies to a WHERE, each with a measured case where the server's verdict moves and the library's tracks it);
-- `compatibility`, at tier `predicate`, when its value moves a listed setting outside the honor set.
+- `defaults`: the defaults `chs_set_defaults` set, as `chs_schema_create` captured them. This is the snapshot the schema compiles under, never a later call (which the latch refuses anyway once a schema exists).
+- `server`: the server profile's `settings` (`chs_server_create`), when the schema was created on a server.
+- `schema`: `chs_schema_create`'s own `settings`.
 
-A name the list does not carry is never an entry, and neither is a setting of the `execution`, `result-truncate` or `output` tiers: those are passed through and ignored. The order is the profile's own, one entry per name. The test is presence, not value: a declined name set to its default value is still listed, because some of ClickHouse's reads are `isChanged()`, which asks only whether a setting was set. A schema whose server lists any is one `chs_filter_create` declines.
+Each entry is `{name, tier, layer}`: `name` follows the rule for byte strings in JSON (`name` or `name_b64`), `tier` is a `declined_tier` value, the tier this build line's WHERE-settings list gives the name, and `layer` is a `declined_layer` value. The entries are:
+
+- every name set at any of the three layers that the line's list carries at tier `predicate`, `predicate-unflipped` or `result-content` and that is not in this build's honor set (the settings it applies to a WHERE, each with a measured case where the server's verdict moves and the library's tracks it);
+- `compatibility`, at tier `predicate`, when its value at the highest layer that sets it moves a listed setting outside the honor set.
+
+A name the list does not carry is never an entry, and neither is a setting of the `execution`, `result-truncate` or `output` tiers: those are passed through and ignored. The test is presence, not value: any value at any layer counts, a declined name set to its default value included, because some of ClickHouse's reads are `isChanged()`, which asks only whether a setting was set. A higher layer that sets the same name never takes the entry away; it only moves the entry's `layer`.
+
+The order is deterministic. There is one entry per name, at the highest layer that sets it (`defaults`, then `server`, then `schema`). The entries are ordered by layer, `defaults` first, and within a layer by name as raw bytes, ascending; a `name_b64` entry sorts by its decoded bytes.
+
+The list holds only the layers known at schema compile. A filter's own `settings` (`chs_filter_create`) and the settings an evaluation brings (the call's, and the body's) are never in it: a declined one is still named at evaluation (`filter_result`'s `unsupported_settings`, every verdict `d`). A schema whose list is not empty is one `chs_filter_create` declines.
 
 ### document:row
 
@@ -284,7 +298,7 @@ Two further fields come from the vendored reader's own state, never from a token
 
 A filter evaluation: the call's outcome, one verdict character per row (`filter_verdict`), and each error or declined row itemized as `{row, code, err}`. `err`, at the top level and per row, follows the rule for byte strings in JSON, and `unsupported_settings` is a list of name objects.
 
-`unsupported_settings` (after `rows_read`, before `verdicts`) names the settings the parse itself declined, and then, after them and without repeats, every setting from the `chs_set_defaults`, schema and filter layers that this build's filters do not honor in a WHERE. When it names one of those, every verdict is `d` and every row is itemized in `errors` as `{row, code, err}` with `code` -2. `outcome` follows its own rules all the same: `ok` for a body a server would accept, and the mirror of `chs_preview_batch`'s verdict otherwise (`filter_outcome`). A declined setting from the server profile never reaches an evaluation, because `chs_filter_create` declines first.
+`unsupported_settings` (after `rows_read`, before `verdicts`) names the settings the parse itself declined, and then, after them and without repeats, every setting of the filter's own `settings` that this build's filters do not honor in a WHERE. When it names one of those, every verdict is `d` and every row is itemized in `errors` as `{row, code, err}` with `code` -2. `outcome` follows its own rules all the same: `ok` for a body a server would accept, and the mirror of `chs_preview_batch`'s verdict otherwise (`filter_outcome`). A declined setting from the `chs_set_defaults`, server or schema layer never reaches an evaluation, because `chs_filter_create` declines first (`schema_description`'s `filter_declined_settings`).
 
 ### document:discovery
 
@@ -426,7 +440,7 @@ Everything is validated here, once, and the server never changes after it. A key
 
 The macros are the server's whole `system.macros` when `macros` is present, even as `{}`: a macro a Replicated engine's arguments name that the set lacks is then the server's own refusal (`CHS_REJECTED`, 139, NO_ELEMENTS_IN_CONFIG). When `macros` is absent the server's macros are unknown, and a schema whose engine reads one is declined, as it is without a server. A build that validates a profile's macros but does not yet apply them declines such a schema in both cases.
 
-A setting this build's filters do not honor in a WHERE is no decline here: the call computes the server's `filter_declined_settings` (`schema_description`) and succeeds, and so does `chs_schema_create` on the server, because a profile never changes a schema compile.
+A setting this build's filters do not honor in a WHERE is no decline here, and the call succeeds. So does `chs_schema_create` on the server, because a profile never changes a schema compile: it lists the setting in the schema's `filter_declined_settings` (`schema_description`), at layer `server`.
 
 The call reads no defaults and leaves `chs_set_defaults`' latch open. Like every call that is not the handshake, it is valid only after `chs_initialize`.
 
@@ -442,6 +456,8 @@ Compiles exactly one `CREATE TABLE` statement (columns, engine, keys, TTL, setti
 
 `timezone()` (and its alias `timeZone()`) in a DEFAULT, MATERIALIZED or CHECK expression is admitted on a schema created on a server whose profile names a `timezone`. On a server schema, `timezone()` answers the server's zone when no session zone is in force; a session zone that would change the answer is declined (named in `unsupported_settings`). That applies equally to a profile whose `settings` carry `session_timezone`. On a schema with no server, or a server whose profile names no `timezone`, it stays refused as a server constant. `serverTimezone()` is refused on every schema.
 
+A setting this build's filters do not honor in a WHERE, from the `chs_set_defaults` snapshot this call captures, the server profile or this call's own `settings`, is no decline here: the call succeeds and lists it in the schema's `filter_declined_settings` (`schema_description`), and `chs_filter_create` on the schema declines.
+
 `options` (`input:schema_options`) defines no member yet, so any key in it is `CHS_INVALID_ARGUMENT`, naming the key.
 
 A build that does not yet compile on a server declines a non-NULL `server`, and a schema whose compile needs its server's zone is declined on a host thread that already runs a ClickHouse query of its own. Each is `CHS_DECLINED`, which is never a wrong answer.
@@ -456,6 +472,8 @@ Releases the caller's reference to a schema. Filters and blocks made from it kee
 
 A JSON document describing the schema's columns, owned by the caller; it replaces v0's borrowed column accessors.
 
+A deep input the server's stack check refuses is `CHS_REJECTED` with ch_code 306. Here the input is the schema's own statement, which describing walks again; it is never `CHS_INTERNAL`.
+
 ### chs_preview_row
 
 Validates and coerces one row of `body` under the schema, as a server's INSERT would, and returns the row's document. `columns` is the INSERT column list, a JSON array of name objects (`{name}` or `{name_b64}`), and empty for none. `session_timezone` in `settings` is this call's zone.
@@ -464,7 +482,7 @@ An INSERT whose input block has no column at all (every insertable column EPHEME
 
 ### chs_preview_batch
 
-Validates and coerces a whole body, which may hold many rows, and returns the batch document, with the same declines as `chs_preview_row`. Row separation and the server's error allowance are ClickHouse's own, and the document's `unconsumed` and `framing` say what the reader skipped and how it framed the body. `filter`, when given, is evaluated over each stored row in the same parse. When that filter's WHERE would read a setting this build's filters do not honor, from the `chs_set_defaults`, schema or filter layer, the name joins the batch document's top-level `unsupported_settings` and the batch is `unsupported` by `batch_outcome`'s step 2: every row `unsupported`, filter rows `d`, and no export. The same call without the filter is unchanged. `export_format` is `CHS_EXPORT_NONE` or a `chs_format` the build can write; with an export, `out_export` receives the accepted rows serialized once, and it may be NULL when no export is asked for. `doc_flags` chooses which groups the per-row documents carry.
+Validates and coerces a whole body, which may hold many rows, and returns the batch document, with the same declines as `chs_preview_row`. Row separation and the server's error allowance are ClickHouse's own, and the document's `unconsumed` and `framing` say what the reader skipped and how it framed the body. `filter`, when given, is evaluated over each stored row in the same parse. When that filter's WHERE would read a setting this build's filters do not honor, from the filter's own `settings`, the name joins the batch document's top-level `unsupported_settings` and the batch is `unsupported` by `batch_outcome`'s step 2: every row `unsupported`, filter rows `d`, and no export. The same call without the filter is unchanged. `export_format` is `CHS_EXPORT_NONE` or a `chs_format` the build can write; with an export, `out_export` receives the accepted rows serialized once, and it may be NULL when no export is asked for. `doc_flags` chooses which groups the per-row documents carry.
 
 ### chs_filter_create
 
@@ -472,9 +490,11 @@ Compiles a boolean SQL expression over the schema's columns, binding its query p
 
 The WHERE's settings are layered, lowest first: the build's own, `chs_set_defaults`, the schema's server profile, the schema's own settings, and then this call's `settings`; `session_timezone` at every layer stays on the zone path. A type gate in the schema's own settings binds the CREATE only, so a WHERE's CAST validates under the session layers, every layer but the schema's own.
 
-On a schema whose server lists any `filter_declined_settings` (`chs_schema_describe`), the call is `CHS_DECLINED` with ch_code 0. It is checked after the argument checks and before the expression is parsed, because `dialect` can change the parse, and the message names the settings in the list's order: `chs_filter_create: this schema's server profile sets <a>, <b>, which this build's filters do not honor in a WHERE (listed in chs_schema_describe's server.filter_declined_settings); declined rather than answered`. The server and the schema were created all the same: a profile never changes a schema compile.
+On a schema whose `filter_declined_settings` is not empty (`chs_schema_describe`), from any layer, the call is `CHS_DECLINED` with ch_code 0. It is checked after the argument checks and before the expression is parsed, because `dialect` can change the parse, and the message names each setting and its layer, in the list's order: `chs_filter_create: the settings this schema was compiled under set <a> (<layer>), <b> (<layer>), which this build's filters do not honor in a WHERE (listed in chs_schema_describe's filter_declined_settings); declined rather than answered`, where each `<layer>` is the entry's `declined_layer` value. The server and the schema were created all the same: no settings layer changes a schema compile.
 
-A key of this call's own `settings` other than `session_timezone` is never `CHS_DECLINED` here. A key in this build's honor set is applied to the WHERE; a key passed through is accepted and ignored; and a key this build's filters do not honor is reported at evaluation, as a declined setting from the `chs_set_defaults` or schema layer is (`filter_result`'s `unsupported_settings`, and `chs_preview_batch`'s). Every key still meets the server's own SET check first, so a name the server does not know is `CHS_REJECTED` with ch_code 115.
+**Changed (public issue #588).** A declined setting from the `chs_set_defaults` or the schema layer moves from evaluation time to create time: it was named at evaluation (`filter_result`'s `unsupported_settings`), and it now declines this call. A server-profile setting already declined it.
+
+A key of this call's own `settings` other than `session_timezone` is never `CHS_DECLINED` here, and it is never in `schema_description`. A key in this build's honor set is applied to the WHERE; a key passed through is accepted and ignored; and a key this build's filters do not honor is reported at evaluation (`filter_result`'s `unsupported_settings`, every verdict `d`, and `chs_preview_batch`'s), as a declined setting from an evaluation's own settings is. Every key still meets the server's own SET check first, so a name the server does not know is `CHS_REJECTED` with ch_code 115.
 
 A filter under a per-call `session_timezone` answers as the artifact producer has measured against live servers, including how the zone in an evaluation's settings combines with the zone the filter was compiled under. Until a path is measured to match a server it declines, which is never a wrong answer. The filter holds a counted reference to the schema.
 

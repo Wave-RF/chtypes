@@ -29,6 +29,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from ._abi2._vocab import (
+    DeclinedLayer,
     DeclinedTier,
     DefaultKind,
     FilterOutcome,
@@ -504,10 +505,11 @@ def _string_map(obj: Mapping[str, Any], key: str, where: str) -> dict[str, str] 
 
 
 def _declined_setting(obj: dict[str, Any], where: str) -> DeclinedSetting:
-    # An unlisted tier is its unknown(n): kept, never a failure (rule r3).
+    # An unlisted tier or layer is its unknown(n): kept, never a failure (rule r3).
     return DeclinedSetting(
         name=_name(obj, "name", where),
         tier=DeclinedTier.of(_text(obj, "tier", where)),
+        layer=DeclinedLayer.of(_text(obj, "layer", where)),
     )
 
 
@@ -516,9 +518,6 @@ def _server(obj: dict[str, Any], where: str) -> SchemaServer:
         timezone=_text(obj, "timezone", where),
         settings=_string_map(obj, "settings", where) or {},
         macros=_string_map(obj, "macros", where),
-        filter_declined_settings=_objects(
-            obj, "filter_declined_settings", where, _declined_setting
-        ),
     )
 
 
@@ -545,6 +544,10 @@ def decode_schema_description(raw: bytes) -> SchemaDescription:
             None
             if replicated is None
             else _replicated(_obj(replicated, where, "replicated"), f"{where}.replicated")
+        ),
+        # Over every layer known at schema compile, with or without a server.
+        filter_declined_settings=_objects(
+            obj, "filter_declined_settings", where, _declined_setting
         ),
     )
 

@@ -30,9 +30,9 @@ Output-format settings that reach a WHERE (through `formatRow`, `toJSONString` o
 
 This is part of the v2 contract.
 
-A consumer passes the server's changed settings in the server profile (`settings`, see `input:server_profile` in `spec/abi-v2/docs.md`). Then it must **refuse a tenant whose server describe lists any `filter_declined_settings`, or that changes a `result-content` setting**.
+A consumer passes the server's changed settings in the server profile (`settings`, see `input:server_profile` in `spec/abi-v2/docs.md`). Then it must **refuse a tenant if `filter_declined_settings` is non-empty, or a `result-content` setting is changed**.
 
-The server describe is the `server` member of `chs_schema_describe` on any schema created on that server. Its `filter_declined_settings` lists every profile setting this build's filters do not honor in a WHERE, each with its tier from these lists. On such a schema, `chs_filter_create` declines (`CHS_DECLINED`): this is the backstop for a consumer that did not read the list.
+`filter_declined_settings` is the top-level member of `chs_schema_describe` on the tenant's schema, one check at bind time. It lists every setting that this build's filters do not honor in a WHERE, over every layer known when the schema was compiled: the `chs_set_defaults` snapshot, the server profile and the schema's own settings. Each entry carries its tier from these lists and its layer. On such a schema, `chs_filter_create` declines (`CHS_DECLINED`): this is the backstop for a consumer that did not read the list. A filter's own settings and an evaluation's are not in it; a declined one is named at evaluation, with every verdict `d`.
 
 A `result-truncate` setting never makes a consumer refuse: it is outside a row verdict's scope, since a stream can deliver rows that a paged SELECT would cut off.
 
@@ -40,7 +40,7 @@ A `result-truncate` setting never makes a consumer refuse: it is outside a row v
 
 <!-- remove-at-v2-lock -->
 
-**Dev-only note.** v2-dev builds before the first one at fingerprint `sha256:28c7445ce6b5c6d0ae33177fd60eb7b3b5654a966c842b8d812aea622824dc72` do not list declined settings: their `server` member has no `filter_declined_settings`, and a dev SDK at that fingerprint or later refuses them (rule r6). A consumer testing those builds treats a setting whose `tier` is `predicate`, `predicate-unflipped` or `result-content` as a reason to refuse.
+**Dev-only note.** v2-dev builds before the first one at fingerprint `sha256:d60a681ea0e249ab9e2c83b50640ad9cef040261ddf61805106c93e2c68774e4` write no top-level `filter_declined_settings`. From fingerprint `sha256:28c7445ce6b5c6d0ae33177fd60eb7b3b5654a966c842b8d812aea622824dc72` they list the server profile's declined settings only, under `server.filter_declined_settings`, and name a declined setting from the defaults or the schema's own settings only at evaluation; before it they list none. A dev SDK at `sha256:d60a681e…` or later refuses every one of them (rule r6). A consumer testing those builds treats a setting at any layer whose `tier` is `predicate`, `predicate-unflipped` or `result-content` as a reason to refuse.
 
 <!-- /remove-at-v2-lock -->
 

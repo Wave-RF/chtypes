@@ -22,6 +22,8 @@ export {
   type Capabilities,
   type BatchOutcome,
   batchOutcomeKnown,
+  DeclinedLayer,
+  declinedLayerKnown,
   DeclinedTier,
   declinedTierKnown,
   DefaultKind,

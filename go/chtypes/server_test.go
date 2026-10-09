@@ -361,63 +361,84 @@ func TestDecodeSchemaDescriptionServer(t *testing.T) {
 	}
 }
 
-// TestDecodeSchemaDescriptionFilterDeclinedSettings decodes the server's
+// TestDecodeSchemaDescriptionFilterDeclinedSettings decodes the top-level
 // filter_declined_settings from documents in the shape of
-// spec/abi-v2/abi.json's schema_description: [] and absent, entries in the
-// profile's own order, a name_b64 entry, a tier the description does not list
-// (its unknown(n), rule r3), members no description names (rule r2), and the
-// refusals.
+// spec/abi-v2/abi.json's schema_description: [] and absent, entries across
+// the three layers in the document's own order (never re-sorted), a name_b64
+// entry, a tier and a layer the description does not list (each its
+// unknown(n), rule r3), members no description names (rule r2), a schema with
+// no server, a server member that still carries the removed list (an unknown
+// member now, ignored), and the refusals.
 func TestDecodeSchemaDescriptionFilterDeclinedSettings(t *testing.T) {
 	const cols = `"columns":[{"name":"k","type":"UInt8","default_kind":"","default_expression":""}]`
-	server := func(list string) []byte {
-		return []byte(`{` + cols + `,"server":{"timezone":"UTC","settings":{"final":"1","aggregate_functions_null_for_empty":"1"},"filter_declined_settings":` + list + `}}`)
+	const server = `"server":{"timezone":"UTC","settings":{"final":"1"}}`
+	doc := func(list string) []byte {
+		return []byte(`{` + cols + `,"filter_declined_settings":` + list + `,` + server + `}`)
 	}
 
 	// [] is present and empty; absent (a document of no build at this
 	// fingerprint) is nil. Neither is a failure.
-	d, err := decodeSchemaDescription(server(`[]`))
-	if err != nil || d.Server == nil || d.Server.FilterDeclinedSettings == nil || len(d.Server.FilterDeclinedSettings) != 0 {
-		t.Fatalf("[] = %+v, %v; want a non-nil empty list", d.Server, err)
+	d, err := decodeSchemaDescription(doc(`[]`))
+	if err != nil || d.FilterDeclinedSettings == nil || len(d.FilterDeclinedSettings) != 0 {
+		t.Fatalf("[] = %+v, %v; want a non-nil empty list", d, err)
 	}
-	d, err = decodeSchemaDescription([]byte(`{` + cols + `,"server":{"timezone":"UTC","settings":{}}}`))
-	if err != nil || d.Server == nil || d.Server.FilterDeclinedSettings != nil {
-		t.Fatalf("absent = %+v, %v; want nil", d.Server, err)
+	d, err = decodeSchemaDescription([]byte(`{` + cols + `,` + server + `}`))
+	if err != nil || d.FilterDeclinedSettings != nil || d.Server == nil {
+		t.Fatalf("absent = %+v, %v; want nil", d, err)
 	}
 
-	// The profile's own order, never sorted; a name_b64 entry decodes to its
-	// bytes; an unlisted tier is kept as it came; unknown members are ignored.
-	d, err = decodeSchemaDescription(server(`[{"name":"final","tier":"result-content","x_future":1},` +
-		`{"name":"aggregate_functions_null_for_empty","tier":"predicate"},` +
-		`{"name_b64":"eP95","tier":"predicate-unflipped"},` +
-		`{"name":"x_future_setting","tier":"x_future_tier","x_future_obj":{"a":[1]}}]`))
-	if err != nil || d.Server == nil {
+	// The document's own order, never re-sorted (here not name order); a
+	// name_b64 entry decodes to its bytes; an unlisted tier or layer is kept as
+	// it came; unknown members are ignored.
+	d, err = decodeSchemaDescription(doc(`[{"name":"aggregate_functions_null_for_empty","tier":"predicate","layer":"defaults","x_future":1},` +
+		`{"name":"final","tier":"result-content","layer":"server"},` +
+		`{"name":"additional_result_filter","tier":"result-content","layer":"schema"},` +
+		`{"name_b64":"eP95","tier":"predicate-unflipped","layer":"schema"},` +
+		`{"name":"x_future_setting","tier":"x_future_tier","layer":"x_future_layer","x_future_obj":{"a":[1]}}]`))
+	if err != nil {
 		t.Fatalf("entries = %+v, %v", d, err)
 	}
 	want := []DeclinedSetting{
-		{Name: "final", Tier: TierResultContent},
-		{Name: "aggregate_functions_null_for_empty", Tier: TierPredicate},
-		{Name: "x\xffy", Tier: TierPredicateUnflipped},
-		{Name: "x_future_setting", Tier: "x_future_tier"},
+		{Name: "aggregate_functions_null_for_empty", Tier: TierPredicate, Layer: LayerDefaults},
+		{Name: "final", Tier: TierResultContent, Layer: LayerServer},
+		{Name: "additional_result_filter", Tier: TierResultContent, Layer: LayerSchema},
+		{Name: "x\xffy", Tier: TierPredicateUnflipped, Layer: LayerSchema},
+		{Name: "x_future_setting", Tier: "x_future_tier", Layer: "x_future_layer"},
 	}
-	if !reflect.DeepEqual(d.Server.FilterDeclinedSettings, want) {
-		t.Errorf("entries = %#v, want %#v", d.Server.FilterDeclinedSettings, want)
+	if !reflect.DeepEqual(d.FilterDeclinedSettings, want) {
+		t.Errorf("entries = %#v, want %#v", d.FilterDeclinedSettings, want)
 	}
-	for i, e := range d.Server.FilterDeclinedSettings {
-		if e.Tier.Known() != (i < 3) {
-			t.Errorf("entry %d: tier %q Known() = %v", i, e.Tier, e.Tier.Known())
+	for i, e := range d.FilterDeclinedSettings {
+		if e.Tier.Known() != (i < 4) || e.Layer.Known() != (i < 4) {
+			t.Errorf("entry %d: tier %q Known() = %v, layer %q Known() = %v", i, e.Tier, e.Tier.Known(), e.Layer, e.Layer.Known())
 		}
+	}
+
+	// A schema with no server lists its own layers all the same.
+	d, err = decodeSchemaDescription([]byte(`{` + cols + `,"filter_declined_settings":[{"name":"final","tier":"result-content","layer":"schema"}]}`))
+	if err != nil || d.Server != nil || !reflect.DeepEqual(d.FilterDeclinedSettings, []DeclinedSetting{{Name: "final", Tier: TierResultContent, Layer: LayerSchema}}) {
+		t.Errorf("no server = %+v, %v", d, err)
+	}
+
+	// The removed server-level list is an unknown member now (rule r2): the
+	// top-level list is the one decoded.
+	d, err = decodeSchemaDescription([]byte(`{` + cols + `,"filter_declined_settings":[],` +
+		`"server":{"timezone":"UTC","settings":{},"filter_declined_settings":[{"name":"final","tier":"result-content"}]}}`))
+	if err != nil || d.Server == nil || d.FilterDeclinedSettings == nil || len(d.FilterDeclinedSettings) != 0 {
+		t.Errorf("a server-level list = %+v, %v; want the top-level [] and the server member's ignored", d, err)
 	}
 
 	// Refusals: each an *InternalError naming the document.
 	for name, list := range map[string]string{
-		"not an array":            `{"name":"final","tier":"predicate"}`,
-		"an entry not an object":  `["final"]`,
-		"a name in both forms":    `[{"name":"final","name_b64":"ZmluYWw=","tier":"predicate"}]`,
-		"no name":                 `[{"tier":"predicate"}]`,
-		"a name not base64":       `[{"name_b64":"*","tier":"predicate"}]`,
-		"a tier that is a number": `[{"name":"final","tier":1}]`,
+		"not an array":             `{"name":"final","tier":"predicate","layer":"server"}`,
+		"an entry not an object":   `["final"]`,
+		"a name in both forms":     `[{"name":"final","name_b64":"ZmluYWw=","tier":"predicate","layer":"server"}]`,
+		"no name":                  `[{"tier":"predicate","layer":"server"}]`,
+		"a name not base64":        `[{"name_b64":"*","tier":"predicate","layer":"server"}]`,
+		"a tier that is a number":  `[{"name":"final","tier":1,"layer":"server"}]`,
+		"a layer that is a number": `[{"name":"final","tier":"predicate","layer":2}]`,
 	} {
-		_, err := decodeSchemaDescription(server(list))
+		_, err := decodeSchemaDescription(doc(list))
 		var ie *InternalError
 		if !errors.As(err, &ie) || !strings.Contains(err.Error(), "schema_description") {
 			t.Errorf("%s = %v, want an *InternalError naming the document", name, err)

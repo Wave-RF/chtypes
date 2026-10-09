@@ -201,10 +201,20 @@ type Column struct {
 	DefaultExpr string
 }
 
-// SchemaDescription is a schema's columns, in declared order, and the server
-// it was compiled on.
+// SchemaDescription is a schema's columns, in declared order, the settings
+// its filters decline, and the server it was compiled on.
 type SchemaDescription struct {
 	Columns []Column
+	// FilterDeclinedSettings is the settings the schema compiles under that
+	// this build's filters do not honor in a WHERE, over every layer known at
+	// schema compile (the defaults Setup set, the server profile and the
+	// schema's own settings), from filter_declined_settings; empty when it
+	// lists none. One entry per name, at the highest layer that sets it,
+	// ordered by layer and then by name bytes, as the library wrote it. A
+	// schema that lists any is one CompileFilter declines (*UnsupportedError),
+	// and a consumer that streams rows refuses such a tenant
+	// (spec/abi-v2/where-settings/README.md).
+	FilterDeclinedSettings []DeclinedSetting
 	// Server is the server the schema was compiled on, from server: nil
 	// exactly when it was compiled without one.
 	Server *SchemaServer
@@ -227,17 +237,10 @@ type SchemaServer struct {
 	// no macros (unknown), and non-nil, even empty, when it did (the complete
 	// set).
 	Macros map[string]string
-	// FilterDeclinedSettings is the settings the server's profile sets that
-	// this build's filters do not honor in a WHERE, in the profile's own
-	// order, from filter_declined_settings; empty when it lists none. A
-	// schema on a server that lists any is one CompileFilter declines
-	// (*UnsupportedError), and a consumer that streams rows refuses such a
-	// tenant (spec/abi-v2/where-settings/README.md).
-	FilterDeclinedSettings []DeclinedSetting
 }
 
-// DeclinedSetting is one setting a server's profile sets that this build's
-// filters do not honor in a WHERE: an entry of the server's
+// DeclinedSetting is one setting the schema compiles under that this build's
+// filters do not honor in a WHERE: an entry of the schema description's
 // filter_declined_settings.
 type DeclinedSetting struct {
 	// Name is the setting's name, from name or name_b64 (a byte string).
@@ -245,6 +248,10 @@ type DeclinedSetting struct {
 	// Tier is the tier this build line's WHERE-settings list gives it. One the
 	// description does not list is its unknown(n), kept as it came (rule r3).
 	Tier DeclinedTier
+	// Layer is the settings layer the entry comes from, the highest one that
+	// sets the name. One the description does not list is its unknown(n),
+	// kept as it came (rule r3).
+	Layer DeclinedLayer
 }
 
 // SchemaReplicated is what ClickHouse's own TableZnodeInfo resolved for a

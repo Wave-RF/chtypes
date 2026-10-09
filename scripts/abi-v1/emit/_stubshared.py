@@ -236,44 +236,102 @@ FILTER_OBSERVABLE_DOCS = {
     "none": '{"outcome":"accepted","code":0,"err":"","rows_read":1,"rows_passed":0,"rows_cut":0}',
 }
 
-# The server's filter-declined settings, variant "declined-settings"
-# (-DCHS_STUB_DECLINED_SETTINGS): a schema on a server whose profile sets
-# settings this build's filters do not honor in a WHERE (spec/abi-v2/docs.md:
-# schema_description's server.filter_declined_settings, and chs_filter_create).
-# A chs_schema_create whose statement is exactly DECLINED["prefix"] + <id>
-# selects DECLINED_LISTS[<id>]; chs_schema_describe then answers
-# declined_document(<id>), and chs_filter_create, after its input checks and
-# the status injection, answers DECLINED["status"] with ch_code 0 and
-# declined_message(<id>) when that list is not empty, and its usual filter
-# otherwise. Any other statement selects nothing, and both calls answer as the
-# ok build does. Like the r3 variant's describe, the selection is the image's
-# LAST chs_schema_create, never a field of the handle: a test double, enough for
-# the one schema each case compiles. The message is the specification's text,
-# rendered here once for the stub's C and for the cases that expect it.
+# The filter-declined settings, variant "declined-settings"
+# (-DCHS_STUB_DECLINED_SETTINGS): a schema compiled under settings this build's
+# filters do not honor in a WHERE, from any layer known at schema compile
+# (spec/abi-v2/docs.md: schema_description's top-level filter_declined_settings,
+# its declined_layer vocabulary, and chs_filter_create). A chs_schema_create
+# whose statement is exactly DECLINED["prefix"] + <id> selects
+# DECLINED_LISTS[<id>]; chs_schema_describe then answers declined_document(<id>),
+# and chs_filter_create, after its input checks and the status injection,
+# answers DECLINED["status"] with ch_code 0 and declined_message(<id>) when that
+# list is not empty, and its usual filter otherwise. The statement
+# DECLINED["prefix"] + DEEP["id"] selects the deep input instead:
+# chs_schema_describe answers DEEP's refusal, the server's stack check (ch_code
+# 306), and chs_filter_create its usual filter. Any other statement selects
+# nothing, and every call answers as the ok build does. Like the r3 variant's
+# describe, the selection is the image's LAST chs_schema_create, never a field
+# of the handle: a test double, enough for the one schema each step describes.
+# The message is the specification's text, rendered here once for the stub's C
+# and for the cases that expect it.
 DECLINED = {
     "prefix": "!F:",
     "status": "CHS_DECLINED",
     "ch_code": 0,
     "message": (
-        "chs_filter_create: this schema's server profile sets {names}, which this build's filters do not "
-        "honor in a WHERE (listed in chs_schema_describe's server.filter_declined_settings); declined "
-        "rather than answered"
+        "chs_filter_create: the settings this schema was compiled under set {names}, which this build's filters "
+        "do not honor in a WHERE (listed in chs_schema_describe's filter_declined_settings); declined rather "
+        "than answered"
     ),
+    # How the message names one entry: its name's bytes, then its layer.
+    "entry": "{name} ({layer})",
 }
-# id -> the server's filter_declined_settings, in the profile's own order. Each
-# entry is {name | name_b64, tier}: "two" is deliberately not in name order, so
-# a reader that sorted would fail; "name_b64" carries a name that is not valid
-# UTF-8 (the byte strings rule; a JSON profile cannot spell one today, and every
-# reader decodes it all the same); "unknown_tier" carries a tier the description
-# does not list (rule r3).
-DECLINED_LISTS: dict[str, list[dict[str, str]]] = {
-    "none": [],
-    "two": [
-        {"name": "final", "tier": "result-content"},
-        {"name": "aggregate_functions_null_for_empty", "tier": "predicate"},
-    ],
-    "name_b64": [{"name_b64": "eP95", "tier": "predicate-unflipped"}],
-    "unknown_tier": [{"name": "x_future_setting", "tier": "x_future_tier"}],
+# The layers, lowest first: the order of the list (spec/abi-v2/docs.md).
+DECLINED_LAYERS = ("defaults", "server", "schema")
+# id -> the selection: whether the case compiles on a server (the document then
+# carries a `server` member, whose `settings` give back the profile's names in
+# `profile`), and the top-level filter_declined_settings, as the library would
+# write it. Each entry is {name | name_b64, tier, layer}:
+#   "layers" spans all three layers in the list's order: by layer, lowest
+#     first, then by name as raw bytes, so a reader that sorted by name alone,
+#     or kept any other order, would fail;
+#   "two_layers" is one name set by the profile AND the schema's own settings:
+#     one entry, at the higher layer (the profile still gives it back);
+#   "name_b64" carries a name that is not valid UTF-8 (the byte strings rule;
+#     a JSON settings object cannot spell one today, and every reader decodes it
+#     all the same);
+#   "unknown_tier" and "unknown_layer" each carry a value its vocabulary does
+#     not list (rule r3);
+#   "schema_only" is one schema-layer setting, on a schema with no server.
+DECLINED_LISTS: dict[str, dict] = {
+    "none": {"server": True, "profile": [], "entries": []},
+    "layers": {
+        "server": True,
+        "profile": ["apply_deleted_mask", "final"],
+        "entries": [
+            {"name": "aggregate_functions_null_for_empty", "tier": "predicate", "layer": "defaults"},
+            {"name": "apply_deleted_mask", "tier": "result-content", "layer": "server"},
+            {"name": "final", "tier": "result-content", "layer": "server"},
+            {"name": "additional_result_filter", "tier": "result-content", "layer": "schema"},
+        ],
+    },
+    "two_layers": {
+        "server": True,
+        "profile": ["final"],
+        "entries": [{"name": "final", "tier": "result-content", "layer": "schema"}],
+    },
+    "name_b64": {
+        "server": True,
+        "profile": [],
+        "entries": [{"name_b64": "eP95", "tier": "predicate-unflipped", "layer": "schema"}],
+    },
+    "unknown_tier": {
+        "server": True,
+        "profile": ["x_future_setting"],
+        "entries": [{"name": "x_future_setting", "tier": "x_future_tier", "layer": "server"}],
+    },
+    "unknown_layer": {
+        "server": True,
+        "profile": [],
+        "entries": [{"name": "final", "tier": "result-content", "layer": "x_future_layer"}],
+    },
+    "schema_only": {
+        "server": False,
+        "profile": [],
+        "entries": [{"name": "final", "tier": "result-content", "layer": "schema"}],
+    },
+}
+# The deep input: chs_schema_describe's refusal by the server's stack check
+# (spec/abi-v2/docs.md, chs_status and chs_schema_describe). The code is the
+# one the specification gives, and the name is ClickHouse's own name for it;
+# the message is the stub's stand-in, not ClickHouse's text.
+DEEP = {
+    "id": "deep",
+    "fn": "chs_schema_describe",
+    "status": "CHS_REJECTED",
+    "ch_code": 306,
+    "ch_name": "TOO_DEEP_RECURSION",
+    "message": "Stack size too large (the stub's stand-in for the server's stack check on a deep input)",
 }
 
 
@@ -284,28 +342,46 @@ def declined_name(entry: dict[str, str]) -> bytes:
     return entry["name"].encode("utf-8") if "name" in entry else base64.b64decode(entry["name_b64"], validate=True)
 
 
+def declined_in_order(entries: list[dict[str, str]]) -> bool:
+    """Whether `entries` keep the specification's rule: one entry per name, in
+    layer order (DECLINED_LAYERS, lowest first), then by name as raw bytes. An
+    entry whose layer the description does not list has no place in that
+    order, so a list carrying one is judged on its names alone."""
+    names = [declined_name(e) for e in entries]
+    if len(set(names)) != len(names):
+        return False
+    if any(e["layer"] not in DECLINED_LAYERS for e in entries):
+        return True
+    keys = [(DECLINED_LAYERS.index(e["layer"]), declined_name(e)) for e in entries]
+    return keys == sorted(keys)
+
+
 def declined_document(sel: str) -> dict:
     """The schema_description chs_schema_describe answers for selection `sel`:
-    one column, and a server whose profile set each listed name (a plain
-    name's value given back in `settings`)."""
-    entries = DECLINED_LISTS[sel]
-    return {
+    one column, the top-level filter_declined_settings, and, on a server, a
+    `server` member whose profile set each name in `profile`."""
+    chosen = DECLINED_LISTS[sel]
+    doc: dict = {
         "columns": [{"name": "k", "type": "UInt8", "default_kind": "", "default_expression": ""}],
-        "server": {
-            "timezone": "UTC",
-            "settings": {e["name"]: "1" for e in entries if "name" in e},
-            "filter_declined_settings": entries,
-        },
+        "filter_declined_settings": chosen["entries"],
     }
+    if chosen["server"]:
+        doc["server"] = {"timezone": "UTC", "settings": {n: "1" for n in chosen["profile"]}}
+    return doc
 
 
 def declined_message(sel: str) -> bytes | None:
     """The message chs_filter_create declines with for selection `sel`, naming
-    the list's names in its order; None when the list is empty (no decline)."""
-    entries = DECLINED_LISTS[sel]
+    each entry and its layer in the list's order; None when the list is empty
+    (no decline)."""
+    entries = DECLINED_LISTS[sel]["entries"]
     if not entries:
         return None
-    names = b", ".join(declined_name(e) for e in entries)
+    one_head, one_mid = DECLINED["entry"].split("{name}")
+    names = b", ".join(
+        one_head.encode("utf-8") + declined_name(e) + one_mid.format(layer=e["layer"]).encode("utf-8")
+        for e in entries
+    )
     head, tail = DECLINED["message"].split("{names}")
     return head.encode("utf-8") + names + tail.encode("utf-8")
 
@@ -566,7 +642,8 @@ def plan(model) -> list[Variant]:
             Variant("r3-unknown-capabilities", (("CHS_STUB_R3_CAPABILITIES", "1"),), "accepted"),
             # Rule r7: whether a batch's filter reached the library.
             Variant("filter-observable", (("CHS_STUB_FILTER_OBSERVABLE", "1"),), "accepted"),
-            # The server's filter-declined settings: see DECLINED above.
+            # The filter-declined settings, and describe's deep-input
+            # refusal: see DECLINED and DEEP above.
             Variant("declined-settings", (("CHS_STUB_DECLINED_SETTINGS", "1"),), "accepted"),
         ]
         # Rule r6 beats the symbol sweep (public issue #537): ANOTHER

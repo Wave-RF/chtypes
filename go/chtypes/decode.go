@@ -427,9 +427,10 @@ func (r *reader) atMerge(m map[string]any, key, path string) []AtMergeEntry {
 	return out
 }
 
-// declinedSettings reads a server's filter_declined_settings: each entry a
-// name (name or name_b64) and its tier. An unlisted tier is its unknown(n):
-// kept, never a failure (r3).
+// declinedSettings reads a schema description's filter_declined_settings:
+// each entry a name (name or name_b64), its tier and its layer, in the
+// document's order. An unlisted tier or layer is its unknown(n): kept, never a
+// failure (r3).
 func (r *reader) declinedSettings(m map[string]any, key, path string) []DeclinedSetting {
 	arr := r.array(r.field(m, key), path+"."+key)
 	if arr == nil {
@@ -443,8 +444,9 @@ func (r *reader) declinedSettings(m map[string]any, key, path string) []Declined
 			return nil
 		}
 		out = append(out, DeclinedSetting{
-			Name: r.name(em, "name", p),
-			Tier: DeclinedTier(r.text(em, "tier", p)),
+			Name:  r.name(em, "name", p),
+			Tier:  DeclinedTier(r.text(em, "tier", p)),
+			Layer: DeclinedLayer(r.text(em, "layer", p)),
 		})
 	}
 	return out
@@ -701,15 +703,16 @@ func decodeSchemaDescription(raw []byte) (SchemaDescription, error) {
 			})
 		}
 	}
+	// Over every layer known at schema compile, with or without a server.
+	res.FilterDeclinedSettings = r.declinedSettings(m, "filter_declined_settings", "$")
 	// Both are absent on a schema compiled without a server, so that document
 	// decodes exactly as it did before servers existed.
 	if v := r.field(m, "server"); v != nil {
 		if sm := r.object(v, "$.server"); sm != nil {
 			res.Server = &SchemaServer{
-				Timezone:               r.text(sm, "timezone", "$.server"),
-				Settings:               r.stringMap(sm, "settings", "$.server"),
-				Macros:                 r.stringMap(sm, "macros", "$.server"),
-				FilterDeclinedSettings: r.declinedSettings(sm, "filter_declined_settings", "$.server"),
+				Timezone: r.text(sm, "timezone", "$.server"),
+				Settings: r.stringMap(sm, "settings", "$.server"),
+				Macros:   r.stringMap(sm, "macros", "$.server"),
 			}
 		}
 	}

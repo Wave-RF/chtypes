@@ -12,7 +12,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { DeclinedTier, declinedTierKnown, InternalError, Status, UsageError } from '../../src/abi2/index.js';
+import { DeclinedLayer, declinedLayerKnown, DeclinedTier, declinedTierKnown, InternalError, Status, UsageError } from '../../src/abi2/index.js';
 import { type LoadedImage, openAbi2, type Predicate } from '../../src/abi2/loader.js';
 import { decodeSchemaDescription } from '../../src/documents.js';
 import { type Library, libraryOf } from '../../src/library.js';
@@ -131,50 +131,76 @@ describe('the description decoder: server and replicated (no library)', () => {
   });
 });
 
-describe('the description decoder: the server\'s filter_declined_settings (no library)', () => {
+describe('the description decoder: the top-level filter_declined_settings (no library)', () => {
   const cols = '"columns":[{"name":"k","type":"UInt8","default_kind":"","default_expression":""}]';
+  const server = '"server":{"timezone":"UTC","settings":{"final":"1"}}';
   const decode = (s: string) => decodeSchemaDescription(Buffer.from(s, 'utf8'));
-  const server = (list: string) =>
-    decode(`{${cols},"server":{"timezone":"UTC","settings":{"final":"1","aggregate_functions_null_for_empty":"1"},"filter_declined_settings":${list}}}`);
+  const listed = (list: string) => decode(`{${cols},"filter_declined_settings":${list},${server}}`);
 
   it('[] is present and empty; absent reads as empty too, never a failure', () => {
-    expect(server('[]').server?.filterDeclinedSettings).toEqual([]);
-    expect(decode(`{${cols},"server":{"timezone":"UTC","settings":{}}}`).server?.filterDeclinedSettings).toEqual([]);
+    expect(listed('[]').filterDeclinedSettings).toEqual([]);
+    expect(decode(`{${cols},${server}}`).filterDeclinedSettings).toEqual([]);
   });
 
-  it('entries in the profile\'s own order, a name_b64 entry, an unlisted tier (rule r3) and unknown members (rule r2)', () => {
-    const got = server(
-      '[{"name":"final","tier":"result-content","x_future":1},' +
-        '{"name":"aggregate_functions_null_for_empty","tier":"predicate"},' +
-        '{"name_b64":"eP95","tier":"predicate-unflipped"},' +
-        '{"name":"x_future_setting","tier":"x_future_tier","x_future_obj":{"a":[1]}}]',
-    ).server?.filterDeclinedSettings;
-    expect(got?.map((e) => e.name.toString('hex'))).toEqual([
-      Buffer.from('final').toString('hex'),
+  it('entries in the document\'s own order, a name_b64 entry, an unlisted tier and layer (rule r3) and unknown members (rule r2)', () => {
+    const got = listed(
+      '[{"name":"aggregate_functions_null_for_empty","tier":"predicate","layer":"defaults","x_future":1},' +
+        '{"name":"final","tier":"result-content","layer":"server"},' +
+        '{"name":"additional_result_filter","tier":"result-content","layer":"schema"},' +
+        '{"name_b64":"eP95","tier":"predicate-unflipped","layer":"schema"},' +
+        '{"name":"x_future_setting","tier":"x_future_tier","layer":"x_future_layer","x_future_obj":{"a":[1]}}]',
+    ).filterDeclinedSettings;
+    // The document's own order, never re-sorted (here not name order).
+    expect(got.map((e) => e.name.toString('hex'))).toEqual([
       Buffer.from('aggregate_functions_null_for_empty').toString('hex'),
+      Buffer.from('final').toString('hex'),
+      Buffer.from('additional_result_filter').toString('hex'),
       '78ff79',
       Buffer.from('x_future_setting').toString('hex'),
     ]);
-    expect(got?.map((e) => e.tier)).toEqual([
-      DeclinedTier.ResultContent,
+    expect(got.map((e) => e.tier)).toEqual([
       DeclinedTier.Predicate,
+      DeclinedTier.ResultContent,
+      DeclinedTier.ResultContent,
       DeclinedTier.PredicateUnflipped,
       'x_future_tier',
     ]);
-    expect(got?.map((e) => declinedTierKnown(e.tier))).toEqual([true, true, true, false]);
+    expect(got.map((e) => e.layer)).toEqual([
+      DeclinedLayer.Defaults,
+      DeclinedLayer.Server,
+      DeclinedLayer.Schema,
+      DeclinedLayer.Schema,
+      'x_future_layer',
+    ]);
+    expect(got.map((e) => declinedTierKnown(e.tier))).toEqual([true, true, true, true, false]);
+    expect(got.map((e) => declinedLayerKnown(e.layer))).toEqual([true, true, true, true, false]);
+  });
+
+  it('a schema with no server lists its own layers; the removed server-level list is an unknown member (rule r2)', () => {
+    const own = decode(`{${cols},"filter_declined_settings":[{"name":"final","tier":"result-content","layer":"schema"}]}`);
+    expect(own.server).toBeUndefined();
+    expect(own.filterDeclinedSettings.map((e) => [e.name.toString('utf8'), e.tier, e.layer])).toEqual([
+      ['final', DeclinedTier.ResultContent, DeclinedLayer.Schema],
+    ]);
+    const old = decode(
+      `{${cols},"filter_declined_settings":[],"server":{"timezone":"UTC","settings":{},"filter_declined_settings":[{"name":"final","tier":"result-content"}]}}`,
+    );
+    expect(old.filterDeclinedSettings).toEqual([]);
+    expect(old.server?.timezone).toBe('UTC');
   });
 
   it('refusals are each an InternalError naming the document', () => {
     for (const list of [
-      '{"name":"final","tier":"predicate"}',
+      '{"name":"final","tier":"predicate","layer":"server"}',
       '["final"]',
-      '[{"name":"final","name_b64":"ZmluYWw=","tier":"predicate"}]',
-      '[{"tier":"predicate"}]',
-      '[{"name_b64":"*","tier":"predicate"}]',
-      '[{"name":"final","tier":1}]',
+      '[{"name":"final","name_b64":"ZmluYWw=","tier":"predicate","layer":"server"}]',
+      '[{"tier":"predicate","layer":"server"}]',
+      '[{"name_b64":"*","tier":"predicate","layer":"server"}]',
+      '[{"name":"final","tier":1,"layer":"server"}]',
+      '[{"name":"final","tier":"predicate","layer":2}]',
     ]) {
-      expect(() => server(list), list).toThrow(InternalError);
-      expect(() => server(list), list).toThrow(/schema_description/);
+      expect(() => listed(list), list).toThrow(InternalError);
+      expect(() => listed(list), list).toThrow(/schema_description/);
     }
   });
 });
