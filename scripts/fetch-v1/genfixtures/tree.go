@@ -55,6 +55,7 @@ type Tree struct {
 	ReferrersMode   referrersMode
 	FallbackTagMode fallbackTagMode
 	NoTagsList      bool // frozen-no-discovery: no tags/list route at all
+	EmptyList       bool // an existing, empty repository: tags/list answers {"tags":[]}
 
 	blobs            map[string][]byte
 	manifestByDigest map[string][]byte
@@ -185,6 +186,10 @@ func (t *Tree) Flush(fs *FileSet) {
 
 	if !t.NoTagsList {
 		tl := TagsList{Name: repoName(t.RepoPath), Tags: append([]string(nil), t.tagOrder...)}
+		if t.EmptyList {
+			// A repository that exists and holds nothing answers {"tags":[]}, not null.
+			tl.Tags = []string{}
+		}
 		fs.Put(base+"/tags/list", canonicalJSON(tl))
 	}
 

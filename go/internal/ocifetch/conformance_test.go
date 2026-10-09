@@ -112,16 +112,41 @@ type confReport struct {
 // TestConformanceV1 is the v1 fetch-layer conformance runner for the Go
 // binding (docs/guides/fetch-v1.md §10).
 func TestConformanceV1(t *testing.T) {
-	fixturesDir := os.Getenv("CHTYPES_V1_CONFORMANCE")
-	if fixturesDir == "" {
-		t.Skip("CHTYPES_V1_CONFORMANCE is not set; skipping the v1 conformance suite (docs/guides/fetch-v1.md §10)")
-	}
 	// This package's tests run under the v1 fetch contract (main_test.go):
 	// the cases are its specification. The ABI v2 dev channel narrows it, and
 	// its own rules (r5, r6) are TestDevChannel* in this package.
-	t.Logf("fetch contract: %s (the fetch-v1 cases' own; the dev channel this binding ships is tested by TestDevChannel*)", ChannelName())
-	if ChannelName() != "v1" {
-		t.Fatalf("the fetch-v1 conformance cases must run under the v1 contract, not %q", ChannelName())
+	runConformance(t, confRun{envFixtures: "CHTYPES_V1_CONFORMANCE", envReport: "CHTYPES_V1_REPORT", channel: "v1"})
+}
+
+// TestConformanceProdV2 runs the same cases, regenerated for generation 2
+// (tests/fixtures/fetch-v2: ABI 2 predicates, schema-2 records), under the
+// production generation-2 channel: the v1 contract with abi 2, schema-2
+// records and the v2 subroot (docs/guides/fetch-v1.md, "Generation 2 after the
+// lock"). Gated on CHTYPES_V2_CONFORMANCE, skipping loudly when unset.
+func TestConformanceProdV2(t *testing.T) {
+	if os.Getenv("CHTYPES_V2_CONFORMANCE") == "" {
+		t.Skip("CHTYPES_V2_CONFORMANCE is not set; skipping the production-v2 conformance suite (docs/guides/fetch-v1.md §10)")
+	}
+	defer UseProdV2ForTests()()
+	runConformance(t, confRun{envFixtures: "CHTYPES_V2_CONFORMANCE", envReport: "CHTYPES_V2_REPORT", channel: ProdV2Name, subroot: ProdV2CacheDir})
+}
+
+// confRun is one conformance run: which corpus, which report, which channel.
+type confRun struct {
+	envFixtures string
+	envReport   string
+	channel     string // the ChannelName() the run must be under
+	subroot     string // where an explicit cache directory's layout lives
+}
+
+func runConformance(t *testing.T, run confRun) {
+	fixturesDir := os.Getenv(run.envFixtures)
+	if fixturesDir == "" {
+		t.Skipf("%s is not set; skipping the conformance suite (docs/guides/fetch-v1.md §10)", run.envFixtures)
+	}
+	t.Logf("fetch contract: %s (corpus %s)", ChannelName(), fixturesDir)
+	if ChannelName() != run.channel {
+		t.Fatalf("these conformance cases must run under the %q contract, not %q", run.channel, ChannelName())
 	}
 	abs, err := filepath.Abs(fixturesDir)
 	if err == nil {
@@ -155,12 +180,17 @@ func TestConformanceV1(t *testing.T) {
 			if transport == "registry" && registryBase == "" {
 				continue // the v1-network job produces registry-transport results separately
 			}
-			result := runOneCase(t, fixturesDir, port, port2, registryBase, c, transport)
+			result := runOneCase(t, fixturesDir, run.subroot, port, port2, registryBase, c, transport)
 			report.Results = append(report.Results, result)
 		}
 	}
+	// A census that cannot be empty: a run that executed nothing is a failure.
+	t.Logf("%s conformance: %d result(s) over %d case(s)", run.channel, len(report.Results), len(cf.Cases))
+	if len(report.Results) == 0 {
+		t.Fatalf("the %s conformance run executed zero cases", run.channel)
+	}
 
-	if path := os.Getenv("CHTYPES_V1_REPORT"); path != "" {
+	if path := os.Getenv(run.envReport); path != "" {
 		out, err := json.MarshalIndent(&report, "", "  ")
 		if err != nil {
 			t.Fatalf("marshaling the report: %v", err)
@@ -280,7 +310,7 @@ func expandBase(template, transport, fixturesDir, tree, caseID, registryBase str
 }
 
 // runOneCase executes c against one transport and returns its report row.
-func runOneCase(t *testing.T, fixturesDir string, port, port2 int, registryBase string, c confCase, transport string) reportResult {
+func runOneCase(t *testing.T, fixturesDir, subroot string, port, port2 int, registryBase string, c confCase, transport string) reportResult {
 	t.Helper()
 	row := reportResult{ID: c.ID, Transport: transport}
 
@@ -295,8 +325,15 @@ func runOneCase(t *testing.T, fixturesDir string, port, port2 int, registryBase 
 	}
 
 	cacheDir := t.TempDir()
+	// An explicit cache directory is used through the contract's subroot, so
+	// that is where a seeded layout lives (empty for the v1 contract).
+	layoutDir := filepath.Join(cacheDir, subroot)
 	if c.Setup.Cache != "" && c.Setup.Cache != "empty" {
-		if err := copyDir(filepath.Join(fixturesDir, "layouts", c.Setup.Cache), cacheDir); err != nil {
+		if err := os.MkdirAll(layoutDir, 0o755); err != nil {
+			row.Verdict, row.Detail = "fail", err.Error()
+			return row
+		}
+		if err := copyDir(filepath.Join(fixturesDir, "layouts", c.Setup.Cache), layoutDir); err != nil {
 			row.Verdict, row.Detail = "fail", fmt.Sprintf("seeding the cache fixture %q: %v", c.Setup.Cache, err)
 			return row
 		}
@@ -332,7 +369,7 @@ func runOneCase(t *testing.T, fixturesDir string, port, port2 int, registryBase 
 	// that must already be INSTALLED, not merely present, before the
 	// case's clock starts — verified and unpacked now, offline, from local
 	// blobs, for every one of this case's cache/system directories.
-	for _, dir := range append([]string{cacheDir}, systemDirs...) {
+	for _, dir := range append([]string{layoutDir}, systemDirs...) {
 		if err := preInstallFromDir(dir, preInstallKeys); err != nil {
 			row.Verdict, row.Detail = "fail", err.Error()
 			return row
@@ -343,7 +380,7 @@ func runOneCase(t *testing.T, fixturesDir string, port, port2 int, registryBase 
 	// it, compared after the call.
 	intactBefore := map[string]map[string]string{}
 	for _, d := range c.Expect.RecordsIntact {
-		snap, err := snapshotInstall(cacheDir, d)
+		snap, err := snapshotInstall(layoutDir, d)
 		if err != nil || len(snap) == 0 {
 			row.Verdict, row.Detail = "fail", fmt.Sprintf("records_intact: %s is not installed before the call (%v)", d, err)
 			return row
@@ -412,7 +449,7 @@ func runOneCase(t *testing.T, fixturesDir string, port, port2 int, registryBase 
 	}
 
 	if c.Setup.BeforeIndexRenameHook != nil {
-		opts.HookBeforeIndexRename = indexRenameHookFor(*c.Setup.BeforeIndexRenameHook, cacheDir)
+		opts.HookBeforeIndexRename = indexRenameHookFor(*c.Setup.BeforeIndexRenameHook, layoutDir)
 	}
 
 	// The dev channel's alias step (docs/guides/fetch-v1.md §3), under the
@@ -497,7 +534,7 @@ func runOneCase(t *testing.T, fixturesDir string, port, port2 int, registryBase 
 		return row
 	}
 	for _, d := range c.Expect.RecordsIntact {
-		after, err := snapshotInstall(cacheDir, d)
+		after, err := snapshotInstall(layoutDir, d)
 		if err != nil || !reflect.DeepEqual(after, intactBefore[d]) {
 			row.Verdict, row.Detail = "fail", fmt.Sprintf("records_intact: the install of %s changed (%d file(s) before, %d after, %v)", d, len(intactBefore[d]), len(after), err)
 			return row

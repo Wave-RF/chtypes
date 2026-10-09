@@ -45,8 +45,35 @@ fn case_trusted_keys(case: &Case) -> Option<Vec<String>> {
     Some(keys)
 }
 
-const ENV_FIXTURES: &str = "CHTYPES_V1_CONFORMANCE";
-const ENV_REPORT: &str = "CHTYPES_V1_REPORT";
+/// One conformance run: which corpus, which report, which channel. The v1
+/// corpus runs under the v1 contract it specifies; the production-v2 corpus is
+/// the same cases regenerated for generation 2 (tests/fixtures/fetch-v2: abi 2
+/// predicates, schema-2 records), run under the production generation-2
+/// channel (docs/guides/fetch-v1.md, "Generation 2 after the lock").
+struct Run {
+    label: &'static str,
+    env_fixtures: &'static str,
+    env_report: &'static str,
+    channel: &'static str,
+    /// Where an explicit cache directory's layout lives (`None` for v1).
+    subroot: Option<&'static str>,
+}
+
+const RUN_V1: Run = Run {
+    label: "v1",
+    env_fixtures: "CHTYPES_V1_CONFORMANCE",
+    env_report: "CHTYPES_V1_REPORT",
+    channel: "v1",
+    subroot: None,
+};
+
+const RUN_PROD_V2: Run = Run {
+    label: "production-v2",
+    env_fixtures: "CHTYPES_V2_CONFORMANCE",
+    env_report: "CHTYPES_V2_REPORT",
+    channel: ocifetch::constants::PROD_V2_NAME,
+    subroot: Some(ocifetch::constants::PROD_V2_CACHE_DIR),
+};
 /// Set only by the `v1-network` job: the registry base `{base}` expands to on
 /// the `registry` transport. Unset, every `registry` pair is skipped loudly.
 const ENV_REGISTRY_BASE: &str = "CHTYPES_V1_REGISTRY_BASE";
@@ -203,32 +230,48 @@ struct ReportResult {
 /// otherwise each `registry` pair is skipped loudly by name.
 const RUNNER_TRANSPORTS: &[&str] = &["file", "http", "registry"];
 
+/// Both corpora run in this one test, one after the other: the cases set
+/// process environment variables, so two runs must never overlap.
 #[test]
 fn conformance() {
-    // The fetch-v1 cases specify the v1 contract, and this test speaks it: the
+    // The fetch-v1 cases specify the v1 contract, and this run speaks it: the
     // ABI v2 dev channel this 2.0.0-dev binding ships narrows it (rules r5 and
     // r6), and its own rules are tests/devchannel.rs. The seam is test-only and
     // per thread; every case runs on this one.
-    let _v1 = ocifetch::channel::use_fetch_v1_for_tests();
+    {
+        let _v1 = ocifetch::channel::use_fetch_v1_for_tests();
+        run_corpus(&RUN_V1);
+    }
+    let _prod = ocifetch::channel::use_prod_v2_for_tests();
+    run_corpus(&RUN_PROD_V2);
+}
+
+fn run_corpus(run: &Run) {
+    let env_fixtures = run.env_fixtures;
+    let env_report = run.env_report;
     eprintln!(
-        "fetch contract: {} (the fetch-v1 cases' own; the dev channel this binding ships is tested by tests/devchannel.rs)",
-        ocifetch::channel::active().name
+        "fetch contract: {} (corpus {})",
+        ocifetch::channel::active().name,
+        run.label
     );
     assert_eq!(
         ocifetch::channel::active().name,
-        "v1",
-        "the fetch-v1 conformance cases must run under the v1 contract"
+        run.channel,
+        "the {} conformance cases must run under the {} contract",
+        run.label,
+        run.channel
     );
-    let Ok(fixtures_env) = std::env::var(ENV_FIXTURES) else {
+    let Ok(fixtures_env) = std::env::var(env_fixtures) else {
         eprintln!(
-            "SKIP: {ENV_FIXTURES} is not set — the v1 conformance suite needs \
-             tests/fixtures/fetch-v1/ (plan §3.2); this test runs nothing without it."
+            "SKIP: {env_fixtures} is not set — the {} conformance suite needs its fixtures \
+             (tests/fixtures/fetch-v1/ or fetch-v2/); this run does nothing without it.",
+            run.label
         );
         return;
     };
     let fixtures_root = PathBuf::from(&fixtures_env);
     if !fixtures_root.is_dir() {
-        panic!("{ENV_FIXTURES}={fixtures_env:?} is not a directory");
+        panic!("{env_fixtures}={fixtures_env:?} is not a directory");
     }
 
     let cases_path = fixtures_root.join("cases.json");
@@ -264,6 +307,7 @@ fn conformance() {
                 &fixtures_root,
                 server.as_ref(),
                 registry_base.as_deref(),
+                run.subroot,
             );
             results.push(ReportResult {
                 id: case.id.clone(),
@@ -282,12 +326,12 @@ fn conformance() {
         cases_sha256,
         results,
     };
-    if let Ok(report_path) = std::env::var(ENV_REPORT) {
+    if let Ok(report_path) = std::env::var(env_report) {
         let bytes = serde_json::to_vec_pretty(&report).expect("serializing the report");
         std::fs::write(&report_path, bytes)
-            .unwrap_or_else(|e| panic!("writing {ENV_REPORT}={report_path:?}: {e}"));
+            .unwrap_or_else(|e| panic!("writing {env_report}={report_path:?}: {e}"));
     } else {
-        eprintln!("note: {ENV_REPORT} is not set; the report below was computed but not written");
+        eprintln!("note: {env_report} is not set; the report below was computed but not written");
     }
 
     let failed: Vec<&ReportResult> = report
@@ -322,9 +366,17 @@ fn run_case(
     fixtures_root: &Path,
     server: Option<&ServerHandle>,
     registry_base: Option<&str>,
+    subroot: Option<&str>,
 ) -> (&'static str, String) {
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        execute_case(case, transport, fixtures_root, server, registry_base)
+        execute_case(
+            case,
+            transport,
+            fixtures_root,
+            server,
+            registry_base,
+            subroot,
+        )
     }));
     match outcome {
         Ok(Ok(())) => ("pass", String::new()),
@@ -346,6 +398,7 @@ fn execute_case(
     fixtures_root: &Path,
     server: Option<&ServerHandle>,
     registry_base: Option<&str>,
+    subroot: Option<&str>,
 ) -> Result<(), String> {
     // `{base}`/`{base2}`'s per-transport expansion (docs/guides/fetch-v1.md
     // §10, "{base2}" decided 2026-10-02 by lane 0B). `{base}` is the primary
@@ -400,8 +453,14 @@ fn execute_case(
         })
         .collect();
 
-    let cache_dir = stage_cache(fixtures_root, &case.setup.cache)
+    let cache_dir = stage_cache(fixtures_root, &case.setup.cache, subroot)
         .map_err(|e| format!("staging cache {:?}: {e}", case.setup.cache))?;
+    // An explicit cache directory is used through the contract's subroot, so
+    // that is where a seeded layout lives (none for the v1 contract).
+    let layout_dir: PathBuf = match subroot {
+        Some(s) => cache_dir.path().join(s),
+        None => cache_dir.path().to_path_buf(),
+    };
     let system_dirs: Vec<PathBuf> = case
         .setup
         .system_dirs
@@ -427,7 +486,7 @@ fn execute_case(
     let before_index_rename: Option<Box<dyn Fn()>> = match case.setup.before_index_rename_hook {
         None => None,
         Some(ref name) if name == "index-race-reapply" => {
-            let root = cache_dir.path().to_path_buf();
+            let root = layout_dir.clone();
             let digest = competing_digest.clone();
             let fired = std::cell::Cell::new(false);
             Some(Box::new(move || {
@@ -454,7 +513,7 @@ fn execute_case(
     // verified.json record), not merely present as blobs, before the case
     // begins. Install each listed digest from the staged cache's own local
     // blobs, offline, before starting the case proper.
-    let installed_marker = cache_dir.path().join("installed.json");
+    let installed_marker = layout_dir.join("installed.json");
     if let Ok(bytes) = std::fs::read(&installed_marker) {
         let marker: InstalledMarker = serde_json::from_slice(&bytes)
             .map_err(|e| format!("parsing {}: {e}", installed_marker.display()))?;
@@ -462,8 +521,8 @@ fn execute_case(
             .map_err(|e| format!("building the pre-seed trust list: {e}"))?;
         for digest in &marker.installed {
             ocifetch::ensure::install_from_local_blobs(
-                cache_dir.path(),
-                cache_dir.path(),
+                &layout_dir,
+                &layout_dir,
                 digest,
                 &case.request.platform,
                 &trust,
@@ -476,7 +535,7 @@ fn execute_case(
     // it, compared after the call.
     let mut intact_before = Vec::new();
     for d in &case.expect.records_intact {
-        let snap = snapshot_install(cache_dir.path(), d);
+        let snap = snapshot_install(&layout_dir, d);
         if snap.is_empty() {
             return Err(format!(
                 "records_intact: {d} is not installed before the call"
@@ -586,7 +645,7 @@ fn execute_case(
                 })
                 .and_then(|()| {
                     if case.setup.before_index_rename_hook.is_some() {
-                        check_index_has_both(cache_dir.path(), &competing_digest)
+                        check_index_has_both(&layout_dir, &competing_digest)
                     } else {
                         Ok(())
                     }
@@ -625,7 +684,7 @@ fn execute_case(
 
     if outcome.is_ok() {
         for (d, before) in &intact_before {
-            if snapshot_install(cache_dir.path(), d) != *before {
+            if snapshot_install(&layout_dir, d) != *before {
                 outcome = Err(format!("records_intact: the install of {d} changed"));
                 break;
             }
@@ -964,10 +1023,18 @@ fn pattern_matches_any(log: &[RequestLogEntry], pattern: &str) -> bool {
 /// pre-seeded layout (`layouts/<name>/`, e.g. `layouts/oras-preseed/`)
 /// copied into a fresh temp directory, since `ensure()` writes into its
 /// cache and a fixture tree must never be mutated in place.
-fn stage_cache(fixtures_root: &Path, name: &str) -> std::io::Result<tempdir::TempDir> {
+fn stage_cache(
+    fixtures_root: &Path,
+    name: &str,
+    subroot: Option<&str>,
+) -> std::io::Result<tempdir::TempDir> {
     let dir = tempdir::TempDir::new("ocifetch-conformance-cache")?;
     if name != "empty" {
-        copy_dir_all(&fixtures_root.join("layouts").join(name), dir.path())?;
+        let layout = match subroot {
+            Some(s) => dir.path().join(s),
+            None => dir.path().to_path_buf(),
+        };
+        copy_dir_all(&fixtures_root.join("layouts").join(name), &layout)?;
     }
     Ok(dir)
 }

@@ -144,6 +144,30 @@ const FETCH_V1_CHANNEL: Channel = Channel {
     own_fingerprint: None,
 };
 
+/// The production generation-2 channel a 2.0.0 SDK speaks after the lock: the
+/// v1 contract with v2 values, from the generated constants
+/// (docs/guides/fetch-v1.md, "Generation 2 after the lock"). It trusts the
+/// release key, honors every override and pin, and has no alias step. NOT the
+/// default: only [`use_prod_v2_for_tests`] selects it, until the lock change
+/// makes it [`active`]'s fallback.
+#[cfg(test)]
+const PROD_V2_CHANNEL: Channel = Channel {
+    name: constants::PROD_V2_NAME,
+    abi: constants::PROD_V2_ABI_GENERATION,
+    record_schema: constants::PROD_V2_RECORD_SCHEMA as u64,
+    root_leaf: constants::PROD_V2_CACHE_DIR,
+    subroot: Some(constants::PROD_V2_CACHE_DIR),
+    system_dirs: constants::PROD_V2_SYSTEM_DIRS,
+    bases: constants::PROD_V2_BASES,
+    keys: &[(
+        constants::RELEASE_KEYS[0].keyid,
+        constants::RELEASE_KEYS[0].ed25519_hex,
+    )],
+    overridable: true,
+    pinnable: true,
+    own_fingerprint: None,
+};
+
 #[cfg(test)]
 thread_local! {
     static TEST_CHANNEL: std::cell::Cell<Option<Channel>> = const { std::cell::Cell::new(None) };
@@ -191,6 +215,13 @@ fn use_channel(c: Channel) -> ChannelGuard {
 #[cfg(test)]
 pub fn use_fetch_v1_for_tests() -> ChannelGuard {
     use_channel(FETCH_V1_CHANNEL)
+}
+
+/// Make this TEST thread speak the production generation-2 channel: the v1
+/// contract with abi 2, schema-2 records and the `v2` subroot.
+#[cfg(test)]
+pub fn use_prod_v2_for_tests() -> ChannelGuard {
+    use_channel(PROD_V2_CHANNEL)
 }
 
 /// Make this TEST thread's dev channel honor the base, trust and unsigned

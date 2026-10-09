@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "id": "retired-410-sanitized",
+  "tree": "http-retired",
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/v2/chtypes/v1/manifests/26.12",
+      "responses": [
+        {
+          "status": 410,
+          "headers": {
+            "Cache-Control": "no-store",
+            "Content-Type": "application/json"
+          },
+          "body": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"\\u001b[1;31mchtypes/v1 is retired\\u001b[0m: use \\u202echtypes/v2\\u202c ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------\"}]}"
+        }
+      ]
+    }
+  ],
+  "second_origin_routes": []
+}

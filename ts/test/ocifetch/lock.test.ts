@@ -10,6 +10,12 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ArtifactPinnedError } from '../../src/ocifetch/errors.js';
 import { emptyLock, getPin, readLock, validateLock, withPin, writeLock } from '../../src/ocifetch/lock.js';
+import { useFetchV1ForTests } from '../../src/ocifetch/channel.js';
+
+// This file tests the v1 lock contract (docs/guides/fetch-v1.md §6): its locks
+// carry abi 1. A lock's abi is the active channel's generation, so it selects
+// the v1 channel; the production-v2 locks run through the conformance cases.
+useFetchV1ForTests();
 
 const GOOD_PIN = {
   version: '26.8.15.10',

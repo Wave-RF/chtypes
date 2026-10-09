@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "source": {
-    "generator_commit": "742a060c64e9f5d10af56d52287769eb6f31d97b",
+    "generator_commit": "73a5e07dca90fe16ea06320892541bf9852394b2",
     "go_sum_sha256": "e998462ee1660f7d0b42c45fd0e16ddef8c688e81aaa22c466ada3c69565eec9"
   },
   "cases": [
@@ -302,6 +302,106 @@
         },
         "lock_after": null,
         "tags": null,
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
+      }
+    },
+    {
+      "id": "unpublished-empty-repository",
+      "tree": "empty-repository",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null
+      },
+      "request": {
+        "spelling": "26.9",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_ARTIFACT_UNPUBLISHED",
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": null,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
+      }
+    },
+    {
+      "id": "list-tags-empty-repository",
+      "tree": "empty-repository",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null
+      },
+      "request": {
+        "spelling": "",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null
+      },
+      "env": {},
+      "expect": {
+        "ok": true,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": null,
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": null,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": [],
         "records_intact": [],
         "message_contains": null,
         "message_excludes": []

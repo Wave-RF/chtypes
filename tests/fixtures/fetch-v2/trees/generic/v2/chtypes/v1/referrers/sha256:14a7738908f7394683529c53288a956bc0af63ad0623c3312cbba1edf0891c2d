@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 2,
+  "mediaType": "application/vnd.oci.image.index.v1+json",
+  "manifests": [
+    {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:4ea81b007008cf46e2bbc75fa6fc48f43d5142a08899e91c789960de206efb8d",
+      "size": 746,
+      "artifactType": "application/vnd.dev.sigstore.bundle.v0.3+json"
+    },
+    {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:9e6ada1f485b3fd87d21b9b94ffa3170285263338415b1bb803993ff417f1937",
+      "size": 714,
+      "artifactType": "application/vnd.wavehouse.chtypes.goldens.v1"
+    }
+  ]
+}
