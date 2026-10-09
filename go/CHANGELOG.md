@@ -8,6 +8,8 @@ The four bindings in this repository are released together and give one answer, 
 
 ### Added
 
+- Every settings layer's filter-declined settings, in one list (ABI v2; moves the dev fingerprint; #588): `SchemaDescription.FilterDeclinedSettings`, a list of `DeclinedSetting`, decoded from `schema_description`'s new required top-level `filter_declined_settings`, over every layer known at schema compile (`Setup`'s defaults as the compile captured them, the server profile, and the schema's own settings). `DeclinedSetting` gains `Layer`, the highest layer that sets the name, from the new `DeclinedLayer` vocabulary (`LayerDefaults`, `LayerServer`, `LayerSchema`, and its unknown(n)). One entry per name, ordered by layer and then by name bytes, as the library writes it; the binding sorts nothing.
+- `Schema.Describe` raises the library's `CHS_REJECTED` with ch_code 306 (TOO_DEEP_RECURSION), a `*SchemaError`, for a deep input the server's stack check refuses (ABI v2: `chs_schema_describe` now lists `CHS_REJECTED`).
 - The server's filter-declined settings (ABI v2; moves the dev fingerprint): `SchemaServer.FilterDeclinedSettings`, a list of `DeclinedSetting` (`Name`, `Tier`), decoded from `schema_description`'s new required `server.filter_declined_settings`, with the new `DeclinedTier` vocabulary (`TierPredicate`, `TierPredicateUnflipped`, `TierResultContent`, and its unknown(n)). `CompileFilter` on a schema whose server lists any is the library's `CHS_DECLINED`, an `*UnsupportedError` carrying its message; a filter's own settings other than `session_timezone` are no longer declined at compile, and a declined one is named at evaluation instead.
 - The v2 spec states that a filter verdict counts only when the evaluation's outcome is `ok`: over a body a server would not accept, every verdict is `d`.
 - The v2 spec publishes the WHERE-affecting settings lists (`spec/abi-v2/where-settings/`) with the consumer rule.
@@ -19,6 +21,7 @@ The four bindings in this repository are released together and give one answer, 
 
 ### Changed
 
+- `CompileFilter` is the library's `CHS_DECLINED`, `*UnsupportedError`, on a schema whose `filter_declined_settings` is not empty from any layer, and its message names each setting and its layer (ABI v2, #588). A declined setting from the defaults or the schema's own settings now fails the compile, where it was named at evaluation before; a filter's own settings and an evaluation's are still named at evaluation.
 - **Enforcement gate lifted** for `26.3` on `linux-amd64`.
 - **Enforcement gate lifted** for `26.7` on `linux-amd64`.
 - **Enforcement gate lifted** for `26.8` on `linux-amd64`.
@@ -30,6 +33,10 @@ The four bindings in this repository are released together and give one answer, 
 - **Enforcement gate lifted** for `26.7` on `darwin-arm64`.
 - **Enforcement gate lifted** for `26.8` on `darwin-arm64`.
 - **Enforcement gate lifted** for `26.9` on `darwin-arm64`.
+
+### Removed
+
+- `SchemaServer.FilterDeclinedSettings` (a breaking change inside v2 dev, #588): the server member no longer carries the list. Read `SchemaDescription.FilterDeclinedSettings`, whose `server`-layer entries are the profile's.
 
 ### Fixed
 

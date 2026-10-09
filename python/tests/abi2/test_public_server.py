@@ -14,6 +14,7 @@ import threading
 import pytest
 
 from chtypes import (
+    DeclinedLayer,
     DeclinedSetting,
     DeclinedTier,
     SchemaReplicated,
@@ -276,54 +277,95 @@ def test_a_malformed_server_or_replicated_member_is_an_internal_error(extra) -> 
         _describe(**extra)
 
 
-_PROFILE = {
-    "timezone": "UTC",
-    "settings": {"final": "1", "aggregate_functions_null_for_empty": "1"},
-}
+_SERVER = {"timezone": "UTC", "settings": {"final": "1"}}
 
 
 def _declined(entries) -> tuple:
-    d = _describe(server={**_PROFILE, "filter_declined_settings": entries})
-    return d.server.filter_declined_settings
+    return _describe(filter_declined_settings=entries, server=_SERVER).filter_declined_settings
 
 
 def test_filter_declined_settings_empty_and_absent() -> None:
     # [] is present and empty; absent (a document of no build at this
     # fingerprint) reads as empty too. Neither is a failure.
     assert _declined([]) == ()
-    absent = _describe(server={"timezone": "UTC", "settings": {}})
-    assert absent.server.filter_declined_settings == ()
+    assert _describe(server=_SERVER).filter_declined_settings == ()
 
 
-def test_filter_declined_settings_in_profile_order_b64_and_an_unknown_tier() -> None:
+def test_filter_declined_settings_in_document_order_b64_and_unknown_values() -> None:
     got = _declined(
         [
-            {"name": "final", "tier": "result-content", "x_future": 1},
-            {"name": "aggregate_functions_null_for_empty", "tier": "predicate"},
-            {"name_b64": "eP95", "tier": "predicate-unflipped"},
-            {"name": "x_future_setting", "tier": "x_future_tier", "x_future_obj": {"a": [1]}},
+            {
+                "name": "aggregate_functions_null_for_empty",
+                "tier": "predicate",
+                "layer": "defaults",
+                "x_future": 1,
+            },
+            {"name": "final", "tier": "result-content", "layer": "server"},
+            {"name": "additional_result_filter", "tier": "result-content", "layer": "schema"},
+            {"name_b64": "eP95", "tier": "predicate-unflipped", "layer": "schema"},
+            {
+                "name": "x_future_setting",
+                "tier": "x_future_tier",
+                "layer": "x_future_layer",
+                "x_future_obj": {"a": [1]},
+            },
         ]
     )
+    # The document's own order, never re-sorted (here not name order).
     assert got == (
-        DeclinedSetting(b"final", DeclinedTier.RESULT_CONTENT),
-        DeclinedSetting(b"aggregate_functions_null_for_empty", DeclinedTier.PREDICATE),
-        DeclinedSetting(b"x\xffy", DeclinedTier.PREDICATE_UNFLIPPED),
-        DeclinedSetting(b"x_future_setting", DeclinedTier.of("x_future_tier")),
+        DeclinedSetting(
+            b"aggregate_functions_null_for_empty", DeclinedTier.PREDICATE, DeclinedLayer.DEFAULTS
+        ),
+        DeclinedSetting(b"final", DeclinedTier.RESULT_CONTENT, DeclinedLayer.SERVER),
+        DeclinedSetting(
+            b"additional_result_filter", DeclinedTier.RESULT_CONTENT, DeclinedLayer.SCHEMA
+        ),
+        DeclinedSetting(b"x\xffy", DeclinedTier.PREDICATE_UNFLIPPED, DeclinedLayer.SCHEMA),
+        DeclinedSetting(
+            b"x_future_setting",
+            DeclinedTier.of("x_future_tier"),
+            DeclinedLayer.of("x_future_layer"),
+        ),
     )
-    # Rule r3: an unlisted tier is kept as it came, as its unknown(n).
-    assert [e.tier.known for e in got] == [True, True, True, False]
-    assert got[3].tier == "x_future_tier"
+    # Rule r3: an unlisted tier or layer is kept as it came, as its unknown(n).
+    assert [e.tier.known for e in got] == [True, True, True, True, False]
+    assert [e.layer.known for e in got] == [True, True, True, True, False]
+    assert got[4].tier == "x_future_tier" and got[4].layer == "x_future_layer"
+
+
+def test_filter_declined_settings_without_a_server_and_the_removed_server_list() -> None:
+    # A schema with no server lists its own layers all the same.
+    d = _describe(
+        filter_declined_settings=[{"name": "final", "tier": "result-content", "layer": "schema"}]
+    )
+    assert d.server is None
+    assert d.filter_declined_settings == (
+        DeclinedSetting(b"final", DeclinedTier.RESULT_CONTENT, DeclinedLayer.SCHEMA),
+    )
+    # The removed server-level list is an unknown member now (rule r2): the
+    # top-level list is the one decoded.
+    d = _describe(
+        filter_declined_settings=[],
+        server={
+            **_SERVER,
+            "filter_declined_settings": [{"name": "final", "tier": "result-content"}],
+        },
+    )
+    assert d.filter_declined_settings == () and d.server == SchemaServer(
+        "UTC", {"final": "1"}, None
+    )
 
 
 @pytest.mark.parametrize(
     "entries",
     [
-        {"name": "final", "tier": "predicate"},
+        {"name": "final", "tier": "predicate", "layer": "server"},
         ["final"],
-        [{"name": "final", "name_b64": "ZmluYWw=", "tier": "predicate"}],
-        [{"tier": "predicate"}],
-        [{"name_b64": "*", "tier": "predicate"}],
-        [{"name": "final", "tier": 1}],
+        [{"name": "final", "name_b64": "ZmluYWw=", "tier": "predicate", "layer": "server"}],
+        [{"tier": "predicate", "layer": "server"}],
+        [{"name_b64": "*", "tier": "predicate", "layer": "server"}],
+        [{"name": "final", "tier": 1, "layer": "server"}],
+        [{"name": "final", "tier": "predicate", "layer": 2}],
     ],
 )
 def test_a_malformed_filter_declined_settings_is_an_internal_error(entries) -> None:

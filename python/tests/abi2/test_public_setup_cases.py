@@ -75,19 +75,20 @@ def _outcome(want: dict, error: BaseException | None) -> str:
 
 
 def _declined(described, want: list[dict]) -> str:
-    """What differs between a description's server `filter_declined_settings`
-    and a describe step's expectation; "" when none."""
-    if described.server is None:
-        return "the description carries no server"
-    got = described.server.filter_declined_settings
+    """What differs between a description's `filter_declined_settings` and a
+    describe step's expectation; "" when none."""
+    got = described.filter_declined_settings
     if len(got) != len(want):
         return f"filter_declined_settings has {len(got)} entries, want {len(want)}: {got!r}"
     for i, (g, w) in enumerate(zip(got, want, strict=True)):
         if g.name.hex() != w["name_hex"]:
             return f"entry {i}: name {g.name!r}, want hex {w['name_hex']}"
-        if g.tier != w["tier"] or g.tier.known != w["known"]:
-            want_tier = f"{w['tier']!r} (known {w['known']})"
+        if g.tier != w["tier"] or g.tier.known != w["tier_known"]:
+            want_tier = f"{w['tier']!r} (known {w['tier_known']})"
             return f"entry {i}: tier {g.tier!r} (known {g.tier.known}), want {want_tier}"
+        if g.layer != w["layer"] or g.layer.known != w["layer_known"]:
+            want_layer = f"{w['layer']!r} (known {w['layer_known']})"
+            return f"entry {i}: layer {g.layer!r} (known {g.layer.known}), want {want_layer}"
     return ""
 
 
@@ -195,9 +196,10 @@ def test_setup_case(
         if opened is not None:
             current = opened
         diff = _outcome(step["expect"], error)
-        if not diff and step["op"] == "describe":
+        if not diff and step["op"] == "describe" and step["expect"].get("ok"):
             # The list as this binding decoded it from the document the stub
-            # answered, never a value the case sets by hand.
+            # answered, never a value the case sets by hand. A describe the
+            # case expects to fail has no list.
             diff = _declined(described, step["declined"])
         if not diff and "rows_passed" in step and step["rows_passed"] != batch_rows_passed:
             diff = (
