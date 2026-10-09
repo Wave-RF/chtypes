@@ -268,6 +268,24 @@ def render_go(data: dict[str, Any], sha: str) -> str:
     go_list = ", ".join(_go_string(v) for v in cache["system_dirs"])
     lines.append(f"var SystemCacheDirs = []string{{{go_list}}}")
     lines.append("")
+    pv2 = data["prod_v2"]
+    lines.append("// The production generation-2 channel (docs/guides/fetch-v1.md, \"Generation 2 after the lock\"):")
+    lines.append("// the v1 contract with v2 values, trusting ReleaseKeys. Built, not yet the default.")
+    lines.append("const (")
+    pv2_consts = [
+        ("ProdV2Name", _go_string(pv2["name"])),
+        ("ProdV2ABIGeneration", str(pv2["abi_generation"])),
+        ("ProdV2RecordSchema", str(pv2["record_schema"])),
+        ("ProdV2CacheDir", _go_string(pv2["cache_leaf"])),
+    ]
+    pv2_w = max(len(n) for n, _ in pv2_consts)
+    for n, v in pv2_consts:
+        lines.append(f"\t{n.ljust(pv2_w)} = {v}")
+    lines.append(")")
+    lines.append("")
+    lines.append(f"var ProdV2Bases = []string{{{', '.join(_go_string(v) for v in pv2['default_bases'])}}}")
+    lines.append(f"var ProdV2SystemDirs = []string{{{', '.join(_go_string(v) for v in pv2['system_dirs'])}}}")
+    lines.append("")
     lines.append("// TestKey is a fixture-only ed25519 public key, never in the default trust list.")
     lines.append("type TestKey struct {")
     field_names = ["KeyID", "Ed25519Hex", "TrustedByDefault"]
@@ -451,6 +469,13 @@ def render_python(data: dict[str, Any], sha: str) -> str:
     lines.append(f"CACHE_ROOT_TEMPLATE: Final[str] = {_py_str(cache['root_template'])}")
     system_cache_dirs = _py_tuple([_py_str(v) for v in cache["system_dirs"]])
     lines.append(f"SYSTEM_CACHE_DIRS: Final[tuple[str, ...]] = {system_cache_dirs}")
+    pv2 = data["prod_v2"]
+    lines.append(f"PROD_V2_NAME: Final[str] = {_py_str(pv2['name'])}")
+    lines.append(f"PROD_V2_ABI_GENERATION: Final[int] = {pv2['abi_generation']}")
+    lines.append(f"PROD_V2_RECORD_SCHEMA: Final[int] = {pv2['record_schema']}")
+    lines.append(f"PROD_V2_CACHE_DIR: Final[str] = {_py_str(pv2['cache_leaf'])}")
+    lines.append(f"PROD_V2_BASES: Final[tuple[str, ...]] = {_py_tuple([_py_str(v) for v in pv2['default_bases']])}")
+    lines.append(f"PROD_V2_SYSTEM_DIRS: Final[tuple[str, ...]] = {_py_tuple([_py_str(v) for v in pv2['system_dirs']])}")
     lines.append(f"CACHE_UNPACKED_DIR: Final[str] = {_py_str(cache['unpacked_dir'])}")
     lines.append(f"CACHE_VERIFIED_RECORD: Final[str] = {_py_str(cache['verified_record'])}")
     lines.append(f"CACHE_ANNOTATION_PREFIX: Final[str] = {_py_str(cache['annotation_prefix'])}")
@@ -607,6 +632,13 @@ def render_ts(data: dict[str, Any], sha: str) -> str:
     lines.append("// biome-ignore lint/suspicious/noTemplateCurlyInString: a shell path template, not JS")
     lines.append(f"export const CACHE_ROOT_TEMPLATE = {json.dumps(cache['root_template'])} as const;")
     lines.append(f"export const SYSTEM_CACHE_DIRS = {arr(cache['system_dirs'])} as const;")
+    pv2 = data["prod_v2"]
+    lines.append(f"export const PROD_V2_NAME = {json.dumps(pv2['name'])} as const;")
+    lines.append(f"export const PROD_V2_ABI_GENERATION = {pv2['abi_generation']} as const;")
+    lines.append(f"export const PROD_V2_RECORD_SCHEMA = {pv2['record_schema']} as const;")
+    lines.append(f"export const PROD_V2_CACHE_DIR = {json.dumps(pv2['cache_leaf'])} as const;")
+    lines.append(f"export const PROD_V2_BASES = {arr(pv2['default_bases'])} as const;")
+    lines.append(f"export const PROD_V2_SYSTEM_DIRS = {arr(pv2['system_dirs'])} as const;")
     lines.append(f"export const CACHE_UNPACKED_DIR = {json.dumps(cache['unpacked_dir'])} as const;")
     lines.append(f"export const CACHE_VERIFIED_RECORD = {json.dumps(cache['verified_record'])} as const;")
     lines.append(f"export const CACHE_ANNOTATION_PREFIX = {json.dumps(cache['annotation_prefix'])} as const;")
@@ -771,6 +803,13 @@ def render_rust(data: dict[str, Any], sha: str) -> str:
     lines.append("")
     lines.append(f"pub const CACHE_ROOT_TEMPLATE: &str = {rs_str(cache['root_template'])};")
     lines.append(f"pub const SYSTEM_CACHE_DIRS: &[&str] = {rs_arr(cache['system_dirs'])};")
+    pv2 = data["prod_v2"]
+    lines.append(f"pub const PROD_V2_NAME: &str = {rs_str(pv2['name'])};")
+    lines.append(f"pub const PROD_V2_ABI_GENERATION: u32 = {pv2['abi_generation']};")
+    lines.append(f"pub const PROD_V2_RECORD_SCHEMA: u32 = {pv2['record_schema']};")
+    lines.append(f"pub const PROD_V2_CACHE_DIR: &str = {rs_str(pv2['cache_leaf'])};")
+    lines.append(f"pub const PROD_V2_BASES: &[&str] = {rs_arr(pv2['default_bases'])};")
+    lines.append(f"pub const PROD_V2_SYSTEM_DIRS: &[&str] = {rs_arr(pv2['system_dirs'])};")
     lines.append(f"pub const CACHE_UNPACKED_DIR: &str = {rs_str(cache['unpacked_dir'])};")
     lines.append(f"pub const CACHE_VERIFIED_RECORD: &str = {rs_str(cache['verified_record'])};")
     lines.append(f"pub const CACHE_ANNOTATION_PREFIX: &str = {rs_str(cache['annotation_prefix'])};")
@@ -829,6 +868,13 @@ def render_guide_block(data: dict[str, Any], sha: str) -> str:
     lines.append("")
     lines.append(f"- schema `{data['schema']}` · ABI generation `{data['abi_generation']}`")
     lines.append(f"- default base(s): {', '.join(f'`{b}`' for b in data['registry']['default_bases'])}")
+    pv2 = data["prod_v2"]
+    lines.append(
+        f"- production generation-2 channel `{pv2['name']}`: ABI `{pv2['abi_generation']}`, record schema "
+        f"`{pv2['record_schema']}`, cache leaf `{pv2['cache_leaf']}`, base(s) "
+        f"{', '.join(f'`{b}`' for b in pv2['default_bases'])}, system dirs "
+        f"{', '.join(f'`{d}`' for d in pv2['system_dirs'])}, trusting the release key above"
+    )
     platform_keys = ", ".join(f"`{p['key']}`" for p in data["platforms"])
     lines.append(f"- platforms: {platform_keys}")
     lines.append("")

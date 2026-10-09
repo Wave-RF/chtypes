@@ -10,6 +10,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { LOCK_DEFAULT_FILE, LOCK_SCHEMA, PLATFORMS } from './constants.gen.js';
+import { activeChannel } from './channel.js';
 import { ArtifactPinnedError } from './errors.js';
 import { isPlatformKey, type PlatformKey } from './types.js';
 
@@ -24,7 +25,8 @@ export interface LockPin {
 
 export interface LockFile {
   readonly schema: 3;
-  readonly abi: 1;
+  /** The ABI generation of the channel that wrote it (1 for v1, 2 for production v2). */
+  readonly abi: number;
   readonly platforms: readonly PlatformKey[];
   /** Keyed by the originally-requested spelling, then by platform key. */
   readonly requests: Readonly<Record<string, Readonly<Record<string, LockPin>>>>;
@@ -33,7 +35,7 @@ export interface LockFile {
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 
 export function emptyLock(): LockFile {
-  return { schema: LOCK_SCHEMA, abi: 1, platforms: [], requests: {} };
+  return { schema: LOCK_SCHEMA, abi: activeChannel().abi, platforms: [], requests: {} };
 }
 
 export function defaultLockPath(cwd: string = process.cwd()): string {
@@ -65,8 +67,9 @@ export function validateLock(parsed: unknown, path_: string): LockFile {
         '; re-lock with `fetch --lock`',
     );
   }
-  if (doc['abi'] !== 1) {
-    throw new ArtifactPinnedError(`chtypes: ${path_}'s abi is ${JSON.stringify(doc['abi'])}, not 1; re-lock with \`fetch --lock\``);
+  const abi = activeChannel().abi;
+  if (doc['abi'] !== abi) {
+    throw new ArtifactPinnedError(`chtypes: ${path_}'s abi is ${JSON.stringify(doc['abi'])}, not ${abi}; re-lock with \`fetch --lock\``);
   }
   const platformsRaw = doc['platforms'];
   if (!Array.isArray(platformsRaw) || platformsRaw.length === 0) {
@@ -120,7 +123,7 @@ export function validateLock(parsed: unknown, path_: string): LockFile {
     }
     requests[spelling] = row;
   }
-  return { schema: LOCK_SCHEMA, abi: 1, platforms, requests };
+  return { schema: LOCK_SCHEMA, abi: activeChannel().abi, platforms, requests };
 }
 
 /** `undefined` when no lock file exists at `lockPath`. */
@@ -142,7 +145,7 @@ export async function readLock(lockPath: string): Promise<LockFile | undefined> 
 }
 
 export async function writeLock(lockPath: string, lock: LockFile): Promise<void> {
-  const serializable = { schema: LOCK_SCHEMA, abi: 1, platforms: lock.platforms, requests: lock.requests };
+  const serializable = { schema: LOCK_SCHEMA, abi: activeChannel().abi, platforms: lock.platforms, requests: lock.requests };
   await mkdir(path.dirname(lockPath), { recursive: true });
   const tmp = `${lockPath}.tmp-${process.pid}-${randomBytes(6).toString('hex')}`;
   await writeFile(tmp, `${JSON.stringify(serializable, null, 2)}\n`);

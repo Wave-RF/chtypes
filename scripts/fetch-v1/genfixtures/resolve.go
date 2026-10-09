@@ -71,6 +71,24 @@ func buildResolveCases(fs *FileSet) []Case {
 	unpublished.Expect.Code = strp("CHTYPES_ARTIFACT_UNPUBLISHED")
 	cases = append(cases, unpublished)
 
+	// --- unpublished-empty-repository / list-tags-empty-repository: a
+	// repository that exists and holds nothing. tags/list answers 200 with an
+	// empty list and every manifest 404s (the production generation-2
+	// repository reads exactly so before its first publish). A fetch is the
+	// contract's "not published" outcome, CHTYPES_ARTIFACT_UNPUBLISHED, never
+	// a transport or internal error; the listing is empty, not an error. ----
+	emptyTree := NewTree("empty-repository")
+	emptyTree.EmptyList = true
+	flushTrees(fs, emptyTree)
+	emptyRepo := newCase("unpublished-empty-repository", "empty-repository", "file", "http")
+	emptyRepo.Request.Spelling = "26.9"
+	emptyRepo.Expect.OK = false
+	emptyRepo.Expect.Code = strp("CHTYPES_ARTIFACT_UNPUBLISHED")
+	cases = append(cases, emptyRepo)
+	emptyListing := newCase("list-tags-empty-repository", "empty-repository", "file", "http")
+	emptyListing.Expect.Tags = []string{}
+	cases = append(cases, emptyListing)
+
 	// --- missing-platform: the index exists but omits darwin-arm64 -------
 	missingPlatformArt := buildIndexForPlatforms(basic, "26.6.1.1", "20260601.000000", "lts", "26.6",
 		[]string{"linux-amd64", "linux-arm64"})

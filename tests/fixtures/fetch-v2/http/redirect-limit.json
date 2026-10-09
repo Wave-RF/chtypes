@@ -1,0 +1,92 @@
+{
+  "schema": 1,
+  "id": "redirect-limit",
+  "tree": "http-basic",
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/v2/chtypes/v1/manifests/26.12",
+      "responses": [
+        {
+          "status": 302,
+          "headers": {
+            "Location": "{origin}/v2/s-redirect-limit/chtypes/v1/manifests/26.12-hop1"
+          }
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v2/chtypes/v1/manifests/26.12-hop1",
+      "responses": [
+        {
+          "status": 302,
+          "headers": {
+            "Location": "{origin}/v2/s-redirect-limit/chtypes/v1/manifests/26.12-hop2"
+          }
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v2/chtypes/v1/manifests/26.12-hop2",
+      "responses": [
+        {
+          "status": 302,
+          "headers": {
+            "Location": "{origin}/v2/s-redirect-limit/chtypes/v1/manifests/26.12-hop3"
+          }
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v2/chtypes/v1/manifests/26.12-hop3",
+      "responses": [
+        {
+          "status": 302,
+          "headers": {
+            "Location": "{origin}/v2/s-redirect-limit/chtypes/v1/manifests/26.12-hop4"
+          }
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v2/chtypes/v1/manifests/26.12-hop4",
+      "responses": [
+        {
+          "status": 302,
+          "headers": {
+            "Location": "{origin}/v2/s-redirect-limit/chtypes/v1/manifests/26.12-hop5"
+          }
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v2/chtypes/v1/manifests/26.12-hop5",
+      "responses": [
+        {
+          "status": 302,
+          "headers": {
+            "Location": "{origin}/v2/s-redirect-limit/chtypes/v1/manifests/26.12-hop6"
+          }
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v2/chtypes/v1/manifests/26.12-hop6",
+      "responses": [
+        {
+          "status": 302,
+          "headers": {
+            "Location": "{origin}/v2/s-redirect-limit/chtypes/v1/manifests/26.12-hop7"
+          }
+        }
+      ]
+    }
+  ],
+  "second_origin_routes": []
+}

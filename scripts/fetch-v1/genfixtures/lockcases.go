@@ -60,7 +60,7 @@ func buildLockCases(fs *FileSet) []Case {
 	ndIndex := ImageIndex{SchemaVersion: 2, MediaType: ociIndexMediaType, Manifests: []Descriptor{platformDescriptor(ndArt.ManifestDesc, "linux-arm64")}}
 	ndIndexDesc := noDiscoveryTree.PutManifest("", ociIndexMediaType, canonicalJSON(ndIndex)) // by digest only, no tag
 
-	ndLock := Lock3{Schema: 3, ABI: 1, Platforms: []string{"linux-arm64"},
+	ndLock := Lock3{Schema: 3, ABI: fixtureABI, Platforms: []string{"linux-arm64"},
 		Requests: map[string]map[string]LockPin{
 			"26.10.1.1": {"linux-arm64": pinFor(ndArt, ndArt.BundleDigest, ndIndexDesc.Digest)},
 		}}
@@ -81,7 +81,7 @@ func buildLockCases(fs *FileSet) []Case {
 	basicLockTree := NewTree("lock-basic")
 	lbArt := buildFullIndex(basicLockTree, "26.10.2.1", "20261010.000002", "lts", []string{"26.10.2.1", "26.10.2"})
 	otherPinnedArt := lbArt["linux-arm64"]
-	unpinnedLock := Lock3{Schema: 3, ABI: 1, Platforms: []string{"linux-arm64"},
+	unpinnedLock := Lock3{Schema: 3, ABI: fixtureABI, Platforms: []string{"linux-arm64"},
 		Requests: map[string]map[string]LockPin{
 			"26.9.9.9": {"linux-arm64": pinFor(otherPinnedArt, otherPinnedArt.BundleDigest, "")},
 		}}
@@ -98,7 +98,7 @@ func buildLockCases(fs *FileSet) []Case {
 	// Deliberately NOT lock3-schema-valid (abi must be 1) — this fixture
 	// exists to prove that exact refusal, so it lives under an
 	// `invalid-` name schema_check.py skips. ------------------------------
-	abi2Lock := Lock3{Schema: 3, ABI: 2, Platforms: []string{"linux-arm64"},
+	abi2Lock := Lock3{Schema: 3, ABI: wrongABI, Platforms: []string{"linux-arm64"},
 		Requests: map[string]map[string]LockPin{
 			"26.10.2.1": {"linux-arm64": pinFor(otherPinnedArt, otherPinnedArt.BundleDigest, "")},
 		}}
@@ -136,7 +136,7 @@ func buildLockCases(fs *FileSet) []Case {
 		art := lwArts[pk]
 		lwPins[pk] = pinFor(art, art.BundleDigest, "")
 	}
-	lwExpected := Lock3{Schema: 3, ABI: 1, Platforms: C.platformKeys(),
+	lwExpected := Lock3{Schema: 3, ABI: fixtureABI, Platforms: C.platformKeys(),
 		Requests: map[string]map[string]LockPin{"26.10.3.1": lwPins}}
 	putExpectedLock(fs, "lock-write-all-platforms", lwExpected)
 	lockWriteAll := newCase("lock-write-all-platforms", "lock-write-all-platforms", "file", "http", "registry")
@@ -165,10 +165,10 @@ func buildLockCases(fs *FileSet) []Case {
 	updArtNew := buildPlatformArtifact(updateTree, testKey, "linux-arm64", "26.10.4.2", "20261010.000005", "lts", ArtifactOptions{LibraryContentSeed: "update-new"})
 	updateIdx := ImageIndex{SchemaVersion: 2, MediaType: ociIndexMediaType, Manifests: []Descriptor{platformDescriptor(updArtNew.ManifestDesc, "linux-arm64")}}
 	updateTree.PutManifest("26.10.4", ociIndexMediaType, canonicalJSON(updateIdx)) // the live tag now serves the NEW build
-	updateInputLock := Lock3{Schema: 3, ABI: 1, Platforms: []string{"linux-arm64"},
+	updateInputLock := Lock3{Schema: 3, ABI: fixtureABI, Platforms: []string{"linux-arm64"},
 		Requests: map[string]map[string]LockPin{"26.10.4": {"linux-arm64": pinFor(updArtOld, updArtOld.BundleDigest, "")}}}
 	putInputLock(fs, "update-re-resolves-before", updateInputLock)
-	updateExpectedLock := Lock3{Schema: 3, ABI: 1, Platforms: []string{"linux-arm64"},
+	updateExpectedLock := Lock3{Schema: 3, ABI: fixtureABI, Platforms: []string{"linux-arm64"},
 		Requests: map[string]map[string]LockPin{"26.10.4": {"linux-arm64": pinFor(updArtNew, updArtNew.BundleDigest, "")}}}
 	putExpectedLock(fs, "update-re-resolves", updateExpectedLock)
 	updateCase := newCase("update-re-resolves", "lock-update", "file", "http")
@@ -196,7 +196,7 @@ func buildLockCases(fs *FileSet) []Case {
 	mirrorTree.SetReferrerServing(mirrorArt.ManifestDesc.Digest, referrersAbsent, fallbackAbsent)
 	mirrorIdx := ImageIndex{SchemaVersion: 2, MediaType: ociIndexMediaType, Manifests: []Descriptor{platformDescriptor(mirrorArt.ManifestDesc, "linux-arm64")}}
 	mirrorIdxDesc := mirrorTree.PutManifest("", ociIndexMediaType, canonicalJSON(mirrorIdx))
-	mirrorLock := Lock3{Schema: 3, ABI: 1, Platforms: []string{"linux-arm64"},
+	mirrorLock := Lock3{Schema: 3, ABI: fixtureABI, Platforms: []string{"linux-arm64"},
 		Requests: map[string]map[string]LockPin{"26.10.5.1": {"linux-arm64": pinFor(mirrorArt, mirrorArt.BundleDigest, mirrorIdxDesc.Digest)}}}
 	putInputLock(fs, "frozen-mirror", mirrorLock)
 	frozenMirror := newCase("frozen-mirror", "lock-mirror-digest-only", "file", "http")
@@ -217,7 +217,7 @@ func buildLockCases(fs *FileSet) []Case {
 	ofArt := buildPlatformArtifact(offlineFrozenTree, testKey, "linux-arm64", "26.10.6.1", "20261010.000007", "lts", ArtifactOptions{LibraryContentSeed: "offline-frozen"})
 	ofIdx := ImageIndex{SchemaVersion: 2, MediaType: ociIndexMediaType, Manifests: []Descriptor{platformDescriptor(ofArt.ManifestDesc, "linux-arm64")}}
 	offlineFrozenTree.PutManifest("26.10.6.1", ociIndexMediaType, canonicalJSON(ofIdx))
-	ofLock := Lock3{Schema: 3, ABI: 1, Platforms: []string{"linux-arm64"},
+	ofLock := Lock3{Schema: 3, ABI: fixtureABI, Platforms: []string{"linux-arm64"},
 		Requests: map[string]map[string]LockPin{"26.10.6.1": {"linux-arm64": pinFor(ofArt, ofArt.BundleDigest, "")}}}
 	putInputLock(fs, "offline-frozen", ofLock)
 	offlineFrozenLayout := NewLayout("offline-frozen")

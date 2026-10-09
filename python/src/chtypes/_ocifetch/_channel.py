@@ -79,6 +79,7 @@ __all__ = [
     "visible",
     "use_dev_channel_for_tests",
     "use_fetch_v1_for_tests",
+    "use_prod_v2_for_tests",
 ]
 
 # The dev channel's registry and key (spec/abi-v2/docs.md, rule r6).
@@ -165,6 +166,25 @@ FETCH_V1_CHANNEL: Final = Channel(
     pinnable=True,
 )
 
+# The production generation-2 channel a 2.0.0 SDK speaks after the lock: the v1
+# contract with v2 values, from the generated constants (docs/guides/fetch-v1.md,
+# "Generation 2 after the lock"). It trusts the release key, honors every
+# override and pin, and has no alias step. NOT the default: only
+# use_prod_v2_for_tests selects it, until the lock change makes it active()'s
+# fallback.
+PROD_V2_CHANNEL: Final = Channel(
+    name=C.PROD_V2_NAME,
+    abi=C.PROD_V2_ABI_GENERATION,
+    record_schema=C.PROD_V2_RECORD_SCHEMA,
+    root_leaf=C.PROD_V2_CACHE_DIR,
+    subroot=C.PROD_V2_CACHE_DIR,
+    system_dirs=C.PROD_V2_SYSTEM_DIRS,
+    bases=C.PROD_V2_BASES,
+    keys=C.RELEASE_KEYS,
+    overridable=True,
+    pinnable=True,
+)
+
 _lock = threading.Lock()
 _current: Channel | None = None
 
@@ -222,6 +242,14 @@ def use_fetch_v1_for_tests() -> Callable[[], None]:
     restores the previous contract; raises outside a test run."""
     _test_only("use_fetch_v1_for_tests")
     return _use(FETCH_V1_CHANNEL)
+
+
+def use_prod_v2_for_tests() -> Callable[[], None]:
+    """Make this TEST run speak the production generation-2 channel
+    (`PROD_V2_CHANNEL`): the v1 contract with abi 2, schema-2 records and the
+    `v2` subroot. Returns the restore function; raises outside a test run."""
+    _test_only("use_prod_v2_for_tests")
+    return _use(PROD_V2_CHANNEL)
 
 
 def allow_overrides_for_tests() -> Callable[[], None]:

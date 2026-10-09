@@ -53,6 +53,37 @@ from chtypes._ocifetch._unpack import unpack_tar_zst
 
 FIXTURES_ENV = "CHTYPES_V1_CONFORMANCE"
 REPORT_ENV = "CHTYPES_V1_REPORT"
+# The same cases regenerated for generation 2 (tests/fixtures/fetch-v2: ABI 2
+# predicates, schema-2 records), run under the production generation-2 channel
+# (docs/guides/fetch-v1.md, "Generation 2 after the lock").
+V2_FIXTURES_ENV = "CHTYPES_V2_CONFORMANCE"
+V2_REPORT_ENV = "CHTYPES_V2_REPORT"
+
+
+class _Corpus:
+    """One conformance run: which corpus, which report, which channel."""
+
+    def __init__(self, name: str, fixtures_env: str, report_env: str, channel: str, subroot: str):
+        self.name = name
+        self.fixtures_env = fixtures_env
+        self.report_env = report_env
+        self.channel = channel
+        self.subroot = subroot  # where an explicit cache directory's layout lives
+
+
+CORPORA = {
+    "v1": _Corpus("v1", FIXTURES_ENV, REPORT_ENV, "v1", ""),
+    "prod-v2": _Corpus(
+        "prod-v2", V2_FIXTURES_ENV, V2_REPORT_ENV, C.PROD_V2_NAME, C.PROD_V2_CACHE_DIR
+    ),
+}
+
+
+@pytest.fixture(scope="module", params=list(CORPORA), ids=list(CORPORA))
+def corpus(request) -> _Corpus:
+    return CORPORA[request.param]
+
+
 BINDING = "python"
 
 
@@ -70,22 +101,22 @@ def _toolchain() -> str:
     )
 
 
-def _fixtures_root() -> Path:
-    raw = os.environ.get(FIXTURES_ENV)
+def _fixtures_root(env: str) -> Path:
+    raw = os.environ.get(env)
     if not raw:
         pytest.skip(
-            f"{FIXTURES_ENV} is not set. Set it to an absolute tests/fixtures/fetch-v1 path "
+            f"{env} is not set. Set it to an absolute tests/fixtures/fetch-v1 (or fetch-v2) path "
             f'to run this suite (docs/guides/fetch-v1.md "Conformance").'
         )
     root = Path(raw).resolve()
     if not (root / "cases.json").is_file():
-        pytest.skip(f"{FIXTURES_ENV}={root} has no cases.json yet — nothing to run")
+        pytest.skip(f"{env}={root} has no cases.json yet — nothing to run")
     return root
 
 
 @pytest.fixture(scope="module")
-def fixtures_root() -> Path:
-    return _fixtures_root()
+def fixtures_root(corpus: _Corpus) -> Path:
+    return _fixtures_root(corpus.fixtures_env)
 
 
 @pytest.fixture(scope="module")
@@ -427,6 +458,7 @@ def _run_case(
     http_port: int | None,
     http_port2: int | None,
     request_log: _RequestLog,
+    subroot: str = "",
 ) -> tuple[str, str]:
     """Drives one (case, transport) pair through `ensure()`. Returns
     (verdict, detail) for the report (schema: "pass"/"fail")."""
@@ -449,18 +481,21 @@ def _run_case(
     )
 
     cache_dir = tmp_path / "cache"
+    # An explicit cache directory is used through the contract's subroot, so
+    # that is where a seeded layout lives (none for the v1 contract).
+    layout_dir = cache_dir / subroot if subroot else cache_dir
     if setup.get("cache") and setup["cache"] != "empty":
         seed = fixtures_root / "layouts" / setup["cache"]
         if seed.is_dir():
-            shutil.copytree(seed, cache_dir)
-            installed_doc_path = cache_dir / "installed.json"
+            shutil.copytree(seed, layout_dir)
+            installed_doc_path = layout_dir / "installed.json"
             if installed_doc_path.is_file():
                 installed = json.loads(installed_doc_path.read_text())
                 for digest in installed.get("installed", []):
                     _preinstall_from_layout(
-                        layout_dir=cache_dir,
+                        layout_dir=layout_dir,
                         manifest_digest=digest,
-                        cache_root=cache_dir,
+                        cache_root=layout_dir,
                         trusted_keys=trusted_keys,
                     )
 
@@ -487,11 +522,11 @@ def _run_case(
         hook_factory = _BEFORE_INDEX_RENAME_HOOKS.get(hook_name)
         if hook_factory is None:
             return "fail", f"unknown before_index_rename_hook {hook_name!r} — not implemented"
-        before_index_rename = hook_factory(cache_dir)
+        before_index_rename = hook_factory(layout_dir)
 
     # records_intact: each named install's directory, as the pre-install left
     # it, compared after the call.
-    intact_before = {d: _snapshot_install(cache_dir, d) for d in expect["records_intact"]}
+    intact_before = {d: _snapshot_install(layout_dir, d) for d in expect["records_intact"]}
     for d, snap in intact_before.items():
         if not snap:
             return "fail", f"records_intact: {d} is not installed before the call"
@@ -619,7 +654,7 @@ def _run_case(
                     )
 
     for d, snap in intact_before.items():
-        after = _snapshot_install(cache_dir, d)
+        after = _snapshot_install(layout_dir, d)
         if after != snap:
             mismatches.append(
                 f"records_intact: the install of {d} changed "
@@ -658,7 +693,8 @@ def _run_case(
     return "pass", ""
 
 
-def test_conformance_v1(
+def test_conformance(
+    corpus: _Corpus,
     fixtures_root: Path,
     cases_doc: dict,
     cases_sha256: str,
@@ -666,16 +702,39 @@ def test_conformance_v1(
     tmp_path_factory,
     request_log: _RequestLog,
 ) -> None:
-    # This directory runs under the v1 fetch contract (conftest.py): the cases
-    # are its specification. The ABI v2 dev channel narrows it, and its own
-    # rules (r5, r6) are test_devchannel.py.
-    print(
-        f"fetch contract: {_channel.channel_name()} (the fetch-v1 cases' own; the dev channel "
-        "this binding ships is tested by tests/ocifetch/test_devchannel.py)"
-    )
-    assert _channel.channel_name() == "v1", (
-        f"the fetch-v1 conformance cases must run under the v1 contract, not "
-        f"{_channel.channel_name()!r}"
+    # The v1 corpus runs under the v1 fetch contract (conftest.py): its cases
+    # are that contract's specification. The ABI v2 dev channel narrows it, and
+    # its own rules (r5, r6) are test_devchannel.py. The prod-v2 corpus runs
+    # under the production generation-2 channel.
+    restore = _channel.use_prod_v2_for_tests() if corpus.name == "prod-v2" else None
+    try:
+        _run_corpus(
+            corpus,
+            fixtures_root,
+            cases_doc,
+            cases_sha256,
+            http_server,
+            tmp_path_factory,
+            request_log,
+        )
+    finally:
+        if restore is not None:
+            restore()
+
+
+def _run_corpus(
+    corpus: _Corpus,
+    fixtures_root: Path,
+    cases_doc: dict,
+    cases_sha256: str,
+    http_server,
+    tmp_path_factory,
+    request_log: _RequestLog,
+) -> None:
+    print(f"fetch contract: {_channel.channel_name()} (corpus {corpus.name})")
+    assert _channel.channel_name() == corpus.channel, (
+        f"the {corpus.name} conformance cases must run under the {corpus.channel!r} contract, "
+        f"not {_channel.channel_name()!r}"
     )
     results = []
     for case in cases_doc["cases"]:
@@ -692,6 +751,7 @@ def test_conformance_v1(
                     http_port=http_port,
                     http_port2=http_port2,
                     request_log=request_log,
+                    subroot=corpus.subroot,
                 )
             except pytest.skip.Exception:
                 continue
@@ -699,7 +759,7 @@ def test_conformance_v1(
                 {"id": case["id"], "transport": transport, "verdict": verdict, "detail": detail}
             )
 
-    report_path = os.environ.get(REPORT_ENV)
+    report_path = os.environ.get(corpus.report_env)
     if report_path:
         report = {
             "schema": 1,
@@ -711,9 +771,13 @@ def test_conformance_v1(
         with open(report_path, "w", encoding="utf-8") as f:
             json.dump(report, f, indent=2, sort_keys=True)
 
+    n_cases = len(cases_doc["cases"])
+    print(f"{corpus.name} conformance: {len(results)} result(s) over {n_cases} case(s)")
     failures = [r for r in results if r["verdict"] == "fail"]
     if failures:
         detail = "\n".join(f"  {r['id']} ({r['transport']}): {r['detail']}" for r in failures)
-        pytest.fail(f"{len(failures)}/{len(results)} v1 conformance cases failed:\n{detail}")
+        pytest.fail(
+            f"{len(failures)}/{len(results)} {corpus.name} conformance cases failed:\n{detail}"
+        )
     if not results:
         pytest.fail("0 cases ran — the fixtures tree is present but produced no results")
