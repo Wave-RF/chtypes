@@ -10,6 +10,10 @@ with them; this check is what keeps a bad copy from landing.
     check-where-settings.py --selftest    plant each defect, prove each rule fires
     check-where-settings.py --print-table print the README's sha256 list
 
+The directory also holds documented-pathological.tsv: the settings values under
+which a server refuses a filter's query outright while the library answers its
+rows. It is copied byte for byte too, and checked by the rules marked (tsv).
+
 Rules (each has a planted case in --selftest):
   schema      a schema id other than the two the files use
   sorted      names not sorted, or a duplicate name
@@ -26,6 +30,16 @@ Rules (each has a planted case in --selftest):
               "#<digit>" (JSON strings and the README)
   table       the README's sha256 list disagrees with the files
   refuse      a `refuse` field anywhere (the lists are not the refuse key)
+  tsv-header  documented-pathological.tsv without its column header, or with a
+              different one
+  tsv-column  a data row that does not have exactly seven columns, or an empty
+              column, or a file with no data row
+  tsv-line    a row whose line is not one of the top-level lines the
+              where-settings files use
+  tsv-layer   a row whose layer is not profile, schema or filter
+  tsv-code    a row whose server answer is not `e:` and an integer
+  tsv-dup     a repeated cell (setting, value, line, layer)
+  private     (also) any string of the TSV that points into the private half
 
 Python standard library only.
 """
@@ -55,7 +69,12 @@ TIER_KIND = {
 }
 # Built from parts so this file does not itself spell a private name (lint-public).
 PRIVATE = re.compile("|".join(["ci" + "/steps", "chtypes" + "-core", "notes" + "/", "#[0-9]"]))
-ROW = re.compile(r"^- `([^`]+\.json)`: `([0-9a-f]{64})`$")
+ROW = re.compile(r"^- `([^`]+\.(?:json|tsv))`: `([0-9a-f]{64})`$")
+TSV = "documented-pathological.tsv"
+ALL = FILES + (TSV,)
+TSV_HEADER = ("setting", "value", "line", "layer", "server", "rule", "ruling")
+TSV_LAYERS = ("profile", "schema", "filter")
+SERVER = re.compile(r"^e:[0-9]+$")
 
 
 def strings(node):
@@ -79,7 +98,7 @@ def has_key(node, key) -> bool:
 
 
 def table_of(raw: dict[str, bytes]) -> str:
-    return "\n".join(f"- `{n}`: `{hashlib.sha256(raw[n]).hexdigest()}`" for n in FILES)
+    return "\n".join(f"- `{n}`: `{hashlib.sha256(raw[n]).hexdigest()}`" for n in ALL)
 
 
 def check(raw: dict[str, bytes], readme: str) -> list[str]:
@@ -120,6 +139,10 @@ def check(raw: dict[str, bytes], readme: str) -> list[str]:
             tag, ver = d.get("tag", ""), d.get("version", "")
             if not str(tag).startswith("v" + n[: -len(".json")] + ".") or not str(tag).startswith("v" + str(ver)):
                 out.append(f"{n}: tag {tag!r} / version {ver!r} disagree with the file name (line)")
+    if TSV not in raw:
+        out.append(f"{TSV}: missing")
+    else:
+        out += tsv_problems(raw[TSV], docs)
     for m in PRIVATE.finditer(readme):
         out.append(f"README.md: {m.group(0)!r} points into the private half (private)")
     if all(n in docs for n in FILES):
@@ -129,14 +152,53 @@ def check(raw: dict[str, bytes], readme: str) -> list[str]:
         m = ROW.match(line)
         if m:
             rows[m.group(1)] = m.group(2)
-    for n in FILES:
+    for n in ALL:
         if n in raw:
             got = hashlib.sha256(raw[n]).hexdigest()
             if rows.get(n) != got:
                 out.append(f"README.md: sha256 row for {n} is {rows.get(n)!r}, the file is {got} (table)")
     for n in rows:
-        if n not in FILES:
+        if n not in ALL:
             out.append(f"README.md: sha256 row for unknown file {n} (table)")
+    return out
+
+
+def tsv_problems(data: bytes, docs: dict) -> list[str]:
+    """Rules for documented-pathological.tsv; docs are the parsed JSON lists."""
+    out: list[str] = []
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError as e:
+        return [f"{TSV}: not UTF-8 ({e}) (tsv-header)"]
+    for t in text.splitlines():
+        if PRIVATE.search(t):
+            out.append(f"{TSV}: line {t!r} points into the private half (private)")
+    lines = text.splitlines()
+    comments = [x for x in lines if x.startswith("#")]
+    rows = [x for x in lines if x.strip() and not x.startswith("#")]
+    want = "# " + "\t".join(TSV_HEADER)
+    if not comments or comments[-1] != want:
+        out.append(f"{TSV}: the last comment line is not the column header {want!r} (tsv-header)")
+    if not rows:
+        out.append(f"{TSV}: no data row (tsv-column)")
+    top = {d.get("line") for n, d in docs.items() if n != "union.json"} or set(LINES)
+    seen: set = set()
+    for r in rows:
+        cols = r.split("\t")
+        if len(cols) != len(TSV_HEADER) or any(not c.strip() for c in cols):
+            out.append(f"{TSV}: row {r!r} does not have {len(TSV_HEADER)} non-empty columns (tsv-column)")
+            continue
+        setting, value, line, layer, server = cols[:5]
+        if line not in top:
+            out.append(f"{TSV}: {setting}: line {line!r} is not one of {sorted(top)} (tsv-line)")
+        if layer not in TSV_LAYERS:
+            out.append(f"{TSV}: {setting}: layer {layer!r} is not one of {TSV_LAYERS} (tsv-layer)")
+        if not SERVER.match(server):
+            out.append(f"{TSV}: {setting}: server {server!r} is not e:<integer> (tsv-code)")
+        cell = (setting, value, line, layer)
+        if cell in seen:
+            out.append(f"{TSV}: {setting}: repeated cell {cell!r} (tsv-dup)")
+        seen.add(cell)
     return out
 
 
@@ -173,7 +235,7 @@ def union_problems(docs: dict) -> list[str]:
 
 
 def load(directory: Path) -> tuple[dict[str, bytes], str]:
-    raw = {n: (directory / n).read_bytes() for n in FILES if (directory / n).exists()}
+    raw = {n: (directory / n).read_bytes() for n in ALL if (directory / n).exists()}
     rd = directory / "README.md"
     return raw, rd.read_text() if rd.exists() else ""
 
@@ -202,9 +264,9 @@ def selftest() -> int:
             fails.append(f"planted case {name!r}: rule {rule} did not fire; got {probs[:3]}")
 
     # positive control: a re-serialized but unchanged corpus is clean once the table is recomputed
-    r0 = {n: dump(json.loads(b)) for n, b in raw.items()}
+    r0 = {n: (b if n == TSV else dump(json.loads(b))) for n, b in raw.items()}
     rd0 = readme
-    for n in FILES:
+    for n in ALL:
         rd0 = re.sub(r"(?m)^- `" + re.escape(n) + r"`: `[0-9a-f]{64}`$",
                      f"- `{n}`: `{hashlib.sha256(r0[n]).hexdigest()}`", rd0)
     base = check(r0, rd0)
@@ -241,6 +303,49 @@ def selftest() -> int:
     if not any("(private)" in p for p in check(raw, readme + "\nsee notes/x\n")):
         fails.append("planted case 'private string in README': rule private did not fire")
 
+    # the TSV: each rule, on a table recomputed for the planted bytes so only the rule under test can fire
+    def tsv_variant(name: str, mutate, rule: str):
+        nonlocal planted
+        planted += 1
+        r = dict(raw)
+        r[TSV] = mutate(raw[TSV].decode()).encode()
+        rd = re.sub(r"(?m)^- `" + re.escape(TSV) + r"`: `[0-9a-f]{64}`$",
+                    f"- `{TSV}`: `{hashlib.sha256(r[TSV]).hexdigest()}`", readme)
+        probs = check(r, rd)
+        if not any(f"({rule})" in p for p in probs):
+            fails.append(f"planted case {name!r}: rule {rule} did not fire; got {probs[:3]}")
+
+    def first_row(t: str) -> str:
+        return next(x for x in t.splitlines() if x.strip() and not x.startswith("#"))
+
+    def swap(t: str, col: int, new: str) -> str:
+        r = first_row(t).split("\t")
+        r[col] = new
+        return t.replace(first_row(t), "\t".join(r), 1)
+
+    tsv_variant("header renamed", lambda t: t.replace("# setting\tvalue", "# name\tvalue"), "tsv-header")
+    tsv_variant("header removed", lambda t: "\n".join(x for x in t.splitlines() if not x.startswith("# setting\t")) + "\n", "tsv-header")
+    tsv_variant("a column dropped", lambda t: t.replace(first_row(t), first_row(t).rsplit("\t", 1)[0], 1), "tsv-column")
+    tsv_variant("a column added", lambda t: t.replace(first_row(t), first_row(t) + "\textra", 1), "tsv-column")
+    tsv_variant("an empty column", lambda t: swap(t, 5, ""), "tsv-column")
+    tsv_variant("no data row", lambda t: "\n".join(x for x in t.splitlines() if x.startswith("#")) + "\n", "tsv-column")
+    tsv_variant("a line outside the lists", lambda t: swap(t, 2, "25.1"), "tsv-line")
+    tsv_variant("a layer outside the three", lambda t: swap(t, 3, "mystery"), "tsv-layer")
+    tsv_variant("a code that is not e:<n>", lambda t: swap(t, 4, "e:thirty-six"), "tsv-code")
+    tsv_variant("a code without e:", lambda t: swap(t, 4, "36"), "tsv-code")
+    tsv_variant("a repeated cell", lambda t: t.rstrip("\n") + "\n" + first_row(t) + "\n", "tsv-dup")
+    for needle in ("ci" + "/steps/x.sh", "the chtypes" + "-core repo", "see notes" + "/plan.md", "fixed in #123"):
+        tsv_variant("private string " + needle, lambda t, n=needle: swap(t, 6, n), "private")
+    planted += 1
+    if not any("(table)" in p for p in check({**raw, TSV: raw[TSV] + b"# x\n"}, readme)):
+        fails.append("planted case 'stale README table for the TSV': rule table did not fire")
+    planted += 1
+    if not any("(table)" in p for p in check({k: v for k, v in raw.items()}, re.sub(r"(?m)^- `" + re.escape(TSV) + r"`.*$", "", readme))):
+        fails.append("planted case 'README lacks the TSV row': rule table did not fire")
+    planted += 1
+    if not any(f"{TSV}: missing" in p for p in check({k: v for k, v in raw.items() if k != TSV}, readme)):
+        fails.append("planted case 'TSV missing': not reported")
+
     if fails:
         for f in fails:
             print("SELFTEST FAIL:", f, file=sys.stderr)
@@ -263,7 +368,8 @@ def main(argv: list[str]) -> int:
         if probs:
             return 1
         n = sum(len(json.loads(raw[f"{x}.json"])["settings"]) for x in LINES)
-        print(f"spec/abi-v2/where-settings: ok ({len(FILES)} files, {n} per-line entries)")
+        t = sum(1 for x in raw[TSV].decode().splitlines() if x.strip() and not x.startswith("#"))
+        print(f"spec/abi-v2/where-settings: ok ({len(FILES)} files, {n} per-line entries, {t} pathological rows)")
         return 0
     print(__doc__, file=sys.stderr)
     return 2

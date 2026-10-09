@@ -34,10 +34,10 @@ Take the code or reason a call returned, find the entry whose `class`, `paths` a
 
 ## Provenance and changes
 
-Produced by the artifact producer at its commit `0ee64d277114a8a98f6f4f94d31e20dc51a333a9`, generator `chtypes filter-declines generator`. The file has 40 entries over the lines 26.3, 26.7, 26.8 and 26.9.
+Produced by the artifact producer at its commit `8f629c5e5e8682feed490c90d79956e231915e26`, generator `chtypes filter-declines generator`. The file has 49 entries over the lines 26.3, 26.7, 26.8 and 26.9.
 
 The sha256 of the file, computed by `scripts/abi-v2/check-declines.py --print-table` and checked by `--check`:
 
-- `declines.json`: `028054958707fa7ea77c01ca3a1bd0dc2fb8bb49a187df22b2e4d0363504c8bc`
+- `declines.json`: `9bc43860960e0dd5aac88ead7fb5f0cec53f0493091e1a67d5c5606c8debfc2e`
 
 The producer regenerates the catalog. A changed set of entries is a new copy here, with this hash updated in the same change.
