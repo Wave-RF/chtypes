@@ -26,7 +26,10 @@ fetch-v1.md §10). Python stdlib only.
         is served, and the log records the agent either way; and a scripted
         status with a `body` (a retired repository's 410 and its error
         document) is sent with exactly those bytes, and one without a body
-        with none.
+        with none; and a closed gate (GATES below) logs and parks a case's
+        request, serves every other case meanwhile, reports it parked, and
+        releases it when opened, after which requests pass straight through
+        and a parked count that is never reached answers 504.
         Exits nonzero and prints which assertion failed, same discipline
         as every other --selftest in this repository.
 
@@ -90,6 +93,26 @@ rather than a purely declarative response sequence:
 Every other header value containing `{origin}` or `{second-origin}` is
 substituted with that origin's actual `http://127.0.0.1:<port>` — the
 ports are not known until the server binds them.
+
+GATES. A test can hold one case's requests while it proves what a client does
+with a request in flight (public issue #491: a registry must not make an open
+of one line wait for another line's fetch). Gates are test-only and keyed by
+case id; no case in cases.json uses one, and a case whose gate was never
+closed is served exactly as before.
+
+    GET /_gate/close/s-<case-id>
+        closes the gate: from now on every request under `/v2/s-<case-id>/` is
+        logged, then parked before any routing, until the gate opens (or
+        GATE_HOLD_S passes, after which it is served as usual). Answers
+        `{"closed": true}`.
+    GET /_gate/parked/s-<case-id>?n=<N>[&wait=<seconds>]
+        answers `{"parked": <count>}` as soon as at least N requests are
+        parked at that gate, or 504 with the current count when `wait`
+        seconds (default GATE_WAIT_S) pass first. A test waits on this,
+        never on a clock, to know its request reached the server.
+    GET /_gate/open/s-<case-id>
+        opens the gate, releasing every parked request to be served as
+        usual, and answers `{"released": <count>}`.
 """
 
 from __future__ import annotations
@@ -118,6 +141,57 @@ FIXTURES: Path = Path(".")  # set by main() / run_server()
 # failing against production.
 USER_AGENT_PATTERN = re.compile(r"^chtypes-(go|python|ts|rust)/[0-9A-Za-z.+-]+$")
 
+# GATES (module docstring): how long a parked request is held at most, and how
+# long `/_gate/parked` waits by default. Both only bound a broken test; a
+# working one opens the gate, or sees the count, at once.
+GATE_HOLD_S = 300.0
+GATE_WAIT_S = 60.0
+
+
+class Gates:
+    """The per-case request gates (module docstring, GATES), shared by both
+    origins' handler threads."""
+
+    def __init__(self) -> None:
+        self._cond = threading.Condition()
+        self._closed: set[str] = set()
+        self._parked: dict[str, int] = defaultdict(int)
+
+    def close(self, case_id: str) -> None:
+        with self._cond:
+            self._closed.add(case_id)
+
+    def open(self, case_id: str) -> int:
+        with self._cond:
+            self._closed.discard(case_id)
+            self._cond.notify_all()
+            return self._parked[case_id]
+
+    def parked(self, case_id: str) -> int:
+        with self._cond:
+            return self._parked[case_id]
+
+    def pass_through(self, case_id: str) -> None:
+        """Return at once while the case's gate is open; while it is closed,
+        count this request as parked and hold it until the gate opens."""
+        with self._cond:
+            if case_id not in self._closed:
+                return
+            self._parked[case_id] += 1
+            self._cond.notify_all()
+            try:
+                self._cond.wait_for(lambda: case_id not in self._closed, timeout=GATE_HOLD_S)
+            finally:
+                self._parked[case_id] -= 1
+
+    def wait_parked(self, case_id: str, n: int, wait: float) -> int | None:
+        """The parked count once it reaches n, or None when `wait` seconds
+        pass first."""
+        with self._cond:
+            if not self._cond.wait_for(lambda: self._parked[case_id] >= n, timeout=wait):
+                return None
+            return self._parked[case_id]
+
 
 class ScriptState:
     """Per-(case id, origin, method, path) response-sequence cursor, shared
@@ -137,6 +211,7 @@ class ScriptState:
         self._cursor: dict[tuple[str, str, str, str], int] = defaultdict(int)
         self.request_log: dict[str, list[dict[str, Any]]] = defaultdict(list)
         self.issued_tokens: dict[str, str] = {}
+        self.gates = Gates()
 
     def next_response(self, case_id: str, origin: str, method: str, path: str, responses: list[dict]) -> dict:
         key = (case_id, origin, method, path)
@@ -210,6 +285,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(body)
             return
 
+        if path.startswith("/_gate/"):
+            self._handle_gate(path[len("/_gate/") :], parsed.query)
+            return
+
         if not path.startswith("/v2/s-"):
             self._send_status(404)
             return
@@ -240,6 +319,9 @@ class Handler(BaseHTTPRequestHandler):
             # Logged above (so a test can see what was sent), then refused.
             self._send_status(400)
             return
+
+        # A closed gate (GATES) holds the request here, logged and unrouted.
+        self.state.gates.pass_through(case_id)
 
         script_path = f"/v2/{repo_relative}"
 
@@ -403,6 +485,42 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         if filtered:
             self.send_header("OCI-Filters-Applied", "artifactType")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
+    def _handle_gate(self, rest: str, query: str) -> None:
+        """GATES (module docstring): close, report parked, open."""
+        action, _, target = rest.partition("/")
+        if action not in ("close", "parked", "open") or not target.startswith("s-") or "/" in target:
+            self._send_status(404)
+            return
+        case_id = target[len("s-") :]
+        gates = self.state.gates
+        if action == "close":
+            gates.close(case_id)
+            self._send_json(200, {"closed": True})
+        elif action == "open":
+            self._send_json(200, {"released": gates.open(case_id)})
+        else:
+            q = parse_qs(query)
+            try:
+                n = int(q.get("n", ["1"])[0])
+                wait = float(q.get("wait", [str(GATE_WAIT_S)])[0])
+            except ValueError:
+                self._send_status(400)
+                return
+            parked = gates.wait_parked(case_id, n, max(0.0, min(wait, GATE_HOLD_S)))
+            if parked is None:
+                self._send_json(504, {"parked": gates.parked(case_id)})
+            else:
+                self._send_json(200, {"parked": parked})
+
+    def _send_json(self, status: int, doc: dict[str, Any]) -> None:
+        body = json.dumps(doc).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         if self.command != "HEAD":
@@ -622,7 +740,7 @@ def _run_selftest(tmp: Path) -> None:
                             "lock_after": None,
                         },
                     }
-                    for cid in ("retry-then-ok", "redirect-case", "closer", "no-script", "gone")
+                    for cid in ("retry-then-ok", "redirect-case", "closer", "no-script", "gone", "gated")
                 ],
             }
         )
@@ -715,6 +833,54 @@ def _run_selftest(tmp: Path) -> None:
         log_ua = json.loads(get(f"http://127.0.0.1:{port1}/_log/s-no-script").read())
         agents = [e["user_agent"] for e in log_ua]
         assert "Python-urllib/3.13" in agents and "chtypes-go/1.0.0" in agents, f"agents not recorded: {agents}"
+
+        # 9. A gate (GATES): a closed case's request is logged and parked,
+        # unanswered, until the gate opens; another case is served meanwhile;
+        # `parked` answers once the request is parked; once open, requests
+        # pass straight through, and a count never reached answers 504.
+        origin = f"http://127.0.0.1:{port1}"
+        gated = f"{origin}/v2/s-gated/chtypes/v1/manifests/26.8"
+        with get(f"{origin}/_gate/close/s-gated") as r:
+            assert json.loads(r.read()) == {"closed": True}
+        held: dict[str, Any] = {}
+        answered = threading.Event()
+
+        def fetch_at_the_gate() -> None:
+            try:
+                with get(gated) as r:
+                    held["status"], held["body"] = r.status, r.read()
+            except Exception as exc:  # noqa: BLE001 - reported by the assertion below
+                held["error"] = exc
+            finally:
+                answered.set()
+
+        threading.Thread(target=fetch_at_the_gate, daemon=True).start()
+        with get(f"{origin}/_gate/parked/s-gated?n=1") as r:
+            assert json.loads(r.read()) == {"parked": 1}
+        assert not answered.is_set(), f"a request at a closed gate was answered: {held}"
+        with get(f"{origin}/v2/s-no-script/chtypes/v1/manifests/26.8") as r:
+            assert r.status == 200, "a closed gate held another case's request"
+        log_gated = json.loads(get(f"{origin}/_log/s-gated").read())
+        assert [e["path"] for e in log_gated] == ["/v2/s-gated/chtypes/v1/manifests/26.8"], log_gated
+        assert not answered.is_set(), f"a request at a closed gate was answered: {held}"
+        with get(f"{origin}/_gate/open/s-gated") as r:
+            assert json.loads(r.read()) == {"released": 1}
+        assert answered.wait(5), "the opened gate did not release its request"
+        assert held.get("status") == 200 and json.loads(held["body"]) == {"ok": True}, held
+        with get(gated) as r:
+            assert r.status == 200 and json.loads(r.read()) == {"ok": True}
+        try:
+            get(f"{origin}/_gate/parked/s-gated?n=1&wait=0")
+            raise AssertionError("expected 504 for a parked count never reached")
+        except urllib.error.HTTPError as e:
+            assert e.code == 504, f"expected 504, got {e.code}"
+            assert json.loads(e.read()) == {"parked": 0}
+        for bad in ("/_gate/shut/s-gated", "/_gate/close/gated", "/_gate/close/s-a/b"):
+            try:
+                get(origin + bad)
+                raise AssertionError(f"expected 404 for {bad}")
+            except urllib.error.HTTPError as e:
+                assert e.code == 404, f"expected 404 for {bad}, got {e.code}"
     finally:
         srv1.shutdown()
         srv2.shutdown()

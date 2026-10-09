@@ -101,13 +101,42 @@ func WithPreload(requests ...string) RegistryOption {
 
 // Registry opens libraries by request. It is safe for concurrent use and has no
 // Close: it holds no handle, and no binding ever unloads an image.
+//
+// Opens of different requests never wait for each other's fetch: the registry
+// holds no lock across network I/O, and an open of a request a build in the
+// cache answers needs no network at all (public issue #491). Concurrent opens
+// of one request share one attempt, and one fetch: each gets that attempt's
+// Library or its error, and a failed attempt is never remembered, so the next
+// open of the request starts a new one.
 type Registry struct {
 	fetch     FetchOptions
 	autofetch bool
 
-	mu   sync.Mutex
-	memo map[string]*Library
-	libs []*Library
+	mu      sync.Mutex
+	memo    map[string]*Library
+	libs    []*Library
+	flights map[string]*flight // the attempts in progress, by request
+	// onWait, nil outside tests, is called each time an open starts waiting
+	// on an attempt, its own or another open's, so a test can hold an
+	// attempt until every open it starts is waiting on it.
+	onWait func(request string)
+}
+
+// flight is one attempt to open one request: the installed lookup, the fetch
+// when there is one, and the load. Every open of that request made while it
+// is in progress waits on it and gets its answer.
+type flight struct {
+	done chan struct{} // closed when the attempt has landed or been abandoned
+
+	// Written before done is closed, and read only after.
+	lib       *Library
+	err       error
+	abandoned bool // the attempt panicked: every open waiting on it starts over
+
+	// Under Registry.mu.
+	gen     uint64             // the setup generation when the attempt began
+	waiters int                // the opens waiting on it
+	cancel  context.CancelFunc // ends its fetch; nil until it fetches
 }
 
 // NewRegistry builds a registry. Construction opens nothing; only a request
@@ -119,7 +148,7 @@ func NewRegistry(opts ...RegistryOption) (*Registry, error) {
 			o(&c)
 		}
 	}
-	r := &Registry{fetch: c.fetch, memo: map[string]*Library{}}
+	r := &Registry{fetch: c.fetch, memo: map[string]*Library{}, flights: map[string]*flight{}}
 	if c.autofetch != nil {
 		r.autofetch = *c.autofetch
 	} else {
@@ -141,45 +170,103 @@ func (r *Registry) For(request string) (*Library, error) {
 	return r.ForContext(context.Background(), request)
 }
 
-// ForContext is For with a context for the fetch, when autofetch is on.
+// ForContext is For with a context for the fetch, when autofetch is on. When
+// ctx is done before the open has an answer, ForContext returns ctx.Err(); a
+// fetch other opens of the same request still wait on goes on for them, and
+// one no open waits on any more is canceled.
 func (r *Registry) ForContext(ctx context.Context, request string) (*Library, error) {
 	return r.open(ctx, request, r.autofetch)
 }
 
-func (r *Registry) open(ctx context.Context, request string, mayFetch bool) (_ *Library, err error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if l := r.memo[request]; l != nil {
-		return l, nil
+// open answers a request from the memo, else waits on the request's attempt,
+// starting it when none is in progress. r.mu guards the memo and the attempts
+// only: it is never held across the installed lookup, a fetch or a load.
+func (r *Registry) open(ctx context.Context, request string, mayFetch bool) (*Library, error) {
+	for {
+		r.mu.Lock()
+		if l := r.memo[request]; l != nil {
+			r.mu.Unlock()
+			return l, nil
+		}
+		f := r.flights[request]
+		lead := f == nil
+		if lead {
+			f = &flight{done: make(chan struct{}), gen: setupGeneration()}
+			r.flights[request] = f
+		}
+		f.waiters++
+		onWait := r.onWait
+		r.mu.Unlock()
+		if onWait != nil {
+			onWait(request)
+		}
+		if lead {
+			r.lead(ctx, f, request, mayFetch)
+		}
+		select {
+		case <-f.done:
+		default:
+			select {
+			case <-f.done:
+			case <-ctx.Done():
+				r.leave(f, request)
+				return nil, ctx.Err()
+			}
+		}
+		if !f.abandoned {
+			return f.lib, f.err
+		}
 	}
-	// An open that attempted a load and failed unlocks the setup record while
-	// no image has completed load step 7, whatever failed: the resolve, the
-	// fetch, the signature or any load step. A refused version spelling is the
-	// caller's own misuse, refused before anything is attempted, and unlocks
-	// nothing (bindings-v1.md section 6, rule 4).
-	gen := setupGeneration()
-	misuse := false
+}
+
+// lead runs an attempt. The installed lookup, and the load of a build the cache
+// answers, run inline: neither touches the network. A fetch runs on its own
+// goroutine, under a context of its own that keeps ctx's values, so the
+// leading open waits for it like every other open, each on its own context.
+func (r *Registry) lead(ctx context.Context, f *flight, request string, mayFetch bool) {
+	landed := false
 	defer func() {
-		if err != nil && !misuse {
-			failedOpen(gen)
+		if !landed {
+			r.abandon(f, request) // a panic: release the waiters, then let it unwind
 		}
 	}()
 	opts := r.fetch.internal()
 	req := ocifetch.Request{Spelling: request}
 	res, err := ocifetch.ResolveInstalled(req, "", opts)
-	if err != nil {
+	switch {
+	case err != nil:
+		// A refused version spelling is the caller's own misuse, refused
+		// before anything is attempted, and unlocks nothing (bindings-v1.md
+		// section 6, rule 4).
 		var spelling *ocifetch.SpellingError
-		misuse = errors.As(err, &spelling)
-		return nil, fetchError(err)
+		r.land(f, request, nil, fetchError(err), !errors.As(err, &spelling))
+	case res != nil:
+		l, err := r.load(request, res)
+		r.land(f, request, l, err, true)
+	case !mayFetch:
+		r.land(f, request, nil, missingError(request, ocifetch.MissingNotes(opts)), true)
+	default:
+		fetchCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+		r.mu.Lock()
+		f.cancel = cancel
+		r.mu.Unlock()
+		go func() {
+			defer cancel()
+			res, err := ocifetch.Ensure(fetchCtx, req, opts)
+			if err != nil {
+				r.land(f, request, nil, fetchError(err), true)
+				return
+			}
+			l, err := r.load(request, res)
+			r.land(f, request, l, err, true)
+		}()
 	}
-	if res == nil {
-		if !mayFetch {
-			return nil, missingError(request, ocifetch.MissingNotes(opts))
-		}
-		if res, err = ocifetch.Ensure(ctx, req, opts); err != nil {
-			return nil, fetchError(err)
-		}
-	}
+	landed = true
+}
+
+// load opens the image a resolved build names (loader steps 1 to 7) and makes
+// the load-time assertion against the request.
+func (r *Registry) load(request string, res *Resolved) (*Library, error) {
 	l, err := openImage(imageKey("verified", res.LibraryPath), func(zone, defaults []byte) (*abi2.Table, error) {
 		return abi2.Load(loadInput(res, zone, defaults))
 	}, res.LibraryPath, res)
@@ -189,9 +276,63 @@ func (r *Registry) open(ctx context.Context, request string, mayFetch bool) (_ *
 	if err := checkWithinRequest(l, request, res.Platform); err != nil {
 		return nil, err
 	}
-	r.memo[request] = l
-	r.libs = append(r.libs, l)
 	return l, nil
+}
+
+// land ends an attempt and releases every open waiting on it. A failed
+// attempt unlocks the setup record it began under while no image has completed
+// load step 7, whatever failed: the resolve, the fetch, the signature or any
+// load step (settles is false only for the caller's own misuse); it is never
+// remembered. A Library is remembered for the request, unless every open gave
+// up on the attempt first (leave), which has made it no longer the request's.
+func (r *Registry) land(f *flight, request string, l *Library, err error, settles bool) {
+	if err != nil && settles {
+		failedOpen(f.gen)
+	}
+	r.mu.Lock()
+	if r.flights[request] == f {
+		delete(r.flights, request)
+		if err == nil {
+			r.memo[request] = l
+			r.libs = append(r.libs, l)
+		}
+	}
+	f.lib, f.err = l, err
+	r.mu.Unlock()
+	close(f.done)
+}
+
+// leave is an open giving up on its own context. The attempt goes on for the
+// other opens waiting on it. When the last one leaves, its fetch is canceled
+// and the attempt abandoned: it is no longer the request's, so the next open
+// starts a new one, and as a failed attempt it unlocks the setup record now.
+func (r *Registry) leave(f *flight, request string) {
+	r.mu.Lock()
+	f.waiters--
+	last := f.waiters == 0 && r.flights[request] == f
+	if last {
+		delete(r.flights, request)
+	}
+	cancel := f.cancel
+	r.mu.Unlock()
+	if last {
+		if cancel != nil {
+			cancel()
+		}
+		failedOpen(f.gen)
+	}
+}
+
+// abandon releases the opens waiting on an attempt that panicked: each starts
+// over, and the panic unwinds the leading open alone.
+func (r *Registry) abandon(f *flight, request string) {
+	r.mu.Lock()
+	if r.flights[request] == f {
+		delete(r.flights, request)
+	}
+	r.mu.Unlock()
+	f.abandoned = true
+	close(f.done)
 }
 
 // loadInput is the adapter between the fetch layer's record and the loader's

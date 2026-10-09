@@ -106,6 +106,11 @@ mod registry;
 #[cfg(test)]
 #[path = "../tests/unit/registry_stub.rs"]
 mod registry_stub_tests;
+// The registry's opens with a fetch held in flight (public issue #491): a unit
+// test for the same reason, over the fixture server's test-only gate.
+#[cfg(test)]
+#[path = "../tests/unit/registry_flight.rs"]
+mod registry_flight_tests;
 mod result;
 mod schema;
 mod server;

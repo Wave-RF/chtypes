@@ -21,9 +21,16 @@
 //! registry, not by the old one. Which installed build a floating request means,
 //! and the spelling rules, are the fetch layer's; this crate orders and matches
 //! no versions itself.
+//!
+//! **An open never waits for another request's fetch** (public issue #491). The
+//! registry's lock guards the memo and the attempts in progress, and is never
+//! held across steps 2 to 5. Concurrent opens of one request share one attempt,
+//! and so one fetch, and each gets that attempt's `Library` or its error; a
+//! failed attempt is never remembered, so the next open starts a new one.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
 use crate::error::{Error, Refusal, Result};
 use crate::library::{Library, open_image, settle_failed_open};
@@ -169,16 +176,101 @@ fn host_platform() -> String {
     format!("{os}-{arch}")
 }
 
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    // A poisoned mutex only means another thread panicked while holding it;
+    // what it guards is still whole.
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 struct Opened {
     request: String,
     library: Arc<Library>,
 }
 
+/// One attempt to open one request: the installed lookup, the fetch when there
+/// is one, and the load. Every open of that request made while it is in
+/// progress waits on it and gets its answer.
+#[derive(Default)]
+struct Flight {
+    landing: Mutex<Landing>,
+    landed: Condvar,
+}
+
+#[derive(Default)]
+enum Landing {
+    #[default]
+    InFlight,
+    Landed(Result<Arc<Library>>),
+    /// The leading open panicked: every open waiting on the attempt starts over.
+    Abandoned,
+}
+
+impl Flight {
+    fn land(&self, landing: Landing) {
+        *lock(&self.landing) = landing;
+        self.landed.notify_all();
+    }
+
+    /// The attempt's answer once it lands, or `None` if it was abandoned.
+    fn wait(&self) -> Option<Result<Arc<Library>>> {
+        let landing = self
+            .landed
+            .wait_while(lock(&self.landing), |l| matches!(l, Landing::InFlight))
+            .unwrap_or_else(|e| e.into_inner());
+        match &*landing {
+            Landing::Landed(outcome) => Some(outcome.clone()),
+            Landing::InFlight | Landing::Abandoned => None,
+        }
+    }
+}
+
+/// What the registry's lock guards: the memo and the attempts in progress.
+#[derive(Default)]
+struct State {
+    opened: Vec<Opened>,
+    flights: HashMap<String, Arc<Flight>>,
+}
+
+impl State {
+    fn remembered(&self, request: &str) -> Option<Arc<Library>> {
+        self.opened
+            .iter()
+            .find(|o| o.request == request)
+            .map(|o| Arc::clone(&o.library))
+    }
+}
+
+/// Abandons an attempt whose leading open unwinds, so the opens waiting on it
+/// start over instead of waiting forever.
+struct AbandonOnUnwind<'a> {
+    registry: &'a Registry,
+    flight: &'a Flight,
+    request: &'a str,
+    armed: bool,
+}
+
+impl Drop for AbandonOnUnwind<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            lock(&self.registry.state).flights.remove(self.request);
+            self.flight.land(Landing::Abandoned);
+        }
+    }
+}
+
 /// A request for a version, to a loaded library. `Send + Sync`.
+///
+/// An open never waits for another request's fetch, and concurrent opens of
+/// one request share one fetch (public issue #491).
 pub struct Registry {
     fetch: FetchOptions,
     autofetch: bool,
-    opened: Mutex<Vec<Opened>>,
+    /// Never held across a lookup, a fetch or a load.
+    state: Mutex<State>,
+    /// A test hook: called each time an open starts waiting on an attempt,
+    /// its own or another open's.
+    #[cfg(test)]
+    pub(crate) on_wait: Option<Box<dyn Fn(&str) + Send + Sync>>,
 }
 
 impl std::fmt::Debug for Registry {
@@ -200,7 +292,9 @@ impl Registry {
         let registry = Registry {
             fetch: options.fetch,
             autofetch,
-            opened: Mutex::new(Vec::new()),
+            state: Mutex::new(State::default()),
+            #[cfg(test)]
+            on_wait: None,
         };
         for request in &options.preload {
             registry.open(request, false)?;
@@ -223,9 +317,9 @@ impl Registry {
 
     /// The libraries this registry has opened, in the order it opened them.
     pub fn libraries(&self) -> Vec<Arc<Library>> {
-        let opened = self.opened.lock().unwrap_or_else(|e| e.into_inner());
+        let state = lock(&self.state);
         let mut out: Vec<Arc<Library>> = Vec::new();
-        for o in opened.iter() {
+        for o in &state.opened {
             if !out.iter().any(|l| Arc::ptr_eq(l, &o.library)) {
                 out.push(Arc::clone(&o.library));
             }
@@ -233,33 +327,80 @@ impl Registry {
         out
     }
 
+    /// The memo's answer, else the answer of the request's attempt, which this
+    /// open starts when none is in progress.
     fn open(&self, request: &str, may_fetch: bool) -> Result<Arc<Library>> {
-        // One request at a time: the memo, the resolve and the load are one
-        // decision, and a registry is opened rarely and never on a hot path.
-        let mut opened = self.opened.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(o) = opened.iter().find(|o| o.request == request) {
-            return Ok(Arc::clone(&o.library));
+        if let Some(library) = lock(&self.state).remembered(request) {
+            return Ok(library);
         }
         // A refused version spelling is the caller's own misuse, refused before
-        // anything is attempted, and unlocks nothing. An open that attempted a
-        // load and failed unlocks the setup record while no image has
-        // completed load step 7, whatever failed: the resolve, the fetch, the
-        // signature or any load step (bindings-v1.md section 6, rule 4).
+        // anything is attempted, and unlocks nothing.
         VersionRequest::parse(request)?;
-        let began = setup::generation();
-        let library = match self.resolve_and_open(request, may_fetch) {
-            Ok(library) => library,
-            Err(e) => {
-                settle_failed_open(began);
-                return Err(e);
+        loop {
+            let mut lead = false;
+            let flight = {
+                let mut state = lock(&self.state);
+                if let Some(library) = state.remembered(request) {
+                    return Ok(library);
+                }
+                let flight = state.flights.entry(request.to_string()).or_insert_with(|| {
+                    lead = true;
+                    Arc::new(Flight::default())
+                });
+                Arc::clone(flight)
+            };
+            self.waiting(request);
+            if lead {
+                return self.attempt(&flight, request, may_fetch);
             }
-        };
-        opened.push(Opened {
-            request: request.to_string(),
-            library: Arc::clone(&library),
-        });
-        Ok(library)
+            if let Some(outcome) = flight.wait() {
+                return outcome;
+            }
+        }
     }
+
+    /// Run an attempt on the leading open's thread, with no lock held, then
+    /// release every open waiting on it. An attempt that tried a load and
+    /// failed unlocks the setup record while no image has completed load step
+    /// 7, whatever failed: the resolve, the fetch, the signature or any load
+    /// step (bindings-v1.md section 6, rule 4). It is never remembered.
+    fn attempt(&self, flight: &Flight, request: &str, may_fetch: bool) -> Result<Arc<Library>> {
+        let mut abandon = AbandonOnUnwind {
+            registry: self,
+            flight,
+            request,
+            armed: true,
+        };
+        let began = setup::generation();
+        let outcome = self.resolve_and_open(request, may_fetch);
+        if outcome.is_err() {
+            settle_failed_open(began);
+        }
+        {
+            let mut state = lock(&self.state);
+            state.flights.remove(request);
+            if let Ok(library) = &outcome {
+                state.opened.push(Opened {
+                    request: request.to_string(),
+                    library: Arc::clone(library),
+                });
+            }
+        }
+        abandon.armed = false;
+        flight.land(Landing::Landed(outcome.clone()));
+        outcome
+    }
+
+    /// The test hook (`on_wait`), when one is set.
+    #[cfg(test)]
+    fn waiting(&self, request: &str) {
+        if let Some(on_wait) = &self.on_wait {
+            on_wait(request);
+        }
+    }
+
+    #[cfg(not(test))]
+    fn waiting(&self, _request: &str) {}
 
     /// Resolve a request, fetching when allowed, and open its image: the part
     /// of [`Registry::open`] whose failure settles the setup.
