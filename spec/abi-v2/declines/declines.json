@@ -91,7 +91,7 @@
   {
    "id": "server-profile-setting",
    "class": "create-decline",
-   "trigger": "a schema whose server profile sets a setting the filter's WHERE cannot honor",
+   "trigger": "a schema compiled under a setting the filter's WHERE cannot honor, from chs_set_defaults, the server profile or the schema's own settings",
    "code": {
     "chs": "CHS_DECLINED",
     "ch": []
@@ -106,7 +106,7 @@
     "chs_filter_create"
    ],
    "retirement": "when the setting is honored (a reviewed change per setting)",
-   "description": "A schema whose server profile sets a setting that a server's WHERE would read, and that this build does not apply, has no filter at all; the names are listed in the schema description under server.filter_declined_settings."
+   "description": "A schema compiled under a setting that a server's WHERE would read, and that this build does not apply, has no filter at all, whichever of the defaults, the server profile or the schema's own settings sets it; each name is listed with its layer in the schema description's filter_declined_settings. A filter's own settings are declined at evaluation instead."
   },
   {
    "id": "session-timezone-unattachable",
@@ -337,7 +337,7 @@
   {
    "id": "setting-new-analyzer-or-planner",
    "class": "decline",
-   "trigger": "a setting the server's new analyzer or planner reads, named in the filter's settings, the schema's profile or the defaults",
+   "trigger": "a setting the server's new analyzer or planner reads, named in the filter's own settings",
    "code": {
     "chs": "-2",
     "ch": []
@@ -359,7 +359,7 @@
   {
    "id": "setting-format-field",
    "class": "decline",
-   "trigger": "a setting that sets a FormatSettings field the conversion and formatting functions read",
+   "trigger": "a setting that sets a FormatSettings field the conversion and formatting functions read, named in the filter's own settings",
    "code": {
     "chs": "-2",
     "ch": []
@@ -381,7 +381,7 @@
   {
    "id": "setting-not-shown-honored",
    "class": "decline",
-   "trigger": "a setting that a WHERE could read and that no measured case shows this build applying as the server does",
+   "trigger": "a setting that a WHERE could read and that no measured case shows this build applying as the server does, named in the filter's own settings",
    "code": {
     "chs": "-2",
     "ch": []
@@ -403,7 +403,7 @@
   {
    "id": "setting-beyond-availability",
    "class": "decline",
-   "trigger": "a setting whose effect goes beyond permitting a function, a type or a form to be named, named in the filter's settings, the schema's profile or the defaults",
+   "trigger": "a setting whose effect goes beyond permitting a function, a type or a form to be named, named in the filter's own settings",
    "code": {
     "chs": "-2",
     "ch": []
@@ -425,7 +425,7 @@
   {
    "id": "setting-analyzer-switch",
    "class": "decline",
-   "trigger": "a setting that switches the analyzer or the parser a server runs the query through",
+   "trigger": "a setting that switches the analyzer or the parser a server runs the query through, named in the filter's own settings",
    "code": {
     "chs": "-2",
     "ch": []
@@ -447,7 +447,7 @@
   {
    "id": "setting-result-content",
    "class": "decline",
-   "trigger": "a setting that makes a SELECT return rows chosen by content beyond the WHERE",
+   "trigger": "a setting that makes a SELECT return rows chosen by content beyond the WHERE, named in the filter's own settings",
    "code": {
     "chs": "-2",
     "ch": []
@@ -469,7 +469,7 @@
   {
    "id": "setting-aggregate-rename",
    "class": "decline",
-   "trigger": "a setting that renames aggregate functions to their OrNull form",
+   "trigger": "a setting that renames aggregate functions to their OrNull form, named in the filter's own settings",
    "code": {
     "chs": "-2",
     "ch": []
@@ -491,7 +491,7 @@
   {
    "id": "setting-projection-plan",
    "class": "decline",
-   "trigger": "a setting that controls projection use in the server's plan",
+   "trigger": "a setting that controls projection use in the server's plan, named in the filter's own settings",
    "code": {
     "chs": "-2",
     "ch": []
@@ -513,7 +513,7 @@
   {
    "id": "setting-preimage-pass",
    "class": "decline",
-   "trigger": "the setting that turns the server's preimage rewrite on or off",
+   "trigger": "the setting that turns the server's preimage rewrite on or off, named in the filter's own settings",
    "code": {
     "chs": "-2",
     "ch": []
@@ -535,7 +535,7 @@
   {
    "id": "setting-alias-shadow",
    "class": "decline",
-   "trigger": "the setting that makes an alias shadow a column in identifier resolution",
+   "trigger": "the setting that makes an alias shadow a column in identifier resolution, named in the filter's own settings",
    "code": {
     "chs": "-2",
     "ch": []
@@ -557,7 +557,7 @@
   {
    "id": "setting-compatibility-moves",
    "class": "decline",
-   "trigger": "a compatibility setting that moves a listed setting outside the set the build honors",
+   "trigger": "a compatibility setting that moves a listed setting outside the set the build honors, named in the filter's own settings",
    "code": {
     "chs": "-2",
     "ch": []
@@ -621,7 +621,8 @@
     "chs_filter_create",
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_schema_describe"
    ],
    "retirement": "none",
    "description": "Each recursive walk the library itself writes runs the server's own stack check first: once the calling thread has used half its stack, the call is refused with the server's code and message (TOO_DEEP_RECURSION) instead of overflowing the stack. The depth this allows depends on the calling thread's stack size; on a small stack it is less than a server's."
