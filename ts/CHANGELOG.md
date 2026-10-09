@@ -34,6 +34,17 @@ The four bindings in this repository are released together and give one answer, 
 - **Enforcement gate lifted** for `26.7` on `darwin-arm64`.
 - **Enforcement gate lifted** for `26.8` on `darwin-arm64`.
 - **Enforcement gate lifted** for `26.9` on `darwin-arm64`.
+- **Enforcement gate restored** for `26.3` on `linux-amd64`.
+- **Enforcement gate restored** for `26.3` on `linux-arm64`.
+- **Enforcement gate restored** for `26.7` on `linux-amd64`.
+- **Enforcement gate restored** for `26.7` on `linux-arm64`.
+- **Enforcement gate restored** for `26.8` on `linux-amd64`.
+- **Enforcement gate restored** for `26.8` on `linux-arm64`.
+- **Enforcement gate restored** for `26.9` on `linux-amd64`.
+- **Enforcement gate restored** for `26.9` on `linux-arm64`.
+- **Enforcement gate restored** for `26.7` on `darwin-arm64`.
+- **Enforcement gate restored** for `26.8` on `darwin-arm64`.
+- **Enforcement gate restored** for `26.9` on `darwin-arm64`.
 
 ### Removed
 

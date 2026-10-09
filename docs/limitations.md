@@ -57,14 +57,14 @@ The rules genuinely differ: `256` into a `UInt8` column stores `0`, while `x = 2
 
 **The criterion.** The artifact producer runs a standing filter differential against real servers of the same platform on each published build, before the push and after it. A build is enforcement-grade for a pair when that differential reports zero over-accepts and zero over-rejects for it. It reads `12/12` on that build as published.
 
-**The gate lifts per `(ClickHouse line, platform)`, never all at once.** Eleven pairs are lifted:
+**The gate lifts per `(ClickHouse line, platform)`, never all at once.** No pair is lifted today. Eleven were lifted with artifact build `20261009.074908`; a known divergence then put every one of them back under the gate, until it is fixed and the producer's differential passes the new cases:
 
-| line   | `linux-amd64` | `linux-arm64` | `darwin-arm64`                              |
-| ------ | ------------- | ------------- | ------------------------------------------- |
-| `26.3` | lifted        | lifted        | not covered: documented platform limitation |
-| `26.7` | lifted        | lifted        | lifted                                      |
-| `26.8` | lifted        | lifted        | lifted                                      |
-| `26.9` | lifted        | lifted        | lifted                                      |
+| line   | `linux-amd64`           | `linux-arm64`           | `darwin-arm64`                              |
+| ------ | ----------------------- | ----------------------- | ------------------------------------------- |
+| `26.3` | gated: known divergence | gated: known divergence | not covered: documented platform limitation |
+| `26.7` | gated: known divergence | gated: known divergence | gated: known divergence (inferred)          |
+| `26.8` | gated: known divergence | gated: known divergence | gated: known divergence (inferred)          |
+| `26.9` | gated: known divergence | gated: known divergence | gated: known divergence (inferred)          |
 
 **Not covered: `26.3` on `darwin-arm64`, a documented platform limitation.** The macOS 26.3 server runs queries on 512 KiB threads, so it refuses deeply nested expressions and types with 306 (TOO_DEEP_RECURSION) at depths where the library answers or accepts them. Measured on the official 26.3.38.2 macOS server, it refuses:
 
@@ -75,6 +75,8 @@ The rules genuinely differ: `256` into a `UInt8` column stores `0`, while `x = 2
 - nested `Array(Array(…))` column types from 368.
 
 26.7 and later, and every Linux line, agree with the server. This is a documented platform difference, not a filter over-accept under the same-platform guarantee's terms. The pair is not lifted and has no CHANGELOG lift entry: run it beside your existing enforcement and compare, do not replace, or refuse inputs nested that deep yourself. See also [macOS artifacts match ClickHouse on macOS; on 26.3, match the server's platform](#macos-artifacts-match-clickhouse-on-macos-on-263-match-the-servers-platform).
+
+**Every lifted pair is back under the gate** ([A date-time column compared with a string constant or a {p:String} parameter, in text the server converts differently](#a-date-time-column-compared-with-a-string-constant-or-a-pstring-parameter-in-text-the-server-converts-differently)). A `Date`- or `DateTime`-family column compared with a `String` constant, or with a `{p:String}` parameter, whose text the library reads differently from the server's default conversion, is answered `t` where the server answers `f`: for example `dt = '20240601120000'`, or `dt >= {p:String}` with that value. Until the fix ships, use the forms measured to agree on every line, a typed `{p:DateTime}` parameter or canonical `YYYY-MM-DD hh:mm:ss` text, and run filters beside your existing enforcement.
 
 **Each lift is announced in the CHANGELOG, by `(line, platform)`, as its own entry** — the fixed shape is in [`CONTRIBUTING.md`](../CONTRIBUTING.md#changelog-entries). A pair stays gated until its own CHANGELOG entry says otherwise.
 
@@ -205,6 +207,24 @@ Until then, do not trust `computed` clock values from a batch preview unless at 
 **Measured**: by the artifact producer, against the production library build `20261006.170903` and its predecessor `20261004.052404`, on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 only. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
 
 Until then, do not treat a successful schema creation as proof that the server will accept a CREATE whose projections have no `ORDER BY`.
+
+### A date-time column compared with a string constant or a `{p:String}` parameter, in text the server converts differently
+
+**Over-accept, in filters, on every supported line where the conversion differs.** A filter that compares a `Date`- or `DateTime`-family column with a `String` constant, or with a `{p:String}` query parameter, reads the text with a conversion that differs from the server's default for some spellings. The library then answers `t` where the server's `SELECT … WHERE` answers `f`. For example `dt = '20240601120000'`, or `dt >= {p:String}` with that value.
+
+|               |             |
+| ------------- | ----------- |
+| this library  | answers `t` |
+| a real server | answers `f` |
+
+**Where:**
+
+- `26.8` and `26.9` on Linux: at stock settings;
+- `26.7` on Linux: two-sided ranges, at stock settings;
+- `26.3` on Linux: when `cast_string_to_date_time_mode` is `best_effort` or `best_effort_us` at any settings layer;
+- `darwin-arm64` on `26.7`, `26.8` and `26.9`: `inferred` identical, not measured, because darwin and Linux agree on those lines.
+
+**Measured** by the artifact producer: direct server `SELECT`s against the library at artifact build `20261009.074908`. **Safe forms**, measured to agree on every line: a typed `{p:DateTime}` parameter, and canonical `YYYY-MM-DD hh:mm:ss` text. The filter enforcement gate is back on for every pair until a build with the fix passes the producer's differential with these cases in it.
 
 ## Known gaps in 1.0
 
