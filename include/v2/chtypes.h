@@ -1051,8 +1051,11 @@ CHS_API chs_status chs_preview_batch(
  * each setting and its layer, in the list's order: `chs_filter_create: the settings this schema was
  * compiled under set <a> (<layer>), <b> (<layer>), which this build's filters do not honor in a
  * WHERE (listed in chs_schema_describe's filter_declined_settings); declined rather than answered`,
- * where each `<layer>` is the entry's `declined_layer` value. The server and the schema were
- * created all the same: no settings layer changes a schema compile.
+ * where each `<layer>` is the entry's `declined_layer` value. The entries are joined by a comma and
+ * a space, in the list's order, and each name renders verbatim. A `name_b64` entry renders as
+ * `b64:<base64>`; it does not occur in practice, because a setting name ClickHouse does not know is
+ * refused earlier, with 115. The server and the schema were created all the same: no settings layer
+ * changes a schema compile.
  *
  * **Changed (public issue #588).** A declined setting from the `chs_set_defaults` or the schema
  * layer moves from evaluation time to create time: it was named at evaluation (`filter_result`'s
