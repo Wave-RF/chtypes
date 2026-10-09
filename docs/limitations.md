@@ -51,9 +51,9 @@ The rules genuinely differ: `256` into a `UInt8` column stores `0`, while `x = 2
 
 ## Filters are enforcement-grade against a same-platform server, per lifted (line, platform)
 
-**A filter verdict is enforcement-grade relative to a ClickHouse server of the same line, on the same operating system and CPU architecture, for the builds that passed the artifact producer's gate.** `2.0.0-dev.8` is the first such build. A `t` verdict is a security claim; anything but a definite `t` is a no. That includes v2's `unknown(n)` verdict member, so a caller that maps an unknown verdict to a pass is wrong by contract. A closed filter is never passed to the library as NULL (which would mean "no filter"): the bindings refuse it.
+**A filter verdict is enforcement-grade relative to a ClickHouse server of the same line, on the same operating system and CPU architecture, for the builds that passed the artifact producer's gate.** Artifact build `20261009.074908` (served on the v2-dev channel to SDK `2.0.0-dev.4`) is the first such build. A `t` verdict is a security claim; anything but a definite `t` is a no. That includes v2's `unknown(n)` verdict member, so a caller that maps an unknown verdict to a pass is wrong by contract. A closed filter is never passed to the library as NULL (which would mean "no filter"): the bindings refuse it.
 
-**The criterion.** The artifact producer runs a standing filter differential against real servers of the same platform on each published build, before the push and after it. A build is enforcement-grade for a pair when that differential reports zero over-accepts and zero over-rejects for it. It reads `12/12` on the published `2.0.0-dev.8` (build `20261009.074908`).
+**The criterion.** The artifact producer runs a standing filter differential against real servers of the same platform on each published build, before the push and after it. A build is enforcement-grade for a pair when that differential reports zero over-accepts and zero over-rejects for it. It reads `12/12` on that build as published.
 
 **The gate lifts per `(ClickHouse line, platform)`, never all at once.** Eleven pairs are lifted:
 
