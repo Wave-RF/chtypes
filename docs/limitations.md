@@ -66,7 +66,15 @@ The rules genuinely differ: `256` into a `UInt8` column stores `0`, while `x = 2
 | `26.8` | lifted        | lifted        | lifted                                      |
 | `26.9` | lifted        | lifted        | lifted                                      |
 
-**Not covered: `26.3` on `darwin-arm64`, a documented platform limitation.** The macOS 26.3 server runs its connection threads on a 512 KiB stack, and ClickHouse's own stack check refuses deep nesting there with 306 (TOO_DEEP_RECURSION): nested lambdas from a depth between about 27 and 54, depending on their shape; `if`, `multiIf` and `CASE` chains, and `NOT`/`OR` chains in a `DEFAULT`, from depth 54; and `Array(…)` types nested 368 deep. The library answers or accepts those inputs. The band is fixed and measured, and specific to the 26.3 macOS server build: on 26.7 and later the macOS server matches the library, as every Linux pair does. The pair is not lifted and has no CHANGELOG lift entry: run it beside your existing enforcement and compare, do not replace, or refuse inputs nested that deep yourself. See also [macOS artifacts match ClickHouse on macOS; on 26.3, match the server's platform](#macos-artifacts-match-clickhouse-on-macos-on-263-match-the-servers-platform).
+**Not covered: `26.3` on `darwin-arm64`, a documented platform limitation.** The macOS 26.3 server runs queries on 512 KiB threads, so it refuses deeply nested expressions and types with 306 (TOO_DEEP_RECURSION) at depths where the library answers or accepts them. Measured on the official 26.3.38.2 macOS server, it refuses:
+
+- nested lambdas from 27 levels (`arrayFilter` and `arrayMap` shapes), 35 (mixed) or 53 (`arrayExists` and `arrayAll` shapes);
+- nested `if`, `multiIf` and `CASE`, and `NOT` and nested-`OR` expression chains, from 54;
+- `DEFAULT` expression chains from 52;
+- partition-key expressions from 76;
+- nested `Array(Array(…))` column types from 368.
+
+26.7 and later, and every Linux line, agree with the server. This is a documented platform difference, not a filter over-accept under the same-platform guarantee's terms. The pair is not lifted and has no CHANGELOG lift entry: run it beside your existing enforcement and compare, do not replace, or refuse inputs nested that deep yourself. See also [macOS artifacts match ClickHouse on macOS; on 26.3, match the server's platform](#macos-artifacts-match-clickhouse-on-macos-on-263-match-the-servers-platform).
 
 **Each lift is announced in the CHANGELOG, by `(line, platform)`, as its own entry** — the fixed shape is in [`CONTRIBUTING.md`](../CONTRIBUTING.md#changelog-entries). A pair stays gated until its own CHANGELOG entry says otherwise.
 
