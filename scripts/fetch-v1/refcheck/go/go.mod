@@ -2,6 +2,8 @@ module github.com/wave-rf/chtypes/scripts/fetch-v1/refcheck/go
 
 go 1.27
 
+toolchain go1.27.2
+
 require (
 	github.com/sigstore/sigstore v1.10.8
 	github.com/sigstore/sigstore-go v1.2.2
