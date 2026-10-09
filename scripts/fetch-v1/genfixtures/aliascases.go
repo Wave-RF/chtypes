@@ -93,6 +93,10 @@ func buildAliasCases(fs *FileSet) []Case {
 	// today's code, and the tag is not tried.
 	buildAliasIndex(tree, "26.6.1.1", "20260801.000000", fixtureFingerprintN, []string{"26.6"}, all)
 	buildAliasIndex(tree, "26.5.9.1", "20260725.000000", fixtureFingerprintA, []string{aliasOf("26.6", fixtureFingerprintA)}, all)
+	// A build of 26.8 signed under B, this SDK's own in the expired-alias case
+	// below (public issue #581): older than the tag's, named by no tag or alias
+	// of this tree, so it exists only in the cache that case installs it into.
+	cachedOwn268 := buildAliasIndex(tree, "26.8.15.8", "20260910.120000", fixtureFingerprintB, nil, all)
 	flushTrees(fs, tree)
 
 	want := func(c *Case, art PlatformArtifact) {
@@ -291,6 +295,25 @@ func buildAliasCases(fs *FileSet) []Case {
 	aheadCached.Expect.Requests.NoneMatching = []string{"GET .*/blobs/" + foreign.LayerDesc.Digest}
 	aheadCached.Expect.RecordsIntact = []string{foreign.ManifestDesc.Digest}
 	cases = append(cases, aheadCached)
+
+	// (d) The alias has expired but the cache still holds a build of this
+	// SDK's own fingerprint (B) for the request (public issue #581): the same
+	// refusal, same code, and the message adds that the cached build is still
+	// usable by open. Nothing is installed or changed; records_intact holds on
+	// the cached build.
+	ownCached := cachedOwn268["linux-arm64"]
+	cachedOwnLayout := NewLayout("dev-alias-own-cached-alias-expired")
+	copyArtifactIntoLayout(cachedOwnLayout, tree, ownCached, "26.8")
+	cachedOwnLayout.SetInstalled(ownCached.ManifestDesc.Digest)
+	cachedOwnLayout.Flush(fs)
+	aheadOwnCached := newAliasCase("fp-ahead-cached-own-fp", "26.8", strp(fixtureFingerprintB), "file", "http")
+	aheadOwnCached.Setup.Cache = "dev-alias-own-cached-alias-expired"
+	refused(&aheadOwnCached, "CHTYPES_ARTIFACT_UNPUBLISHED")
+	aheadOwnCached.Expect.MessageContains = strp(aheadMessage + "; a cached build for this fingerprint (build " +
+		ownCached.Predicate.Build + ") is still usable by open; upgrade the SDK to get newer builds")
+	aheadOwnCached.Expect.Requests.NoneMatching = []string{"GET .*/blobs/" + floating268["linux-arm64"].LayerDesc.Digest}
+	aheadOwnCached.Expect.RecordsIntact = []string{ownCached.ManifestDesc.Digest}
+	cases = append(cases, aheadOwnCached)
 
 	// The control: with no own fingerprint (the fetch-v1 channel), the same
 	// cache answers with the newest build of the line, whoever's it is.

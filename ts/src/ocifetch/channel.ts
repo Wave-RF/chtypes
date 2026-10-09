@@ -253,14 +253,35 @@ export function visibleToChannel(predicate: { readonly abi_fingerprint?: unknown
  * lookup this SDK opens through would refuse it. It returns in every other
  * case: the alias answered, the tag's build is this SDK's own, or the contract
  * has no own fingerprint.
+ *
+ * The expired alias with a usable cache (public issue #581): `cachedOwnBuild`
+ * looks up, through the filter open uses, the cache's verified record of this
+ * SDK's OWN fingerprint for the request, and resolves to its build id (`''`
+ * for a record that names none) or `undefined` for no record. When there is
+ * one the message grows by `cachedOwnSuffix`; the code does not change.
  */
-export function aheadOfRegistry(
+export async function aheadOfRegistry(
   aliasAbsent: boolean,
   predicate: { readonly abi_fingerprint?: unknown; readonly build?: unknown },
+  cachedOwnBuild?: () => Promise<string | undefined>,
   channel: Channel = activeChannel(),
-): void {
+): Promise<void> {
   if (!aliasAbsent || visibleToChannel(predicate, channel)) return;
-  throw new ArtifactUnpublishedError(`chtypes: ${aheadMessage(channel.ownFingerprint, predicate)}`);
+  let message = aheadMessage(channel.ownFingerprint, predicate);
+  const cached = cachedOwnBuild === undefined ? undefined : await cachedOwnBuild();
+  if (cached !== undefined) message += cachedOwnSuffix(cached);
+  throw new ArtifactUnpublishedError(`chtypes: ${message}`);
+}
+
+/**
+ * The clause `aheadOfRegistry` appends when the cache holds an own-fingerprint
+ * build: "; a cached build for this fingerprint (build <id>) is still usable
+ * by open; upgrade the SDK to get newer builds", the parenthesis dropped when
+ * the record names no build.
+ */
+function cachedOwnSuffix(build: string): string {
+  const named = build === '' ? '' : ` (build ${build})`;
+  return `; a cached build for this fingerprint${named} is still usable by open; upgrade the SDK to get newer builds`;
 }
 
 /**

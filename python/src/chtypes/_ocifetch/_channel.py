@@ -277,7 +277,11 @@ def visible(predicate: object, channel: Channel | None = None) -> bool:
 
 
 def ahead_of_registry(
-    alias_absent: bool, predicate: object, channel: Channel | None = None
+    alias_absent: bool,
+    predicate: object,
+    channel: Channel | None = None,
+    *,
+    cached_own_build: Callable[[], str | None] | None = None,
 ) -> None:
     """The dev channel's answer for an SDK whose fingerprint no published build
     carries yet (docs/guides/fetch-v1.md §3; public issue #578): when every base
@@ -287,11 +291,33 @@ def ahead_of_registry(
     build answers gets, naming both fingerprints. Nothing is installed and an
     install of that build is never reported, because the lookup this SDK opens
     through would refuse it. Returns in every other case: the alias answered,
-    the tag's build is this SDK's own, or the contract has no own fingerprint."""
+    the tag's build is this SDK's own, or the contract has no own fingerprint.
+
+    The expired alias with a usable cache (public issue #581): `cached_own_build`
+    looks up, through the filter open uses, the cache's verified record of this
+    SDK's OWN fingerprint for the request, and returns its build id ("" for a
+    record that names none) or None for no record. When there is one the
+    message grows by `_cached_own_suffix`; the code does not change."""
     channel = channel or active()
     if not alias_absent or visible(predicate, channel):
         return
-    raise ArtifactUnpublishedError(f"chtypes: {_ahead_message(channel.own_fingerprint, predicate)}")
+    message = _ahead_message(channel.own_fingerprint, predicate)
+    if cached_own_build is not None:
+        build = cached_own_build()
+        if build is not None:
+            message += _cached_own_suffix(build)
+    raise ArtifactUnpublishedError(f"chtypes: {message}")
+
+
+def _cached_own_suffix(build: str) -> str:
+    """The clause appended when the cache holds an own-fingerprint build: "; a
+    cached build for this fingerprint (build <id>) is still usable by open;
+    upgrade the SDK to get newer builds", the parenthesis dropped when the
+    record names no build."""
+    suffix = "; a cached build for this fingerprint"
+    if build:
+        suffix += f" (build {build})"
+    return suffix + " is still usable by open; upgrade the SDK to get newer builds"
 
 
 def _ahead_message(own: str, predicate: object) -> str:

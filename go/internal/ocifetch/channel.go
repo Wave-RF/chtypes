@@ -233,11 +233,33 @@ func (c *channel) visible(pred map[string]any) bool {
 // lookup this SDK opens through would refuse it. nil in every other case:
 // the alias answered, the tag's build is this SDK's own, or the contract has
 // no own fingerprint.
-func (c *channel) aheadOfRegistry(aliasAbsent bool, pred map[string]any, request, platform string) error {
+func (c *channel) aheadOfRegistry(l *layout, aliasAbsent bool, pred map[string]any, request, platform string) error {
 	if !aliasAbsent || c.visible(pred) {
 		return nil
 	}
-	return newError(CodeArtifactUnpublished, request, platform, "", nil, "%s", aheadMessage(c.ownFingerprint, pred))
+	msg := aheadMessage(c.ownFingerprint, pred)
+	// The expired alias with a usable cache (public issue #581): the cache
+	// still holds a verified build of this SDK's own fingerprint for the
+	// request, found through the filter open uses (newestMatching), so open
+	// works while fetch refuses. Only the message grows.
+	if entries, err := listUnpacked(l.dir); err == nil {
+		if own, ok := newestMatching(entries, platform, request, c); ok {
+			msg += cachedOwnSuffix(own.rec.Build)
+		}
+	}
+	return newError(CodeArtifactUnpublished, request, platform, "", nil, "%s", msg)
+}
+
+// cachedOwnSuffix is the clause aheadOfRegistry appends when the cache holds
+// an own-fingerprint build: "; a cached build for this fingerprint (build
+// <id>) is still usable by open; upgrade the SDK to get newer builds", the
+// parenthesis dropped when the record names no build.
+func cachedOwnSuffix(build string) string {
+	suffix := "; a cached build for this fingerprint"
+	if build != "" {
+		suffix += " (build " + build + ")"
+	}
+	return suffix + " is still usable by open; upgrade the SDK to get newer builds"
 }
 
 // aheadMessage is aheadOfRegistry's message: "no published build for this

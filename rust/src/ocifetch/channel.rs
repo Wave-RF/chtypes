@@ -267,7 +267,17 @@ pub fn visible(predicate: &serde_json::Value) -> bool {
 /// install of that build is never reported, because the lookup this SDK opens
 /// through would refuse it. `Ok` in every other case: the alias answered, the
 /// tag's build is this SDK's own, or the contract has no own fingerprint.
-pub fn ahead_of_registry(alias_absent: bool, predicate: &serde_json::Value) -> Result<(), Error> {
+///
+/// The expired alias with a usable cache (public issue #581): `cached_own_build`
+/// looks up, through the filter open uses, the cache's verified record of this
+/// SDK's OWN fingerprint for the request, and returns its build id (empty for
+/// a record that names none) or `None` for no record. When there is one the
+/// message grows by [`cached_own_suffix`]; the code does not change.
+pub fn ahead_of_registry(
+    alias_absent: bool,
+    predicate: &serde_json::Value,
+    cached_own_build: impl FnOnce() -> Option<String>,
+) -> Result<(), Error> {
     if !alias_absent || visible(predicate) {
         return Ok(());
     }
@@ -275,7 +285,26 @@ pub fn ahead_of_registry(alias_absent: bool, predicate: &serde_json::Value) -> R
         return Ok(());
     };
     let own = fingerprint.strip_prefix("sha256:").unwrap_or(fingerprint);
-    Err(Error::ArtifactUnpublished(ahead_message(own, predicate)))
+    let mut message = ahead_message(own, predicate);
+    if let Some(build) = cached_own_build() {
+        message.push_str(&cached_own_suffix(&build));
+    }
+    Err(Error::ArtifactUnpublished(message))
+}
+
+/// The clause [`ahead_of_registry`] appends when the cache holds an
+/// own-fingerprint build: "; a cached build for this fingerprint (build <id>)
+/// is still usable by open; upgrade the SDK to get newer builds", the
+/// parenthesis dropped when the record names no build.
+fn cached_own_suffix(build: &str) -> String {
+    let named = if build.is_empty() {
+        String::new()
+    } else {
+        format!(" (build {build})")
+    };
+    format!(
+        "; a cached build for this fingerprint{named} is still usable by open; upgrade the SDK to get newer builds"
+    )
 }
 
 /// [`ahead_of_registry`]'s message: "no published build for this SDK's

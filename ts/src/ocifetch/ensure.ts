@@ -206,6 +206,24 @@ export async function resolveInstalled(
   return resolvedFromRecord(best.record, platform, request, best.dir, best.source, true, warnings);
 }
 
+/**
+ * The build id of the newest cached record of this SDK's OWN fingerprint that
+ * answers the request (`resolveInstalled`'s filter), `''` when it names none,
+ * or `undefined` when the cache holds no such record (public issue #581).
+ */
+async function cachedOwnBuild(options: FetchV1Options, platform: PlatformKey, request: string): Promise<string | undefined> {
+  let best: VerifiedRecord | undefined;
+  for (const r of searchRoots(options)) {
+    for (const { record } of await listVerified(r.root)) {
+      if (record.platform !== platform) continue;
+      if (!withinRequest(record.version, request)) continue;
+      if (!visibleToChannel(record.predicate)) continue;
+      if (best === undefined || compareRecords(record, best) > 0) best = record;
+    }
+  }
+  return best === undefined ? undefined : best.build;
+}
+
 /** The cache, then every system directory in order: the one search order every lookup uses. */
 function searchRoots(options: FetchV1Options): readonly { readonly root: string; readonly source: string }[] {
   return [{ root: cacheRoot(options.cacheDir), source: 'cache' }, ...systemDirs(options.systemDirs).map((d) => ({ root: d, source: `system:${d}` }))];
@@ -462,7 +480,7 @@ async function ensureIn(request: string, options: FetchV1Options): Promise<Resol
     // An install of another fingerprint's build, reached through the tag
     // because the registry has none at this SDK's own, is never reported
     // installed (public issue #578): refused before the cache is touched.
-    aheadOfRegistry(resolveResult.aliasAbsent, existing.predicate);
+    await aheadOfRegistry(resolveResult.aliasAbsent, existing.predicate, () => cachedOwnBuild(options, platform, request));
     record = existing;
     alreadyInstalled = true;
     // A NEWER build within the request, installed beside it, is still the
@@ -513,7 +531,7 @@ async function ensureIn(request: string, options: FetchV1Options): Promise<Resol
       // own fingerprint answered 404 on every base, and the tag's build is
       // signed for another. Refused from the signed statement, before the
       // layer is requested, so nothing is downloaded or installed.
-      aheadOfRegistry(resolveResult.aliasAbsent, predicate);
+      await aheadOfRegistry(resolveResult.aliasAbsent, predicate, () => cachedOwnBuild(options, platform, request));
     }
 
     const monotonic = await checkMonotonic(root, platform, request, predicate);
