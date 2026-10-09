@@ -343,11 +343,12 @@ typedef struct chs_block chs_block;
  *
  * - `CHS_OK`: the call succeeded and its outputs are set.
  * - `CHS_REJECTED`: ClickHouse's own refusal, with its own code, name and message, which a server
- *   would also give. A call's compile-time input that the server's stack check refuses for depth
- *   (an expression, a statement, a type, a settings or profile object nested deeper than the
- *   calling thread's stack allows) is `CHS_REJECTED` with ch_code 306, TOO_DEEP_RECURSION, never
- *   `CHS_INTERNAL`. A body the server would refuse for depth is not a call status: like every
- *   refused body, it is answered in the call's document with code 306, and the call is `CHS_OK`.
+ *   would also give. `CHS_REJECTED` with ch_code 306, TOO_DEEP_RECURSION, never `CHS_INTERNAL`, is
+ *   returned at the entry points that compile caller text, when the server's stack check refuses
+ *   that text for depth: `chs_set_defaults`, `chs_server_create`, `chs_schema_create`,
+ *   `chs_schema_describe`, `chs_filter_create`, `chs_type_validate`, `chs_reference_type`,
+ *   `chs_discover_columns`, `chs_block_create` and `chs_filter_eval_block`. A body's depth refusal
+ *   is reported in its document (`CHS_OK`, with code 306), as every refused body is.
  * - `CHS_DECLINED`: this build will not answer; a server might accept. Never scored as agreement.
  * - `CHS_INVALID_ARGUMENT`: caller misuse, such as a NULL pointer with a nonzero length, a
  *   wrong-kind, freed or cross-library handle, or a NULL required out-parameter.
