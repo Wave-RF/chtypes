@@ -49,19 +49,33 @@ Everything on the row path is **insert-side** coercion. Never reuse it to fold a
 
 The rules genuinely differ: `256` into a `UInt8` column stores `0`, while `x = 256` over that column promotes and is false for every row. Refuse an operand outside the column type's domain instead — or use [`guides/filters.md`](guides/filters.md), which is the surface that answers comparison questions with ClickHouse's own comparison functions.
 
-## Filters are for comparison, not enforcement, for now
+## Filters are enforcement-grade against a same-platform server, per lifted (line, platform)
 
-No read-side security may be enforced on the filter surface until a release explicitly lifts this limitation — the CHANGELOG will say so, and until it does, assume it has not. Until then the surface is for shadow and replay: run it beside your existing enforcement and compare, do not replace.
+**A filter verdict is enforcement-grade relative to a ClickHouse server of the same line, on the same operating system and CPU architecture, for the builds that passed the artifact producer's gate.** `2.0.0-dev.8` is the first such build. A `t` verdict is a security claim; anything but a definite `t` is a no. That includes v2's `unknown(n)` verdict member, so a caller that maps an unknown verdict to a pass is wrong by contract. A closed filter is never passed to the library as NULL (which would mean "no filter"): the bindings refuse it.
 
-The parse-once block twin does not change that — it is a performance shape, not a maturity signal, and sits under the same gate. This is the canonical statement of the gate; `docs/guides/filters.md` points here rather than restating the criterion. For the rule a filter's own result type must follow, see [`guides/filters.md` → Writing a filter's result type](guides/filters.md#writing-a-filters-result-type).
+**The criterion.** The artifact producer runs a standing filter differential against real servers of the same platform on each published build, before the push and after it. A build is enforcement-grade for a pair when that differential reports zero over-accepts and zero over-rejects for it. It reads `12/12` on the published `2.0.0-dev.8` (build `20261009.074908`).
 
-**The gate lifts per `(ClickHouse line, platform)`, never all at once.** A pair's warning lifts once that pair has **three consecutive records with zero over-admits and zero over-hides against a real server, and no open filter divergences for it** (see [Known divergences](#known-divergences) below). A pair that diverges again after being lifted gets the warning back — a lift is a state, not a one-way promotion, and lifting one pair says nothing about any other.
+**The gate lifts per `(ClickHouse line, platform)`, never all at once.** Eleven pairs are lifted:
 
-**Each lift is announced in the CHANGELOG, by `(line, platform)`, as its own entry** — the fixed shape is in [`CONTRIBUTING.md`](../CONTRIBUTING.md#changelog-entries). There is no other record of a lift: a pair stays gated until its own CHANGELOG entry says otherwise.
+| line   | `linux-amd64` | `linux-arm64` | `darwin-arm64`  |
+| ------ | ------------- | ------------- | --------------- |
+| `26.3` | lifted        | lifted        | not yet covered |
+| `26.7` | lifted        | lifted        | lifted          |
+| `26.8` | lifted        | lifted        | lifted          |
+| `26.9` | lifted        | lifted        | lifted          |
 
-**Today no `(line, platform)` pair is lifted.** Every supported line, on every published platform, is still under the gate above.
+**Not yet covered: `26.3` on `darwin-arm64`.** Deep nesting that the macOS 26.3 server refuses (306, its smaller thread stack) is answered by the library. That pair is under review and stays under the gate: run it beside your existing enforcement and compare, do not replace.
 
-This criterion is scored against the artifact producer's own differential comparison against real servers, and the per-`(line, platform)` state it produces is not served yet — the registry carries no such field today. Once the artifact producer serves one, this page reads it directly, the same principle [`support-v1.md`](support-v1.md) follows for line support: it states what the registry says rather than listing lines by hand. Until then, do not infer a lift from anything but a CHANGELOG entry naming the pair.
+**Each lift is announced in the CHANGELOG, by `(line, platform)`, as its own entry** — the fixed shape is in [`CONTRIBUTING.md`](../CONTRIBUTING.md#changelog-entries). A pair stays gated until its own CHANGELOG entry says otherwise.
+
+**A pair that diverges again gets the gate back.** A lift is a state, not a one-way promotion: a divergence against a same-platform server (see [Known divergences](#known-divergences) below) puts that pair back under the gate with a fresh entry, and lifting one pair says nothing about any other.
+
+**What the guarantee does not cover.**
+
+- **A server configured so that it refuses every query.** For example `max_expanded_ast_elements=1` refuses everything with code 36, and so does `page=1` on 26.8 and 26.9. The library answers the rows such a server would refuse. The committed list is [`spec/abi-v2/where-settings/documented-pathological.tsv`](../spec/abi-v2/where-settings/documented-pathological.tsv), explained in the README section [Settings the server may refuse outright](../spec/abi-v2/where-settings/README.md#settings-the-server-may-refuse-outright). A consumer refuses such a profile or call; the list grows only by sign-off.
+- **The 26.3 float platform requirement.** On 26.3, ClickHouse's own float text parse depends on the platform, so run the library on the server's operating system and architecture. See [macOS artifacts match ClickHouse on macOS; on 26.3, match the server's platform](#macos-artifacts-match-clickhouse-on-macos-on-263-match-the-servers-platform), which this page states as a requirement.
+
+The parse-once block twin sits under the same guarantee. For the rule a filter's own result type must follow, see [`guides/filters.md` → Writing a filter's result type](guides/filters.md#writing-a-filters-result-type).
 
 ## Some formats depend on the artifact, not the binding
 

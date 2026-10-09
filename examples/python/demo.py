@@ -1173,9 +1173,10 @@ def section16(lib: chtypes.Library) -> None:
             )
     blank()
 
-    note("ENFORCEMENT GATE: nothing may enforce read-side security on this API until")
-    note("the WHERE-truth gate lands green; until then it is a shadow/replay surface")
-    note("(docs/limitations.md)")
+    note("ENFORCEMENT GATE: a t verdict is enforcement-grade against a server of the")
+    note("same line, OS and architecture, for each lifted (line, platform) pair;")
+    note("anything but a definite t is a no. Pairs not lifted stay a shadow/replay")
+    note("surface. See docs/limitations.md.")
 
 
 # ---------------------------------------------------------------------------
