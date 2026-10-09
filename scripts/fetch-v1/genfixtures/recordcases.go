@@ -57,7 +57,7 @@ func canonicalRecordFor(tree *Tree, art PlatformArtifact) recordDoc {
 	bundleManifest := tree.referrersOf[art.ManifestDesc.Digest][0].Digest
 	signedBy := testKey.KeyID
 	return recordDoc{
-		Schema:        1,
+		Schema:        fixtureRecordSchema,
 		Platform:      art.PlatformKey,
 		Version:       art.Predicate.ClickHouseVersion,
 		Channel:       &channel,
@@ -133,7 +133,7 @@ func buildRecordCases(fs *FileSet) []Case {
 	artForeign, seedForeign := newArtifact("26.2.5.6", "20260205.000006", "record-foreign")
 	canon := canonicalRecordFor(tree, artForeign)
 	schema2 := canon
-	schema2.Schema = 2
+	schema2.Schema = foreignRecordSchema
 	schema2.Build = "99999999.999999"
 	schema2.Version = "26.2.99.99"
 	flat, err := json.Marshal(map[string]any{

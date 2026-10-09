@@ -132,6 +132,26 @@ var fetchV1Channel = channel{
 	pinnable:     true,
 }
 
+// prodV2Channel is the production generation-2 channel a 2.0.0 SDK speaks
+// after the lock: the v1 contract with v2 values, from the generated
+// constants (docs/guides/fetch-v1.md, "Generation 2 after the lock"). It
+// trusts the release key, honors every override and pin, and has no alias step
+// and no own-fingerprint filter. It is NOT the default; only
+// UseProdV2ForTests selects it, until the lock change makes it active()'s
+// fallback.
+var prodV2Channel = channel{
+	name:         ProdV2Name,
+	abi:          ProdV2ABIGeneration,
+	recordSchema: ProdV2RecordSchema,
+	rootLeaf:     ProdV2CacheDir,
+	subroot:      ProdV2CacheDir,
+	systemDirs:   ProdV2SystemDirs,
+	bases:        ProdV2Bases,
+	keys:         ReleaseKeys,
+	overridable:  true,
+	pinnable:     true,
+}
+
 var current atomic.Pointer[channel]
 
 // active is the contract this process fetches under: the dev channel, unless
@@ -163,6 +183,16 @@ func use(c *channel) func() {
 func UseFetchV1ForTests() (restore func()) {
 	testOnly("UseFetchV1ForTests")
 	c := fetchV1Channel
+	return use(&c)
+}
+
+// UseProdV2ForTests makes this TEST binary speak the production generation-2
+// channel (prodV2Channel): the v1 contract with abi 2, schema-2 records and
+// the v2 subroot. It returns the restore function, and panics outside a test
+// binary.
+func UseProdV2ForTests() (restore func()) {
+	testOnly("UseProdV2ForTests")
+	c := prodV2Channel
 	return use(&c)
 }
 

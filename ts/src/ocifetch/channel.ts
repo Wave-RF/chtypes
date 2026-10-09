@@ -49,6 +49,12 @@ import {
   ENV_ALLOW_UNSIGNED_NAME,
   ENV_BASES_NAME,
   ENV_TRUSTED_KEYS_NAME,
+  PROD_V2_ABI_GENERATION,
+  PROD_V2_BASES,
+  PROD_V2_CACHE_DIR,
+  PROD_V2_NAME,
+  PROD_V2_RECORD_SCHEMA,
+  PROD_V2_SYSTEM_DIRS,
   RELEASE_KEYS,
   SCHEMA_VERSION,
   SPELLING_REGEX,
@@ -146,6 +152,28 @@ const FETCH_V1_CHANNEL: Channel = {
   ownFingerprint: '',
 };
 
+/**
+ * The production generation-2 channel a 2.0.0 SDK speaks after the lock: the v1
+ * contract with v2 values, from the generated constants (`docs/guides/fetch-v1.md`,
+ * "Generation 2 after the lock"). It trusts the release key, honors every
+ * override and pin, and has no alias step. NOT the default: only
+ * `useProdV2ForTests` selects it, until the lock change makes it
+ * `activeChannel()`'s fallback.
+ */
+const PROD_V2_CHANNEL: Channel = {
+  name: PROD_V2_NAME,
+  abi: PROD_V2_ABI_GENERATION,
+  recordSchema: PROD_V2_RECORD_SCHEMA,
+  rootLeaf: PROD_V2_CACHE_DIR,
+  subroot: PROD_V2_CACHE_DIR,
+  systemDirs: PROD_V2_SYSTEM_DIRS,
+  bases: PROD_V2_BASES,
+  keys: RELEASE_KEYS.map((k) => ({ keyid: k.keyid, ed25519Hex: k.ed25519Hex })),
+  overridable: true,
+  pinnable: true,
+  ownFingerprint: '',
+};
+
 let current: Channel | undefined;
 
 /** The contract this process fetches under: the dev channel, unless a test selected another. */
@@ -187,6 +215,16 @@ function use(c: Channel): () => void {
 export function useFetchV1ForTests(): () => void {
   testOnly('useFetchV1ForTests');
   return use(FETCH_V1_CHANNEL);
+}
+
+/**
+ * Makes this TEST process speak the production generation-2 channel: the v1
+ * contract with abi 2, schema-2 records and the `v2` subroot. Returns the
+ * restore function; throws outside a vitest worker.
+ */
+export function useProdV2ForTests(): () => void {
+  testOnly('useProdV2ForTests');
+  return use(PROD_V2_CHANNEL);
 }
 
 /**

@@ -179,12 +179,13 @@ Every one of the checks above runs **in this order**, and a failure at any step 
 
 <!-- BEGIN GENERATED: fetch-v1 constants -->
 
-Generated from `spec/fetch-v1/constants.json` (sha256:`4554956faeb154fc324a6120b7b35976222c6bc8ecbce7fd0147502e3073611d`) by `scripts/fetch-v1/gen-constants.py`; do not hand-edit between the markers. Covers this guide's §7 and §8, plus a quick reference for the media types, predicate types and default trust key introduced in earlier sections.
+Generated from `spec/fetch-v1/constants.json` (sha256:`82afa8d6cba96c10b5945c6f7c1c8360a504cc8ac6231e74017cc6c20b908df6`) by `scripts/fetch-v1/gen-constants.py`; do not hand-edit between the markers. Covers this guide's §7 and §8, plus a quick reference for the media types, predicate types and default trust key introduced in earlier sections.
 
 ## Reference
 
 - schema `1` · ABI generation `1`
 - default base(s): `https://registry.wavehouse.dev/chtypes/v1`
+- production generation-2 channel `v2`: ABI `2`, record schema `2`, cache leaf `v2`, base(s) `https://registry.wavehouse.dev/chtypes/v2`, system dirs `/usr/local/share/chtypes/v2`, `/opt/chtypes/v2`, trusting the release key above
 - platforms: `linux-amd64`, `linux-arm64`, `darwin-arm64`
 
 | media type / artifactType | value                                                     |
@@ -280,6 +281,26 @@ A `Resolved` carries: `abi_generation` (always 1); `platform`, `request`, `versi
 **On return, the fetch layer guarantees:** the library file exists and its sha256/size equal the signed predicate's; the predicate verified under a trusted key (or allow-unsigned was explicit and loud); `predicate.abi == abi_generation`; the predicate's `os`/`arch` equal the request's platform; the predicate's version lies within (or equals) the request.
 
 **The fetch layer never:** `dlopen`s anything; interprets `abi_fingerprint` (passed through opaque); checks glibc; or reads a `chs_*` symbol. Those checks — and the `CHTYPES_ARTIFACT_INCOMPATIBLE` error code they can raise (§8) — belong to the FFI/loader lane, not yet built as of this writing (blocked on the ABI v1 design, core issue #647). When it lands, it calls `resolve_installed` and `ensure` exactly as any other caller of this module would; the seam above is frozen specifically so that lane can be written against it without this module changing underneath it.
+
+## Generation 2 after the lock
+
+A 2.0.0-dev SDK keeps rule r6 of `spec/abi-v2/docs.md`: it speaks only the dev channel (staging `chtypes/v2-dev`, the staging key, no override, no pin), and so does every non-test binary of this repository today. When generation 2 locks, 2.0.0 ships from the production `chtypes/v2` repository, signed with the release key (r6's last paragraph), and restores what a consumer documents: mirrors, air-gapped installs and pinned fetches. That channel is built now, in every binding, behind the conformance cases of §10, and it is not the default: only a test-only selector reaches it (`UseProdV2ForTests` in Go, `use_prod_v2_for_tests` in Python, `useProdV2ForTests` in TypeScript, `use_prod_v2_for_tests` in Rust), until the lock change makes it the fallback. It is the v1 contract of this guide with these values, all from `prod_v2` in `spec/fetch-v1/constants.json` (generated into the four bindings, never copied):
+
+| setting                        | production generation 2                                                                                                                             |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| name, ABI, record schema       | `v2`, `2` (a signed predicate must say `abi` 2, a lock names `abi` 2), `2` (`verified.json` is schema 2)                                            |
+| default base                   | `https://registry.wavehouse.dev/chtypes/v2`, one host and no default mirror                                                                         |
+| trust                          | the release key list of §4 (key id `deb275922dbff76e`) and not the staging key                                                                      |
+| default cache root             | `${XDG_CACHE_HOME:-~/.cache}/chtypes/v2`                                                                                                            |
+| an explicit cache              | used through its subroot: `<cache>/v2`; `CacheRoot`, `SearchDirs` and `chtypes where` report that path                                              |
+| system directories             | `/usr/local/share/chtypes/v2`, `/opt/chtypes/v2`                                                                                                    |
+| overrides                      | `CHTYPES_ARTIFACTS_URL` and `Bases`, `CHTYPES_TRUSTED_KEYS` and `TrustedKeys`, `CHTYPES_ALLOW_UNSIGNED`                                             |
+| pinning                        | `--lock`, `--frozen`, `--update` and their API forms, exactly as §6                                                                                 |
+| alias step, fingerprint filter | none: one fingerprint after the lock, so a version request fetches its tag and nothing else, and the library load still refuses another fingerprint |
+
+Tags are the v1 spellings (`26.9`, `26.9.8`, `26.9.8.3`), with no `latest` and no `--fp-` alias. A repository that exists and holds nothing answers `tags/list` with `{"tags":[]}` and every manifest `404`: a fetch is `CHTYPES_ARTIFACT_UNPUBLISHED`, the code a line the registry has never published gets, never a transport error, and a listing is empty (the `unpublished-empty-repository` and `list-tags-empty-repository` cases).
+
+The conformance cases run under this channel from their own corpus, `tests/fixtures/fetch-v2/`, which `scripts/fetch-v1/genfixtures` writes with `--abi=2` from the same case builders as the v1 corpus: every case keeps its id and its meaning, and what changes is each value a case encodes (ABI 2 predicates and locks, schema-2 records, the other generation's record as the "foreign" one, a seeded layout under the `v2` subroot). Each runner takes `CHTYPES_V2_CONFORMANCE=<abs path to tests/fixtures/fetch-v2>` beside `CHTYPES_V1_CONFORMANCE` (Go: `TestConformanceProdV2`), skips loudly when it is unset, and fails a run that executed no case.
 
 ## 10. Conformance
 

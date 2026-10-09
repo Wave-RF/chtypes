@@ -24,7 +24,7 @@ import { ArtifactMissingError, type FetchV1ErrorCode } from '../../src/ocifetch/
 import { verifyAndInstallFromLocalBlobs } from '../../src/ocifetch/localverify.js';
 import { readLock, type LockFile } from '../../src/ocifetch/lock.js';
 import type { Clock, PlatformKey } from '../../src/ocifetch/types.js';
-import { channelName, useOwnFingerprintForTests, useFetchV1ForTests } from '../../src/ocifetch/channel.js';
+import { channelName, useOwnFingerprintForTests, useFetchV1ForTests, useProdV2ForTests } from '../../src/ocifetch/channel.js';
 
 // This file tests the v1 fetch contract that the ABI v2 dev channel narrows
 // (src/ocifetch/channel.ts): its fixtures name their own registry and key, and
@@ -33,8 +33,42 @@ import { channelName, useOwnFingerprintForTests, useFetchV1ForTests } from '../.
 // test/cli-devchannel.test.ts.
 useFetchV1ForTests();
 
-const CONFORMANCE_DIR = process.env['CHTYPES_V1_CONFORMANCE'];
-const REPORT_PATH = process.env['CHTYPES_V1_REPORT'];
+
+/**
+ * One conformance run: which corpus, which report, which channel. The v1 corpus
+ * runs under the v1 contract it specifies; the production-v2 corpus is the same
+ * cases regenerated for generation 2 (tests/fixtures/fetch-v2: abi 2 predicates,
+ * schema-2 records), run under the production generation-2 channel
+ * (docs/guides/fetch-v1.md, "Generation 2 after the lock").
+ */
+interface Run {
+  readonly label: string;
+  readonly dir: string | undefined;
+  readonly report: string | undefined;
+  readonly channel: string;
+  /** Where an explicit cache directory's layout lives (none for the v1 contract). */
+  readonly subroot: string;
+  readonly select: (() => () => void) | undefined;
+}
+
+const RUNS: readonly Run[] = [
+  {
+    label: 'v1',
+    dir: process.env['CHTYPES_V1_CONFORMANCE'],
+    report: process.env['CHTYPES_V1_REPORT'],
+    channel: 'v1',
+    subroot: '',
+    select: undefined,
+  },
+  {
+    label: 'production-v2',
+    dir: process.env['CHTYPES_V2_CONFORMANCE'],
+    report: process.env['CHTYPES_V2_REPORT'],
+    channel: 'v2',
+    subroot: 'v2',
+    select: useProdV2ForTests,
+  },
+];
 const REGISTRY_BASE = process.env['CHTYPES_V1_REGISTRY_BASE'] === '' ? undefined : process.env['CHTYPES_V1_REGISTRY_BASE'];
 
 // ---------------------------------------------------------------- the shapes
@@ -219,56 +253,67 @@ function deepEqual(a: unknown, b: unknown): boolean {
 
 // ------------------------------------------------------------------ the suite
 
-describe.skipIf(CONFORMANCE_DIR === undefined || CONFORMANCE_DIR === '')('v1 conformance', () => {
-  let caseFile: CaseFile;
-  let casesSha256: string;
-  let server: { proc: ServerProcess; port: number; port2: number } | undefined;
-  const results: ReportResult[] = [];
+for (const run of RUNS) {
+  const CONFORMANCE_DIR = run.dir;
+  const REPORT_PATH = run.report;
+  describe.skipIf(CONFORMANCE_DIR === undefined || CONFORMANCE_DIR === '')(`${run.label} conformance`, () => {
+    let caseFile: CaseFile;
+    let casesSha256: string;
+    let server: { proc: ServerProcess; port: number; port2: number } | undefined;
+    let restoreChannel: (() => void) | undefined;
+    const results: ReportResult[] = [];
 
-  beforeAll(async () => {
-    if (CONFORMANCE_DIR === undefined || CONFORMANCE_DIR === '') return;
-    // The cases are the v1 fetch contract's specification; the 2.0.0-dev
-    // binding's dev channel narrows it, and its own rules are tested apart.
-    console.log(`fetch contract: ${channelName()} (the fetch-v1 cases' own; the dev channel this binding ships is test/ocifetch/devchannel.test.ts)`);
-    if (channelName() !== 'v1') throw new Error(`the fetch-v1 conformance cases must run under the v1 contract, not ${channelName()}`);
-    const raw = await readFile(path.join(CONFORMANCE_DIR, 'cases.json'));
-    casesSha256 = createHash('sha256').update(raw).digest('hex');
-    caseFile = JSON.parse(raw.toString('utf8')) as CaseFile;
-    if (caseFile.cases.some((c) => c.transports.includes('http'))) {
-      server = await startServer(CONFORMANCE_DIR);
-    }
-  }, 30_000);
-
-  afterAll(async () => {
-    server?.proc.kill();
-    if (REPORT_PATH !== undefined && REPORT_PATH !== '' && caseFile !== undefined) {
-      const report = { schema: 1, binding: 'ts', toolchain: toolchainId(), cases_sha256: casesSha256, results };
-      await mkdir(path.dirname(REPORT_PATH), { recursive: true });
-      await writeFile(REPORT_PATH, JSON.stringify(report, null, 2));
-    }
-  });
-
-  it('every case in cases.json passes on every transport it lists (file, http, and registry when CHTYPES_V1_REGISTRY_BASE is set)', async () => {
-    if (CONFORMANCE_DIR === undefined) return;
-    for (const c of caseFile.cases) {
-      for (const transport of c.transports) {
-        // The `registry` transport runs only where CHTYPES_V1_REGISTRY_BASE
-        // names a live repository root (the v1-network and staging jobs set
-        // it); everywhere else its pairs are skipped LOUDLY, by name.
-        if (transport === 'registry' && REGISTRY_BASE === undefined) {
-          console.warn(`SKIP ${c.id}/registry: CHTYPES_V1_REGISTRY_BASE is unset`);
-          continue;
-        }
-        const detail = await runOne(c, transport, CONFORMANCE_DIR, server?.port, server?.port2).catch(
-          (err: unknown) => `runner threw: ${err instanceof Error ? err.stack ?? err.message : String(err)}`,
-        );
-        results.push({ id: c.id, transport, verdict: detail === '' ? 'pass' : 'fail', detail });
+    beforeAll(async () => {
+      if (CONFORMANCE_DIR === undefined || CONFORMANCE_DIR === '') return;
+      // The v1 cases are the v1 fetch contract's specification; the 2.0.0-dev
+      // binding's dev channel narrows it, and its own rules are tested apart.
+      // The production-v2 corpus runs under the production generation-2 channel.
+      restoreChannel = run.select?.();
+      console.log(`fetch contract: ${channelName()} (corpus ${run.label})`);
+      if (channelName() !== run.channel) throw new Error(`the ${run.label} conformance cases must run under the ${run.channel} contract, not ${channelName()}`);
+      const raw = await readFile(path.join(CONFORMANCE_DIR, 'cases.json'));
+      casesSha256 = createHash('sha256').update(raw).digest('hex');
+      caseFile = JSON.parse(raw.toString('utf8')) as CaseFile;
+      if (caseFile.cases.some((c) => c.transports.includes('http'))) {
+        server = await startServer(CONFORMANCE_DIR);
       }
-    }
-    const failures = results.filter((r) => r.verdict === 'fail');
-    expect(failures, failures.map((f) => `${f.id}/${f.transport}: ${f.detail}`).join('\n')).toEqual([]);
-  }, 300_000);
-});
+    }, 30_000);
+
+    afterAll(async () => {
+      server?.proc.kill();
+      restoreChannel?.();
+      if (REPORT_PATH !== undefined && REPORT_PATH !== '' && caseFile !== undefined) {
+        const report = { schema: 1, binding: 'ts', toolchain: toolchainId(), cases_sha256: casesSha256, results };
+        await mkdir(path.dirname(REPORT_PATH), { recursive: true });
+        await writeFile(REPORT_PATH, JSON.stringify(report, null, 2));
+      }
+    });
+
+    it('every case in cases.json passes on every transport it lists (file, http, and registry when CHTYPES_V1_REGISTRY_BASE is set)', async () => {
+      if (CONFORMANCE_DIR === undefined) return;
+      for (const c of caseFile.cases) {
+        for (const transport of c.transports) {
+          // The `registry` transport runs only where CHTYPES_V1_REGISTRY_BASE
+          // names a live repository root (the v1-network and staging jobs set
+          // it); everywhere else its pairs are skipped LOUDLY, by name.
+          if (transport === 'registry' && REGISTRY_BASE === undefined) {
+            console.warn(`SKIP ${c.id}/registry: CHTYPES_V1_REGISTRY_BASE is unset`);
+            continue;
+          }
+          const detail = await runOne(c, transport, CONFORMANCE_DIR, run.subroot, server?.port, server?.port2).catch(
+            (err: unknown) => `runner threw: ${err instanceof Error ? err.stack ?? err.message : String(err)}`,
+          );
+          results.push({ id: c.id, transport, verdict: detail === '' ? 'pass' : 'fail', detail });
+        }
+      }
+      // A census that cannot be empty: a run that executed nothing is a failure.
+      console.log(`${run.label} conformance: ${results.length} result(s) over ${caseFile.cases.length} case(s)`);
+      expect(results.length, 'the conformance run executed zero cases').toBeGreaterThan(0);
+      const failures = results.filter((r) => r.verdict === 'fail');
+      expect(failures, failures.map((f) => `${f.id}/${f.transport}: ${f.detail}`).join('\n')).toEqual([]);
+    }, 300_000);
+  });
+}
 
 // ------------------------------------------------------------------ one case
 
@@ -276,6 +321,7 @@ async function runOne(
   c: ConformanceCase,
   transport: Transport,
   conformanceDir: string,
+  subroot: string,
   serverPort: number | undefined,
   serverPort2: number | undefined,
 ): Promise<string> {
@@ -283,8 +329,12 @@ async function runOne(
   try {
     const cacheDir = path.join(work, 'cache');
     await mkdir(cacheDir, { recursive: true });
+    // An explicit cache directory is used through the contract's subroot, so
+    // that is where a seeded layout lives (none for the v1 contract).
+    const layoutDir = subroot === '' ? cacheDir : path.join(cacheDir, subroot);
+    await mkdir(layoutDir, { recursive: true });
     if (c.setup.cache !== 'empty') {
-      await cp(path.join(conformanceDir, 'layouts', c.setup.cache), cacheDir, { recursive: true });
+      await cp(path.join(conformanceDir, 'layouts', c.setup.cache), layoutDir, { recursive: true });
     }
 
     const trustedKeys =
@@ -295,11 +345,11 @@ async function runOne(
     // installed.json: pre-install exactly these digests, offline, from local
     // blobs, before the timed part of the case (plan §3.2's `installed.json`
     // convention, guide §10's "Cache fixtures and installed.json").
-    const installedPath = path.join(cacheDir, 'installed.json');
+    const installedPath = path.join(layoutDir, 'installed.json');
     try {
       const raw = JSON.parse(await readFile(installedPath, 'utf8')) as { installed: readonly string[] };
       for (const digest of raw.installed) {
-        await verifyAndInstallFromLocalBlobs(cacheDir, cacheDir, digest, c.request.platform, trustedKeys);
+        await verifyAndInstallFromLocalBlobs(layoutDir, layoutDir, digest, c.request.platform, trustedKeys);
       }
     } catch {
       // No installed.json for this fixture — nothing to pre-install.
@@ -318,7 +368,7 @@ async function runOne(
       await cp(path.join(conformanceDir, 'locks', 'inputs', `${c.setup.lock}.json`), lockPath);
     }
 
-    const beforeIndexRename = c.setup.before_index_rename_hook === null ? undefined : indexRenameHook(c.setup.before_index_rename_hook, cacheDir);
+    const beforeIndexRename = c.setup.before_index_rename_hook === null ? undefined : indexRenameHook(c.setup.before_index_rename_hook, layoutDir);
 
     const sleeps: number[] = [];
     const bases = c.request.bases.map((b) => expandBase(b, transport, serverPort, serverPort2, c.id, c.tree, conformanceDir));
@@ -343,7 +393,7 @@ async function runOne(
     // it, compared after the call.
     const intactBefore = new Map<string, string>();
     for (const d of c.expect.records_intact) {
-      const snap = await snapshotInstall(cacheDir, d);
+      const snap = await snapshotInstall(layoutDir, d);
       if (snap === '{}') return `records_intact: ${d} is not installed before the call`;
       intactBefore.set(d, snap);
     }
@@ -365,7 +415,7 @@ async function runOne(
     }
     if (resultDetail !== '') return resultDetail;
     for (const [d, before] of intactBefore) {
-      if ((await snapshotInstall(cacheDir, d)) !== before) return `records_intact: the install of ${d} changed`;
+      if ((await snapshotInstall(layoutDir, d)) !== before) return `records_intact: the install of ${d} changed`;
     }
 
     if (c.expect.sleeps.length > 0 || sleeps.length > 0) {

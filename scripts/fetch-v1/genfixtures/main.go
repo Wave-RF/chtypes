@@ -34,7 +34,21 @@ func repoRoot() string {
 	return filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(file))))
 }
 
-const fixturesRelPath = "tests/fixtures/fetch-v1"
+// fixturesRelPath is the corpus this run generates: tests/fixtures/fetch-v1
+// (the v1 contract's, ABI 1) or, under --abi 2, tests/fixtures/fetch-v2 (the
+// same cases signed for the production generation-2 channel).
+var fixturesRelPath = "tests/fixtures/fetch-v1"
+
+// The generation a corpus speaks. The v1 corpus: ABI 1 predicates and locks,
+// schema-1 verified.json records, and schema 2 as the foreign record. The
+// ABI 2 corpus swaps every one of those, so each case keeps its id and its
+// meaning (a "foreign" record is the OTHER generation's).
+var (
+	fixtureABI          = 1
+	wrongABI            = 2
+	fixtureRecordSchema = 1
+	foreignRecordSchema = 2
+)
 
 // layoutPresentOnDisk reports whether tests/fixtures/fetch-v1/layouts/<name>
 // is physically present in this checkout right now, by checking for that
@@ -62,7 +76,10 @@ func main() {
 	check := false
 	selftest := false
 	for _, arg := range os.Args[1:] {
-		if arg == "--write" {
+		if arg == "--abi=2" {
+			fixturesRelPath = "tests/fixtures/fetch-v2"
+			fixtureABI, wrongABI, fixtureRecordSchema, foreignRecordSchema = 2, 1, 2, 1
+		} else if arg == "--write" {
 			write = true
 		} else if arg == "--check" {
 			check = true
@@ -89,6 +106,10 @@ func main() {
 	}
 
 	fs := buildAll()
+	if fixtureABI != 1 {
+		copyStaticKeys(fs, root)
+		managedPrefixes = append(managedPrefixes, "test-key", "other-key")
+	}
 
 	if write {
 		fixturesDir := filepath.Join(root, fixturesRelPath)

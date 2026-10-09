@@ -124,7 +124,7 @@ func buildPlatformArtifact(tree *Tree, key SigningKey, platformKey, version, bui
 		predLibContent = opts.LibraryContentForPredicateOnly
 	}
 	predicate := Predicate{
-		ABI:               1,
+		ABI:               fixtureABI,
 		ABIFingerprint:    "sha256:" + fakeHex("abi-fingerprint-"+platformKey, 64),
 		ClickHouseVersion: version,
 		Channel:           channel,

@@ -278,6 +278,10 @@ jobs:
         if: steps.runner_file.outputs.exists == 'true'
         env:
           CHTYPES_V1_CONFORMANCE: ${{ github.workspace }}/tests/fixtures/fetch-v1
+          # The same cases for generation 2, run under the production-v2 channel
+          # (docs/guides/fetch-v1.md, "Generation 2 after the lock"); no report
+          # is written for it, the runner fails a run that executed no case.
+          CHTYPES_V2_CONFORMANCE: ${{ github.workspace }}/tests/fixtures/fetch-v2
           CHTYPES_V1_REPORT: ${{ runner.temp }}/report-${{ matrix.binding }}-${{ matrix.toolchain }}.json
           # The report's `toolchain`, exactly as the matrix names it (parity.py
           # compares strings). sandbox.sh runs `sudo -E`, so it survives into
@@ -295,7 +299,7 @@ jobs:
             # At ABI v2 the Go binding's dev channel narrows the contract these
             # cases specify (spec/abi-v2/docs.md r5, r6): its own tests run
             # here too, in the same no-network sandbox.
-            go) (cd go && go test -count=1 -run '^TestConformanceV1$' ./internal/ocifetch/ \
+            go) (cd go && go test -count=1 -run '^TestConformance(V1|ProdV2)$' ./internal/ocifetch/ \
                   && if [ "$(python3 ../scripts/abi-v1/majors.py get go)" != "1" ]; then go test -count=1 -v -run '^TestDevChannel' ./internal/ocifetch/; fi) ;;
             python)
               # steps.runner_file's own path (repo-root-relative) with the

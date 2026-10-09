@@ -200,7 +200,7 @@ func buildCacheCases(fs *FileSet) []Case {
 	layoutInst := NewLayout("installed-request")
 	copyArtifactIntoLayout(layoutInst, tree, artInst, "26.8")
 	layoutInst.SetInstalled(artInst.ManifestDesc.Digest)
-	instLock := Lock3{Schema: 3, ABI: 1, Platforms: []string{"linux-arm64"},
+	instLock := Lock3{Schema: 3, ABI: fixtureABI, Platforms: []string{"linux-arm64"},
 		Requests: map[string]map[string]LockPin{
 			"26.8":       {"linux-arm64": pinFor(artInst, artInst.BundleDigest, "")},
 			"26.8.15.10": {"linux-arm64": pinFor(artInst, artInst.BundleDigest, "")},

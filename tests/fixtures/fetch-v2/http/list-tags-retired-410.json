@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "id": "list-tags-retired-410",
+  "tree": "http-retired",
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/v2/chtypes/v1/tags/list",
+      "responses": [
+        {
+          "status": 410,
+          "headers": {
+            "Cache-Control": "no-store",
+            "Content-Type": "application/json"
+          },
+          "body": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"chtypes/v1 is retired: use chtypes/v2 (this registry no longer serves chtypes/v1)\",\"detail\":{\"retired\":\"chtypes/v1\",\"successor\":\"chtypes/v2\"}}]}"
+        },
+        {
+          "from_tree": true
+        }
+      ]
+    }
+  ],
+  "second_origin_routes": []
+}

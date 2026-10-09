@@ -8,7 +8,7 @@
   "required": [
     "schema", "abi_generation", "registry", "env", "spelling", "platforms",
     "media_types", "dsse", "statement_type", "predicate_types", "trust",
-    "test_keys", "retry", "timeouts", "limits", "cache", "lock", "autofetch", "errors"
+    "test_keys", "retry", "timeouts", "limits", "cache", "prod_v2", "lock", "autofetch", "errors"
   ],
   "properties": {
     "schema": {"const": 1},
@@ -207,6 +207,19 @@
         "unpacked_dir": {"type": "string"},
         "verified_record": {"type": "string"},
         "annotation_prefix": {"type": "string"}
+      }
+    },
+    "prod_v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "abi_generation", "record_schema", "cache_leaf", "default_bases", "system_dirs"],
+      "properties": {
+        "name": {"type": "string"},
+        "abi_generation": {"type": "integer", "const": 2},
+        "record_schema": {"type": "integer", "const": 2},
+        "cache_leaf": {"type": "string"},
+        "default_bases": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "system_dirs": {"type": "array", "items": {"type": "string", "pattern": "^/"}}
       }
     },
     "lock": {
