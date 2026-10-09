@@ -10,11 +10,13 @@ When you get one, fall back to the server: validate cautiously, forward the row 
 
 **Requirement: run the library on the same operating system and CPU architecture as your ClickHouse server.** That is the caller's responsibility; the library does not detect or decline a mismatch. Its answers, filter verdicts included, are guaranteed relative to a ClickHouse server on the same platform.
 
-The darwin artifacts give exactly the answers ClickHouse itself gives on macOS, on every supported line. The artifact producer measured this against official macOS ClickHouse binaries.
+The darwin artifacts give exactly the answers ClickHouse itself gives on macOS, on every supported line, with one exception on 26.3 (deep nesting, below). The artifact producer measured this against official macOS ClickHouse binaries.
 
 **On 26.7, 26.8 and 26.9,** ClickHouse agrees on every platform (macOS, Linux amd64, Linux arm64), float text included. On these lines, a mismatch of platform changes nothing.
 
 **On 26.3,** ClickHouse's own parse of Float values from text input formats differs across platforms (macOS, Linux amd64, Linux arm64; mostly 1 ULP), and none is correctly rounded. So stored Float values, and comparisons involving them, can differ across architectures, and a verdict computed on another platform can differ from the server's.
+
+**On 26.3, deep nesting** also differs on macOS: the macOS 26.3 server refuses deeply nested expressions and types that the library answers, because its threads have a smaller stack. That is a documented platform limitation of that one pair; the measured band is under [Not covered: `26.3` on `darwin-arm64`](#filters-are-enforcement-grade-against-a-same-platform-server-per-lifted-line-platform).
 
 (An earlier version of this page said every macOS float parse diverged from a server. That was measured on 25.8 and no longer holds on any supported line.)
 
@@ -49,19 +51,41 @@ Everything on the row path is **insert-side** coercion. Never reuse it to fold a
 
 The rules genuinely differ: `256` into a `UInt8` column stores `0`, while `x = 256` over that column promotes and is false for every row. Refuse an operand outside the column type's domain instead — or use [`guides/filters.md`](guides/filters.md), which is the surface that answers comparison questions with ClickHouse's own comparison functions.
 
-## Filters are for comparison, not enforcement, for now
+## Filters are enforcement-grade against a same-platform server, per lifted (line, platform)
 
-No read-side security may be enforced on the filter surface until a release explicitly lifts this limitation — the CHANGELOG will say so, and until it does, assume it has not. Until then the surface is for shadow and replay: run it beside your existing enforcement and compare, do not replace.
+**A filter verdict is enforcement-grade relative to a ClickHouse server of the same line, on the same operating system and CPU architecture, for the builds that passed the artifact producer's gate.** Artifact build `20261009.074908` (served on the v2-dev channel to SDK `2.0.0-dev.4`) is the first such build. A `t` verdict is a security claim; anything but a definite `t` is a no. That includes v2's `unknown(n)` verdict member, so a caller that maps an unknown verdict to a pass is wrong by contract. A closed filter is never passed to the library as NULL (which would mean "no filter"): the bindings refuse it.
 
-The parse-once block twin does not change that — it is a performance shape, not a maturity signal, and sits under the same gate. This is the canonical statement of the gate; `docs/guides/filters.md` points here rather than restating the criterion. For the rule a filter's own result type must follow, see [`guides/filters.md` → Writing a filter's result type](guides/filters.md#writing-a-filters-result-type).
+**The criterion.** The artifact producer runs a standing filter differential against real servers of the same platform on each published build, before the push and after it. A build is enforcement-grade for a pair when that differential reports zero over-accepts and zero over-rejects for it. It reads `12/12` on that build as published.
 
-**The gate lifts per `(ClickHouse line, platform)`, never all at once.** A pair's warning lifts once that pair has **three consecutive records with zero over-admits and zero over-hides against a real server, and no open filter divergences for it** (see [Known divergences](#known-divergences) below). A pair that diverges again after being lifted gets the warning back — a lift is a state, not a one-way promotion, and lifting one pair says nothing about any other.
+**The gate lifts per `(ClickHouse line, platform)`, never all at once.** Eleven pairs are lifted:
 
-**Each lift is announced in the CHANGELOG, by `(line, platform)`, as its own entry** — the fixed shape is in [`CONTRIBUTING.md`](../CONTRIBUTING.md#changelog-entries). There is no other record of a lift: a pair stays gated until its own CHANGELOG entry says otherwise.
+| line   | `linux-amd64` | `linux-arm64` | `darwin-arm64`                              |
+| ------ | ------------- | ------------- | ------------------------------------------- |
+| `26.3` | lifted        | lifted        | not covered: documented platform limitation |
+| `26.7` | lifted        | lifted        | lifted                                      |
+| `26.8` | lifted        | lifted        | lifted                                      |
+| `26.9` | lifted        | lifted        | lifted                                      |
 
-**Today no `(line, platform)` pair is lifted.** Every supported line, on every published platform, is still under the gate above.
+**Not covered: `26.3` on `darwin-arm64`, a documented platform limitation.** The macOS 26.3 server runs queries on 512 KiB threads, so it refuses deeply nested expressions and types with 306 (TOO_DEEP_RECURSION) at depths where the library answers or accepts them. Measured on the official 26.3.38.2 macOS server, it refuses:
 
-This criterion is scored against the artifact producer's own differential comparison against real servers, and the per-`(line, platform)` state it produces is not served yet — the registry carries no such field today. Once the artifact producer serves one, this page reads it directly, the same principle [`support-v1.md`](support-v1.md) follows for line support: it states what the registry says rather than listing lines by hand. Until then, do not infer a lift from anything but a CHANGELOG entry naming the pair.
+- nested lambdas from 27 levels (`arrayFilter` and `arrayMap` shapes), 35 (mixed) or 53 (`arrayExists` and `arrayAll` shapes);
+- nested `if`, `multiIf` and `CASE`, and `NOT` and nested-`OR` expression chains, from 54;
+- `DEFAULT` expression chains from 52;
+- partition-key expressions from 76;
+- nested `Array(Array(…))` column types from 368.
+
+26.7 and later, and every Linux line, agree with the server. This is a documented platform difference, not a filter over-accept under the same-platform guarantee's terms. The pair is not lifted and has no CHANGELOG lift entry: run it beside your existing enforcement and compare, do not replace, or refuse inputs nested that deep yourself. See also [macOS artifacts match ClickHouse on macOS; on 26.3, match the server's platform](#macos-artifacts-match-clickhouse-on-macos-on-263-match-the-servers-platform).
+
+**Each lift is announced in the CHANGELOG, by `(line, platform)`, as its own entry** — the fixed shape is in [`CONTRIBUTING.md`](../CONTRIBUTING.md#changelog-entries). A pair stays gated until its own CHANGELOG entry says otherwise.
+
+**A pair that diverges again gets the gate back.** A lift is a state, not a one-way promotion: a divergence against a same-platform server (see [Known divergences](#known-divergences) below) puts that pair back under the gate with a fresh entry, and lifting one pair says nothing about any other.
+
+**What the guarantee does not cover.**
+
+- **A server configured so that it refuses every query.** For example `max_expanded_ast_elements=1` refuses everything with code 36, and so does `page=1` on 26.8 and 26.9. The library answers the rows such a server would refuse. The committed list is [`spec/abi-v2/where-settings/documented-pathological.tsv`](../spec/abi-v2/where-settings/documented-pathological.tsv), explained in the README section [Settings the server may refuse outright](../spec/abi-v2/where-settings/README.md#settings-the-server-may-refuse-outright). A consumer refuses such a profile or call; the list grows only by sign-off.
+- **The 26.3 float platform requirement.** On 26.3, ClickHouse's own float text parse depends on the platform, so run the library on the server's operating system and architecture. See [macOS artifacts match ClickHouse on macOS; on 26.3, match the server's platform](#macos-artifacts-match-clickhouse-on-macos-on-263-match-the-servers-platform), which this page states as a requirement.
+
+The parse-once block twin sits under the same guarantee. For the rule a filter's own result type must follow, see [`guides/filters.md` → Writing a filter's result type](guides/filters.md#writing-a-filters-result-type).
 
 ## Some formats depend on the artifact, not the binding
 

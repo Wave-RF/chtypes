@@ -1066,9 +1066,9 @@ function section16(lib: Library): void {
   ps.close();
   blank();
 
-  note('ENFORCEMENT GATE: nothing may enforce read-side security on this API until the');
-  note('WHERE-truth rig gates green (zero over-admit, zero over-hide). Until then this is a');
-  note('shadow/replay surface: log disagreements, enforce with what enforced yesterday.');
+  note('ENFORCEMENT GATE: a t verdict is enforcement-grade against a server of the same');
+  note('line, OS and architecture, for each lifted (line, platform) pair; anything but a');
+  note('definite t is a no. Pairs not lifted stay a shadow/replay surface. See docs/limitations.md.');
 }
 
 // ---------------------------------------------------------------------------

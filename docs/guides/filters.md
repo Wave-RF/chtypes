@@ -2,7 +2,7 @@
 
 A filter compiles **one boolean expression** against a schema's physical columns and answers it per row, using ClickHouse's own comparison functions. It is the read-side twin of the insert path: same rows, same artifact, different question. The **block twin** is its parse-once variant: parse a body into a block once, then evaluate several filters against that same block.
 
-> **Enforcement gate.** A filter is for comparison, not enforcement, until a release explicitly lifts this limitation — compare it against your existing enforcement, do not replace it. The lift criterion, and whether any `(line, platform)` pair has been lifted, live in [`limitations.md` → Filters are for comparison, not enforcement, for now](../limitations.md#filters-are-for-comparison-not-enforcement-for-now) — each lift is announced by its own CHANGELOG entry.
+> **Enforcement gate.** A filter verdict is enforcement-grade against a ClickHouse server of the same line on the same operating system and architecture, for the `(line, platform)` pairs a CHANGELOG entry has lifted; `26.3` on `darwin-arm64` is not covered (a documented platform limitation), and a server that refuses every query is outside the guarantee. See [`limitations.md` → Filters are enforcement-grade against a same-platform server, per lifted (line, platform)](../limitations.md#filters-are-enforcement-grade-against-a-same-platform-server-per-lifted-line-platform).
 
 ## WHERE-side semantics, which are not insert-side semantics
 
@@ -265,7 +265,7 @@ Per-row parse failures live **inside** the block and answer `decline`. A call-le
 
 ## Exporting only the rows a filter admits
 
-Attach a compiled filter to `rows`'s export channel ([`batches.md` → Exporting the accepted rows as wire bytes](batches.md#exporting-the-accepted-rows-as-wire-bytes)) and one parse answers both questions at once: the same four verdicts as above, one per row, and — for the rows whose verdict is `t` — the exported bytes. This is the row-level-security shape: compile a tenant's predicate once, reuse the handle across batches, and export only the rows it admits. It is still under the enforcement gate at the top of this page: for comparison, not a replacement for existing enforcement, until the gate lifts for this `(line, platform)` — see [`limitations.md` → Filters are for comparison, not enforcement, for now](../limitations.md#filters-are-for-comparison-not-enforcement-for-now) for the lift criterion.
+Attach a compiled filter to `rows`'s export channel ([`batches.md` → Exporting the accepted rows as wire bytes](batches.md#exporting-the-accepted-rows-as-wire-bytes)) and one parse answers both questions at once: the same four verdicts as above, one per row, and — for the rows whose verdict is `t` — the exported bytes. This is the row-level-security shape: compile a tenant's predicate once, reuse the handle across batches, and export only the rows it admits. It is under the enforcement gate at the top of this page: enforcement-grade only for a `(line, platform)` pair a CHANGELOG entry has lifted, against a same-platform server — see [`limitations.md` → Filters are enforcement-grade against a same-platform server, per lifted (line, platform)](../limitations.md#filters-are-enforcement-grade-against-a-same-platform-server-per-lifted-line-platform) for the criterion.
 
 <details open><summary><b>Go</b></summary>
 

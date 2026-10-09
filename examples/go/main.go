@@ -1384,10 +1384,10 @@ func section16(lib *chtypes.Library) {
 
 	note("THREADS: concurrent calls on one handle are safe in the library, so")
 	note("two filters over one schema may run at once")
-	note("ENFORCEMENT GATE: nothing may enforce read-side security on this")
-	note("API until the WHERE-truth rig gates green (zero over-admit, zero")
-	note("over-hide). Until then this is a shadow/replay surface: log")
-	note("disagreements, enforce with what enforced yesterday.")
+	note("ENFORCEMENT GATE: a t verdict is enforcement-grade against a server of")
+	note("the same line, OS and architecture, for each lifted (line, platform)")
+	note("pair; anything but a definite t is a no. Pairs not lifted stay a")
+	note("shadow/replay surface. See docs/limitations.md.")
 }
 
 // verdictString renders a FilterResult's verdicts as the document's compact

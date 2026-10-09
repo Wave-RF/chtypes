@@ -21,6 +21,17 @@ The four bindings in this repository are released together and give one answer, 
 ### Changed
 
 - `Schema::compile_filter` is the library's `CHS_DECLINED`, `Error::Unsupported`, on a schema whose `filter_declined_settings` is not empty from any layer, and its message names each setting and its layer (ABI v2, #588). A declined setting from the defaults or the schema's own settings now fails the compile, where it was named at evaluation before; a filter's own settings and an evaluation's are still named at evaluation.
+- **Enforcement gate lifted** for `26.3` on `linux-amd64`.
+- **Enforcement gate lifted** for `26.7` on `linux-amd64`.
+- **Enforcement gate lifted** for `26.8` on `linux-amd64`.
+- **Enforcement gate lifted** for `26.9` on `linux-amd64`.
+- **Enforcement gate lifted** for `26.3` on `linux-arm64`.
+- **Enforcement gate lifted** for `26.7` on `linux-arm64`.
+- **Enforcement gate lifted** for `26.8` on `linux-arm64`.
+- **Enforcement gate lifted** for `26.9` on `linux-arm64`.
+- **Enforcement gate lifted** for `26.7` on `darwin-arm64`.
+- **Enforcement gate lifted** for `26.8` on `darwin-arm64`.
+- **Enforcement gate lifted** for `26.9` on `darwin-arm64`.
 
 ### Removed
 
