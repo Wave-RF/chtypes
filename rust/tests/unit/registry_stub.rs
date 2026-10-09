@@ -36,29 +36,29 @@ use sha2::{Digest, Sha256};
 use crate::ocifetch::channel;
 use crate::{Error, FetchOptions, Registry, RegistryOptions};
 
-const ENV_STUBS: &str = "CHTYPES_ABI2_STUBS";
+pub(crate) const ENV_STUBS: &str = "CHTYPES_ABI2_STUBS";
 
-const MEDIA_INDEX: &str = "application/vnd.oci.image.index.v1+json";
-const MEDIA_MANIFEST: &str = "application/vnd.oci.image.manifest.v1+json";
-const MEDIA_EMPTY: &str = "application/vnd.oci.empty.v1+json";
-const MEDIA_CONFIG: &str = "application/vnd.wavehouse.chtypes.config.v1+json";
-const MEDIA_LAYER: &str = "application/vnd.oci.image.layer.v1.tar+zstd";
-const MEDIA_BUNDLE: &str = "application/vnd.dev.sigstore.bundle.v0.3+json";
-const ARTIFACT_TYPE: &str = "application/vnd.wavehouse.chtypes.artifact.v1";
-const PAYLOAD_TYPE: &str = "application/vnd.in-toto+json";
-const STATEMENT_TYPE: &str = "https://in-toto.io/Statement/v1";
-const PREDICATE_TYPE: &str = "https://artifacts.wavehouse.dev/spec/artifact/v1";
-const LIBRARY_NAME: &str = "libchtypes.so";
+pub(crate) const MEDIA_INDEX: &str = "application/vnd.oci.image.index.v1+json";
+pub(crate) const MEDIA_MANIFEST: &str = "application/vnd.oci.image.manifest.v1+json";
+pub(crate) const MEDIA_EMPTY: &str = "application/vnd.oci.empty.v1+json";
+pub(crate) const MEDIA_CONFIG: &str = "application/vnd.wavehouse.chtypes.config.v1+json";
+pub(crate) const MEDIA_LAYER: &str = "application/vnd.oci.image.layer.v1.tar+zstd";
+pub(crate) const MEDIA_BUNDLE: &str = "application/vnd.dev.sigstore.bundle.v0.3+json";
+pub(crate) const ARTIFACT_TYPE: &str = "application/vnd.wavehouse.chtypes.artifact.v1";
+pub(crate) const PAYLOAD_TYPE: &str = "application/vnd.in-toto+json";
+pub(crate) const STATEMENT_TYPE: &str = "https://in-toto.io/Statement/v1";
+pub(crate) const PREDICATE_TYPE: &str = "https://artifacts.wavehouse.dev/spec/artifact/v1";
+pub(crate) const LIBRARY_NAME: &str = "libchtypes.so";
 const TEST_KEYID: &str = "6c3468e4ec653ac0";
 
-fn repo_root() -> PathBuf {
+pub(crate) fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .expect("rust/ has a parent")
         .to_path_buf()
 }
 
-fn sha256_hex(bytes: &[u8]) -> String {
+pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
         .iter()
         .map(|b| format!("{b:02x}"))
@@ -67,7 +67,7 @@ fn sha256_hex(bytes: &[u8]) -> String {
 
 /// The fixtures' test key: the seed is the last 32 bytes of the PKCS#8 DER the
 /// PEM carries (an ed25519 PrivateKeyInfo is a 16-byte prefix and the seed).
-fn test_signing_key() -> (SigningKey, String, String) {
+pub(crate) fn test_signing_key() -> (SigningKey, String, String) {
     let dir = repo_root().join("tests/fixtures/fetch-v1/test-key");
     let pem = std::fs::read_to_string(dir.join("private.pem")).expect("read private.pem");
     let body: String = pem.lines().filter(|l| !l.starts_with("-----")).collect();
@@ -94,7 +94,7 @@ fn test_signing_key() -> (SigningKey, String, String) {
 }
 
 /// DSSE's pre-authentication encoding.
-fn pae(payload_type: &str, payload: &[u8]) -> Vec<u8> {
+pub(crate) fn pae(payload_type: &str, payload: &[u8]) -> Vec<u8> {
     let mut out = format!(
         "DSSEv1 {} {payload_type} {} ",
         payload_type.len(),

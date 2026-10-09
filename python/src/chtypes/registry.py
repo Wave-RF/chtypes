@@ -15,13 +15,19 @@ The sequence of `for_version(request)`:
 Construction opens nothing. The binding orders and matches no versions itself:
 which installed build a floating request means, and the spelling rules, are the
 fetch layer's.
+
+Opens of different requests never wait for each other's fetch (public issue
+#491): the registry's lock guards its memo and the attempts in progress, and is
+never held across steps 2 to 5. Concurrent opens of one request share one
+attempt, and so one fetch, and each gets that attempt's `Library` or its error;
+a failed attempt is never remembered, so the next open starts a new one.
 """
 
 from __future__ import annotations
 
 import os
 import threading
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -168,6 +174,19 @@ def _wrap(exc: FetchError) -> errors.ArtifactError:
     return wrapped
 
 
+class _Flight:
+    """One attempt to open one request: the installed lookup, the fetch when
+    there is one, and the load. Every open of that request made while it is in
+    progress waits on it and gets its answer."""
+
+    __slots__ = ("done", "error", "library")
+
+    def __init__(self) -> None:
+        self.done = threading.Event()
+        self.library: Library | None = None
+        self.error: BaseException | None = None
+
+
 class Registry:
     """Opens versions. Safe across threads. `autofetch` defaults to
     `CHTYPES_AUTOFETCH`, and is off when that is unset.
@@ -175,6 +194,9 @@ class Registry:
     Construction opens nothing: only `for_version` and `preload` open an
     artifact. `preload` opens each listed request through the loader at
     construction, in list order, and never fetches, even with autofetch on.
+
+    An open never waits for another request's fetch, and concurrent opens of
+    one request share one fetch (public issue #491).
     """
 
     def __init__(
@@ -189,8 +211,14 @@ class Registry:
             env = os.environ.get(_fetch_constants.ENV_AUTOFETCH_NAME, "")
             autofetch = env.strip().lower() in _TRUTHY
         self._autofetch = autofetch
-        self._lock = threading.RLock()
+        # Guards the memo and the attempts in progress, never a lookup, a fetch
+        # or a load.
+        self._lock = threading.Lock()
         self._memo: dict[str, Library] = {}
+        self._flights: dict[str, _Flight] = {}
+        # A test hook, None outside tests: called each time an open starts
+        # waiting on an attempt, its own or another open's.
+        self._on_wait: Callable[[str], None] | None = None
         if isinstance(preload, str):
             raise TypeError("preload must be a sequence of requests, not a single string")
         for request in preload:
@@ -223,28 +251,61 @@ class Registry:
     def _open(self, request: str, *, allow_fetch: bool) -> Library:
         with self._lock:
             hit = self._memo.get(request)
+        if hit is not None:
+            return hit
+        # A refused version spelling is the caller's own misuse, refused before
+        # anything is attempted, and unlocks nothing.
+        try:
+            fetch_request = Request(request)
+        except ValueError as exc:
+            raise errors.misuse(str(exc)) from None
+        # So is a pinning request on the dev channel (rule r6).
+        _refuse_pinning(self._fetch._to_options())
+        with self._lock:
+            hit = self._memo.get(request)
             if hit is not None:
                 return hit
-            # A refused version spelling is the caller's own misuse, refused
-            # before anything is attempted, and unlocks nothing. An open that
-            # attempted a load and failed unlocks the setup record while no
-            # image has completed load step 7, whatever failed: the resolve,
-            # the fetch, the signature or any load step (bindings-v1.md
-            # section 6, rule 4).
-            try:
-                fetch_request = Request(request)
-            except ValueError as exc:
-                raise errors.misuse(str(exc)) from None
-            # So is a pinning request on the dev channel (rule r6).
-            _refuse_pinning(self._fetch._to_options())
-            began = _setup.generation()
-            try:
-                library = self._resolve_and_open(request, fetch_request, allow_fetch)
-            except Exception:
-                _setup.open_failed(began)
-                raise
-            self._memo[request] = library
-            return library
+            flight = self._flights.get(request)
+            lead = flight is None
+            if flight is None:
+                flight = self._flights[request] = _Flight()
+        on_wait = self._on_wait
+        if on_wait is not None:
+            on_wait(request)
+        if lead:
+            self._attempt(flight, request, fetch_request, allow_fetch)
+        else:
+            flight.done.wait()
+        if flight.error is not None:
+            raise flight.error
+        assert flight.library is not None
+        return flight.library
+
+    def _attempt(
+        self, flight: _Flight, request: str, fetch_request: Request, allow_fetch: bool
+    ) -> None:
+        """Run an attempt on the leading open's thread, with no lock held, then
+        release every open waiting on it. An attempt that tried a load and
+        failed unlocks the setup record while no image has completed load step
+        7, whatever failed: the resolve, the fetch, the signature or any load
+        step (bindings-v1.md section 6, rule 4). It is never remembered."""
+        began = _setup.generation()
+        library: Library | None = None
+        error: BaseException | None = None
+        try:
+            library = self._resolve_and_open(request, fetch_request, allow_fetch)
+        except Exception as exc:
+            _setup.open_failed(began)
+            error = exc
+        except BaseException as exc:
+            error = exc
+        with self._lock:
+            del self._flights[request]
+            if error is None:
+                assert library is not None
+                self._memo[request] = library
+            flight.library, flight.error = library, error
+        flight.done.set()
 
     def _resolve_and_open(self, request: str, fetch_request: Request, allow_fetch: bool) -> Library:
         try:
