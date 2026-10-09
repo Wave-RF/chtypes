@@ -180,6 +180,12 @@ jobs:
         run: uv run --no-project --python 3.11 scripts/abi-v2/check-where-settings.py --selftest
       - name: the WHERE-affecting settings lists agree with their README and with each other
         run: uv run --no-project --python 3.11 scripts/abi-v2/check-where-settings.py --check
+      # The filter decline-reasons catalog (spec/abi-v2/declines/) is data
+      # copied from the artifact producer, outside abi.json. Same shape.
+      - name: the filter decline-reasons catalog — every rule fires on planted copies
+        run: uv run --no-project --python 3.11 scripts/abi-v2/check-declines.py --selftest
+      - name: the filter decline-reasons catalog agrees with its README
+        run: uv run --no-project --python 3.11 scripts/abi-v2/check-declines.py --check
       - name: ABI v2's fingerprint and canonical forms, recomputed by an independent RFC 8785 implementation
         run: |
           ours="$(uv run --no-project --python 3.11 scripts/abi-v1/gen.py --major 2 --fingerprint)"
