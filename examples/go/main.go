@@ -110,9 +110,12 @@ const (
 
 // setupDefaults is the process-wide default settings layer (section 9). It is
 // fixed once, before any library opens, and lives under every call's own
-// settings: a stock "basic" datetime parse, so section 9 can show each layer
-// overriding the one below it.
-var setupDefaults = map[string]string{"date_time_input_format": "basic"}
+// settings: unknown JSON fields refused, so section 9 can show each layer
+// overriding the one below it. It is a setting no filter's WHERE reads: a
+// WHERE-affecting default that this build's filters do not honor would make
+// every filter in the process CHS_DECLINED at create (section 16 relies on it
+// not doing so; see spec/abi-v2/where-settings/README.md).
+var setupDefaults = map[string]string{"input_format_skip_unknown_fields": "0"}
 
 func main() {
 	// The process setup comes first and only once (bindings-v1.md section 6):
@@ -857,50 +860,50 @@ func section8(lib *chtypes.Library) {
 // WHY: this is how a gateway declares a deployment's settings ONCE (at
 // compile) yet still lets one INSERT override per call. If precedence were
 // fuzzy, the declared profile would not actually be in force.
-// LOOK FOR: three verdicts on one row: the process default ("basic") rejects
-// an ISO-8601 timestamp, the profile ("best_effort") overrides that default
-// and accepts, and a per-call "basic" overrides the profile and rejects again.
+// LOOK FOR: three verdicts on one row: the process default ("0") rejects a
+// row with an unknown field, the profile ("1") overrides that default and
+// accepts, and a per-call "0" overrides the profile and rejects again.
 // C API: chs_set_defaults (fixed at setup), chs_schema_create (the profile),
 // chs_preview_row (the call's settings).
 // ---------------------------------------------------------------------------
 func section9(lib *chtypes.Library) {
 	section(9, "Settings precedence: who wins")
-	kv("the probe", `ts DateTime  fed  {"ts":"2026-01-15T10:30:00Z"}`)
+	kv("the probe", `n UInt8  fed  {"n":1,"extra":2}`)
 	kv("process defaults", fmt.Sprintf("%v   (chtypes.Setup, fixed in main before any library opened)", setupDefaults))
-	note("stock ClickHouse parses 'basic' datetimes only; best_effort accepts")
-	note("ISO-8601, so the verdict TELLS you which setting value won")
+	note("with input_format_skip_unknown_fields=0 the unknown 'extra' field is")
+	note("an error; with 1 it is skipped, so the verdict TELLS you which value won")
 	blank()
 
-	iso := []byte(`{"ts":"2026-01-15T10:30:00Z"}`)
-	basic := chtypes.WithSettings(map[string]string{"date_time_input_format": "basic"})
-	bestEffort := chtypes.WithSettings(map[string]string{"date_time_input_format": "best_effort"})
+	probe := []byte(`{"n":1,"extra":2}`)
+	strict := chtypes.WithSettings(map[string]string{"input_format_skip_unknown_fields": "0"})
+	lenient := chtypes.WithSettings(map[string]string{"input_format_skip_unknown_fields": "1"})
 
-	plain, err := lib.CompileTable(tableOf("ts DateTime"))
+	plain, err := lib.CompileTable(tableOf("n UInt8"))
 	must(err)
 	defer plain.Close()
-	profiled, err := lib.CompileTable(tableOf("ts DateTime"),
-		chtypes.WithSettings(map[string]string{"date_time_input_format": "best_effort"}))
+	profiled, err := lib.CompileTable(tableOf("n UInt8"),
+		chtypes.WithSettings(map[string]string{"input_format_skip_unknown_fields": "1"}))
 	must(err)
 	defer profiled.Close()
 
-	r1, _ := plain.Rows(chtypes.JSONEachRow, iso)
-	kv("1. process default (basic)", verdict(r1))
+	r1, _ := plain.Rows(chtypes.JSONEachRow, probe)
+	kv("1. process default (0)", verdict(r1))
 	note("nothing declared on the table or the call: the Setup default decides")
-	r2, _ := profiled.Rows(chtypes.JSONEachRow, iso)
-	kv("2. compile profile best_effort", verdict(r2))
+	r2, _ := profiled.Rows(chtypes.JSONEachRow, probe)
+	kv("2. compile profile 1", verdict(r2))
 	note("the profile declared at COMPILE reaches every later call and")
 	note("overrides the process default beneath it")
-	r3, _ := profiled.Rows(chtypes.JSONEachRow, iso, basic)
-	kv("3.  + per-call basic", verdict(r3))
+	r3, _ := profiled.Rows(chtypes.JSONEachRow, probe, strict)
+	kv("3.  + per-call 0", verdict(r3))
 	note("2 vs 3 is the requirement, measured: the same row PASSES under the")
 	note("profile and FAILS when the per-call value overrides it")
-	r4, _ := plain.Rows(chtypes.JSONEachRow, iso, bestEffort)
-	kv("4. default + per-call best_effort", verdict(r4))
+	r4, _ := plain.Rows(chtypes.JSONEachRow, probe, lenient)
+	kv("4. default + per-call 1", verdict(r4))
 	note("a per-call value outranks the process default too")
 	blank()
 
 	kv("defaults are fixed", "there is no setter during traffic")
-	err = chtypes.Setup(chtypes.SetupOptions{Defaults: map[string]string{"date_time_input_format": "best_effort"}})
+	err = chtypes.Setup(chtypes.SetupOptions{Defaults: map[string]string{"input_format_skip_unknown_fields": "1"}})
 	kv("  Setup with other defaults", classify(err))
 	note("a different setup after the first is a *UsageError naming both; the")
 	note("first stands. A binding never rewrites a value: settings are strings.")
