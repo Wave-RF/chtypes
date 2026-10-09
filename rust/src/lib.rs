@@ -112,8 +112,8 @@ mod server;
 mod setup;
 
 pub use abi2::vocab_gen::{
-    DeclinedTier, DefaultKind, DiscoverQueryParam, DocFlags, FilterOutcome, Format, MergeReason,
-    Outcome, Reason, Source, Status, Verdict, reason, source, status,
+    DeclinedLayer, DeclinedTier, DefaultKind, DiscoverQueryParam, DocFlags, FilterOutcome, Format,
+    MergeReason, Outcome, Reason, Source, Status, Verdict, reason, source, status,
 };
 pub use error::{CacheFault, CallError, Error, Refusal, Result};
 pub use library::Library;

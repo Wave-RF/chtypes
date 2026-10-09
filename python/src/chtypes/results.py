@@ -14,7 +14,15 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from ._abi2._vocab import DeclinedTier, DefaultKind, FilterOutcome, MergeReason, Outcome, Verdict
+from ._abi2._vocab import (
+    DeclinedLayer,
+    DeclinedTier,
+    DefaultKind,
+    FilterOutcome,
+    MergeReason,
+    Outcome,
+    Verdict,
+)
 
 __all__ = [
     "AtMergeEntry",
@@ -252,14 +260,17 @@ class Column:
 
 @dataclass(frozen=True, slots=True)
 class DeclinedSetting:
-    """One setting a server's profile sets that this build's filters do not honor
-    in a WHERE: an entry of the server's `filter_declined_settings` (ABI v2).
-    `name` is bytes (from `name` or `name_b64`). `tier` is the tier this build
-    line's WHERE-settings list gives it, a `DeclinedTier`; one the description
-    does not list is its unknown(n) member (rule r3)."""
+    """One setting the schema compiles under that this build's filters do not
+    honor in a WHERE: an entry of the schema description's
+    `filter_declined_settings` (ABI v2). `name` is bytes (from `name` or
+    `name_b64`). `tier` is the tier this build line's WHERE-settings list gives
+    it, a `DeclinedTier`, and `layer` the settings layer it comes from, the
+    highest one that sets the name, a `DeclinedLayer`; a value the description
+    does not list is its vocabulary's unknown(n) member (rule r3)."""
 
     name: bytes
     tier: DeclinedTier
+    layer: DeclinedLayer
 
 
 @dataclass(frozen=True, slots=True)
@@ -269,17 +280,11 @@ class SchemaServer:
     data-derived. `timezone` is the zone the schema's types bind: the profile's,
     or else the image zone. `settings` is the profile's settings (`{}` when it
     gave none). `macros` is None exactly when the profile carried no macros
-    (unknown), and a mapping, even an empty one, when it did (the complete set).
-    `filter_declined_settings` is the settings the profile sets that this
-    build's filters do not honor in a WHERE, in the profile's own order, empty
-    when it lists none: a schema on a server that lists any is one
-    `compile_filter` declines (`UnsupportedError`), and a consumer that streams
-    rows refuses such a tenant (spec/abi-v2/where-settings/README.md)."""
+    (unknown), and a mapping, even an empty one, when it did (the complete set)."""
 
     timezone: str
     settings: Mapping[str, str]
     macros: Mapping[str, str] | None
-    filter_declined_settings: tuple[DeclinedSetting, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -293,13 +298,22 @@ class SchemaReplicated:
 
 @dataclass(frozen=True, slots=True)
 class SchemaDescription:
-    """A schema's columns, in declared order, and the server it was compiled on.
-    `server` is None exactly when it was compiled without one; `replicated` is
-    None when the document carries none."""
+    """A schema's columns, in declared order, the server it was compiled on, and
+    the settings its filters decline. `server` is None exactly when it was
+    compiled without one; `replicated` is None when the document carries none.
+    `filter_declined_settings` is the settings the schema compiles under that
+    this build's filters do not honor in a WHERE, over every layer known at
+    schema compile (the defaults `setup` set, the server profile and the
+    schema's own settings), empty when it lists none: one entry per name, at
+    the highest layer that sets it, ordered by layer and then by name bytes, as
+    the library wrote it. A schema that lists any is one `compile_filter`
+    declines (`UnsupportedError`), and a consumer that streams rows refuses
+    such a tenant (spec/abi-v2/where-settings/README.md)."""
 
     columns: tuple[Column, ...]
     server: SchemaServer | None = None
     replicated: SchemaReplicated | None = None
+    filter_declined_settings: tuple[DeclinedSetting, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

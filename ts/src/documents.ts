@@ -34,6 +34,8 @@
 
 import {
   batchOutcomeOf,
+  type DeclinedLayer,
+  declinedLayerOf,
   type DeclinedTier,
   declinedTierOf,
   type DefaultKind,
@@ -226,12 +228,14 @@ export interface Column {
   readonly defaultExpr: Buffer;
 }
 
-/** One setting a server's profile sets that this build's filters do not honor in a WHERE: an entry of the server's `filter_declined_settings` (ABI v2). */
+/** One setting the schema compiles under that this build's filters do not honor in a WHERE: an entry of the schema description's `filter_declined_settings` (ABI v2). */
 export interface DeclinedSetting {
   /** The setting's name, as bytes (`name` or `name_b64`). */
   readonly name: Buffer;
   /** The tier this build line's WHERE-settings list gives it; one the description does not list is its unknown(n), kept verbatim (rule r3). */
   readonly tier: DeclinedTier;
+  /** The settings layer it comes from, the highest one that sets the name; one the description does not list is its unknown(n), kept verbatim (rule r3). */
+  readonly layer: DeclinedLayer;
 }
 
 /**
@@ -245,8 +249,6 @@ export interface SchemaServer {
   readonly settings: Readonly<Record<string, string>> | undefined;
   /** The server's macro set: `undefined` exactly when the profile carried no macros (unknown); present, even `{}`, is the complete set. */
   readonly macros: Readonly<Record<string, string>> | undefined;
-  /** The settings the profile sets that this build's filters do not honor in a WHERE, in the profile's own order; empty when it lists none. A schema on a server that lists any is one `compileFilter` declines (`UnsupportedError`), and a consumer that streams rows refuses such a tenant (`spec/abi-v2/where-settings/README.md`). */
-  readonly filterDeclinedSettings: readonly DeclinedSetting[];
 }
 
 /** What ClickHouse's own TableZnodeInfo resolved for a Replicated engine, fully expanded. Both expand DDL bytes, so both are bytes. */
@@ -257,6 +259,8 @@ export interface SchemaReplicated {
 
 export interface SchemaDescription {
   readonly columns: readonly Column[];
+  /** The settings the schema compiles under that this build's filters do not honor in a WHERE, over every layer known at schema compile (the defaults `setup` set, the server profile and the schema's own settings); empty when it lists none. One entry per name, at the highest layer that sets it, ordered by layer and then by name bytes, as the library wrote it. A schema that lists any is one `compileFilter` declines (`UnsupportedError`), and a consumer that streams rows refuses such a tenant (`spec/abi-v2/where-settings/README.md`). */
+  readonly filterDeclinedSettings: readonly DeclinedSetting[];
   /** The server the schema was compiled on: `undefined` exactly when it was compiled without one. */
   readonly server: SchemaServer | undefined;
   /** A Replicated engine's resolved ZooKeeper path and replica name: `undefined` when the document carries none. */
@@ -634,7 +638,6 @@ export function decodeSchemaDescription(bytes: Uint8Array): SchemaDescription {
       timezone: strOr(doc, so, 'timezone', ''),
       settings: stringMapOf(doc, so, 'settings', '$.server'),
       macros: stringMapOf(doc, so, 'macros', '$.server'),
-      filterDeclinedSettings: declinedSettingsOf(doc, so),
     };
   }
   let replicated: SchemaReplicated | undefined;
@@ -645,6 +648,8 @@ export function decodeSchemaDescription(bytes: Uint8Array): SchemaDescription {
   return {
     server,
     replicated,
+    // Over every layer known at schema compile, with or without a server.
+    filterDeclinedSettings: declinedSettingsOf(doc, o),
     columns: listOf(doc, o, 'columns').map((c) => {
       const co = asObject(doc, 'columns[]', c);
       // An unlisted default_kind is its unknown(n): kept, never a failure (r3).
@@ -654,13 +659,17 @@ export function decodeSchemaDescription(bytes: Uint8Array): SchemaDescription {
   };
 }
 
-/** A server's `filter_declined_settings`: absent (or `null`) is empty, as in every binding. An unlisted tier is its unknown(n): kept, never a failure (r3). */
-function declinedSettingsOf(doc: string, so: Obj): readonly DeclinedSetting[] {
-  const v = so.filter_declined_settings;
+/** A schema description's `filter_declined_settings`: absent (or `null`) is empty, as in every binding. An unlisted tier or layer is its unknown(n): kept, never a failure (r3). */
+function declinedSettingsOf(doc: string, o: Obj): readonly DeclinedSetting[] {
+  const v = o.filter_declined_settings;
   if (v === undefined || v === null) return [];
-  return asArray(doc, '$.server.filter_declined_settings', v).map((e) => {
-    const eo = asObject(doc, '$.server.filter_declined_settings[]', e);
-    return { name: nameOf(doc, eo, 'name'), tier: declinedTierOf(strOr(doc, eo, 'tier', '')) };
+  return asArray(doc, '$.filter_declined_settings', v).map((e) => {
+    const eo = asObject(doc, '$.filter_declined_settings[]', e);
+    return {
+      name: nameOf(doc, eo, 'name'),
+      tier: declinedTierOf(strOr(doc, eo, 'tier', '')),
+      layer: declinedLayerOf(strOr(doc, eo, 'layer', '')),
+    };
   });
 }
 

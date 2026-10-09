@@ -63,7 +63,8 @@ document, a fallback names only whose facts `Unknown` reports, `value_src`
 and `transform_reason` become types of their own (`Source`, `Reason`), the
 call status gains a `Status` type, `discover_query_param` gains
 `DiscoverQueryParam`, `merge_reason` (v2 only) is `MergeReason`, `declined_tier` (v2 only) is
-`DeclinedTier` (a hyphen in a wire value is a word boundary, as an underscore is), and `DESCRIBED_VOCABULARIES` with
+`DeclinedTier` (a hyphen in a wire value is a word boundary, as an underscore is), `declined_layer`
+(v2 only) is `DeclinedLayer`, and `DESCRIBED_VOCABULARIES` with
 `described_vocabulary` reaches every enum the description defines, for the
 r3 tests, without a hand-kept list. ABI v1's outputs are produced by the
 untouched v1 path, byte for byte as before.
@@ -1381,6 +1382,7 @@ _RUST_VOCAB = {
     "default_kind": ("DefaultKind", "string"),
     "merge_reason": ("MergeReason", "string"),
     "declined_tier": ("DeclinedTier", "string"),
+    "declined_layer": ("DeclinedLayer", "string"),
 }
 
 _UNKNOWN_STRING_DOC = (
@@ -1760,9 +1762,21 @@ def render_vocab_v2(model) -> str:
         # A hyphen (`predicate-unflipped`) is a word boundary, as an underscore is.
         variant=lambda w: _words(w.replace("-", "_")),
         doc=(
-            "The WHERE-settings tier of a setting a server profile sets and this build's filters do not honor in a\n"
+            "The WHERE-settings tier of a setting a settings layer sets and this build's filters do not honor in a\n"
             "WHERE, as a `DeclinedSetting` reports it. A tier the description does not list is `Unknown`, and the\n"
             "entry decodes on (rule r3)."
+        ),
+    )
+
+    out += _string_enum_v2(
+        model,
+        "declined_layer",
+        "DeclinedLayer",
+        variant=_words,
+        doc=(
+            "The settings layer a `DeclinedSetting` comes from, the highest one that sets the name: `defaults`,\n"
+            "`server` or `schema`, lowest first. A layer the description does not list is `Unknown`, and the entry\n"
+            "decodes on (rule r3)."
         ),
     )
 

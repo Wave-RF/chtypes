@@ -32,13 +32,16 @@ type setupCaseExpect struct {
 	ImageZone *string `json:"image_zone"`
 }
 
-// declinedExpect is one entry a describe step must decode from the server's
-// filter_declined_settings: the name's bytes as hex, the tier's raw spelling,
-// and whether the description lists that tier (rule r3).
+// declinedExpect is one entry a describe step must decode from the schema
+// description's filter_declined_settings: the name's bytes as hex, the tier's
+// and the layer's raw spellings, and whether the description lists each (rule
+// r3).
 type declinedExpect struct {
-	NameHex string `json:"name_hex"`
-	Tier    string `json:"tier"`
-	Known   bool   `json:"known"`
+	NameHex    string `json:"name_hex"`
+	Tier       string `json:"tier"`
+	TierKnown  bool   `json:"tier_known"`
+	Layer      string `json:"layer"`
+	LayerKnown bool   `json:"layer_known"`
 }
 
 type setupCaseStep struct {
@@ -62,8 +65,8 @@ type setupCaseStep struct {
 	Expression string `json:"expression"`
 	Body       string `json:"body"`
 	RowsPassed *int   `json:"rows_passed"`
-	// The describe op: the server's filter_declined_settings the named
-	// schema's description must decode to, in order.
+	// The describe op: the filter_declined_settings the named schema's
+	// description must decode to, in order, when the describe succeeds.
 	Declined []declinedExpect `json:"declined"`
 }
 
@@ -173,13 +176,10 @@ func setupStepOutcome(want setupCaseExpect, err error) string {
 	return ""
 }
 
-// declinedOutcome compares a description's server filter_declined_settings
-// with a describe step's expectation, and returns what differs, or "".
+// declinedOutcome compares a description's filter_declined_settings with a
+// describe step's expectation, and returns what differs, or "".
 func declinedOutcome(d SchemaDescription, want []declinedExpect) string {
-	if d.Server == nil {
-		return "the description carries no server"
-	}
-	got := d.Server.FilterDeclinedSettings
+	got := d.FilterDeclinedSettings
 	if len(got) != len(want) {
 		return fmt.Sprintf("filter_declined_settings has %d entries, want %d: %+v", len(got), len(want), got)
 	}
@@ -187,8 +187,11 @@ func declinedOutcome(d SchemaDescription, want []declinedExpect) string {
 		if hex.EncodeToString([]byte(got[i].Name)) != w.NameHex {
 			return fmt.Sprintf("entry %d: name %q, want hex %s", i, got[i].Name, w.NameHex)
 		}
-		if string(got[i].Tier) != w.Tier || got[i].Tier.Known() != w.Known {
-			return fmt.Sprintf("entry %d: tier %q (known %v), want %q (known %v)", i, got[i].Tier, got[i].Tier.Known(), w.Tier, w.Known)
+		if string(got[i].Tier) != w.Tier || got[i].Tier.Known() != w.TierKnown {
+			return fmt.Sprintf("entry %d: tier %q (known %v), want %q (known %v)", i, got[i].Tier, got[i].Tier.Known(), w.Tier, w.TierKnown)
+		}
+		if string(got[i].Layer) != w.Layer || got[i].Layer.Known() != w.LayerKnown {
+			return fmt.Sprintf("entry %d: layer %q (known %v), want %q (known %v)", i, got[i].Layer, got[i].Layer.Known(), w.Layer, w.LayerKnown)
 		}
 	}
 	return ""
@@ -317,9 +320,10 @@ func TestSetupCases(t *testing.T) {
 					current = lib
 				}
 				diff := setupStepOutcome(s.Expect, err)
-				if diff == "" && s.Op == "describe" {
+				if diff == "" && s.Op == "describe" && s.Expect.OK {
 					// The list as this binding decoded it from the document the
-					// stub answered, never a value the case sets by hand.
+					// stub answered, never a value the case sets by hand. A
+					// describe the case expects to fail has no list.
 					diff = declinedOutcome(*described, s.Declined)
 				}
 				if diff == "" && s.RowsPassed != nil && (rowsPassed == nil || *rowsPassed != uint64(*s.RowsPassed)) {

@@ -24,8 +24,10 @@ chtypes:
                           of the part an INSERT writes, the batch document's
                           at_merge reason
   DeclinedTier            declined_tier (ABI v2): the WHERE-settings tier of a
-                          server profile setting this build's filters decline,
-                          schema_description's server.filter_declined_settings
+                          setting this build's filters decline,
+                          schema_description's filter_declined_settings
+  DeclinedLayer           declined_layer (ABI v2): the settings layer such a
+                          setting comes from (defaults, server or schema)
 
 The identifier of a constant is derived from its value's spelling by the one
 mechanical rule below (`_pascal`, a hyphen read as a word boundary like an
@@ -254,6 +256,7 @@ _PREFIX = {
     "default_kind": "Kind",
     "merge_reason": "Merge",
     "declined_tier": "Tier",
+    "declined_layer": "Layer",
 }
 
 
@@ -471,17 +474,32 @@ def _merge_reason(model) -> list[str]:
 
 
 def _declined_tier(model) -> list[str]:
-    """ABI v2: declined_tier, the tier of a server.filter_declined_settings entry (r3: its unknown(n) too)."""
+    """ABI v2: declined_tier, the tier of a filter_declined_settings entry (r3: its unknown(n) too)."""
     enum = model.enums["declined_tier"]
     values = [(f"Tier{_value_ident(enum.name, v.value)}", v.value) for v in enum.values]
     out = _string_type(
         "DeclinedTier",
-        "DeclinedTier is declined_tier: the WHERE-settings tier of a setting a server profile sets and this\n"
+        "DeclinedTier is declined_tier: the WHERE-settings tier of a setting a settings layer sets and this\n"
         "build's filters do not honor in a WHERE, as a DeclinedSetting reports it. The spelling is the\n"
         "description's, which is the WHERE-settings lists' own.",
         values,
     )
     out += _known_method("DeclinedTier", [i for i, _ in values], "tier")
+    return out
+
+
+def _declined_layer(model) -> list[str]:
+    """ABI v2: declined_layer, the settings layer of a filter_declined_settings entry (r3: its unknown(n) too)."""
+    enum = model.enums["declined_layer"]
+    values = [(f"Layer{_value_ident(enum.name, v.value)}", v.value) for v in enum.values]
+    out = _string_type(
+        "DeclinedLayer",
+        "DeclinedLayer is declined_layer: the settings layer a DeclinedSetting comes from, the highest one\n"
+        "that sets the name (defaults, the server profile, or the schema's own settings). The spelling is\n"
+        "the description's.",
+        values,
+    )
+    out += _known_method("DeclinedLayer", [i for i, _ in values], "layer")
     return out
 
 
@@ -514,6 +532,7 @@ _GO_VOCAB = {
     "default_kind": ("DefaultKind", "string"),
     "merge_reason": ("MergeReason", "string"),
     "declined_tier": ("DeclinedTier", "string"),
+    "declined_layer": ("DeclinedLayer", "string"),
 }
 
 
@@ -571,7 +590,7 @@ def render_vocab_gen(model) -> str:
         _default_kind,
     ]
     if model.major >= 2:
-        parts += [_discover_query_param, _merge_reason, _declined_tier, _described]
+        parts += [_discover_query_param, _merge_reason, _declined_tier, _declined_layer, _described]
     for part in parts:
         out += part(model)
     while out and out[-1] == "":

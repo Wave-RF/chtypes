@@ -139,17 +139,16 @@ fn outcome(want: &Value, got: &Result<(), Error>) -> Result<(), String> {
     Ok(())
 }
 
-/// What differs between a description's server `filter_declined_settings` and
-/// a describe step's expectation: each entry's name as hex of its bytes, its
-/// tier's raw spelling, and whether the description lists that tier (rule r3).
+/// What differs between a description's `filter_declined_settings` and a
+/// describe step's expectation: each entry's name as hex of its bytes, its
+/// tier's and its layer's raw spellings, and whether the description lists
+/// each (rule r3).
 fn declined(described: Option<&SchemaDescription>, want: &Value) -> Result<(), String> {
     let want = want
         .as_array()
         .ok_or("a describe step names no declined list")?;
-    let server = described
-        .and_then(|d| d.server.as_ref())
-        .ok_or("the description carries no server")?;
-    let got = &server.filter_declined_settings;
+    let described = described.ok_or("the describe answered no description")?;
+    let got = &described.filter_declined_settings;
     if got.len() != want.len() {
         return Err(format!(
             "filter_declined_settings has {} entries, want {}: {got:?}",
@@ -168,14 +167,25 @@ fn declined(described: Option<&SchemaDescription>, want: &Value) -> Result<(), S
             return Err(format!("entry {i}: name {hex}, want hex {}", w["name_hex"]));
         }
         if Some(g.tier.as_str()) != w["tier"].as_str()
-            || Some(g.tier.is_known()) != w["known"].as_bool()
+            || Some(g.tier.is_known()) != w["tier_known"].as_bool()
         {
             return Err(format!(
                 "entry {i}: tier {:?} (known {}), want {} (known {})",
                 g.tier.as_str(),
                 g.tier.is_known(),
                 w["tier"],
-                w["known"]
+                w["tier_known"]
+            ));
+        }
+        if Some(g.layer.as_str()) != w["layer"].as_str()
+            || Some(g.layer.is_known()) != w["layer_known"].as_bool()
+        {
+            return Err(format!(
+                "entry {i}: layer {:?} (known {}), want {} (known {})",
+                g.layer.as_str(),
+                g.layer.is_known(),
+                w["layer"],
+                w["layer_known"]
             ));
         }
     }
@@ -304,9 +314,11 @@ fn run_case(stubs: &Path, probe: &str, case: &Value) {
             current = Some(Arc::clone(library));
         }
         let mut checked = outcome(&step["expect"], &got);
-        if checked.is_ok() && op == "describe" {
+        let expect_ok = step["expect"].get("ok").and_then(Value::as_bool) == Some(true);
+        if checked.is_ok() && op == "describe" && expect_ok {
             // The list as this binding decoded it from the document the stub
-            // answered, never a value the case sets by hand.
+            // answered, never a value the case sets by hand. A describe the
+            // case expects to fail has no list.
             checked = declined(described.as_ref(), &step["declined"]);
         }
         if let (Ok(()), Some(want)) = (&checked, step["expect"].get("image_zone")) {

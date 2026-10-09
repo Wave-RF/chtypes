@@ -1415,23 +1415,26 @@ _DECLINED_FILTER = "chs_filter_create"
 
 
 def _declined_settings(model, fn) -> list[str]:
-    """Generation 2, the server's filter-declined settings: under
+    """Generation 2, the filter-declined settings: under
     CHS_STUB_DECLINED_SETTINGS (variant "declined-settings", see
-    _stubshared.DECLINED), chs_schema_create records which list its statement
-    selects, chs_schema_describe answers that list's document, and
-    chs_filter_create declines, naming the list, when it is not empty. Emitted
-    after the input checks and the status injection; the documents and the
-    messages are rendered by _stubshared, which the cases read too."""
+    _stubshared.DECLINED and DEEP), chs_schema_create records which list (or
+    the deep input) its statement selects, chs_schema_describe answers that
+    list's document (or the deep input's refusal, 306), and chs_filter_create
+    declines, naming each entry and its layer, when the list is not empty.
+    Emitted after the input checks and the status injection; the documents and
+    the messages are rendered by _stubshared, which the cases read too."""
     if model.abi < 2 or fn.name not in (_DECLINED_CREATE, _DECLINED_DESCRIBE, _DECLINED_FILTER):
         return []
     import json
 
     rule = _stubshared.DECLINED
+    deep = _stubshared.DEEP
     ids = list(_stubshared.DECLINED_LISTS)
+    deep_sel = len(ids)  # the deep input's selection, after every list's
     if fn.name == _DECLINED_CREATE:
         b = next(p for p in fn.params if p.kind == "bytes_in").name
         lines = ["#if defined(CHS_STUB_DECLINED_SETTINGS)", "    chs_stub_declined_sel = -1;"]
-        for i, sel in enumerate(ids):
+        for i, sel in enumerate([*ids, deep["id"]]):
             key = (rule["prefix"] + sel).encode("ascii")
             lines.append(
                 f"    if ({b}_len == {len(key)} && memcmp({b}, {_c_str(key.decode('ascii'))}, {len(key)}) == 0) "
@@ -1440,15 +1443,24 @@ def _declined_settings(model, fn) -> list[str]:
         return [*lines, "#endif"]
     if fn.name == _DECLINED_DESCRIBE:
         out, others = _doc_out(fn)
-        if out is None or out.content != "document:schema_description":
+        if out is None or out.content != "document:schema_description" or fn.name != deep["fn"]:
             raise ValueError(f"{fn.name}: the shape _declined_settings answers has changed")
+        if deep["status"] not in model.function(fn.name).may_return:
+            raise ValueError(f"{fn.name}: {deep['status']} is not in its may_return")
         docs = ", ".join(
             _c_str(json.dumps(_stubshared.declined_document(sel), separators=(",", ":"), ensure_ascii=True))
             for sel in ids
         )
+        name_lit, msg_lit = _c_str(deep["ch_name"]), _c_str(deep["message"])
         return [
             "#if defined(CHS_STUB_DECLINED_SETTINGS)",
-            "    if (chs_stub_declined_sel >= 0) {",
+            f"    if (chs_stub_declined_sel == {deep_sel}) {{",
+            f"        static const char name[] = {name_lit};",
+            f"        static const char msg[] = {msg_lit};",
+            f"        chs_stub_set_err(err, chs_stub_make_error({deep['status']}, {deep['ch_code']}, name, sizeof(name) - 1, msg, sizeof(msg) - 1));",
+            f"        return {deep['status']};",
+            "    }",
+            f"    if (chs_stub_declined_sel >= 0 && chs_stub_declined_sel < {len(ids)}) {{",
             f"        static const char *const declined_docs[] = {{{docs}}};",
             *_answer_doc(out, others, "declined_docs[chs_stub_declined_sel]"),
             "    }",
@@ -1462,7 +1474,7 @@ def _declined_settings(model, fn) -> list[str]:
     lens = ", ".join("0" if m is None else str(len(m)) for m in msgs)
     return [
         "#if defined(CHS_STUB_DECLINED_SETTINGS)",
-        "    if (chs_stub_declined_sel >= 0) {",
+        f"    if (chs_stub_declined_sel >= 0 && chs_stub_declined_sel < {len(ids)}) {{",
         f"        static const char *const declined_msgs[] = {{{lits}}};",
         f"        static const size_t declined_lens[] = {{{lens}}};",
         "        if (declined_msgs[chs_stub_declined_sel] != NULL) {",
@@ -1681,8 +1693,9 @@ def render_stub_c(model) -> str:
             "static char chs_stub_r3_create[128];\n"
             "static size_t chs_stub_r3_create_len = 0;\n"
             "#endif\n"
-            "\n/* The server's filter-declined settings: the list the image's last chs_schema_create\n"
-            "   selected (CHS_STUB_DECLINED_SETTINGS), an index into _stubshared.DECLINED_LISTS, or -1. */\n"
+            "\n/* The filter-declined settings: the list the image's last chs_schema_create selected\n"
+            "   (CHS_STUB_DECLINED_SETTINGS), an index into _stubshared.DECLINED_LISTS, one past them for\n"
+            "   _stubshared.DEEP, or -1. */\n"
             "#if defined(CHS_STUB_DECLINED_SETTINGS)\n"
             "static int chs_stub_declined_sel = -1;\n"
             "#endif\n"

@@ -26,8 +26,8 @@ use serde::de::{Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde_json::{Map, Value as Json};
 
 use crate::abi2::vocab_gen::{
-    BYTES_SUFFIX, DeclinedTier, DefaultKind, FilterOutcome, MergeReason, Outcome, Reason, Source,
-    VALUE_BYTES, Verdict,
+    BYTES_SUFFIX, DeclinedLayer, DeclinedTier, DefaultKind, FilterOutcome, MergeReason, Outcome,
+    Reason, Source, VALUE_BYTES, Verdict,
 };
 use crate::error::{Error, Result};
 use crate::raw::RawText;
@@ -628,16 +628,17 @@ pub(crate) fn filter_result(bytes: &[u8]) -> Result<FilterResult> {
 
 // ---------------------------------------------------- schema, discovery, ...
 
-/// A server's `filter_declined_settings`: absent is empty. An unlisted tier is
-/// its `Unknown` (rule r3): kept, never a failure.
-fn declined_settings(sm: &Obj<'_>) -> Result<Vec<DeclinedSetting>> {
+/// A schema description's `filter_declined_settings`: absent is empty. An
+/// unlisted tier or layer is its `Unknown` (rule r3): kept, never a failure.
+fn declined_settings(o: &Obj<'_>) -> Result<Vec<DeclinedSetting>> {
     let key = "filter_declined_settings";
     let mut out = Vec::new();
-    for (i, v) in sm.array(key)?.iter().enumerate() {
-        let e = Obj::of(sm.doc, format!("{}[{i}]", sm.child(key)), v)?;
+    for (i, v) in o.array(key)?.iter().enumerate() {
+        let e = Obj::of(o.doc, format!("{}[{i}]", o.child(key)), v)?;
         out.push(DeclinedSetting {
             name: e.name("name")?,
             tier: DeclinedTier::from_wire(&e.string("tier")?),
+            layer: DeclinedLayer::from_wire(&e.string("layer")?),
         });
     }
     Ok(out)
@@ -667,7 +668,6 @@ pub(crate) fn schema_description(bytes: &[u8]) -> Result<SchemaDescription> {
             timezone: sm.string("timezone")?,
             settings: sm.string_map("settings")?.unwrap_or_default(),
             macros: sm.string_map("macros")?,
-            filter_declined_settings: declined_settings(&sm)?,
         }),
     };
     let replicated = match o.object("replicated")? {
@@ -679,6 +679,8 @@ pub(crate) fn schema_description(bytes: &[u8]) -> Result<SchemaDescription> {
     };
     Ok(SchemaDescription {
         columns,
+        // Over every layer known at schema compile, with or without a server.
+        filter_declined_settings: declined_settings(&o)?,
         server,
         replicated,
     })
@@ -1323,11 +1325,11 @@ mod tests {
         assert!(row(br#"{"outcome":"accepted","x":inf}"#).is_err());
     }
 
-    /// A schema_description whose server carries `list` as its
-    /// filter_declined_settings.
+    /// A schema_description, on a server, whose top-level
+    /// filter_declined_settings is `list`.
     fn declined(list: &str) -> Result<SchemaDescription> {
         let doc = format!(
-            r#"{{"columns":[{{"name":"k","type":"UInt8","default_kind":"","default_expression":""}}],"server":{{"timezone":"UTC","settings":{{"final":"1"}},"filter_declined_settings":{list}}}}}"#
+            r#"{{"columns":[{{"name":"k","type":"UInt8","default_kind":"","default_expression":""}}],"filter_declined_settings":{list},"server":{{"timezone":"UTC","settings":{{"final":"1"}}}}}}"#
         );
         schema_description(doc.as_bytes())
     }
@@ -1335,29 +1337,32 @@ mod tests {
     #[test]
     fn filter_declined_settings_empty_and_absent_are_empty() {
         let d = declined("[]").unwrap();
-        assert!(d.server.unwrap().filter_declined_settings.is_empty());
+        assert!(d.filter_declined_settings.is_empty());
         let absent =
             schema_description(br#"{"columns":[],"server":{"timezone":"UTC","settings":{}}}"#)
                 .unwrap();
-        assert!(absent.server.unwrap().filter_declined_settings.is_empty());
+        assert!(absent.filter_declined_settings.is_empty());
     }
 
     #[test]
-    fn filter_declined_settings_keep_the_profile_order_bytes_and_an_unknown_tier() {
+    fn filter_declined_settings_keep_the_document_order_bytes_and_unknown_values() {
         let d = declined(
-            r#"[{"name":"final","tier":"result-content","x_future":1},
-                {"name":"aggregate_functions_null_for_empty","tier":"predicate"},
-                {"name_b64":"eP95","tier":"predicate-unflipped"},
-                {"name":"x_future_setting","tier":"x_future_tier","x_future_obj":{"a":[1]}}]"#,
+            r#"[{"name":"aggregate_functions_null_for_empty","tier":"predicate","layer":"defaults","x_future":1},
+                {"name":"final","tier":"result-content","layer":"server"},
+                {"name":"additional_result_filter","tier":"result-content","layer":"schema"},
+                {"name_b64":"eP95","tier":"predicate-unflipped","layer":"schema"},
+                {"name":"x_future_setting","tier":"x_future_tier","layer":"x_future_layer","x_future_obj":{"a":[1]}}]"#,
         )
         .unwrap();
-        let got = d.server.unwrap().filter_declined_settings;
+        let got = d.filter_declined_settings;
+        // The document's own order, never re-sorted (here not name order).
         let names: Vec<&[u8]> = got.iter().map(|e| e.name.as_bytes()).collect();
         assert_eq!(
             names,
             vec![
-                &b"final"[..],
                 &b"aggregate_functions_null_for_empty"[..],
+                &b"final"[..],
+                &b"additional_result_filter"[..],
                 &b"x\xffy"[..],
                 &b"x_future_setting"[..],
             ]
@@ -1366,25 +1371,64 @@ mod tests {
         assert_eq!(
             tiers,
             vec![
-                DeclinedTier::ResultContent,
                 DeclinedTier::Predicate,
+                DeclinedTier::ResultContent,
+                DeclinedTier::ResultContent,
                 DeclinedTier::PredicateUnflipped,
                 DeclinedTier::Unknown("x_future_tier".into()),
             ]
         );
-        assert_eq!(got[3].tier.as_str(), "x_future_tier");
-        assert!(!got[3].tier.is_known() && got[0].tier.is_known());
+        let layers: Vec<DeclinedLayer> = got.iter().map(|e| e.layer.clone()).collect();
+        assert_eq!(
+            layers,
+            vec![
+                DeclinedLayer::Defaults,
+                DeclinedLayer::Server,
+                DeclinedLayer::Schema,
+                DeclinedLayer::Schema,
+                DeclinedLayer::Unknown("x_future_layer".into()),
+            ]
+        );
+        assert_eq!(got[4].tier.as_str(), "x_future_tier");
+        assert_eq!(got[4].layer.as_str(), "x_future_layer");
+        assert!(!got[4].tier.is_known() && got[0].tier.is_known());
+        assert!(!got[4].layer.is_known() && got[0].layer.is_known());
+    }
+
+    #[test]
+    fn filter_declined_settings_without_a_server_and_the_removed_server_list() {
+        // A schema with no server lists its own layers all the same.
+        let own = schema_description(
+            br#"{"columns":[],"filter_declined_settings":[{"name":"final","tier":"result-content","layer":"schema"}]}"#,
+        )
+        .unwrap();
+        assert!(own.server.is_none());
+        assert_eq!(own.filter_declined_settings.len(), 1);
+        assert_eq!(
+            own.filter_declined_settings[0].name.as_bytes(),
+            &b"final"[..]
+        );
+        assert_eq!(own.filter_declined_settings[0].layer, DeclinedLayer::Schema);
+        // The removed server-level list is an unknown member now (rule r2):
+        // the top-level list is the one decoded.
+        let old = schema_description(
+            br#"{"columns":[],"filter_declined_settings":[],"server":{"timezone":"UTC","settings":{},"filter_declined_settings":[{"name":"final","tier":"result-content"}]}}"#,
+        )
+        .unwrap();
+        assert!(old.filter_declined_settings.is_empty());
+        assert_eq!(old.server.unwrap().timezone, "UTC");
     }
 
     #[test]
     fn a_malformed_filter_declined_settings_is_internal() {
         for list in [
-            r#"{"name":"final","tier":"predicate"}"#,
+            r#"{"name":"final","tier":"predicate","layer":"server"}"#,
             r#"["final"]"#,
-            r#"[{"name":"final","name_b64":"ZmluYWw=","tier":"predicate"}]"#,
-            r#"[{"tier":"predicate"}]"#,
-            r#"[{"name_b64":"*","tier":"predicate"}]"#,
-            r#"[{"name":"final","tier":1}]"#,
+            r#"[{"name":"final","name_b64":"ZmluYWw=","tier":"predicate","layer":"server"}]"#,
+            r#"[{"tier":"predicate","layer":"server"}]"#,
+            r#"[{"name_b64":"*","tier":"predicate","layer":"server"}]"#,
+            r#"[{"name":"final","tier":1,"layer":"server"}]"#,
+            r#"[{"name":"final","tier":"predicate","layer":2}]"#,
         ] {
             let msg = internal(declined(list).unwrap_err());
             assert!(msg.contains("schema_description"), "{list}: {msg}");
