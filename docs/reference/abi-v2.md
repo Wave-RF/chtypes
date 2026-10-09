@@ -361,6 +361,28 @@ FIRM; an unrecognized value is read as `unsupported`.
 
 One character per row of a filter evaluation. `t` and `f` are answers (true; false or NULL); `e` (the predicate raised an error on this row) and `d` (this build declines the row) are not, and a caller enforcing visibility must fail closed on both. A verdict is an answer only for a body a server would accept: in a batch whose outcome is not `accepted` every verdict is `d`, and in a filter document whose outcome is not `ok` (any non-`ok` outcome, including `unsupported`) a caller MUST treat every verdict as `d` (`batch_outcome`, `filter_outcome`).
 
+**What a filter verdict is.** A filter verdict answers one question per row: would a ClickHouse server of the pinned version, on the same OS and architecture, return this row from `SELECT … FROM <table> WHERE <filter>`, if the table held exactly the row this INSERT would store? It is the server's `WHERE` over that one row, as the table stores it and the server reads it back.
+
+- **`t`:** that query returns the row. Truth follows the server's own `WHERE` rule: a non-zero number keeps the row, and NULL never does. A `t` is a security claim. A `t` where the server would not return the row is an over-accept, a security-severity defect.
+- **`f`:** the predicate is false or NULL, so the query does not return the row.
+- **`e`:** the predicate threw on this row's values. The verdict carries the server's own code and message. A server fails the whole query in that case, because a `SELECT` has no per-row error channel.
+- **`d`:** the library declines to answer for this row because it cannot be sure the server would answer the same. Examples:
+  - the row cannot be stored;
+  - the filter reads a value the server computes for itself, such as a clock read or a generator;
+  - the call carries a setting the library cannot honor;
+  - the filter has a shape on the decline list.
+
+A caller that authorizes rows with filters treats anything but a definite `t` as no: `f`, `e`, `d` and `unknown(n)` all mean no.
+
+**What the model leaves out, by design:**
+
+- **Other rows.** A verdict does not depend on which other rows the table holds. If the predicate throws on a different row of the same part, a real query fails as a whole, but this row's verdict is unchanged: each row carries its own `t`, `f` or `e`.
+- **What storage does later.** Engine merges, TTL expiry, mutations and deletes change what the table holds over time. The verdict is the `WHERE` over the record as stored by this INSERT.
+- **Other query shapes.** A planning refusal that only another query shape reaches is not a row verdict; an example on some versions is an aggregate `SELECT count() … WHERE`. Where the row shape itself reaches such a refusal, the library declines the filter (`d`).
+- **The server's platform.** The library answers for a server on its own OS and architecture. On 26.3, ClickHouse's own parse of Float values from text input formats differs across macOS, Linux amd64 and Linux arm64 (mostly one ULP), so stored Float values, and comparisons involving them, can differ between servers of different architectures. Run the library on the server's platform; on 26.7 and later, every platform agrees.
+
+**A body the INSERT does not accept has no filter verdicts** (`batch_outcome`, `filter_outcome`). Any outcome other than `accepted` (a batch) or `ok` (a filter document) means every verdict is `d`.
+
 FIRM; an unrecognized value is read as `d`.
 
 | value | answered |
