@@ -249,15 +249,19 @@ def fetch_manifest_by_tag(
     retry: RetryPolicy,
     max_bytes: int = C.MANIFEST_MAX_BYTES,
     alias: str | None = None,
-) -> tuple[dict, bytes, str]:
-    """GET manifests/<tag>; returns (doc, raw_bytes, resolved_digest).
+) -> tuple[dict, bytes, str, bool]:
+    """GET manifests/<tag>; returns (doc, raw_bytes, resolved_digest, alias_absent).
 
     With `alias` (the dev channel's `<tag>--fp-<fingerprint>`, from
     `_channel.alias_tag`), GET manifests/<alias> first, and the tag only when
     every base answered the alias 404 (docs/guides/fetch-v1.md §3); any other
     failure of the alias request is raised as it is. What is returned is then
-    trusted exactly as the tag's own answer would be."""
+    trusted exactly as the tag's own answer would be. `alias_absent` reports
+    that fallback: the alias was asked for and every base answered it 404, so
+    the registry has no build at this SDK's fingerprint, and the build the tag
+    names is checked against it (`_channel.ahead_of_registry`)."""
     accept = (C.MEDIA_TYPE_INDEX, C.MEDIA_TYPE_MANIFEST)
+    alias_absent = False
     if alias is not None:
         try:
             doc, resp = get_json(
@@ -270,9 +274,9 @@ def fetch_manifest_by_tag(
                 retry=retry,
             )
         except AliasNotFoundError:
-            pass
+            alias_absent = True
         else:
-            return doc, resp.body, f"sha256:{hashlib.sha256(resp.body).hexdigest()}"
+            return doc, resp.body, f"sha256:{hashlib.sha256(resp.body).hexdigest()}", False
     doc, resp = get_json(
         bases,
         f"/manifests/{tag}",
@@ -283,7 +287,7 @@ def fetch_manifest_by_tag(
         retry=retry,
     )
     digest = f"sha256:{hashlib.sha256(resp.body).hexdigest()}"
-    return doc, resp.body, digest
+    return doc, resp.body, digest, alias_absent
 
 
 def fetch_blob_to_path(

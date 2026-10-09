@@ -69,6 +69,25 @@ def _outcome(want: dict, error: BaseException | None) -> str:
         return f"ch_name {error.ch_name!r}, want {want['ch_name']!r}"
     if "reason" in want and error.reason != want["reason"]:
         return f"reason {error.reason!r}, want {want['reason']!r}"
+    if "message" in want and error.message != want["message"].encode():
+        return f"message {error.message!r}, want {want['message']!r}"
+    return ""
+
+
+def _declined(described, want: list[dict]) -> str:
+    """What differs between a description's server `filter_declined_settings`
+    and a describe step's expectation; "" when none."""
+    if described.server is None:
+        return "the description carries no server"
+    got = described.server.filter_declined_settings
+    if len(got) != len(want):
+        return f"filter_declined_settings has {len(got)} entries, want {len(want)}: {got!r}"
+    for i, (g, w) in enumerate(zip(got, want, strict=True)):
+        if g.name.hex() != w["name_hex"]:
+            return f"entry {i}: name {g.name!r}, want hex {w['name_hex']}"
+        if g.tier != w["tier"] or g.tier.known != w["known"]:
+            want_tier = f"{w['tier']!r} (known {w['known']})"
+            return f"entry {i}: tier {g.tier!r} (known {g.tier.known}), want {want_tier}"
     return ""
 
 
@@ -86,6 +105,7 @@ def test_setup_case(
     schemas: dict = {}
     filters: dict = {}
     batch_rows_passed: int | None = None
+    described = None
 
     def image(variant: str | None) -> str:
         """The case's one fresh copy of `variant` (the case's own by default)."""
@@ -120,7 +140,10 @@ def test_setup_case(
                 assert got[kind] == want, f"step {i}: live {kind} = {got[kind]}, want {want}: {got}"
             continue
         try:
-            if step["op"] == "filter_new":
+            if step["op"] == "describe":
+                described = None
+                described = schemas[step["schema"]].describe()
+            elif step["op"] == "filter_new":
                 filters[step["as"]] = schemas[step["schema"]].compile_filter(step["expression"])
             elif step["op"] == "rows":
                 batch_rows_passed = None
@@ -172,6 +195,10 @@ def test_setup_case(
         if opened is not None:
             current = opened
         diff = _outcome(step["expect"], error)
+        if not diff and step["op"] == "describe":
+            # The list as this binding decoded it from the document the stub
+            # answered, never a value the case sets by hand.
+            diff = _declined(described, step["declined"])
         if not diff and "rows_passed" in step and step["rows_passed"] != batch_rows_passed:
             diff = (
                 f"rows_passed {batch_rows_passed}, want {step['rows_passed']}: "

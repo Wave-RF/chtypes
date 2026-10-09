@@ -16,6 +16,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   ArtifactCorruptError,
   ArtifactIncompatibleError,
+  declinedTierKnown,
   type Filter,
   Format,
   InternalError,
@@ -23,6 +24,7 @@ import {
   openUnverified,
   Registry,
   type Schema,
+  type SchemaDescription,
   SchemaError,
   Status,
   setup,
@@ -43,8 +45,17 @@ interface Expect {
   readonly ch_code?: number;
   readonly ch_name?: string;
   readonly reason?: string;
+  /** On an error the library answered: the message it must carry, byte for byte. */
+  readonly message?: string;
   /** On a successful open: the zone the image was set up with, read back with the document's `image_zone_probe`. */
   readonly image_zone?: string;
+}
+
+/** One entry a describe step must decode from the server's `filter_declined_settings`: the name's bytes as hex, the tier's raw spelling, and whether the description lists it (rule r3). */
+interface DeclinedExpect {
+  readonly name_hex: string;
+  readonly tier: string;
+  readonly known: boolean;
 }
 
 interface Step {
@@ -65,6 +76,8 @@ interface Step {
   readonly body?: string;
   readonly filter?: string;
   readonly rows_passed?: number;
+  /** The describe op: the server's `filter_declined_settings` the named schema's description must decode to, in order. */
+  readonly declined?: readonly DeclinedExpect[];
 }
 
 interface SetupCase {
@@ -102,7 +115,7 @@ function outcome(want: Expect, error: unknown): string {
   const cls = want.class === undefined ? undefined : CLASSES[want.class];
   if (cls === undefined) return `the case names an error class this runner does not know: ${String(want.class)}`;
   if (!(error instanceof cls)) return `want ${cls.name}, got ${error === undefined ? 'success' : String(error)}`;
-  const e = error as unknown as { status: number; chCode: number; chName: string };
+  const e = error as unknown as { status: number; chCode: number; chName: string; messageBytes: Buffer };
   if (want.status !== undefined) {
     const status = statusOf(want.status);
     if (status === undefined) return `the case names a status this binding does not know: ${want.status}`;
@@ -112,6 +125,25 @@ function outcome(want: Expect, error: unknown): string {
   if (want.ch_name !== undefined && e.chName !== want.ch_name) return `ch_name ${e.chName}, want ${want.ch_name}`;
   const reason = (error as { reason?: unknown }).reason;
   if (want.reason !== undefined && reason !== want.reason) return `reason ${String(reason)}, want ${want.reason}`;
+  if (want.message !== undefined && !e.messageBytes.equals(Buffer.from(want.message, 'utf8'))) {
+    return `message ${JSON.stringify(e.messageBytes.toString('utf8'))}, want ${JSON.stringify(want.message)}`;
+  }
+  return '';
+}
+
+/** What differs between a description's server `filter_declined_settings` and a describe step's expectation; '' when none. */
+function declinedOutcome(described: SchemaDescription | undefined, want: readonly DeclinedExpect[]): string {
+  const got = described?.server?.filterDeclinedSettings;
+  if (got === undefined) return 'the description carries no server';
+  if (got.length !== want.length) return `filter_declined_settings has ${got.length} entries, want ${want.length}`;
+  for (const [i, w] of want.entries()) {
+    const g = got[i];
+    if (g === undefined) return `entry ${i}: missing`;
+    if (g.name.toString('hex') !== w.name_hex) return `entry ${i}: name ${g.name.toString('hex')}, want hex ${w.name_hex}`;
+    if (g.tier !== w.tier || declinedTierKnown(g.tier) !== w.known) {
+      return `entry ${i}: tier ${g.tier} (known ${String(declinedTierKnown(g.tier))}), want ${w.tier} (known ${String(w.known)})`;
+    }
+  }
   return '';
 }
 
@@ -153,6 +185,7 @@ describe.skipIf(!stubsAvailable)('the shared setup cases, through the public API
     const schemas = new Map<string, Schema>();
     const filters = new Map<string, Filter>();
     let batchRowsPassed: number | undefined;
+    let described: SchemaDescription | undefined;
     try {
       for (const [i, step] of c.steps.entries()) {
         let error: unknown;
@@ -178,7 +211,10 @@ describe.skipIf(!stubsAvailable)('the shared setup cases, through the public API
           continue;
         }
         try {
-          if (step.op === 'filter_new') filters.set(step.as as string, (schemas.get(step.schema as string) as Schema).compileFilter(step.expression as string));
+          if (step.op === 'describe') {
+            described = undefined;
+            described = (schemas.get(step.schema as string) as Schema).describe();
+          } else if (step.op === 'filter_new') filters.set(step.as as string, (schemas.get(step.schema as string) as Schema).compileFilter(step.expression as string));
           else if (step.op === 'rows') {
             batchRowsPassed = undefined;
             const rowFilter = step.filter === undefined ? undefined : filters.get(step.filter);
@@ -205,6 +241,8 @@ describe.skipIf(!stubsAvailable)('the shared setup cases, through the public API
         }
         if (opened !== undefined) current = opened;
         let diff = outcome(step.expect, error);
+        // The list as this binding decoded it from the document the stub answered, never a value the case sets by hand.
+        if (diff === '' && step.op === 'describe') diff = declinedOutcome(described, step.declined ?? []);
         if (diff === '' && step.rows_passed !== undefined && step.rows_passed !== batchRowsPassed) {
           diff = `rowsPassed ${String(batchRowsPassed)}, want ${step.rows_passed}: the stub says whether the filter reached the library`;
         }

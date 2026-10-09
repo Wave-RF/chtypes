@@ -325,7 +325,7 @@ fn ensure_online(
         client: &res.client,
         auth: &res.auth,
     };
-    let fetched_index = oci::fetch_by_request(&source, version_request)?;
+    let (fetched_index, alias_absent) = oci::fetch_by_request(&source, version_request)?;
     let index = oci::parse_index(&fetched_index.bytes, &format!("index for {request:?}"))?;
     let descriptor = oci::select_platform(&index, &res.platform)?;
 
@@ -366,6 +366,13 @@ fn ensure_online(
 
     if signed {
         validate_predicate(&predicate, &res.platform, Some(version_request))?;
+        // An SDK ahead of the registry (public issue #578): the alias for its
+        // own fingerprint answered 404 on every base, and the tag's build is
+        // signed for another. Refused from the signed statement, before the
+        // installed check below and before the layer is requested, so an
+        // install of that build is never reported and nothing is downloaded
+        // or installed.
+        channel::ahead_of_registry(alias_absent, &predicate)?;
     }
 
     let already = is_fully_installed(&layout::unpacked_dir(&res.root, &descriptor.digest)?)?;
@@ -489,7 +496,7 @@ fn lock_entries_for_all_platforms(
         client: &res.client,
         auth: &res.auth,
     };
-    let fetched_index = oci::fetch_by_request(&source, version_request)?;
+    let (fetched_index, _alias_absent) = oci::fetch_by_request(&source, version_request)?;
     let index = oci::parse_index(&fetched_index.bytes, "index")?;
 
     let mut out = Vec::new();

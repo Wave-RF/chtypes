@@ -48,6 +48,7 @@ use std::sync::Mutex;
 use super::abi_fingerprint::DEV_ABI_FINGERPRINT;
 use super::constants;
 use super::ensure::Options;
+use super::error::Error;
 use super::oci::VersionRequest;
 
 /// The only base a 2.0.0-dev SDK fetches from (rule r6).
@@ -255,6 +256,44 @@ pub fn visible(predicate: &serde_json::Value) -> bool {
     let hex = fingerprint.strip_prefix("sha256:").unwrap_or(fingerprint);
     let own = format!("sha256:{hex}");
     predicate["abi_fingerprint"].as_str() == Some(own.as_str())
+}
+
+/// The dev channel's answer for an SDK whose fingerprint no published build
+/// carries yet (docs/guides/fetch-v1.md §3; public issue #578): when every base
+/// answered its own alias 404 (`alias_absent`) and the build the tag names is
+/// signed for another fingerprint (`predicate`, the SIGNED predicate, the field
+/// [`visible`] keys on), it is `Error::ArtifactUnpublished`, the code a request
+/// no build answers gets, naming both fingerprints. Nothing is installed and an
+/// install of that build is never reported, because the lookup this SDK opens
+/// through would refuse it. `Ok` in every other case: the alias answered, the
+/// tag's build is this SDK's own, or the contract has no own fingerprint.
+pub fn ahead_of_registry(alias_absent: bool, predicate: &serde_json::Value) -> Result<(), Error> {
+    if !alias_absent || visible(predicate) {
+        return Ok(());
+    }
+    let Some(fingerprint) = active().own_fingerprint else {
+        return Ok(());
+    };
+    let own = fingerprint.strip_prefix("sha256:").unwrap_or(fingerprint);
+    Err(Error::ArtifactUnpublished(ahead_message(own, predicate)))
+}
+
+/// [`ahead_of_registry`]'s message: "no published build for this SDK's
+/// fingerprint <own>; newest published on this channel is <fp> (build <id>)",
+/// each fingerprint 64 lowercase hex without its `sha256:` prefix, the
+/// parenthesis dropped when the predicate names no build, and "unnamed" for a
+/// predicate that names no fingerprint.
+fn ahead_message(own: &str, predicate: &serde_json::Value) -> String {
+    let named = predicate["abi_fingerprint"].as_str().unwrap_or("");
+    let theirs = named.strip_prefix("sha256:").unwrap_or(named);
+    let theirs = if theirs.is_empty() { "unnamed" } else { theirs };
+    let message = format!(
+        "no published build for this SDK's fingerprint {own}; newest published on this channel is {theirs}"
+    );
+    match predicate["build"].as_str().filter(|b| !b.is_empty()) {
+        Some(build) => format!("{message} (build {build})"),
+        None => message,
+    }
 }
 
 /// Make this TEST thread speak the dev channel exactly as a non-test build does

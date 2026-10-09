@@ -1409,6 +1409,72 @@ def _r3_values(model, fn) -> list[str]:
     return lines
 
 
+_DECLINED_CREATE = "chs_schema_create"
+_DECLINED_DESCRIBE = "chs_schema_describe"
+_DECLINED_FILTER = "chs_filter_create"
+
+
+def _declined_settings(model, fn) -> list[str]:
+    """Generation 2, the server's filter-declined settings: under
+    CHS_STUB_DECLINED_SETTINGS (variant "declined-settings", see
+    _stubshared.DECLINED), chs_schema_create records which list its statement
+    selects, chs_schema_describe answers that list's document, and
+    chs_filter_create declines, naming the list, when it is not empty. Emitted
+    after the input checks and the status injection; the documents and the
+    messages are rendered by _stubshared, which the cases read too."""
+    if model.abi < 2 or fn.name not in (_DECLINED_CREATE, _DECLINED_DESCRIBE, _DECLINED_FILTER):
+        return []
+    import json
+
+    rule = _stubshared.DECLINED
+    ids = list(_stubshared.DECLINED_LISTS)
+    if fn.name == _DECLINED_CREATE:
+        b = next(p for p in fn.params if p.kind == "bytes_in").name
+        lines = ["#if defined(CHS_STUB_DECLINED_SETTINGS)", "    chs_stub_declined_sel = -1;"]
+        for i, sel in enumerate(ids):
+            key = (rule["prefix"] + sel).encode("ascii")
+            lines.append(
+                f"    if ({b}_len == {len(key)} && memcmp({b}, {_c_str(key.decode('ascii'))}, {len(key)}) == 0) "
+                f"chs_stub_declined_sel = {i};"
+            )
+        return [*lines, "#endif"]
+    if fn.name == _DECLINED_DESCRIBE:
+        out, others = _doc_out(fn)
+        if out is None or out.content != "document:schema_description":
+            raise ValueError(f"{fn.name}: the shape _declined_settings answers has changed")
+        docs = ", ".join(
+            _c_str(json.dumps(_stubshared.declined_document(sel), separators=(",", ":"), ensure_ascii=True))
+            for sel in ids
+        )
+        return [
+            "#if defined(CHS_STUB_DECLINED_SETTINGS)",
+            "    if (chs_stub_declined_sel >= 0) {",
+            f"        static const char *const declined_docs[] = {{{docs}}};",
+            *_answer_doc(out, others, "declined_docs[chs_stub_declined_sel]"),
+            "    }",
+            "#endif",
+        ]
+    status = rule["status"]
+    if status not in model.function(fn.name).may_return:
+        raise ValueError(f"{fn.name}: {status} is not in its may_return")
+    msgs = [_stubshared.declined_message(sel) for sel in ids]
+    lits = ", ".join("NULL" if m is None else _c_bytes_lit(m) for m in msgs)
+    lens = ", ".join("0" if m is None else str(len(m)) for m in msgs)
+    return [
+        "#if defined(CHS_STUB_DECLINED_SETTINGS)",
+        "    if (chs_stub_declined_sel >= 0) {",
+        f"        static const char *const declined_msgs[] = {{{lits}}};",
+        f"        static const size_t declined_lens[] = {{{lens}}};",
+        "        if (declined_msgs[chs_stub_declined_sel] != NULL) {",
+        "            chs_stub_set_err(err, chs_stub_make_error("
+        f"{status}, {rule['ch_code']}, \"\", 0, declined_msgs[chs_stub_declined_sel], declined_lens[chs_stub_declined_sel]));",
+        f"            return {status};",
+        "        }",
+        "    }",
+        "#endif",
+    ]
+
+
 def _gen_generic(model, fn) -> str:
     sig = fn.prototype().rstrip(";")
     body = [sig + " {"]
@@ -1426,6 +1492,7 @@ def _gen_generic(model, fn) -> str:
     body += _document_mode(model, fn)
     body += _r2_members(model, fn)
     body += _r3_values(model, fn)
+    body += _declined_settings(model, fn)
     body += _filter_observable(model, fn)
     body += _fill_outputs(model, fn)
     err_param = next((p for p in fn.params if p.kind == "out_error"), None)
@@ -1613,6 +1680,11 @@ def render_stub_c(model) -> str:
             "#if defined(CHS_STUB_R3_VALUES)\n"
             "static char chs_stub_r3_create[128];\n"
             "static size_t chs_stub_r3_create_len = 0;\n"
+            "#endif\n"
+            "\n/* The server's filter-declined settings: the list the image's last chs_schema_create\n"
+            "   selected (CHS_STUB_DECLINED_SETTINGS), an index into _stubshared.DECLINED_LISTS, or -1. */\n"
+            "#if defined(CHS_STUB_DECLINED_SETTINGS)\n"
+            "static int chs_stub_declined_sel = -1;\n"
             "#endif\n"
         )
     out.append("\n/* ----------------------------------------------------------- functions */\n")

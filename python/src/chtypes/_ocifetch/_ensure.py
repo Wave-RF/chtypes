@@ -700,7 +700,7 @@ def _ensure_floating(
     cache_root_path = roots[0]
     scratch_root = _scratch_root(cache_root_path)
 
-    index_doc, index_bytes, index_digest = fetch_manifest_by_tag(
+    index_doc, index_bytes, index_digest, alias_absent = fetch_manifest_by_tag(
         bases,
         request.spelling,
         policy=policy,
@@ -713,6 +713,10 @@ def _ensure_floating(
     existing_dir = unpacked_dir_for(cache_root_path, manifest_hex)
     existing_record = read_verified_record(existing_dir)
     if existing_record is not None and existing_record.platform == platform_key:
+        # An install of another fingerprint's build, reached through the tag
+        # because the registry has none at this SDK's own, is never reported
+        # installed (public issue #578): refused before the cache is touched.
+        _channel.ahead_of_registry(alias_absent, existing_record.predicate)
         # A NEWER build within the request, installed beside it, is still the
         # answer ("monotonic-warning", docs/guides/fetch-v1.md §9).
         newer = _newer_installed(
@@ -803,6 +807,12 @@ def _ensure_floating(
         signed_by = verified.signed_by
 
     _check_predicate_matches_request(predicate, platform_key, request.spelling)
+    if found is not None:
+        # An SDK ahead of the registry (public issue #578): the alias for its
+        # own fingerprint answered 404 on every base, and the tag's build is
+        # signed for another. Refused from the signed statement, before the
+        # layer is requested, so nothing is downloaded or installed.
+        _channel.ahead_of_registry(alias_absent, predicate)
     newer = _newer_installed(roots, platform_key, predicate, request.spelling)
     if newer is not None:
         newer_dir, newer_record, warning = newer
@@ -1372,7 +1382,9 @@ def _fetch_signed_impl(repository: str, ref: str, predicate_type: str, options: 
         doc, _raw = fetch_manifest_by_digest(bases, ref, policy=policy, retry=retry)
         manifest_digest = ref
     else:
-        doc, _raw, manifest_digest = fetch_manifest_by_tag(bases, ref, policy=policy, retry=retry)
+        doc, _raw, manifest_digest, _alias_absent = fetch_manifest_by_tag(
+            bases, ref, policy=policy, retry=retry
+        )
 
     layer_desc = manifest_single_layer(doc)
     found = _find_verified_signature(

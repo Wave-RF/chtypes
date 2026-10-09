@@ -23,9 +23,13 @@ chtypes:
   MergeReason             merge_reason (ABI v2): what a merge would do to a row
                           of the part an INSERT writes, the batch document's
                           at_merge reason
+  DeclinedTier            declined_tier (ABI v2): the WHERE-settings tier of a
+                          server profile setting this build's filters decline,
+                          schema_description's server.filter_declined_settings
 
 The identifier of a constant is derived from its value's spelling by the one
-mechanical rule below (`_pascal`), except for the four verdict letters, whose
+mechanical rule below (`_pascal`, a hyphen read as a word boundary like an
+underscore: `predicate-unflipped` is `PredicateUnflipped`), except for the four verdict letters, whose
 identifiers cannot be derived from a single letter and are NAMED in
 `_VERDICT_NAMES`: that table is naming, never a vocabulary, and the emitter
 refuses a verdict value it has no name for.
@@ -249,6 +253,7 @@ _PREFIX = {
     "filter_verdict": "Verdict",
     "default_kind": "Kind",
     "merge_reason": "Merge",
+    "declined_tier": "Tier",
 }
 
 
@@ -259,7 +264,9 @@ def _value_ident(vocab: str, value: str) -> str:
         return _VERDICT_NAMES[value]
     if vocab == "default_kind" and value == "":
         return "None"
-    return _pascal(value.lower() if vocab == "default_kind" else value)
+    # A hyphen (declined_tier's `predicate-unflipped`) is a word boundary, as
+    # an underscore is; no ABI v1 value carries one, so its file is unchanged.
+    return _pascal((value.lower() if vocab == "default_kind" else value).replace("-", "_"))
 
 
 def _reason(model) -> list[str]:
@@ -463,6 +470,21 @@ def _merge_reason(model) -> list[str]:
     return out
 
 
+def _declined_tier(model) -> list[str]:
+    """ABI v2: declined_tier, the tier of a server.filter_declined_settings entry (r3: its unknown(n) too)."""
+    enum = model.enums["declined_tier"]
+    values = [(f"Tier{_value_ident(enum.name, v.value)}", v.value) for v in enum.values]
+    out = _string_type(
+        "DeclinedTier",
+        "DeclinedTier is declined_tier: the WHERE-settings tier of a setting a server profile sets and this\n"
+        "build's filters do not honor in a WHERE, as a DeclinedSetting reports it. The spelling is the\n"
+        "description's, which is the WHERE-settings lists' own.",
+        values,
+    )
+    out += _known_method("DeclinedTier", [i for i, _ in values], "tier")
+    return out
+
+
 def _discover_query_param(model) -> list[str]:
     """ABI v2: discover_query_param's type (r3: every enum has its unknown(n))."""
     enum = model.enums["discover_query_param"]
@@ -491,6 +513,7 @@ _GO_VOCAB = {
     "discover_query_param": ("DiscoverQueryParam", "string"),
     "default_kind": ("DefaultKind", "string"),
     "merge_reason": ("MergeReason", "string"),
+    "declined_tier": ("DeclinedTier", "string"),
 }
 
 
@@ -548,7 +571,7 @@ def render_vocab_gen(model) -> str:
         _default_kind,
     ]
     if model.major >= 2:
-        parts += [_discover_query_param, _merge_reason, _described]
+        parts += [_discover_query_param, _merge_reason, _declined_tier, _described]
     for part in parts:
         out += part(model)
     while out and out[-1] == "":

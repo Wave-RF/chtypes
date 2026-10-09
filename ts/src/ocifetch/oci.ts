@@ -278,6 +278,13 @@ export interface IndexResolveResult {
   readonly indexDigest: string;
   readonly indexBytes: Buffer;
   readonly manifest: ManifestInfo;
+  /**
+   * The index is the tag's, reached after every base answered this SDK's own
+   * alias 404 (guide §3): the registry has no build at this SDK's fingerprint,
+   * and the build the tag names is checked against it (`aheadOfRegistry`).
+   * `false` when no alias was asked for, or the alias answered.
+   */
+  readonly aliasAbsent: boolean;
 }
 
 /** One tag's index, fetched from the first base that serves it. */
@@ -364,6 +371,7 @@ export async function resolveTag(
   const triedBases: string[] = [];
   const alias = aliasTag(spelling);
   let found = alias === undefined ? undefined : await indexAcrossBases(bases, alias, options, [], true);
+  const aliasAbsent = alias !== undefined && found === undefined;
   if (found === undefined) found = await indexAcrossBases(bases, spelling, options, triedBases, false);
   if (found === undefined) {
     throw new ArtifactUnpublishedError(`chtypes: ${spelling} is unpublished: every base 404d the tag (${triedBases.join(', ')})`);
@@ -413,5 +421,5 @@ export async function resolveTag(
   }
   const manifestBytes = await fetchManifestBytesByDigest(bases, manifestDescriptor, options);
   const manifest = parseManifest(manifestDigest, manifestBytes);
-  return { repositoryRoot: base, indexDigest: digestOfHex(sha256Hex(body)), indexBytes: body, manifest };
+  return { repositoryRoot: base, indexDigest: digestOfHex(sha256Hex(body)), indexBytes: body, manifest, aliasAbsent };
 }

@@ -13,7 +13,15 @@ import threading
 
 import pytest
 
-from chtypes import SchemaReplicated, SchemaServer, ServerProfile, Status, UsageError
+from chtypes import (
+    DeclinedSetting,
+    DeclinedTier,
+    SchemaReplicated,
+    SchemaServer,
+    ServerProfile,
+    Status,
+    UsageError,
+)
 from chtypes import _decode as decode
 from chtypes._input import server_profile_json
 from chtypes.errors import InternalError
@@ -266,3 +274,58 @@ def test_macros_a_replicated_path_and_unknown_members() -> None:
 def test_a_malformed_server_or_replicated_member_is_an_internal_error(extra) -> None:
     with pytest.raises(InternalError, match="schema_description"):
         _describe(**extra)
+
+
+_PROFILE = {
+    "timezone": "UTC",
+    "settings": {"final": "1", "aggregate_functions_null_for_empty": "1"},
+}
+
+
+def _declined(entries) -> tuple:
+    d = _describe(server={**_PROFILE, "filter_declined_settings": entries})
+    return d.server.filter_declined_settings
+
+
+def test_filter_declined_settings_empty_and_absent() -> None:
+    # [] is present and empty; absent (a document of no build at this
+    # fingerprint) reads as empty too. Neither is a failure.
+    assert _declined([]) == ()
+    absent = _describe(server={"timezone": "UTC", "settings": {}})
+    assert absent.server.filter_declined_settings == ()
+
+
+def test_filter_declined_settings_in_profile_order_b64_and_an_unknown_tier() -> None:
+    got = _declined(
+        [
+            {"name": "final", "tier": "result-content", "x_future": 1},
+            {"name": "aggregate_functions_null_for_empty", "tier": "predicate"},
+            {"name_b64": "eP95", "tier": "predicate-unflipped"},
+            {"name": "x_future_setting", "tier": "x_future_tier", "x_future_obj": {"a": [1]}},
+        ]
+    )
+    assert got == (
+        DeclinedSetting(b"final", DeclinedTier.RESULT_CONTENT),
+        DeclinedSetting(b"aggregate_functions_null_for_empty", DeclinedTier.PREDICATE),
+        DeclinedSetting(b"x\xffy", DeclinedTier.PREDICATE_UNFLIPPED),
+        DeclinedSetting(b"x_future_setting", DeclinedTier.of("x_future_tier")),
+    )
+    # Rule r3: an unlisted tier is kept as it came, as its unknown(n).
+    assert [e.tier.known for e in got] == [True, True, True, False]
+    assert got[3].tier == "x_future_tier"
+
+
+@pytest.mark.parametrize(
+    "entries",
+    [
+        {"name": "final", "tier": "predicate"},
+        ["final"],
+        [{"name": "final", "name_b64": "ZmluYWw=", "tier": "predicate"}],
+        [{"tier": "predicate"}],
+        [{"name_b64": "*", "tier": "predicate"}],
+        [{"name": "final", "tier": 1}],
+    ],
+)
+def test_a_malformed_filter_declined_settings_is_an_internal_error(entries) -> None:
+    with pytest.raises(InternalError, match="schema_description"):
+        _declined(entries)

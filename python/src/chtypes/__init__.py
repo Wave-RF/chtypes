@@ -48,6 +48,7 @@ from importlib.metadata import version as _package_version
 
 from ._abi2._vocab import (
     EXPORT_NONE,
+    DeclinedTier,
     DefaultKind,
     DiscoverQueryParam,
     DocFlags,
@@ -104,6 +105,7 @@ from .results import (
     Capabilities,
     Column,
     Computed,
+    DeclinedSetting,
     DiscoveredColumn,
     Discovery,
     EngineCell,
@@ -154,6 +156,8 @@ __all__ = [
     "ChtypesError",
     "Column",
     "Computed",
+    "DeclinedSetting",
+    "DeclinedTier",
     "DefaultKind",
     "DiscoverQueryParam",
     "DiscoveredColumn",

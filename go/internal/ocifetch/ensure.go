@@ -490,7 +490,7 @@ func (s *session) ensureOnline(ctx context.Context, ro resolvedOptions, l *layou
 }
 
 func (s *session) resolveAndInstall(ctx context.Context, ro resolvedOptions, l *layout, req Request, platform Platform) (*Resolved, *ImageIndex, error) {
-	idx, indexDigest, base, err := s.resolveIndex(ctx, ro.bases, req.Spelling)
+	idx, indexDigest, base, aliasAbsent, err := s.resolveIndex(ctx, ro.bases, req.Spelling)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -513,8 +513,14 @@ func (s *session) resolveAndInstall(ctx context.Context, ro resolvedOptions, l *
 	// needs checking — this also satisfies "zero layer requests" for the
 	// existing-install-noop case, since nothing past this point runs. A
 	// NEWER build within the request, installed beside it, is still the
-	// answer (the monotonic check below, §9).
+	// answer (the monotonic check below, §9). An install of another
+	// fingerprint's build, reached through the tag because the registry has
+	// none at this SDK's own, is never reported installed: it is refused
+	// before the cache is touched (aheadOfRegistry; public issue #578).
 	if rec, dir, ok := readInstalledRecord(l, manifestDigest); ok {
+		if err := ro.ch.aheadOfRegistry(aliasAbsent, rec.Predicate, req.Spelling, platform.Key); err != nil {
+			return nil, nil, err
+		}
 		if err := l.writeBlob(desc.Digest, manifestBody); err != nil {
 			return nil, nil, err
 		}
@@ -531,6 +537,16 @@ func (s *session) resolveAndInstall(ctx context.Context, ro resolvedOptions, l *
 	stmt, warnings, err := s.verifyManifestTrust(ctx, ro.bases, manifestDigest, layerDesc.Digest, platform, req.Spelling, ro.trustedKeys, ro.allowUnsigned)
 	if err != nil {
 		return nil, nil, err
+	}
+
+	// An SDK ahead of the registry (public issue #578): the alias for its own
+	// fingerprint answered 404 on every base, and the tag's build is signed
+	// for another. Refused from the signed statement, before the layer is
+	// requested, so nothing is downloaded or installed.
+	if stmt != nil {
+		if err := ro.ch.aheadOfRegistry(aliasAbsent, stmt.Statement.Predicate, req.Spelling, platform.Key); err != nil {
+			return nil, nil, err
+		}
 	}
 
 	// Monotonicity (§6, "monotonic-warning"): "a HIGHER build is already
@@ -1423,7 +1439,7 @@ func (s *session) updateLock(ctx context.Context, ro resolvedOptions) error {
 	}
 	fresh := make(map[string]map[string]LockPin, len(existing.Requests))
 	for spelling, byPlatform := range existing.Requests {
-		idx, _, _, err := s.resolveIndex(ctx, ro.bases, spelling)
+		idx, _, _, _, err := s.resolveIndex(ctx, ro.bases, spelling)
 		if err != nil {
 			return err
 		}

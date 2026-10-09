@@ -26,15 +26,16 @@ use serde::de::{Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde_json::{Map, Value as Json};
 
 use crate::abi2::vocab_gen::{
-    BYTES_SUFFIX, DefaultKind, FilterOutcome, MergeReason, Outcome, Reason, Source, VALUE_BYTES,
-    Verdict,
+    BYTES_SUFFIX, DeclinedTier, DefaultKind, FilterOutcome, MergeReason, Outcome, Reason, Source,
+    VALUE_BYTES, Verdict,
 };
 use crate::error::{Error, Result};
 use crate::raw::RawText;
 use crate::result::{
-    AtMergeEntry, BatchResult, BuildInfo, Capabilities, Column, Computed, DiscoveredColumn,
-    Discovery, EngineCell, ErrorCodeEntry, ErrorCodeTable, FilterResult, FilterRowError, Framing,
-    Header, RowResult, SchemaDescription, SchemaReplicated, SchemaServer, Span, Transform, Value,
+    AtMergeEntry, BatchResult, BuildInfo, Capabilities, Column, Computed, DeclinedSetting,
+    DiscoveredColumn, Discovery, EngineCell, ErrorCodeEntry, ErrorCodeTable, FilterResult,
+    FilterRowError, Framing, Header, RowResult, SchemaDescription, SchemaReplicated, SchemaServer,
+    Span, Transform, Value,
 };
 
 // -------------------------------------------------------------- strict parse
@@ -627,6 +628,21 @@ pub(crate) fn filter_result(bytes: &[u8]) -> Result<FilterResult> {
 
 // ---------------------------------------------------- schema, discovery, ...
 
+/// A server's `filter_declined_settings`: absent is empty. An unlisted tier is
+/// its `Unknown` (rule r3): kept, never a failure.
+fn declined_settings(sm: &Obj<'_>) -> Result<Vec<DeclinedSetting>> {
+    let key = "filter_declined_settings";
+    let mut out = Vec::new();
+    for (i, v) in sm.array(key)?.iter().enumerate() {
+        let e = Obj::of(sm.doc, format!("{}[{i}]", sm.child(key)), v)?;
+        out.push(DeclinedSetting {
+            name: e.name("name")?,
+            tier: DeclinedTier::from_wire(&e.string("tier")?),
+        });
+    }
+    Ok(out)
+}
+
 /// Decode one `schema_description` document.
 pub(crate) fn schema_description(bytes: &[u8]) -> Result<SchemaDescription> {
     let json = parse("schema_description", bytes)?;
@@ -651,6 +667,7 @@ pub(crate) fn schema_description(bytes: &[u8]) -> Result<SchemaDescription> {
             timezone: sm.string("timezone")?,
             settings: sm.string_map("settings")?.unwrap_or_default(),
             macros: sm.string_map("macros")?,
+            filter_declined_settings: declined_settings(&sm)?,
         }),
     };
     let replicated = match o.object("replicated")? {
@@ -1304,5 +1321,73 @@ mod tests {
     fn a_document_that_is_not_json_is_internal() {
         assert!(internal(row(b"{not json").unwrap_err()).contains("does not decode"));
         assert!(row(br#"{"outcome":"accepted","x":inf}"#).is_err());
+    }
+
+    /// A schema_description whose server carries `list` as its
+    /// filter_declined_settings.
+    fn declined(list: &str) -> Result<SchemaDescription> {
+        let doc = format!(
+            r#"{{"columns":[{{"name":"k","type":"UInt8","default_kind":"","default_expression":""}}],"server":{{"timezone":"UTC","settings":{{"final":"1"}},"filter_declined_settings":{list}}}}}"#
+        );
+        schema_description(doc.as_bytes())
+    }
+
+    #[test]
+    fn filter_declined_settings_empty_and_absent_are_empty() {
+        let d = declined("[]").unwrap();
+        assert!(d.server.unwrap().filter_declined_settings.is_empty());
+        let absent =
+            schema_description(br#"{"columns":[],"server":{"timezone":"UTC","settings":{}}}"#)
+                .unwrap();
+        assert!(absent.server.unwrap().filter_declined_settings.is_empty());
+    }
+
+    #[test]
+    fn filter_declined_settings_keep_the_profile_order_bytes_and_an_unknown_tier() {
+        let d = declined(
+            r#"[{"name":"final","tier":"result-content","x_future":1},
+                {"name":"aggregate_functions_null_for_empty","tier":"predicate"},
+                {"name_b64":"eP95","tier":"predicate-unflipped"},
+                {"name":"x_future_setting","tier":"x_future_tier","x_future_obj":{"a":[1]}}]"#,
+        )
+        .unwrap();
+        let got = d.server.unwrap().filter_declined_settings;
+        let names: Vec<&[u8]> = got.iter().map(|e| e.name.as_bytes()).collect();
+        assert_eq!(
+            names,
+            vec![
+                &b"final"[..],
+                &b"aggregate_functions_null_for_empty"[..],
+                &b"x\xffy"[..],
+                &b"x_future_setting"[..],
+            ]
+        );
+        let tiers: Vec<DeclinedTier> = got.iter().map(|e| e.tier.clone()).collect();
+        assert_eq!(
+            tiers,
+            vec![
+                DeclinedTier::ResultContent,
+                DeclinedTier::Predicate,
+                DeclinedTier::PredicateUnflipped,
+                DeclinedTier::Unknown("x_future_tier".into()),
+            ]
+        );
+        assert_eq!(got[3].tier.as_str(), "x_future_tier");
+        assert!(!got[3].tier.is_known() && got[0].tier.is_known());
+    }
+
+    #[test]
+    fn a_malformed_filter_declined_settings_is_internal() {
+        for list in [
+            r#"{"name":"final","tier":"predicate"}"#,
+            r#"["final"]"#,
+            r#"[{"name":"final","name_b64":"ZmluYWw=","tier":"predicate"}]"#,
+            r#"[{"tier":"predicate"}]"#,
+            r#"[{"name_b64":"*","tier":"predicate"}]"#,
+            r#"[{"name":"final","tier":1}]"#,
+        ] {
+            let msg = internal(declined(list).unwrap_err());
+            assert!(msg.contains("schema_description"), "{list}: {msg}");
+        }
     }
 }

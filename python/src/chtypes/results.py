@@ -14,7 +14,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from ._abi2._vocab import DefaultKind, FilterOutcome, MergeReason, Outcome, Verdict
+from ._abi2._vocab import DeclinedTier, DefaultKind, FilterOutcome, MergeReason, Outcome, Verdict
 
 __all__ = [
     "AtMergeEntry",
@@ -23,6 +23,7 @@ __all__ = [
     "Capabilities",
     "Column",
     "Computed",
+    "DeclinedSetting",
     "DiscoveredColumn",
     "EngineCell",
     "Discovery",
@@ -223,8 +224,10 @@ class FilterRowError:
 
 @dataclass(frozen=True, slots=True)
 class FilterResult:
-    """The `filter_result` document. `e` and `d` are never answers, and a caller
-    enforcing visibility fails closed on both; `Verdict.answered` says which."""
+    """The `filter_result` document. A verdict counts only when `outcome` is `ok`;
+    otherwise treat every verdict as `d`, whatever the verdict string holds. Under
+    `ok`, `e` and `d` are never answers, and a caller enforcing visibility fails
+    closed on both; `Verdict.answered` says which."""
 
     outcome: FilterOutcome
     err_code: int
@@ -248,17 +251,35 @@ class Column:
 
 
 @dataclass(frozen=True, slots=True)
+class DeclinedSetting:
+    """One setting a server's profile sets that this build's filters do not honor
+    in a WHERE: an entry of the server's `filter_declined_settings` (ABI v2).
+    `name` is bytes (from `name` or `name_b64`). `tier` is the tier this build
+    line's WHERE-settings list gives it, a `DeclinedTier`; one the description
+    does not list is its unknown(n) member (rule r3)."""
+
+    name: bytes
+    tier: DeclinedTier
+
+
+@dataclass(frozen=True, slots=True)
 class SchemaServer:
     """The server a schema was compiled on, as the library holds it. Its strings
     are the caller's own profile values given back, so they are plain text, not
     data-derived. `timezone` is the zone the schema's types bind: the profile's,
     or else the image zone. `settings` is the profile's settings (`{}` when it
     gave none). `macros` is None exactly when the profile carried no macros
-    (unknown), and a mapping, even an empty one, when it did (the complete set)."""
+    (unknown), and a mapping, even an empty one, when it did (the complete set).
+    `filter_declined_settings` is the settings the profile sets that this
+    build's filters do not honor in a WHERE, in the profile's own order, empty
+    when it lists none: a schema on a server that lists any is one
+    `compile_filter` declines (`UnsupportedError`), and a consumer that streams
+    rows refuses such a tenant (spec/abi-v2/where-settings/README.md)."""
 
     timezone: str
     settings: Mapping[str, str]
     macros: Mapping[str, str] | None
+    filter_declined_settings: tuple[DeclinedSetting, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

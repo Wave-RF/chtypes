@@ -183,8 +183,10 @@ type FilterResult struct {
 	ErrMsg              string
 	RowsRead            uint64
 	UnsupportedSettings []string
-	// Verdicts is one verdict per row. A caller enforcing visibility fails
-	// closed on every verdict whose Answered is false.
+	// Verdicts is one verdict per row. A verdict counts only when Outcome is
+	// FilterOK; for any other outcome, treat every verdict as VerdictDecline,
+	// whatever the verdict string holds. Under FilterOK, a caller enforcing
+	// visibility fails closed on every verdict whose Answered is false.
 	Verdicts []Verdict
 	Errors   []FilterRowError
 }
@@ -225,6 +227,24 @@ type SchemaServer struct {
 	// no macros (unknown), and non-nil, even empty, when it did (the complete
 	// set).
 	Macros map[string]string
+	// FilterDeclinedSettings is the settings the server's profile sets that
+	// this build's filters do not honor in a WHERE, in the profile's own
+	// order, from filter_declined_settings; empty when it lists none. A
+	// schema on a server that lists any is one CompileFilter declines
+	// (*UnsupportedError), and a consumer that streams rows refuses such a
+	// tenant (spec/abi-v2/where-settings/README.md).
+	FilterDeclinedSettings []DeclinedSetting
+}
+
+// DeclinedSetting is one setting a server's profile sets that this build's
+// filters do not honor in a WHERE: an entry of the server's
+// filter_declined_settings.
+type DeclinedSetting struct {
+	// Name is the setting's name, from name or name_b64 (a byte string).
+	Name string
+	// Tier is the tier this build line's WHERE-settings list gives it. One the
+	// description does not list is its unknown(n), kept as it came (rule r3).
+	Tier DeclinedTier
 }
 
 // SchemaReplicated is what ClickHouse's own TableZnodeInfo resolved for a

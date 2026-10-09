@@ -52,6 +52,7 @@ from typing import Final, Protocol
 from chtypes._abi2._decls import CHS_ABI_FINGERPRINT
 from chtypes._ocifetch import _constants as C
 from chtypes._ocifetch._dsse import TrustedKey
+from chtypes._ocifetch._errors import ArtifactUnpublishedError
 
 __all__ = [
     "ALIAS_SEPARATOR",
@@ -66,6 +67,7 @@ __all__ = [
     "PinningRefusedError",
     "abi",
     "active",
+    "ahead_of_registry",
     "alias_tag",
     "allow_overrides_for_tests",
     "channel_name",
@@ -272,6 +274,43 @@ def visible(predicate: object, channel: Channel | None = None) -> bool:
         return True
     fingerprint = predicate.get("abi_fingerprint") if isinstance(predicate, dict) else None
     return fingerprint == f"sha256:{channel.own_fingerprint}"
+
+
+def ahead_of_registry(
+    alias_absent: bool, predicate: object, channel: Channel | None = None
+) -> None:
+    """The dev channel's answer for an SDK whose fingerprint no published build
+    carries yet (docs/guides/fetch-v1.md §3; public issue #578): when every base
+    answered its own alias 404 (`alias_absent`) and the build the tag names is
+    signed for another fingerprint (`predicate`, the SIGNED predicate, the field
+    `visible` keys on), raise `ArtifactUnpublishedError`, the code a request no
+    build answers gets, naming both fingerprints. Nothing is installed and an
+    install of that build is never reported, because the lookup this SDK opens
+    through would refuse it. Returns in every other case: the alias answered,
+    the tag's build is this SDK's own, or the contract has no own fingerprint."""
+    channel = channel or active()
+    if not alias_absent or visible(predicate, channel):
+        return
+    raise ArtifactUnpublishedError(f"chtypes: {_ahead_message(channel.own_fingerprint, predicate)}")
+
+
+def _ahead_message(own: str, predicate: object) -> str:
+    """`ahead_of_registry`'s message: "no published build for this SDK's
+    fingerprint <own>; newest published on this channel is <fp> (build <id>)",
+    each fingerprint 64 lowercase hex without its `sha256:` prefix, the
+    parenthesis dropped when the predicate names no build, and "unnamed" for a
+    predicate that names no fingerprint."""
+    fields = predicate if isinstance(predicate, dict) else {}
+    theirs = fields.get("abi_fingerprint")
+    theirs = theirs.removeprefix("sha256:") if isinstance(theirs, str) else ""
+    message = (
+        f"no published build for this SDK's fingerprint {own}; "
+        f"newest published on this channel is {theirs or 'unnamed'}"
+    )
+    build = fields.get("build")
+    if isinstance(build, str) and build:
+        message += f" (build {build})"
+    return message
 
 
 def use_dev_channel_for_tests() -> Callable[[], None]:

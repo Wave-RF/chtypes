@@ -10,6 +10,7 @@ package chtypes
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -353,6 +354,70 @@ func TestDecodeSchemaDescriptionServer(t *testing.T) {
 		"a replica name not base64":      `{` + cols + `,"replicated":{"zookeeper_path":"/a","replica_name_b64":"*"}}`,
 	} {
 		_, err := decodeSchemaDescription([]byte(doc))
+		var ie *InternalError
+		if !errors.As(err, &ie) || !strings.Contains(err.Error(), "schema_description") {
+			t.Errorf("%s = %v, want an *InternalError naming the document", name, err)
+		}
+	}
+}
+
+// TestDecodeSchemaDescriptionFilterDeclinedSettings decodes the server's
+// filter_declined_settings from documents in the shape of
+// spec/abi-v2/abi.json's schema_description: [] and absent, entries in the
+// profile's own order, a name_b64 entry, a tier the description does not list
+// (its unknown(n), rule r3), members no description names (rule r2), and the
+// refusals.
+func TestDecodeSchemaDescriptionFilterDeclinedSettings(t *testing.T) {
+	const cols = `"columns":[{"name":"k","type":"UInt8","default_kind":"","default_expression":""}]`
+	server := func(list string) []byte {
+		return []byte(`{` + cols + `,"server":{"timezone":"UTC","settings":{"final":"1","aggregate_functions_null_for_empty":"1"},"filter_declined_settings":` + list + `}}`)
+	}
+
+	// [] is present and empty; absent (a document of no build at this
+	// fingerprint) is nil. Neither is a failure.
+	d, err := decodeSchemaDescription(server(`[]`))
+	if err != nil || d.Server == nil || d.Server.FilterDeclinedSettings == nil || len(d.Server.FilterDeclinedSettings) != 0 {
+		t.Fatalf("[] = %+v, %v; want a non-nil empty list", d.Server, err)
+	}
+	d, err = decodeSchemaDescription([]byte(`{` + cols + `,"server":{"timezone":"UTC","settings":{}}}`))
+	if err != nil || d.Server == nil || d.Server.FilterDeclinedSettings != nil {
+		t.Fatalf("absent = %+v, %v; want nil", d.Server, err)
+	}
+
+	// The profile's own order, never sorted; a name_b64 entry decodes to its
+	// bytes; an unlisted tier is kept as it came; unknown members are ignored.
+	d, err = decodeSchemaDescription(server(`[{"name":"final","tier":"result-content","x_future":1},` +
+		`{"name":"aggregate_functions_null_for_empty","tier":"predicate"},` +
+		`{"name_b64":"eP95","tier":"predicate-unflipped"},` +
+		`{"name":"x_future_setting","tier":"x_future_tier","x_future_obj":{"a":[1]}}]`))
+	if err != nil || d.Server == nil {
+		t.Fatalf("entries = %+v, %v", d, err)
+	}
+	want := []DeclinedSetting{
+		{Name: "final", Tier: TierResultContent},
+		{Name: "aggregate_functions_null_for_empty", Tier: TierPredicate},
+		{Name: "x\xffy", Tier: TierPredicateUnflipped},
+		{Name: "x_future_setting", Tier: "x_future_tier"},
+	}
+	if !reflect.DeepEqual(d.Server.FilterDeclinedSettings, want) {
+		t.Errorf("entries = %#v, want %#v", d.Server.FilterDeclinedSettings, want)
+	}
+	for i, e := range d.Server.FilterDeclinedSettings {
+		if e.Tier.Known() != (i < 3) {
+			t.Errorf("entry %d: tier %q Known() = %v", i, e.Tier, e.Tier.Known())
+		}
+	}
+
+	// Refusals: each an *InternalError naming the document.
+	for name, list := range map[string]string{
+		"not an array":            `{"name":"final","tier":"predicate"}`,
+		"an entry not an object":  `["final"]`,
+		"a name in both forms":    `[{"name":"final","name_b64":"ZmluYWw=","tier":"predicate"}]`,
+		"no name":                 `[{"tier":"predicate"}]`,
+		"a name not base64":       `[{"name_b64":"*","tier":"predicate"}]`,
+		"a tier that is a number": `[{"name":"final","tier":1}]`,
+	} {
+		_, err := decodeSchemaDescription(server(list))
 		var ie *InternalError
 		if !errors.As(err, &ie) || !strings.Contains(err.Error(), "schema_description") {
 			t.Errorf("%s = %v, want an *InternalError naming the document", name, err)
