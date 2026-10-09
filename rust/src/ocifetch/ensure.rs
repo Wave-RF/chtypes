@@ -373,7 +373,7 @@ fn ensure_online(
         // install of that build is never reported and nothing is downloaded
         // or installed.
         channel::ahead_of_registry(alias_absent, &predicate, || {
-            cached_own_build(&res.root, &res.system_dirs, &version_request, &res.platform)
+            cached_own_build(&res.root, &res.system_dirs, version_request, &res.platform)
         })?;
     }
 
