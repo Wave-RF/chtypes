@@ -454,7 +454,7 @@ jobs:
             -e REGISTRY_HTTP_ADDR=0.0.0.0:5443 \
             -e REGISTRY_HTTP_TLS_CERTIFICATE=/certs/registry.test.crt \
             -e REGISTRY_HTTP_TLS_KEY=/certs/registry.test.key \
-            registry:2
+            public.ecr.aws/docker/library/registry:2
           ok=
           for _ in $(seq 1 30); do
             if curl -fsS https://registry.test:5443/v2/ >/dev/null 2>&1; then ok=1; break; fi
@@ -1265,7 +1265,7 @@ jobs:
           oras version
       - name: start a plain-HTTP registry:2 (no TLS/proxy needed for this job)
         run: |
-          docker run -d --name v1-preseed-registry -p 5000:5000 registry:2
+          docker run -d --name v1-preseed-registry -p 5000:5000 public.ecr.aws/docker/library/registry:2
           ok=
           for _ in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:5000/v2/ >/dev/null 2>&1; then ok=1; break; fi
