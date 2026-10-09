@@ -42,6 +42,10 @@ import (
 // flightBound turns a hang into a failure; a working registry answers at once.
 const flightBound = 30 * time.Second
 
+// startBound bounds the fixture server's start, which took about 35 s on the
+// darwin-arm64 runner before server.py stopped looking its address up.
+const startBound = 120 * time.Second
+
 // flightCases are the fixture server's case ids, one per test, each served
 // from the one stub tree.
 var flightCases = []string{"flight-install", "flight-held", "flight-one-fetch", "flight-fails", "flight-cancel", "flight-abandon"}
@@ -217,8 +221,8 @@ func startFlightServer(t *testing.T, fixtures string) string {
 	var got string
 	select {
 	case got = <-line:
-	case <-time.After(flightBound):
-		t.Fatalf("%s printed no LISTENING line", script)
+	case <-time.After(startBound):
+		t.Fatalf("%s printed no LISTENING line in %s", script, startBound)
 	}
 	fields := strings.Fields(got)
 	if len(fields) != 3 || fields[0] != "LISTENING" {

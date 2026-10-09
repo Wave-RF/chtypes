@@ -121,6 +121,7 @@ import argparse
 import json
 import re
 import socket
+import socketserver
 import sys
 import threading
 import time
@@ -548,14 +549,29 @@ def make_handler_class(state: ScriptState, cases: dict[str, dict], origin_label:
     return _H
 
 
+class LoopbackServer(ThreadingHTTPServer):
+    """ThreadingHTTPServer without HTTPServer.server_bind's reverse lookup of
+    its own address (`socket.getfqdn`), whose only use is `server_name`, which
+    nothing here reads. On the darwin-arm64 runner a test that started this
+    server waited about 35 s for its LISTENING line (measured through the
+    Rust and Python test durations on 2026-10-09; the lookup as the cause is
+    inferred), against well under a second on Linux. The socket bind itself is unchanged."""
+
+    def server_bind(self) -> None:
+        socketserver.TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = str(host)
+        self.server_port = port
+
+
 def run_server(fixtures: Path, port: int = 0) -> tuple[ThreadingHTTPServer, ThreadingHTTPServer, ScriptState]:
     global FIXTURES
     FIXTURES = fixtures
     cases = load_cases(fixtures)
     state = ScriptState()
 
-    srv1 = ThreadingHTTPServer(("127.0.0.1", port), make_handler_class(state, cases, "primary", "", ""))
-    srv2 = ThreadingHTTPServer(("127.0.0.1", 0), make_handler_class(state, cases, "second", "", ""))
+    srv1 = LoopbackServer(("127.0.0.1", port), make_handler_class(state, cases, "primary", "", ""))
+    srv2 = LoopbackServer(("127.0.0.1", 0), make_handler_class(state, cases, "second", "", ""))
 
     origin1 = f"http://127.0.0.1:{srv1.server_address[1]}"
     origin2 = f"http://127.0.0.1:{srv2.server_address[1]}"

@@ -58,6 +58,8 @@ const CASES = ['flight-install', 'flight-held', 'flight-one-fetch', 'flight-fail
 type CaseId = (typeof CASES)[number];
 /** Turns a hang into a failure; a working registry answers at once. */
 const BOUND_MS = 30_000;
+/** Bounds the fixture server's start, which took about 35 s on the darwin-arm64 runner before server.py stopped looking its address up. */
+const START_BOUND_MS = 120_000;
 const N = 8;
 const zstd = promisify(zstdCompress);
 
@@ -247,7 +249,7 @@ describe.skipIf(!stubsAvailable)('the registry with a fetch in flight (public is
     writeFileSync(path.join(fixtures, 'cases.json'), JSON.stringify({ schema: 1, cases: CASES.map((id) => ({ id, tree: 'stub' })) }));
     layerPath = `/chtypes/v1/blobs/${layer}`;
     server = await startServer(fixtures);
-  });
+  }, START_BOUND_MS);
 
   afterAll(() => {
     server?.proc.kill();

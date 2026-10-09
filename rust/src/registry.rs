@@ -258,6 +258,11 @@ impl Drop for AbandonOnUnwind<'_> {
     }
 }
 
+/// The test hook's type: called with the request each time an open starts
+/// waiting on an attempt.
+#[cfg(test)]
+type OnWait = Box<dyn Fn(&str) + Send + Sync>;
+
 /// A request for a version, to a loaded library. `Send + Sync`.
 ///
 /// An open never waits for another request's fetch, and concurrent opens of
@@ -270,7 +275,7 @@ pub struct Registry {
     /// A test hook: called each time an open starts waiting on an attempt,
     /// its own or another open's.
     #[cfg(test)]
-    pub(crate) on_wait: Option<Box<dyn Fn(&str) + Send + Sync>>,
+    pub(crate) on_wait: Option<OnWait>,
 }
 
 impl std::fmt::Debug for Registry {
