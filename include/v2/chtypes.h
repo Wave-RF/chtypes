@@ -38,6 +38,16 @@
  * a handle that call uses. Process setup (`chs_initialize`, then `chs_set_defaults`) runs before
  * the traffic it configures.
  *
+ * Stacks. A call's answer doesn't depend on the calling thread's stack. Every call that returns a
+ * `chs_status` runs with an 8 MiB stack's worth of room: on the calling thread when half its stack,
+ * less what it has used, is between 3.75 MiB and 4 MiB (a default 8 MiB thread: glibc's, a Go cgo
+ * call, a Python thread, a main thread); otherwise on a library-owned thread with an 8 MiB stack,
+ * one per calling thread, made at its first such call and ended with it. The caller blocks until
+ * the call returns. The library's threads block every asynchronous signal. After `fork()`, a
+ * child's first such call makes its own thread. If the library can't make its thread, the call
+ * returns `CHS_INTERNAL`. The frees, the buffer and error accessors, `chs_shutdown` and the
+ * handshake always run on the calling thread.
+ *
  * Time zones. A library image has one zone of its own, set once by `chs_initialize`: the image
  * zone. A schema has a home zone, its server's `timezone` (`chs_server_create`), or else the image
  * zone. The schema's types bind its home zone, as a server's table binds the server's zone after a
@@ -345,12 +355,11 @@ typedef struct chs_block chs_block;
  * - `CHS_REJECTED`: ClickHouse's own refusal, with its own code, name and message, which a server
  *   would also give. `CHS_REJECTED` with ch_code 306, TOO_DEEP_RECURSION, never `CHS_INTERNAL`, is
  *   returned for a deep argument the call compiles (an expression, a type, or a settings, columns
- *   or options JSON), or when the calling thread's stack is already short, at `chs_set_defaults`,
- *   `chs_server_create`, `chs_schema_create`, `chs_schema_describe`, `chs_preview_row`,
- *   `chs_preview_batch`, `chs_filter_create`, `chs_filter_eval_body`, `chs_block_create`,
- *   `chs_filter_eval_block`, `chs_type_validate`, `chs_reference_type` and `chs_discover_columns`.
- *   A body's depth refusal is reported in its document (`CHS_OK`, with code 306), as every refused
- *   body is.
+ *   or options JSON), at `chs_set_defaults`, `chs_server_create`, `chs_schema_create`,
+ *   `chs_schema_describe`, `chs_preview_row`, `chs_preview_batch`, `chs_filter_create`,
+ *   `chs_filter_eval_body`, `chs_block_create`, `chs_filter_eval_block`, `chs_type_validate`,
+ *   `chs_reference_type` and `chs_discover_columns`. A body's depth refusal is reported in its
+ *   document (`CHS_OK`, with code 306), as every refused body is.
  * - `CHS_DECLINED`: this build will not answer; a server might accept. Never scored as agreement.
  * - `CHS_INVALID_ARGUMENT`: caller misuse, such as a NULL pointer with a nonzero length, a
  *   wrong-kind, freed or cross-library handle, or a NULL required out-parameter.
