@@ -58,6 +58,11 @@ set -euo pipefail
 # deb275922dbff76e), the cache subroot v2, npm's `latest` dist-tag, and
 # never-default replaced by its opposite (the default then IS the new 2.x),
 # and no FP_ALIAS: a production channel never resolves an alias.
+# The bindings already carry that channel, built and tested but not the default
+# (docs/guides/fetch-v1.md, "Generation 2 after the lock"), so the lock is a
+# switch. The production repository caches its tags and tags/list for 300 s (the
+# dev repository, 60 s): release-verify.sh reads the listing once, and a retry
+# window added around that read must cover the channel's value, not 60 s.
 # Until that pull request exists, any other CHANNEL refuses everything below.
 # ============================================================================
 CHANNEL="v2-dev"

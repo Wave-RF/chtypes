@@ -1,0 +1,13 @@
+{
+  "name": "chtypes/v1",
+  "tags": [
+    "26.8",
+    "26.8--fp-0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d",
+    "26.8.14.2",
+    "26.8.14.2--fp-0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d",
+    "26.7",
+    "26.7--fp-0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d",
+    "26.6",
+    "26.6--fp-0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d"
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 2,
+  "mediaType": "application/vnd.oci.image.manifest.v1+json",
+  "artifactType": "application/vnd.wavehouse.chtypes.artifact.v1",
+  "config": {
+    "mediaType": "application/vnd.wavehouse.chtypes.config.v1+json",
+    "digest": "sha256:e2fc21fddb947a5e2a78524ac1db87d8ef6e0f77b04573e5826f9f2daa7316dc",
+    "size": 645
+  },
+  "layers": [
+    {
+      "mediaType": "application/vnd.oci.image.layer.v1.tar+zstd",
+      "digest": "sha256:5c2c6a350e760d44ac717444c983eb94d77df1e737cfa0d2bad7eb5703075866",
+      "size": 194
+    }
+  ]
+}
