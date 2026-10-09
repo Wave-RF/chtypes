@@ -53,4 +53,4 @@ Throughout, `payload_len` appears as `Computed`, never in `Values`. It is `MATER
 ## Two things this demo does not do
 
 - **It does not compare anything.** Everything here is insert-side coercion. A `WHERE`-clause constant is a different question with different rules — see the C ABI contract on filters before folding a predicate operand through this API.
-- **It does not prove float precision on other hosts.** This walkthrough was recorded on macOS, whose artifacts are for development (Linux is the reference): macOS `long double` is 53-bit, so float parses diverge from real servers. Nothing in this batch is float-sensitive, but do not take float results from a Mac.
+- **It does not prove float precision on other hosts.** This walkthrough was recorded on macOS. Its artifacts match ClickHouse on macOS, and on 26.7 and later macOS and Linux agree bit for bit. On 26.3, float text parses differ by platform (see `docs/limitations.md`). Nothing in this batch is float-sensitive.
