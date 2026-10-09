@@ -43,7 +43,7 @@ A vocabulary's members come from the description (`spec/abi-v1/abi.json`, throug
 
 ## Changelog entries
 
-Most CHANGELOG bullets describe themselves. One has a fixed shape, because its criterion lives elsewhere and must not drift into a second, competing description: an **enforcement-gate lift** on the filter surface (`docs/limitations.md` → [Filters are for comparison, not enforcement, for now](docs/limitations.md#filters-are-for-comparison-not-enforcement-for-now)).
+Most CHANGELOG bullets describe themselves. One has a fixed shape, because its criterion lives elsewhere and must not drift into a second, competing description: an **enforcement-gate lift** on the filter surface (`docs/limitations.md` → [Filters are enforcement-grade against a same-platform server, per lifted (line, platform)](docs/limitations.md#filters-are-enforcement-grade-against-a-same-platform-server-per-lifted-line-platform)).
 
 When a `(ClickHouse line, platform)` pair meets that page's lift criterion, announce it as its own bullet under an existing `### Changed` heading in each affected binding's CHANGELOG — never a new `### Changed` heading for it, which would fail markdownlint's MD024 — in this shape:
 
