@@ -49,7 +49,11 @@ When a `(ClickHouse line, platform)` pair meets that page's lift criterion, anno
 
 - **Enforcement gate lifted** for `<line>` on `<platform>`.
 
-That bullet is the only record of a lift: nothing elsewhere — a comment, an issue, a dashboard — lifts the gate. A `(line, platform)` pair stays under the gate until its own CHANGELOG entry, in this shape, says otherwise, and a pair that diverges again after being lifted gets a fresh entry the same way.
+That bullet is the only record of a lift: nothing elsewhere — a comment, an issue, a dashboard — lifts the gate. A `(line, platform)` pair stays under the gate until its own CHANGELOG entry, in this shape, says otherwise, and a pair that diverges again after being lifted goes back under the gate with its own bullet, under the same `### Changed` heading, in this fixed shape:
+
+- **Enforcement gate restored** for `<line>` on `<platform>`.
+
+The divergence itself is recorded once, in `docs/limitations.md` → Known divergences, never in the bullet; the pair stays gated until a fresh lift bullet says otherwise.
 
 ## Policy merge
 
