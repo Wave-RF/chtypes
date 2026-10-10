@@ -38,6 +38,10 @@ list-offline-empty-strict list --offline --strict --cache @EMPTY@
 where where --cache @CACHE@
 where-strict where --strict --cache @CACHE@
 where-all where --all --cache @CACHE@
+resolve-offline-empty resolve 26.8 --offline --cache @EMPTY@
+resolve-offline-empty-json resolve --json 26.8 --offline --cache @EMPTY@
+prune-empty prune --cache @EMPTY@
+prune-dry-run-empty prune --dry-run --keep 2 --line 26.8 --cache @EMPTY@
 usage-no-arguments
 usage-unknown-command frobnicate
 usage-short-version -V
@@ -49,6 +53,13 @@ usage-fetch-needs-a-version fetch
 usage-update-needs-lock fetch --update
 usage-update-frozen fetch --update --lock f --frozen
 usage-update-offline fetch --update --lock f --offline
+usage-resolve-needs-a-version resolve
+usage-resolve-two-versions resolve 26.8 26.9
+usage-resolve-platform resolve 26.8 --platform linux-arm64
+usage-prune-positional prune 26.8
+usage-prune-keep-zero prune --keep 0
+usage-prune-line prune --line 26.8.15
+usage-prune-offline prune --offline
 CASES
 }
 
@@ -215,6 +226,35 @@ case "$1" in
     fi
     if [ "$cmd" = list ] && [ "$brk" = list-header ]; then echo "installed ($cache):"; fi
     exit 0 ;;
+  resolve)
+    shift
+    n=0; offline=0
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --json | --strict) ;; --offline) offline=1 ;; --cache) shift ;;
+        -*) bad ;;
+        *) n=$((n + 1)) ;;
+      esac
+      shift
+    done
+    [ "$n" = 1 ] || bad
+    # Offline, with nothing installed: the offline miss (public issue #493).
+    if [ "$offline" = 1 ]; then echo "chtypes: CHTYPES_ARTIFACT_MISSING" >&2; exit 1; fi
+    exit 0 ;;
+  prune)
+    shift
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --dry-run | --strict) ;; --cache) shift ;;
+        --keep) { [ "$2" -ge 1 ] 2>/dev/null || [ "$brk" = keep-zero-accepted ]; } || bad; shift ;;
+        --line) case "$2" in *.*.*) bad ;; esac; shift ;;
+        *) bad ;;
+      esac
+      shift
+    done
+    # The summary always goes to stderr (public issue #494).
+    echo "chtypes: pruned 0 build(s)" >&2
+    exit 0 ;;
 esac
 bad
 FAKE
@@ -228,7 +268,7 @@ selftest() {
   # would prove nothing.
   FAKE_BREAK="" compare fake "$scratch" >/dev/null || { echo "check-cli-parity --selftest: the conforming fake CLI does not match the expectation" >&2; cat "$scratch/diff-fake.txt" >&2; exit 1; }
   local brk
-  for brk in help-stderr version-bare list-header platform-accepted where-all-root-only; do
+  for brk in help-stderr version-bare list-header platform-accepted where-all-root-only keep-zero-accepted; do
     if FAKE_BREAK="$brk" compare fake "$scratch" >/dev/null 2>&1; then
       echo "check-cli-parity --selftest: the planted mismatch '$brk' was NOT caught" >&2
       exit 1

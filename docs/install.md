@@ -72,7 +72,7 @@ cargo install chtypes && chtypes fetch 26.8                          # Rust
 
 A spelling is two, three or four parts (`26.8`, `26.8.15`, `26.8.15.10`), with no `v` prefix and no channel suffix. The command installs into the per-user OCI cache `${XDG_CACHE_HOME:-~/.cache}/chtypes/v1/`, which every binding reads by default, so **one machine set up once serves all four**. `CHTYPES_CACHE` overrides the cache directory, and `chtypes where` prints the one in use. `CHTYPES_REGISTRY`, which the previous generation used, is retired: set, it warns once and is otherwise ignored.
 
-Before anything lands, the command verifies a Sigstore bundle signed under the release key and the digest of every byte. `fetch --all` takes every line the registry publishes for this platform; `verify`, `list` and `where` are the other three subcommands. [`guides/artifacts.md`](guides/artifacts.md) has the whole story, including pinning for CI with `--lock` and `--frozen`.
+Before anything lands, the command verifies a Sigstore bundle signed under the release key and the digest of every byte. `fetch --all` takes every line the registry publishes for this platform; `verify`, `list`, `where`, `resolve` (what a line resolves to, installing nothing) and `prune` (remove the builds newer ones supersede) are the other five subcommands. [`guides/artifacts.md`](guides/artifacts.md) has the whole story, including pinning for CI with `--lock` and `--frozen`.
 
 Pick a line you actually need. Each artifact is 160–300 MB on disk and about 120 MB resident once loaded, so fetch the versions your deployments run rather than all of them.
 

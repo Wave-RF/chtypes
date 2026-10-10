@@ -46,9 +46,12 @@ from chtypes._ocifetch._ensure import (
     resolve_installed,
 )
 from chtypes._ocifetch._errors import ArtifactMissingError, FetchError
+from chtypes._ocifetch._hold import HELD, hold
 from chtypes._ocifetch._http import TransportError
 from chtypes._ocifetch._layout import VerifiedRecord, resolve_cache_root, write_verified_install
 from chtypes._ocifetch._oci import manifest_layer_descriptor, manifest_single_layer, parse_digest
+from chtypes._ocifetch._prune import Superseded, prune
+from chtypes._ocifetch._resolve import Resolution, resolve
 from chtypes._ocifetch._unpack import unpack_tar_zst
 
 FIXTURES_ENV = "CHTYPES_V1_CONFORMANCE"
@@ -291,6 +294,45 @@ def _snapshot_install(cache_dir: Path, manifest_digest: str) -> dict[str, str]:
     }
 
 
+def _layout_files(layout_dir: Path) -> list[str]:
+    """Every file under the cache's layout, as `/`-separated relative paths,
+    sorted: what a `prune-` case compares before and after the call."""
+    if not layout_dir.is_dir():
+        return []
+    return sorted(
+        p.relative_to(layout_dir).as_posix() for p in layout_dir.rglob("*") if p.is_file()
+    )
+
+
+def _check_prune(
+    expect_prune: dict, pruned: list[Superseded], layout_dir: Path, before: list[str]
+) -> str | None:
+    """A prune's report against `expect.prune`, then the layout it left: every
+    `gone` path is gone, every other file the layout held before the call is
+    still there, and index.json lists exactly `index_after`."""
+    removed = [s.manifest for s in pruned if not s.in_use]
+    in_use = [s.manifest for s in pruned if s.in_use]
+    if removed != expect_prune["removed"]:
+        return f"prune reported removed {removed}, want {expect_prune['removed']}"
+    if in_use != expect_prune["in_use"]:
+        return f"prune reported in use {in_use}, want {expect_prune['in_use']}"
+    gone = expect_prune["gone"]
+    want = [f for f in before if not any(f == g or f.startswith(g + "/") for g in gone)]
+    after = _layout_files(layout_dir)
+    if after != want:
+        return f"the layout after the prune holds {after}, want {want}"
+    for g in gone:
+        if (layout_dir / g).exists():
+            return f"{g} is still there after the prune"
+    index_path = layout_dir / "index.json"
+    index = []
+    if index_path.is_file():
+        index = [e.get("digest") for e in json.loads(index_path.read_text()).get("manifests", [])]
+    if index != expect_prune["index_after"]:
+        return f"index.json lists {index} after the prune, want {expect_prune['index_after']}"
+    return None
+
+
 def _check_registry_log(http_port: int, case_id: str, expect_requests: dict) -> str | None:
     """The same expectations, over http, against what the registry itself logged
     (`GET /_log/s-<case-id>`, docs/guides/fetch-v1.md §10), which every binding's
@@ -531,6 +573,14 @@ def _run_case(
         if not snap:
             return "fail", f"records_intact: {d} is not installed before the call"
 
+    # held: each named build held by this process, as a process using it holds
+    # it, through the very call the registry makes before a load.
+    for d in setup["held"]:
+        if hold(layout_dir / "unpacked" / "sha256" / parse_digest(d)) != HELD:
+            return "fail", f"held: {d} could not be held"
+    # A prune- case compares every file of the layout before and after.
+    files_before = _layout_files(layout_dir) if req["prune"] is not None else []
+
     clock = _FakeClock()
     request_log.clear()
     options = Options(
@@ -552,6 +602,8 @@ def _run_case(
     resolved = None
     generic_result = None
     listed: list[str] | None = None
+    resolutions: list[Resolution] | None = None
+    pruned: list[Superseded] | None = None
     # docs/guides/fetch-v1.md §10 "The generic-fetch convention": a case id
     # starting goldens-/fixtures- exercises fetch_signed(), not ensure() —
     # cases.schema.json has no separate shape for this, so the convention is
@@ -572,7 +624,18 @@ def _run_case(
 
         _ensure_module.search_roots = _fake_search_roots
     try:
-        if is_generic:
+        if case["id"].startswith("resolve-build-"):
+            # What a request resolves to on every platform, never a layer
+            # (docs/guides/fetch-v1.md §10).
+            resolutions, _warnings = resolve(Request(req["spelling"]), options)
+        elif case["id"].startswith("prune-"):
+            pruned = prune(
+                options,
+                line=req["prune"]["line"],
+                keep=req["prune"]["keep"],
+                dry_run=req["prune"]["dry_run"],
+            )
+        elif is_generic:
             is_goldens = case["id"].startswith("goldens-")
             predicate_type = C.PREDICATE_TYPE_GOLDENS if is_goldens else C.PREDICATE_TYPE_FIXTURES
             # _ensure.fetch_signed's own docstring: `repository` is a path
@@ -663,6 +726,18 @@ def _run_case(
 
     if expect["tags"] is not None and not mismatches and listed != expect["tags"]:
         mismatches.append(f"listed {listed!r} != {expect['tags']!r}")
+
+    if expect["resolutions"] is not None and resolutions is not None:
+        got = [
+            {"platform": r.platform, "version": r.version, "build": r.build, "manifest": r.manifest}
+            for r in resolutions
+        ]
+        if got != expect["resolutions"]:
+            mismatches.append(f"resolved {got} != {expect['resolutions']}")
+    if expect["prune"] is not None and pruned is not None:
+        prune_mismatch = _check_prune(expect["prune"], pruned, layout_dir, files_before)
+        if prune_mismatch:
+            mismatches.append(prune_mismatch)
 
     if clock.sleeps != expect["sleeps"]:
         mismatches.append(f"sleeps {clock.sleeps} != {expect['sleeps']}")

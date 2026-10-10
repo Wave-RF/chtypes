@@ -25,6 +25,7 @@ Unix only: the loader is `dlopen`. Minimum supported Rust version 1.87. `cargo d
 | construct a registry            | `Registry::new(RegistryOptions { fetch, autofetch, preload })`; it opens nothing                                                                        |
 | open a version                  | `registry.for_version("26.8") -> Result<Arc<Library>>`                                                                                                  |
 | what is installed, what is open | `registry.installed()`, `registry.libraries()`                                                                                                          |
+| fetch without opening           | `registry.fetch("26.8") -> Result<Resolved>`: installs the build, loads nothing, needs no `setup`; one fetch with a concurrent open (#492)              |
 | open a local build              | `Library::open_unverified(path, allow)`; also needs `CHTYPES_ALLOW_UNVERIFIED_LIBRARY=1`                                                                |
 | what the library is             | `lib.build_info()`, `lib.version()`, `lib.minor()`, `lib.path()`, `lib.resolved()`                                                                      |
 | helpers                         | `validate_type`, `quote_identifier`, `quote_identifier_if_needed`, `quote_literal`, `error_codes`, `discover_query`, `discover_columns`, `live_handles` |
@@ -51,6 +52,8 @@ The crate ships a `chtypes` binary over the fetch layer (`cargo install chtypes`
 | `chtypes verify`                                                                          | re-hash every installed library against its verified record                                                                                             |
 | `chtypes list [--offline]`                                                                | the installed builds, then, unless `--offline`, the version spellings the registry publishes (`tags/list`, filtered to two-, three- and four-part tags) |
 | `chtypes where [--all]`                                                                   | the v1 cache root; `--all` prints every directory searched, the root first, one per line                                                                |
+| `chtypes resolve <spelling> [--json] [--offline]`                                         | what the spelling resolves to on every platform the registry offers, each verified, nothing installed; `--json` prints one JSON array (#493)            |
+| `chtypes prune [--line L] [--keep N] [--dry-run]`                                         | remove each line's superseded builds, keeping the newest `N` (default 1) and any build a running process holds (#494)                                   |
 
 `--lock F` writes the lock after a fetch, `--frozen` fetches exactly what the lock pins (default file `chtypes.lock`) with no discovery, `--offline` reads the cache only, and `--update` re-resolves and rewrites the lock. The environment variables are `CHTYPES_ARTIFACTS_URL`, `CHTYPES_CACHE`, `CHTYPES_DOWNLOAD_TOKEN`, `CHTYPES_TRUSTED_KEYS` and `CHTYPES_ALLOW_UNSIGNED`.
 

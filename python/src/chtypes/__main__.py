@@ -6,6 +6,10 @@
     chtypes verify [--cache <dir>] [--strict]   re-verify every installed build
     chtypes list   [--cache <dir>] [--offline] [--strict]
     chtypes where  [--cache <dir>] [--strict] [--all]   the cache root; --all: every search dir
+    chtypes resolve <spelling> [--json] [--cache <dir>] [--offline] [--strict]
+                   the build and manifest each platform resolves to, verified; installs nothing
+    chtypes prune  [--line <line>] [--keep <n>] [--dry-run] [--cache <dir>] [--strict]
+                   remove the builds of each line newer ones supersede, keeping the newest n
 
 A spelling is `26.8`, `26.8.15` or `26.8.15.10`. Exit statuses come from the
 `errors` table of spec/fetch-v1/constants.json (generated into the fetch layer
@@ -42,6 +46,7 @@ from ._ocifetch._faults import probe_roots
 from ._ocifetch._http import FetchPolicy, RetryPolicy, TransportError, fetch_from_bases
 from ._ocifetch._layout import resolve_cache_root, search_roots
 from ._ocifetch._lock import load_lock
+from ._ocifetch._prune import is_line
 from .errors import ChtypesError
 from .registry import FetchOptions
 
@@ -174,6 +179,55 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="every directory searched, in order, the cache root first (one per line)",
     )
+
+    resolving = sub.add_parser(
+        "resolve",
+        help="the build and manifest each platform resolves to, verified; installs nothing",
+        description=(
+            "What a line or version resolves to on every platform the registry offers, "
+            "each signature verified, with no layer downloaded (docs/guides/fetch-v1.md section 3)."
+        ),
+    )
+    resolving.add_argument(
+        "spelling",
+        metavar="<spelling>",
+        help="26.8, 26.8.15 or 26.8.15.10 (no v prefix, no channel suffix)",
+    )
+    resolving.add_argument(
+        "--json",
+        action="store_true",
+        help="print one JSON array, one object per platform, instead of one line per platform",
+    )
+    cache_option(resolving)
+    resolving.add_argument(
+        "--offline",
+        action="store_true",
+        help="answer from the cache; no network (or set CHTYPES_OFFLINE=1)",
+    )
+
+    pruning = sub.add_parser(
+        "prune",
+        help="remove the builds of each line newer ones supersede, keeping the newest n",
+        description=(
+            "Remove the installed builds of each line that newer installed builds of the same line "
+            "and platform supersede, keeping the newest n, and never one a running process holds "
+            "(docs/guides/fetch-v1.md section 1)."
+        ),
+    )
+    pruning.add_argument(
+        "--line", metavar="<line>", help="prune only this line, such as 26.8 (default: every line)"
+    )
+    pruning.add_argument(
+        "--keep",
+        metavar="<n>",
+        type=int,
+        default=1,
+        help="how many of each line's newest builds to keep, per platform (at least 1; default 1)",
+    )
+    pruning.add_argument(
+        "--dry-run", action="store_true", help="print what would be removed, and remove nothing"
+    )
+    cache_option(pruning)
     return parser
 
 
@@ -329,7 +383,55 @@ def _cmd_where(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-_COMMANDS = {"fetch": _cmd_fetch, "verify": _cmd_verify, "list": _cmd_list, "where": _cmd_where}
+def _cmd_resolve(args: argparse.Namespace) -> int:
+    options = _options(args)
+    request = fetch_layer.Request(args.spelling)  # a spelling error: usage, before any I/O
+    rows, warnings = fetch_layer.resolve(request, options)
+    for warning in warnings:
+        _say(f"chtypes: warning: {warning}")
+    if args.json:
+        doc = [
+            {"platform": r.platform, "version": r.version, "build": r.build, "manifest": r.manifest}
+            for r in rows
+        ]
+        sys.stdout.write(json.dumps(doc, separators=(",", ":")) + "\n")
+    else:
+        for r in rows:
+            sys.stdout.write(f"resolved {r.version} {r.platform} {r.build} {r.manifest}\n")
+    sys.stdout.flush()
+    return EXIT_OK
+
+
+def _cmd_prune(args: argparse.Namespace) -> int:
+    if args.keep < 1:
+        raise ValueError(f"chtypes: --keep is at least 1, not {args.keep}")
+    if args.line is not None and not is_line(args.line):
+        raise ValueError(f"chtypes: --line takes a two-part line such as 26.8, not {args.line!r}")
+    options = _options(args)
+    results = fetch_layer.prune(options, line=args.line, keep=args.keep, dry_run=args.dry_run)
+    removed = 0
+    for r in results:
+        if r.in_use:
+            word = "in-use"
+        else:
+            removed += 1
+            word = "would-prune" if args.dry_run else "pruned"
+        sys.stdout.write(f"{word} {r.version} {r.platform} {r.dir}\n")
+    sys.stdout.flush()
+    _say_notes(options)
+    root = resolve_cache_root(args.cache)
+    _say(f"chtypes: {'would prune' if args.dry_run else 'pruned'} {removed} build(s) under {root}")
+    return EXIT_OK
+
+
+_COMMANDS = {
+    "fetch": _cmd_fetch,
+    "verify": _cmd_verify,
+    "list": _cmd_list,
+    "where": _cmd_where,
+    "resolve": _cmd_resolve,
+    "prune": _cmd_prune,
+}
 
 
 def main(argv: Sequence[str] | None = None) -> int:
