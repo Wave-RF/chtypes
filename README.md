@@ -59,7 +59,7 @@ npx @wavehouse/chtypes fetch 26.8
 cargo install chtypes && chtypes fetch 26.8
 ```
 
-A signature over the library's statement and the sha256 of every byte are checked before anything is unpacked, and the library's own build record is checked again when it loads. `chtypes list` shows the lines the registry publishes. Which lines are supported is not stated by the registry yet, so [docs/support-v1.md](docs/support-v1.md) says "support unknown" rather than guessing.
+A signature over the library's statement and the sha256 of every byte are checked before anything is unpacked, and the library's own build record is checked again when it loads. `chtypes list` shows the lines the registry publishes, and [docs/support-v2.md](docs/support-v2.md) is generated from the registry's signed statements, each verified before anything is read from it.
 
 ## Quickstart
 
@@ -159,7 +159,7 @@ A bad row is a **verdict, not an error**: `outcome` becomes `rejected`, carrying
 
 ## What is supported
 
-Three axes — the language you call from, the platform you run on, and the ClickHouse line you want answers for. **[docs/support-v1.md](docs/support-v1.md)** states them by hand: Go, Python, TypeScript and Rust; `linux-amd64`, `linux-arm64` and `darwin-arm64` (Unix only — the loaders are `dlopen`); and the ClickHouse lines the registry publishes, which `chtypes list` prints. The v1 channel carries no statement of which lines are supported, so a line's support reads **unknown**, never unsupported.
+Three axes — the language you call from, the platform you run on, and the ClickHouse line you want answers for. **[docs/support-v2.md](docs/support-v2.md)** is generated from the registry's verified statements: Go, Python, TypeScript and Rust; `linux-amd64`, `linux-arm64` and `darwin-arm64` (Unix only — the loaders are `dlopen`); and, per line and platform, the exact ClickHouse version, build and glibc floor the registry publishes. Where the page does not know something it says **support unknown**, never unsupported. The 1.x line's page, written by hand, is [docs/support-v1.md](docs/support-v1.md).
 
 ## Known gaps in 1.0
 

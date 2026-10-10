@@ -88,6 +88,10 @@ VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$")
 BUILD_RE = re.compile(r"^[0-9]{8}\.[0-9]{6}$")
 GLIBC_RE = re.compile(r"^[0-9]+\.[0-9]+(\.[0-9]+)?$")
 
+# The selftest's planted strings, one per pattern below, built at run time.
+PLANTED_NAME = "chtypes-" + "zz"
+PLANTED_PATH = "/" + "Users" + "/someone/lib.so"
+
 # Shapes that point into the private half or at a developer's machine. The page
 # is also scanned by scripts/lint-public.sh, whose rules these mirror in kind;
 # this is the generator's own refusal, so a planted string never reaches a file.
@@ -596,9 +600,11 @@ def _selftest() -> int:
     amd = cases["tampered"].platform_manifest("26.8", "linux-amd64")
     cases["tampered"].tamper(amd, "99999999.999999")
     arm = cases["planted-rendered"].platform_manifest("26.8", "linux-arm64")
-    cases["planted-rendered"].plant(arm, build="chtypes-core")
+    # The planted strings are composed at run time so this file carries no
+    # private-looking token itself (scripts/lint-public.sh would flag it).
+    cases["planted-rendered"].plant(arm, build=PLANTED_NAME)
     arm_h = cases["planted-hidden"].platform_manifest("26.8", "linux-arm64")
-    cases["planted-hidden"].plant(arm_h, library="/Users/someone/lib.so")
+    cases["planted-hidden"].plant(arm_h, library=PLANTED_PATH)
     (tmp / "fixtures" / "trees").mkdir(parents=True)
     for name in cases:
         os.symlink(tmp / "trees" / name / TREE, tmp / "fixtures" / "trees" / name)
@@ -673,7 +679,7 @@ def _selftest() -> int:
         status, page, said, _ = results[name]
         check(status == EXIT_PARTIAL, f"{name}: a private-name string refuses that row (3)")
         check("26.8 linux-arm64: omitted" in said, f"{name}: the row is named")
-        leak = ("chtypes-core", "Users/someone")
+        leak = (PLANTED_NAME, PLANTED_PATH)
         check(not any(s in page or s in said for s in leak), f"{name}: the string is nowhere")
     # The exit-status contract at the file level: --check on a partial page,
     # a missing page and an equal page.

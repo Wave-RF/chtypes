@@ -245,7 +245,10 @@ jobs:
         id: support-v2
         run: |
           if changed="$(git diff --name-only HEAD^1 HEAD 2>/dev/null)"; then
-            if grep -qE '^(docs/support-v2\.md|scripts/support-v2/|python/src/chtypes/_ocifetch/)' <<<"$changed"; then
+            # Only the page and its generator: a fetch-layer change is checked by
+            # the generator's selftest above, and gating it on the live page
+            # would redden it whenever the delivery side publishes a line.
+            if grep -qE '^(docs/support-v2\.md|scripts/support-v2/)' <<<"$changed"; then
               echo "touched=true" >> "$GITHUB_OUTPUT"
             else
               echo "touched=false" >> "$GITHUB_OUTPUT"
