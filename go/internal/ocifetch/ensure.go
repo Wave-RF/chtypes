@@ -448,9 +448,16 @@ func resolveOffline(ro resolvedOptions, req Request, platform Platform) (*Resolv
 // exactly the pinned manifest, layer and bundle digests. It touches no
 // network and creates nothing. nil, nil means no installed build matches.
 func installedByPin(ro resolvedOptions, req Request, platform Platform, pin LockPin) (*Resolved, error) {
+	res, _, err := lookupByPin(ro, req, platform, pin)
+	return res, err
+}
+
+// lookupByPin is installedByPin that also reports whether a record exists
+// under the pinned manifest's directory but disagrees with the pin.
+func lookupByPin(ro resolvedOptions, req Request, platform Platform, pin LockPin) (res *Resolved, mismatch bool, err error) {
 	warnings, err := probeRoots(ro)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	for i, dir := range ro.searchDirs() {
 		udir := newLayout(dir, true).unpackedDir(pin.Manifest)
@@ -460,17 +467,18 @@ func installedByPin(ro resolvedOptions, req Request, platform Platform, pin Lock
 		}
 		if rec.Platform != platform.Key || rec.Digests.Manifest != pin.Manifest ||
 			rec.Digests.Layer != pin.Layer || rec.Digests.Bundle != pin.Bundle {
+			mismatch = true
 			continue
 		}
-		return recordToResolved(rec, udir, platform.Key, req.Spelling, "", true, rootSource(i, dir), warnings), nil
+		return recordToResolved(rec, udir, platform.Key, req.Spelling, "", true, rootSource(i, dir), warnings), false, nil
 	}
-	return nil, nil
+	return nil, mismatch, nil
 }
 
 // resolveFrozenOffline implements --frozen --offline: verify the installed
 // build against the lock with zero network. A lock with no entry for the
 // request, or an installed record that does not match the pin, is
-// CHTYPES_ARTIFACT_PINNED.
+// CHTYPES_ARTIFACT_PINNED; a pinned build that is not installed is CHTYPES_ARTIFACT_MISSING.
 func resolveFrozenOffline(ro resolvedOptions, req Request, platform Platform) (*Resolved, error) {
 	lock, err := readLock(ro.lockPath)
 	if err != nil {
@@ -481,13 +489,17 @@ func resolveFrozenOffline(ro resolvedOptions, req Request, platform Platform) (*
 		return nil, newError(CodeArtifactPinned, req.Spelling, platform.Key, "", nil,
 			"lock file %s names no entry for %s/%s; re-lock with `fetch --lock`", ro.lockPath, req.Spelling, platform.Key)
 	}
-	res, err := installedByPin(ro, req, platform, pin)
+	res, mismatch, err := lookupByPin(ro, req, platform, pin)
 	if err != nil {
 		return nil, err
 	}
 	if res == nil {
-		return nil, newError(CodeArtifactPinned, req.Spelling, platform.Key, "", nil,
-			"%s", WithNotes(fmt.Sprintf("no installed build matches the lock's pin %s for %s/%s, and --frozen --offline forbids a network fetch", pin.Manifest, req.Spelling, platform.Key), missingNotes(ro)))
+		if mismatch {
+			return nil, newError(CodeArtifactPinned, req.Spelling, platform.Key, "", nil,
+				"the installed build for %s/%s does not match the lock's pin %s (platform, manifest, layer or bundle digest differs)", req.Spelling, platform.Key, pin.Manifest)
+		}
+		return nil, newError(CodeArtifactMissing, req.Spelling, platform.Key, "", nil,
+			"%s", WithNotes(fmt.Sprintf("the build the lock pins (%s) is not installed for %s/%s, and --frozen --offline forbids a network fetch", pin.Manifest, req.Spelling, platform.Key), missingNotes(ro)))
 	}
 	return res, nil
 }

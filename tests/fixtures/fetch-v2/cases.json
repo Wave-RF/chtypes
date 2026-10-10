@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "source": {
-    "generator_commit": "6035a0c3db17f472d3b81c118c771655c890af95",
+    "generator_commit": "d5ed5bf1566a6e5c32c6e55345c2e069ca5b48b3",
     "go_sum_sha256": "e998462ee1660f7d0b42c45fd0e16ddef8c688e81aaa22c466ada3c69565eec9"
   },
   "cases": [
@@ -5518,6 +5518,56 @@
         "manifest": null,
         "library_sha256": null,
         "code": "CHTYPES_ARTIFACT_PINNED",
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": 0,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
+      }
+    },
+    {
+      "id": "frozen-offline-lock-not-installed",
+      "tree": "lock-frozen-warm",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "frozen-warm",
+        "system_dirs": [],
+        "lock": "frozen-warm-not-installed",
+        "before_index_rename_hook": null
+      },
+      "request": {
+        "spelling": "26.10.7.1",
+        "platform": "linux-arm64",
+        "offline": true,
+        "frozen": true,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_ARTIFACT_MISSING",
         "sleeps": [],
         "warnings": [],
         "requests": {

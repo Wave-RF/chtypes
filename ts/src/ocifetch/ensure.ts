@@ -690,6 +690,17 @@ async function lockedPin(request: string, platform: PlatformKey, options: FetchV
  * `undefined` when no installed build matches.
  */
 async function installedByPin(request: string, platform: PlatformKey, options: FetchV1Options, pin: LockPin): Promise<Resolved | undefined> {
+  return (await lookupByPin(request, platform, options, pin)).hit;
+}
+
+/** `installedByPin`, also saying whether a record exists under the pinned manifest but disagrees with the pin. */
+async function lookupByPin(
+  request: string,
+  platform: PlatformKey,
+  options: FetchV1Options,
+  pin: LockPin,
+): Promise<{ readonly hit: Resolved | undefined; readonly mismatch: boolean }> {
+  let mismatch = false;
   const warnings = await probeRoots(
     searchRoots(options).map((r) => r.root),
     strictMode(options.strictCache),
@@ -697,27 +708,31 @@ async function installedByPin(request: string, platform: PlatformKey, options: F
   for (const r of searchRoots(options)) {
     const dir = unpackedDir(r.root, hexOfDigest(pin.manifest));
     const record = await readVerifiedRecord(dir);
+    if (record === undefined) continue;
     if (
-      record !== undefined &&
       record.platform === platform &&
       record.manifestDigest === pin.manifest &&
       record.layerDigest === pin.layer &&
       record.bundleDigest === pin.bundle
     ) {
-      return resolvedFromRecord(record, platform, request, dir, r.source, true, warnings);
+      return { hit: resolvedFromRecord(record, platform, request, dir, r.source, true, warnings), mismatch: false };
     }
+    mismatch = true;
   }
-  return undefined;
+  return { hit: undefined, mismatch };
 }
 
-/** `--frozen --offline`: verify the installed build against the lock, with zero network. No lock entry, or no installed build matching the pin, is `CHTYPES_ARTIFACT_PINNED`. */
+/** `--frozen --offline`: verify the installed build against the lock, with zero network. No lock entry, or an installed record that does not match the pin, is `CHTYPES_ARTIFACT_PINNED`; a pinned build that is not installed is `CHTYPES_ARTIFACT_MISSING`. */
 async function resolveFrozenOffline(request: string, platform: PlatformKey, options: FetchV1Options): Promise<Resolved> {
   const pin = await lockedPin(request, platform, options);
-  const hit = await installedByPin(request, platform, options, pin);
+  const { hit, mismatch } = await lookupByPin(request, platform, options, pin);
   if (hit === undefined) {
-    throw new ArtifactPinnedError(
+    if (mismatch) {
+      throw new ArtifactPinnedError(`chtypes: --frozen --offline: the installed build for ${request} (${platform}) does not match the lock's pin ${pin.manifest}`);
+    }
+    throw new ArtifactMissingError(
       withNotes(
-        `chtypes: --frozen --offline: no installed build matches the lock's pin ${pin.manifest} for ${request} (${platform})`,
+        `chtypes: --frozen --offline: the build the lock pins (${pin.manifest}) is not installed for ${request} (${platform})`,
         await missingNotes(options),
       ),
     );

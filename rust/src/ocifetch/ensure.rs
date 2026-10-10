@@ -666,6 +666,17 @@ fn ensure_frozen(
 /// directory, whose `verified.json` is for this platform and records exactly
 /// the pinned manifest, layer and bundle digests. `None` when none matches.
 fn installed_by_pin(res: &Resources, request: &str, entry: &LockEntry) -> Result<Option<Resolved>> {
+    Ok(lookup_by_pin(res, request, entry)?.0)
+}
+
+/// [`installed_by_pin`], also saying whether a record exists under the
+/// pinned manifest but disagrees with the pin.
+fn lookup_by_pin(
+    res: &Resources,
+    request: &str,
+    entry: &LockEntry,
+) -> Result<(Option<Resolved>, bool)> {
+    let mut mismatch = false;
     for (i, root) in layout::search_roots(&res.root, &res.system_dirs)
         .iter()
         .enumerate()
@@ -685,22 +696,27 @@ fn installed_by_pin(res: &Resources, request: &str, entry: &LockEntry) -> Result
             } else {
                 format!("system:{}", root.display())
             };
-            return Ok(Some(record_to_resolved(
-                request,
-                &res.platform,
-                &dir,
-                record,
-                &source,
-                true,
-            )));
+            return Ok((
+                Some(record_to_resolved(
+                    request,
+                    &res.platform,
+                    &dir,
+                    record,
+                    &source,
+                    true,
+                )),
+                false,
+            ));
         }
+        mismatch = true;
     }
-    Ok(None)
+    Ok((None, mismatch))
 }
 
 /// `--frozen --offline`: verify the installed build against the lock with
-/// zero network. No lock, no entry for the request, or no installed build
-/// matching the pin is `CHTYPES_ARTIFACT_PINNED`.
+/// zero network. No lock, no entry for the request, or an installed record
+/// that does not match the pin is `CHTYPES_ARTIFACT_PINNED`; a pinned build
+/// that is not installed is `CHTYPES_ARTIFACT_MISSING`.
 fn resolve_frozen_offline(
     res: &Resources,
     request: &str,
@@ -724,14 +740,18 @@ fn resolve_frozen_offline(
             res.platform
         ))
     })?;
-    match installed_by_pin(res, request, entry)? {
-        Some(resolved) => Ok(Resolved {
+    match lookup_by_pin(res, request, entry)? {
+        (Some(resolved), _) => Ok(Resolved {
             warnings,
             ..resolved
         }),
-        None => Err(Error::ArtifactPinned(with_notes(
+        (None, true) => Err(Error::ArtifactPinned(format!(
+            "--frozen --offline: the installed build for {request} ({}) does not match the lock's pin {}",
+            res.platform, entry.manifest
+        ))),
+        (None, false) => Err(Error::ArtifactMissing(with_notes(
             &format!(
-                "--frozen --offline: no installed build matches the lock's pin {} for {request} ({})",
+                "--frozen --offline: the build the lock pins ({}) is not installed for {request} ({})",
                 entry.manifest, res.platform
             ),
             &notes_for(res),

@@ -237,7 +237,7 @@ func buildLockCases(fs *FileSet) []Case {
 	cases = append(cases, offlineFrozen)
 
 	// --- frozen-warm-cache-zero-requests, frozen-offline-lock-match and
-	// frozen-offline-lock-mismatch (public issue #414): a build installed
+	// frozen-offline-lock-mismatch and frozen-offline-lock-not-installed (public issue #414): a build installed
 	// under exactly the lock's pinned manifest, layer and bundle digests
 	// answers --frozen with ZERO requests, --frozen --offline verifies the
 	// installed build against the lock with zero network, and an installed
@@ -252,9 +252,15 @@ func buildLockCases(fs *FileSet) []Case {
 	warmLock := Lock3{Schema: 3, ABI: fixtureABI, Platforms: []string{"linux-arm64"},
 		Requests: map[string]map[string]LockPin{"26.10.7.1": {"linux-arm64": pinFor(warmArt, warmArt.BundleDigest, "")}}}
 	putInputLock(fs, "frozen-warm", warmLock)
+	// not-installed: the lock pins a build the cache does not hold.
 	otherLock := Lock3{Schema: 3, ABI: fixtureABI, Platforms: []string{"linux-arm64"},
 		Requests: map[string]map[string]LockPin{"26.10.7.1": {"linux-arm64": pinFor(otherArt, otherArt.BundleDigest, "")}}}
-	putInputLock(fs, "frozen-warm-mismatch", otherLock)
+	putInputLock(fs, "frozen-warm-not-installed", otherLock)
+	// mismatch: the pinned manifest IS installed, but its record's bundle
+	// digest differs from the pin's.
+	mismatchLock := Lock3{Schema: 3, ABI: fixtureABI, Platforms: []string{"linux-arm64"},
+		Requests: map[string]map[string]LockPin{"26.10.7.1": {"linux-arm64": pinFor(warmArt, otherArt.BundleDigest, "")}}}
+	putInputLock(fs, "frozen-warm-mismatch", mismatchLock)
 	for _, w := range []struct {
 		id, lock string
 		offline  bool
@@ -263,6 +269,7 @@ func buildLockCases(fs *FileSet) []Case {
 		{"frozen-warm-cache-zero-requests", "frozen-warm", false, true},
 		{"frozen-offline-lock-match", "frozen-warm", true, true},
 		{"frozen-offline-lock-mismatch", "frozen-warm-mismatch", true, false},
+		{"frozen-offline-lock-not-installed", "frozen-warm-not-installed", true, false},
 	} {
 		c := newCase(w.id, "lock-frozen-warm", "file", "http")
 		c.Request.Spelling = "26.10.7.1"
@@ -279,6 +286,9 @@ func buildLockCases(fs *FileSet) []Case {
 			c.Expect.LibrarySHA256 = strp(warmArt.Predicate.LibrarySHA256)
 		} else {
 			c.Expect.Code = strp("CHTYPES_ARTIFACT_PINNED")
+			if w.id == "frozen-offline-lock-not-installed" {
+				c.Expect.Code = strp("CHTYPES_ARTIFACT_MISSING")
+			}
 		}
 		cases = append(cases, c)
 	}
