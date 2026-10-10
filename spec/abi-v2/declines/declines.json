@@ -151,6 +151,43 @@
    "description": "The filter compile needs the process context that initialization builds; without it the create is declined."
   },
   {
+   "id": "string-reading",
+   "class": "create-decline",
+   "trigger": "a comparison of a non-String expression with a String constant or {p:String} parameter whose text the server's own index or analyzer reading reads differently from the comparison",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "none",
+   "description": "A comparison reads a String constant once, with cast_string_to_date_time_mode; the server reads the same text again with the default text format in its index analysis, IN sets and analyzer, and drops rows the comparison keeps or refuses a query over a key column. The create is declined, naming the column and both readings; typed parameters and canonical text are answered."
+  },
+  {
+   "id": "equals-fold",
+   "class": "create-decline",
+   "trigger": "an AND of two equals comparisons of one expression with different constants that the comparison matches with one value, such as dt = '2024-06-01 12:00:00' AND dt = '1717243200'",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "when 26.3 leaves the supported set",
+   "description": "On the lines whose analyzer folds an AND of two equals over different constants to false whatever the comparison reads, the server returns no row where the comparison keeps one; the create is declined. Constants the server's own constant test calls equal are answered."
+  },
+  {
    "id": "alias-expansion",
    "class": "decline",
    "trigger": "a WHERE that refers to an alias it defines",
@@ -553,6 +590,26 @@
    ],
    "retirement": "when the setting is honored (a reviewed change per setting)",
    "description": "The server's analyzer resolves the shadowing and this build does not; every row is declined and the setting is named in unsupported_settings."
+  },
+  {
+   "id": "setting-format-pair",
+   "class": "decline",
+   "trigger": "date_time_input_format and cast_string_to_date_time_mode at different values, one of them named in the filter's own settings",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "when the server's analyzer and its comparison function parse a String constant with the same setting",
+   "description": "On these lines the server's analyzer parses a comparison chain's String constant with date_time_input_format, while the comparison itself parses it with cast_string_to_date_time_mode; while the two differ the server answers by a parse this build does not make, so every row is declined and the setting is named in unsupported_settings. Equal values are honored."
   },
   {
    "id": "setting-compatibility-moves",
