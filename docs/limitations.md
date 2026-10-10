@@ -57,14 +57,20 @@ The rules genuinely differ: `256` into a `UInt8` column stores `0`, while `x = 2
 
 **The criterion.** The artifact producer runs a standing filter differential against real servers of the same platform on each published build, before the push and after it. A build is enforcement-grade for a pair when that differential reports zero over-accepts and zero over-rejects for it. It reads `12/12` on that build as published.
 
-**The gate lifts per `(ClickHouse line, platform)`, never all at once.** No pair is lifted today. Eleven were lifted with artifact build `20261009.074908`; a known divergence then put every one of them back under the gate, until it is fixed and the producer's differential passes the new cases:
+**The gate lifts per `(ClickHouse line, platform)`, never all at once.** Eleven pairs are lifted, from artifact build `20261010.180314` (the build served on the v2-dev channel to SDK `2.0.0-dev.8`). The history, in plain words:
 
-| line   | `linux-amd64`           | `linux-arm64`           | `darwin-arm64`                              |
-| ------ | ----------------------- | ----------------------- | ------------------------------------------- |
-| `26.3` | gated: known divergence | gated: known divergence | not covered: documented platform limitation |
-| `26.7` | gated: known divergence | gated: known divergence | gated: known divergence (inferred)          |
-| `26.8` | gated: known divergence | gated: known divergence | gated: known divergence (inferred)          |
-| `26.9` | gated: known divergence | gated: known divergence | gated: known divergence (inferred)          |
+- Build `20261009.074908` first lifted the same eleven pairs.
+- A known divergence then put every one of them back under the gate: a date-time column compared with a `String` constant or a `{p:String}` parameter, in text the server converts differently.
+- Build `20261010.180314` declines those shapes, and the producer's differential passed every pair on it as published, so the eleven are lifted again from that build.
+
+| line   | `linux-amd64`                 | `linux-arm64`                 | `darwin-arm64`                              |
+| ------ | ----------------------------- | ----------------------------- | ------------------------------------------- |
+| `26.3` | lifted from `20261010.180314` | lifted from `20261010.180314` | not covered: documented platform limitation |
+| `26.7` | lifted from `20261010.180314` | lifted from `20261010.180314` | lifted from `20261010.180314`               |
+| `26.8` | lifted from `20261010.180314` | lifted from `20261010.180314` | lifted from `20261010.180314`               |
+| `26.9` | lifted from `20261010.180314` | lifted from `20261010.180314` | lifted from `20261010.180314`               |
+
+The `darwin-arm64` lifts are measured: the producer's differential ran those pairs on that build and reported zero over-accepts, zero body over-accepts and zero over-rejects.
 
 **Not covered: `26.3` on `darwin-arm64`, a documented platform limitation.** The macOS 26.3 server runs queries on 512 KiB threads, so it refuses deeply nested expressions and types with 306 (TOO_DEEP_RECURSION) at depths where the library answers or accepts them. Measured on the official 26.3.38.2 macOS server, it refuses:
 
@@ -76,7 +82,7 @@ The rules genuinely differ: `256` into a `UInt8` column stores `0`, while `x = 2
 
 26.7 and later, and every Linux line, agree with the server. This is a documented platform difference, not a filter over-accept under the same-platform guarantee's terms. The pair is not lifted and has no CHANGELOG lift entry: run it beside your existing enforcement and compare, do not replace, or refuse inputs nested that deep yourself. The committed list is [`spec/abi-v2/documented-platform/documented-platform.tsv`](../spec/abi-v2/documented-platform/documented-platform.tsv). See also [macOS artifacts match ClickHouse on macOS; on 26.3, match the server's platform](#macos-artifacts-match-clickhouse-on-macos-on-263-match-the-servers-platform).
 
-**Every lifted pair is back under the gate** ([A date-time column compared with a string constant or a {p:String} parameter, in text the server converts differently](#a-date-time-column-compared-with-a-string-constant-or-a-pstring-parameter-in-text-the-server-converts-differently)). A `Date`- or `DateTime`-family column compared with a `String` constant, or with a `{p:String}` parameter, whose text the library reads differently from the server's default conversion, is answered `t` where the server answers `f`: for example `dt = '20240601120000'`, or `dt >= {p:String}` with that value. Until the fix ships, use the forms measured to agree on every line, a typed `{p:DateTime}` parameter or canonical `YYYY-MM-DD hh:mm:ss` text, and run filters beside your existing enforcement. RFC 3339 spellings (`…T00:00:00Z`, or with an offset), compact forms and unix timestamps are unverified until the fix's measured table; don't treat them as safe.
+**The date-time/String divergence is declined, not answered, from build `20261010.180314`.** A `Date`- or `DateTime`-family column compared with a `String` constant or a `{p:String}` parameter, in text the server reads differently from the library's comparison, is now refused when the filter is created: the library's `CHS_DECLINED` (each binding's unsupported error) names the reason, `string-reading`, or `equals-fold` for an `AND` of two equals comparisons of one expression with different constants that the comparison matches with one value. Builds before it, `20261009.145808` and earlier, still answer those shapes divergently (see [the Known divergences entry](#a-date-time-column-compared-with-a-string-constant-or-a-pstring-parameter-in-text-the-server-converts-differently)), so the lift applies from `20261010.180314` only. The forms that answer are a typed `{p:DateTime}` parameter and canonical `YYYY-MM-DD hh:mm:ss` text. Treat a declined filter as no filter, never as a pass.
 
 **Each lift is announced in the CHANGELOG, by `(line, platform)`, as its own entry** — the fixed shape is in [`CONTRIBUTING.md`](../CONTRIBUTING.md#changelog-entries). A pair stays gated until its own CHANGELOG entry says otherwise.
 
@@ -210,21 +216,33 @@ Until then, do not treat a successful schema creation as proof that the server w
 
 ### A date-time column compared with a string constant or a `{p:String}` parameter, in text the server converts differently
 
-**Over-accept, in filters, on every supported line where the conversion differs.** A filter that compares a `Date`- or `DateTime`-family column with a `String` constant, or with a `{p:String}` query parameter, reads the text with a conversion that differs from the server's default for some spellings. The library then answers `t` where the server's `SELECT … WHERE` answers `f`. For example `dt = '20240601120000'`, or `dt >= {p:String}` with that value.
+**Declined from build `20261010.180314`; over-accept in earlier builds.** A filter that compares a `Date`- or `DateTime`-family column with a `String` constant, or with a `{p:String}` query parameter, reads the text with a conversion that differs from the server's default for some spellings. Builds `20261009.145808` and earlier answer `t` where the server's `SELECT … WHERE` answers `f`: for example `dt = '20240601120000'`, or `dt >= {p:String}` with that value. From build `20261010.180314` the shapes the decline catalog describes are declined at `chs_filter_create` with `CHS_DECLINED` (each binding's unsupported error), naming the reason, rather than answered.
 
-|               |             |
-| ------------- | ----------- |
-| this library  | answers `t` |
-| a real server | answers `f` |
+The decline catalog (`spec/abi-v2/declines/declines.json`) gives two reasons, and this entry claims nothing beyond their entries:
 
-**Where:**
+- **`string-reading`** (`26.3`, `26.7`, `26.8`, `26.9`): a comparison of a non-String expression with a `String` constant or `{p:String}` parameter whose text the server's own index or analyzer reading reads differently from the comparison. A comparison reads a `String` constant once, with `cast_string_to_date_time_mode`; the server reads the same text again with the default text format in its index analysis, `IN` sets and analyzer, and drops rows the comparison keeps or refuses a query over a key column. The create is declined, naming the column and both readings. Typed parameters and canonical text are answered.
+- **`equals-fold`** (`26.3` only; retires when `26.3` leaves the supported set): an `AND` of two equals comparisons of one expression with different constants that the comparison matches with one value, such as `dt = '2024-06-01 12:00:00' AND dt = '1717243200'`. On the lines whose analyzer folds an `AND` of two equals over different constants to false whatever the comparison reads, the server returns no row where the comparison keeps one; the create is declined. Constants the server's own constant test calls equal are answered.
 
-- `26.8` and `26.9` on Linux: at stock settings;
-- `26.7` on Linux: two-sided ranges, at stock settings;
-- `26.3` on Linux: when `cast_string_to_date_time_mode` is `best_effort` or `best_effort_us` at any settings layer;
-- `darwin-arm64` on `26.7`, `26.8` and `26.9`: `inferred` identical, not measured, because darwin and Linux agree on those lines.
+**Measured** by the artifact producer: direct server `SELECT`s against the library at artifact build `20261009.074908` for the divergence, and the producer's differential on build `20261010.180314` as published for the decline (zero over-accepts, zero over-rejects on every pair). **Safe forms**, which answer on every line: a typed `{p:DateTime}` parameter, and canonical `YYYY-MM-DD hh:mm:ss` text. On a build before `20261010.180314`, RFC 3339 spellings (`…T00:00:00Z`, or with an offset), compact forms and unix timestamps are not safe. The filter enforcement gate for the eleven covered pairs is lifted from build `20261010.180314`; on earlier builds the gate stays on.
 
-**Measured** by the artifact producer: direct server `SELECT`s against the library at artifact build `20261009.074908`. **Safe forms**, measured to agree on every line: a typed `{p:DateTime}` parameter, and canonical `YYYY-MM-DD hh:mm:ss` text. RFC 3339 spellings (`…T00:00:00Z`, or with an offset), compact forms and unix timestamps are unverified until the fix's measured table; don't treat them as safe. The filter enforcement gate is back on for every pair until a build with the fix passes the producer's differential with these cases in it.
+### A column default expression that calls a function needing a server compiles here; a stock server refuses the CREATE
+
+**Over-accept, at schema creation, on builds `20261009.145808` and `20261010.180314`.** A column whose `DEFAULT`, `MATERIALIZED`, `ALIAS` or `EPHEMERAL` expression calls a function that needs a server compiles in chtypes, where a stock server's `CREATE TABLE` refuses it. The functions, by family:
+
+- `showCertificate`;
+- the `region*` functions;
+- `neighbor`, `runningAccumulate` and the `runningDifference*` functions;
+- `transactionLatestSnapshot` and `transactionOldestSnapshot`;
+- `fuzzQuery`;
+- the `ai*` functions.
+
+On the `ALIAS` and `EPHEMERAL` forms, rows are accepted for such a schema.
+
+**Who is exposed.** Only a consumer that validates a proposed `CREATE` with chtypes. Such a table cannot exist on a stock server, so the filter enforcement gate, which covers tables that exist, is unaffected by this entry; the lift above stands apart from it.
+
+**Measured**: by the artifact producer, on builds `20261009.145808` and `20261010.180314`. A later build declines these at create. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the build that ships the fix, never on a CI result.
+
+Until then, do not treat a successful compile as proof that a server will accept the `CREATE`. Check the function names in the `DEFAULT`, `MATERIALIZED`, `ALIAS` and `EPHEMERAL` expressions against the list above, or run the `CREATE` against a server.
 
 ## Known gaps in 1.0
 
