@@ -186,6 +186,12 @@ jobs:
         run: uv run --no-project --python 3.11 scripts/abi-v2/check-declines.py --selftest
       - name: the filter decline-reasons catalog agrees with its README
         run: uv run --no-project --python 3.11 scripts/abi-v2/check-declines.py --check
+      # The documented platform differences (spec/abi-v2/documented-platform/)
+      # are data from the artifact producer too. Same shape.
+      - name: the documented platform differences — every rule fires on planted copies
+        run: uv run --no-project --python 3.11 scripts/abi-v2/check-documented-platform.py --selftest
+      - name: the documented platform differences agree with their README
+        run: uv run --no-project --python 3.11 scripts/abi-v2/check-documented-platform.py --check
       - name: ABI v2's fingerprint and canonical forms, recomputed by an independent RFC 8785 implementation
         run: |
           ours="$(uv run --no-project --python 3.11 scripts/abi-v1/gen.py --major 2 --fingerprint)"

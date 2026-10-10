@@ -1,0 +1,23 @@
+# Platform differences that are DOCUMENTED, not declined: on one platform and one ClickHouse line the server refuses what
+# the library answers, for a reason that belongs to the platform's server build, not to the library. The filter
+# differential's judge counts and prints each such failure under its own heading (`[DOCUMENTED-PLATFORM]`), and it does not
+# block the gate. Nothing else is excused:
+#   * one row is one EXACT cell: one platform, one line, one gate class, one FAIL kind and the server's exact answer;
+#     the loader refuses a wildcard, a range, a list or a word standing for many values;
+#   * it holds only that cell's failures of that kind with that answer; any other kind, any other answer, any other class,
+#     platform or line still fails the gate;
+#   * a row that holds nothing on its platform and line (the cell agrees with the server now, fails another way, or the
+#     corpus no longer has it) FAILS the gate until the row is removed, so the list cannot outlive the behavior it records.
+# Adding a row needs a dated sign-off; `ruling` names it.
+# This file is public data: it names no issue, no repository and no internal label.
+# Columns (tab-separated):
+#   platform  darwin-arm64, linux-arm64 or linux-amd64
+#   line      the ClickHouse line (major.minor)
+#   class     the gate class (one)
+#   kind      the FAIL kind (one): OA, OA_REFUSED, OR, ...
+#   server    the server's exact answer: `server e:<code>`
+#   rule      the neutral name of the platform difference
+#   ruling    the role that signed the row off, and when (a role, never a person's name)
+# platform	line	class	kind	server	rule	ruling
+darwin-arm64	26.3	F23	OA_REFUSED	server e:306	macos-26.3-thread-stack	the maintainer, 2026-10-09
+darwin-arm64	26.3	F23b	OA_REFUSED	server e:306	macos-26.3-thread-stack	the maintainer, 2026-10-09
