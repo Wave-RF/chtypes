@@ -143,6 +143,20 @@ fn r2_unknown_members_are_ignored(dir: &Path, variants: &serde_json::Map<String,
         (1, 1, 1, 1),
         "{r:?}"
     );
+    // Public issue #384: the library's own transformed entry is reported; nothing is derived.
+    let t = &r.transformed[0];
+    assert_eq!(
+        (
+            t.column.as_bytes(),
+            t.input.as_bytes(),
+            t.stored.as_bytes(),
+            t.row
+        ),
+        (&b"s"[..], &b"1"[..], &b"2"[..], 0),
+        "{r:?}"
+    );
+    assert_eq!(t.reason, Reason::ValueChanged, "{r:?}");
+    assert!(t.lossy, "{r:?}");
 
     let b = schema
         .rows(

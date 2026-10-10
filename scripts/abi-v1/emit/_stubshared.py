@@ -145,7 +145,7 @@ _R2_ROW = {
         }
     ],
     "computed": [{"name": "m", "kind": "materialized", "stored": "5", **_UNK}],
-    "transformed": [{"column": "s", "input": "1", "stored": "2", "reason": "date_clamp", "row": 0, **_UNK}],
+    "transformed": [{"column": "s", "input": "1", "stored": "2", "reason": "value_changed", "row": 0, **_UNK}],
     "unknown_fields": [{"name": "u", **_UNK}],
     "unsupported_settings": [{"name": "st", **_UNK}],
     "partition_id": "all",
@@ -161,7 +161,7 @@ R2_DOCS = {
         "rows_read": 1,
         "rows_skipped": 0,
         "rows": [_R2_ROW],
-        "transformed": [{"column": "s", "input": "1", "stored": "2", "reason": "date_clamp", "row": 0, **_UNK}],
+        "transformed": [{"column": "s", "input": "1", "stored": "2", "reason": "value_changed", "row": 0, **_UNK}],
         "storage_transforms": [{"row": 0, "column": "s", "stored": "2", "reason": "date_clamp", **_UNK}],
         "unsupported_settings": [{"name": "st", **_UNK}],
         "at_merge": [

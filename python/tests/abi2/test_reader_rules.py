@@ -82,6 +82,10 @@ def test_r2_unknown_members_are_ignored(open_variant) -> None:
     assert row.columns[0].text == b"abc" and row.columns[0].value == b"abc"
     assert row.input_span is not None and row.input_span.len == 3
     assert len(row.computed) == 1 and len(row.transformed) == 1
+    # Public issue #384: the library's own transformed entry is reported; nothing is derived.
+    entry0 = row.transformed[0]
+    assert (entry0.column, entry0.input, entry0.stored) == (b"s", b"1", b"2")
+    assert entry0.reason == Reason.VALUE_CHANGED and entry0.lossy is True and entry0.row == 0
     assert row.unknown_fields == (b"u",) and row.unsupported_settings == (b"st",)
 
     batch = schema.rows(JSON, b'{"x":1}', export=JSON)
