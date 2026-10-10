@@ -1,6 +1,7 @@
 /**
  * An open never waits for another request's fetch, and concurrent opens of one
- * request share one fetch (public issue #491).
+ * request share one fetch (public issue #491). `registry.fetch`, the fetch-only
+ * call (public issue #492), installs without opening and shares that same fetch.
  *
  * Each case serves the stub, signed with the fetch fixtures' TEST key, from the
  * fetch fixture server (`scripts/fetch-v1/server.py`) over HTTP, and holds a
@@ -15,7 +16,10 @@
  * is no lock to hold across a fetch. `for()` takes no `AbortSignal`, so there is
  * no cancellation case, and the registry has no synchronous or worker path.
  *
- * Needs `$CHTYPES_ABI2_STUBS`; without it every case here SKIPS LOUDLY by name.
+ * The open cases need `$CHTYPES_ABI2_STUBS`; without it each of them SKIPS
+ * LOUDLY by name. The `fetch` cases serve a signed artifact whose library bytes
+ * are not a library at all, so nothing could load it and no stub is needed: a
+ * `fetch` that tried to open it would fail.
  */
 
 import { type ChildProcessByStdio, spawn } from 'node:child_process';
@@ -27,8 +31,17 @@ import type { Readable } from 'node:stream';
 import { promisify } from 'node:util';
 import { zstdCompress } from 'node:zlib';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { ABI_FINGERPRINT, ABI_VERSION } from '../../src/abi2/decls.gen.js';
 import type { Predicate } from '../../src/abi2/loader.js';
-import { ArtifactError, type Library, Registry } from '../../src/index.js';
+import {
+  ArtifactError,
+  CODE_ARTIFACT_MISSING,
+  CODE_ARTIFACT_UNPUBLISHED,
+  type Library,
+  Registry,
+  setup,
+  UsageError,
+} from '../../src/index.js';
 import {
   ARTIFACT_TYPE,
   DSSE_PAYLOAD_TYPE,
@@ -38,11 +51,14 @@ import {
   MEDIA_TYPE_INDEX,
   MEDIA_TYPE_LAYER,
   MEDIA_TYPE_MANIFEST,
+  PLATFORMS,
   PREDICATE_TYPE_ARTIFACT,
   STATEMENT_TYPE,
   TEST_KEYS,
 } from '../../src/ocifetch/constants.gen.js';
 import { allowOverridesForTests } from '../../src/ocifetch/channel.js';
+import { hold, hostPlatformKey, prune, resolveInstalled } from '../../src/ocifetch/index.js';
+import { onFetchWaitForTests } from '../../src/registry.js';
 import { resetSetupForTests } from '../../src/setup.js';
 
 // The dev channel, with the test key's trust and the base overrides honored.
@@ -105,16 +121,22 @@ interface Descriptor {
   readonly size: number;
 }
 
-/**
- * Write the stub as `tag`'s one-platform signed artifact in the route-tree
- * shape the fixture server serves (`manifests/<tag or digest>`,
- * `blobs/<digest>`, `referrers/<digest>`), and return the layer's digest.
- */
-async function writeRouteTree(repo: string, tag: string): Promise<string> {
+/** The stub's `ok` variant: its library's bytes and its signed predicate. */
+function stubArtifact(): { readonly library: Buffer; readonly predicate: Record<string, unknown> } {
   const stubs = JSON.parse(readFileSync(path.join(STUBS_DIR as string, 'stubs.json'), 'utf8')) as StubsDoc;
   const variant = stubs.variants.ok;
   if (variant === undefined) throw new Error('stubs.json has no ok variant');
-  const library = readFileSync(path.join(STUBS_DIR as string, 'ok.so'));
+  return { library: readFileSync(path.join(STUBS_DIR as string, 'ok.so')), predicate: { ...variant.predicate } };
+}
+
+/**
+ * Write `library` as `tag`'s one-platform signed artifact in the route-tree
+ * shape the fixture server serves (`manifests/<tag or digest>`,
+ * `blobs/<digest>`, `referrers/<digest>`), and return the layer's digest. The
+ * signed predicate is `signed` with the library's name, hash and size; its
+ * `os` and `arch` name the index's one platform.
+ */
+async function writeRouteTree(repo: string, tag: string, library: Buffer, signed: Record<string, unknown>): Promise<string> {
   const libName = process.platform === 'darwin' ? 'libchtypes.dylib' : 'libchtypes.so';
   for (const sub of ['manifests', 'blobs', 'referrers']) mkdirSync(path.join(repo, sub), { recursive: true });
   const put = (sub: string, name: string, bytes: Buffer): void => writeFileSync(path.join(repo, sub, name), bytes);
@@ -132,7 +154,7 @@ async function writeRouteTree(repo: string, tag: string): Promise<string> {
 
   const layer = blob(MEDIA_TYPE_LAYER, await zstd(tarOfOneFile(libName, library)));
   const predicate: Record<string, unknown> = {
-    ...variant.predicate,
+    ...signed,
     library: libName,
     library_sha256: sha256(library),
     library_bytes: library.length,
@@ -182,7 +204,7 @@ async function writeRouteTree(repo: string, tag: string): Promise<string> {
         schemaVersion: 2,
         mediaType: MEDIA_TYPE_INDEX,
         manifests: [
-          { ...platformManifest, artifactType: ARTIFACT_TYPE, platform: { os: String(variant.predicate.os), architecture: String(variant.predicate.arch) } },
+          { ...platformManifest, artifactType: ARTIFACT_TYPE, platform: { os: String(predicate['os']), architecture: String(predicate['arch']) } },
         ],
       }),
     ),
@@ -245,7 +267,8 @@ describe.skipIf(!stubsAvailable)('the registry with a fetch in flight (public is
     resetSetupForTests();
     work = mkdtempSync(path.join(tmpdir(), 'ts-registry-flight-'));
     const fixtures = path.join(work, 'fixtures');
-    const layer = await writeRouteTree(path.join(fixtures, 'trees/stub/v2/chtypes/v1'), '26.8');
+    const stub = stubArtifact();
+    const layer = await writeRouteTree(path.join(fixtures, 'trees/stub/v2/chtypes/v1'), '26.8', stub.library, stub.predicate);
     writeFileSync(path.join(fixtures, 'cases.json'), JSON.stringify({ schema: 1, cases: CASES.map((id) => ({ id, tree: 'stub' })) }));
     layerPath = `/chtypes/v1/blobs/${layer}`;
     server = await startServer(fixtures);
@@ -358,5 +381,157 @@ describe.skipIf(!stubsAvailable)('the registry with a fetch in flight (public is
     expect(again).toBeInstanceOf(ArtifactError);
     expect((again as ArtifactError).code).toBe((first as ArtifactError).code);
     expect((await requests('flight-fails')).get(tag)).toBe(2); // a failure is never remembered
+  }, 120_000);
+});
+
+// -------------------------------------------------- registry.fetch (issue #492)
+
+/** This host's platform key: the `fetch` cases need a host this SDK publishes for. */
+const HOST = hostPlatformKey(process.platform, process.arch);
+const FETCH_CASES = ['fetch-installs', 'fetch-shared', 'fetch-unpublished'] as const;
+type FetchCaseId = (typeof FETCH_CASES)[number];
+/** The served build's library bytes: no loader accepts them. */
+const NOT_A_LIBRARY = Buffer.from('chtypes registry fetch test: these bytes are not a loadable library\n');
+
+/** Each call of a registry's fetch-wait hook, in order, as promises a test awaits: an event, never a clock. */
+function fetchWaits(registry: Registry): () => Promise<string> {
+  const seen: string[] = [];
+  const waiters: ((request: string) => void)[] = [];
+  onFetchWaitForTests(registry, (request) => {
+    const waiter = waiters.shift();
+    if (waiter === undefined) seen.push(request);
+    else waiter(request);
+  });
+  return () => {
+    const request = seen.shift();
+    if (request !== undefined) return Promise.resolve(request);
+    return new Promise<string>((resolve) => {
+      waiters.push(resolve);
+    });
+  };
+}
+
+describe.skipIf(HOST === undefined)('registry.fetch, the fetch-only call (public issue #492)', () => {
+  let work: string;
+  let server: { proc: ServerProcess; origin: string };
+  let layerPath: string;
+  let cacheSeq = 0;
+
+  beforeAll(async () => {
+    work = mkdtempSync(path.join(tmpdir(), 'ts-registry-fetch-'));
+    const fixtures = path.join(work, 'fixtures');
+    const info = PLATFORMS.find((p) => p.key === HOST);
+    if (info === undefined) throw new Error(`${HOST} is not in PLATFORMS`);
+    // Signed for this SDK's own fingerprint, so the dev channel's lookups see it.
+    const predicate: Record<string, unknown> = {
+      abi: ABI_VERSION,
+      abi_fingerprint: ABI_FINGERPRINT,
+      clickhouse_version: '26.8.15.10',
+      clickhouse_minor: '26.8',
+      channel: 'lts',
+      build: '20261001.183455',
+      os: info.os,
+      arch: info.architecture,
+    };
+    const layer = await writeRouteTree(path.join(fixtures, 'trees/fetch/v2/chtypes/v1'), '26.8', NOT_A_LIBRARY, predicate);
+    writeFileSync(path.join(fixtures, 'cases.json'), JSON.stringify({ schema: 1, cases: FETCH_CASES.map((id) => ({ id, tree: 'fetch' })) }));
+    layerPath = `/chtypes/v1/blobs/${layer}`;
+    server = await startServer(fixtures);
+  }, START_BOUND_MS);
+
+  afterAll(() => {
+    server?.proc.kill();
+    rmSync(work, { recursive: true, force: true });
+  });
+
+  const freshCache = (): string => path.join(work, `cache-${cacheSeq++}`);
+  /** Autofetch on, the one base `caseId`'s repository on the server, over `cache`. */
+  const registryOver = (caseId: FetchCaseId, cache: string): Promise<Registry> =>
+    Registry.open({
+      fetch: { bases: [`${server.origin}/s-${caseId}/chtypes/v1`], cacheDir: cache, systemDirs: [], trustedKeys: [TEST_KEY.ed25519Hex] },
+      autofetch: true,
+    });
+
+  async function control(route: string): Promise<unknown> {
+    const res = await fetch(`${server.origin}${route}`);
+    if (!res.ok) throw new Error(`GET ${route}: ${res.status}`);
+    return res.json();
+  }
+  const closeGate = (caseId: FetchCaseId): Promise<unknown> => control(`/_gate/close/s-${caseId}`);
+  const openGate = (caseId: FetchCaseId): Promise<unknown> => control(`/_gate/open/s-${caseId}`);
+  const waitParked = async (caseId: FetchCaseId, n: number): Promise<number> =>
+    ((await control(`/_gate/parked/s-${caseId}?n=${n}`)) as { parked: number }).parked;
+  /** `caseId`'s logged requests, counted by "METHOD path", the path relative to the case's own segment. */
+  async function requests(caseId: FetchCaseId): Promise<Map<string, number>> {
+    const log = (await control(`/_log/s-${caseId}`)) as readonly { method: string; path: string }[];
+    const prefix = `/v2/s-${caseId}`;
+    const out = new Map<string, number>();
+    for (const e of log) {
+      const key = `${e.method} ${e.path.startsWith(prefix) ? e.path.slice(prefix.length) : e.path}`;
+      out.set(key, (out.get(key) ?? 0) + 1);
+    }
+    return out;
+  }
+
+  it('installs the build and opens nothing: no Library, the setup untouched, and the build held by this process', async () => {
+    resetSetupForTests();
+    const cache = freshCache();
+    const registry = await registryOver('fetch-installs', cache);
+    const res = await bounded(registry.fetch('26.8'), "fetch('26.8')");
+    expect({ version: res.version, build: res.build, request: res.request }).toEqual({ version: '26.8.15.10', build: '20261001.183455', request: '26.8' });
+    expect(res.digests.manifest).toBe(`sha256:${path.basename(res.dir)}`);
+    expect(readFileSync(res.libraryPath).equals(NOT_A_LIBRARY)).toBe(true);
+    expect(registry.libraries()).toEqual([]);
+    // Nothing committed or latched the process setup: any setup is still accepted.
+    expect(() => setup({ timezone: 'Europe/Berlin' })).not.toThrow();
+    resetSetupForTests();
+    // The installed lookup an open makes now answers, with no request.
+    const options = { cacheDir: cache, systemDirs: [] };
+    expect((await resolveInstalled('26.8', HOST as NonNullable<typeof HOST>, options))?.digests.manifest).toBe(res.digests.manifest);
+    // One build of the line: a prune supersedes nothing, and the build is held.
+    expect(await prune(options, { keep: 1 })).toEqual([]);
+    expect(hold(res.dir)).toBe('held');
+    // A second fetch is answered by the cache's build, already installed: the layer was fetched once in all.
+    const again = await bounded(registry.fetch('26.8'), "the second fetch('26.8')");
+    expect({ manifest: again.digests.manifest, alreadyInstalled: again.alreadyInstalled }).toEqual({ manifest: res.digests.manifest, alreadyInstalled: true });
+    expect((await requests('fetch-installs')).get(`GET ${layerPath}`)).toBe(1);
+  }, 120_000);
+
+  it('shares one fetch with an open of the same request: the fetch has the build, and the open goes on to its load', async () => {
+    resetSetupForTests();
+    const registry = await registryOver('fetch-shared', freshCache());
+    const nextWait = fetchWaits(registry);
+    await closeGate('fetch-shared');
+    try {
+      const fetched = registry.fetch('26.8');
+      fetched.catch(() => {}); // awaited below; never an unhandled rejection meanwhile
+      expect(await bounded(nextWait(), 'the fetch waiting on the fetch')).toBe('26.8');
+      const opened = rejection(registry.for('26.8'));
+      expect(await bounded(nextWait(), 'the open waiting on the same fetch')).toBe('26.8');
+      expect(await waitParked('fetch-shared', 1)).toBe(1); // one fetch's one request
+      await openGate('fetch-shared');
+      expect((await bounded(fetched, 'the fetch after the gate opened')).version).toBe('26.8.15.10');
+      // The bytes are no library, so the open's load refuses them.
+      expect(await bounded(opened, 'the open after the gate opened')).toBeInstanceOf(ArtifactError);
+    } finally {
+      await openGate('fetch-shared');
+      resetSetupForTests();
+    }
+    const log = await requests('fetch-shared');
+    expect(log.get('GET /chtypes/v1/manifests/26.8')).toBe(1);
+    expect(log.get(`GET ${layerPath}`)).toBe(1);
+    expect(registry.libraries()).toEqual([]);
+  }, 120_000);
+
+  it("fails with the fetch layer's own codes, and refuses a spelling as for() does", async () => {
+    const registry = await registryOver('fetch-unpublished', freshCache());
+    const unpublished = await rejection(registry.fetch('26.3'));
+    expect(unpublished).toBeInstanceOf(ArtifactError);
+    expect((unpublished as ArtifactError).code).toBe(CODE_ARTIFACT_UNPUBLISHED);
+    expect(await rejection(registry.fetch('v26.8'))).toBeInstanceOf(UsageError);
+    const offline = await Registry.open({ fetch: { cacheDir: freshCache(), systemDirs: [], offline: true } });
+    const missing = await rejection(offline.fetch('26.8'));
+    expect(missing).toBeInstanceOf(ArtifactError);
+    expect((missing as ArtifactError).code).toBe(CODE_ARTIFACT_MISSING);
   }, 120_000);
 });

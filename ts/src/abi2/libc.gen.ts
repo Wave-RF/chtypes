@@ -11,6 +11,8 @@
  * `resolveSymbol` is THE ONE symbol-lookup helper hand code uses (dlsym plus the null
  * check); the other four exports are the raw primitives dlopen/dlerror/gnu_get_libc_version/
  * strlen need, each with its own null handling where the C function can return NULL.
+ * `flock` is the fetch layer's in-use hold (docs/guides/fetch-v1.md §1, "In use"): Node has
+ * no file lock of its own, and every binding takes the same flock(2) on the same file.
  */
 
 import { DataType, define, isNullPointer, type JsExternal, open } from 'ffi-rs';
@@ -38,6 +40,7 @@ interface LibcFns {
   dlerror(args: []): JsExternal;
   gnu_get_libc_version(args: []): JsExternal;
   strlen(args: [JsExternal]): bigint;
+  flock(args: [number, number]): { value: number; errnoCode: number; errnoMessage: string };
 }
 
 let fns: LibcFns | null = null;
@@ -50,6 +53,7 @@ function libc(): LibcFns {
       dlerror: { library: LIBC_KEY, retType: External, paramsType: [] },
       gnu_get_libc_version: { library: LIBC_KEY, retType: External, paramsType: [] },
       strlen: { library: LIBC_KEY, retType: U64, paramsType: [External] },
+      flock: { library: LIBC_KEY, retType: I32, paramsType: [I32, I32], errno: true },
     }) as unknown as LibcFns;
   }
   return fns;
@@ -86,4 +90,11 @@ export function gnuGetLibcVersion(): JsExternal | null {
 /** strlen(ptr): the length of a NUL-terminated C string, for a byte-safe read via createExternalBuffer. */
 export function cStringLength(ptr: JsExternal): number {
   return Number(libc().strlen([ptr]));
+}
+
+/** flock(fd, operation) against the process's own libc: 0 when it succeeded, else the errno it failed with (-1 when none was captured), never 0 for a failure. */
+export function flock(fd: number, operation: number): number {
+  const r = libc().flock([fd, operation]);
+  if (r.value === 0) return 0;
+  return r.errnoCode !== 0 ? r.errnoCode : -1;
 }

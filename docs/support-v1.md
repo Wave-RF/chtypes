@@ -46,9 +46,11 @@ chtypes fetch 26.8              # resolve, verify and install one line for this 
 chtypes list                    # what the registry publishes
 chtypes verify                  # re-verify every installed line against its signed statement
 chtypes where                   # the cache directory
+chtypes resolve 26.8            # the build each platform's 26.8 resolves to, verified, installing nothing
+chtypes prune --dry-run         # the installed builds newer ones of their line supersede
 ```
 
-The four commands are spelled the same way in all four bindings, and [`guides/fetch-v1.md`](guides/fetch-v1.md) is the contract they share, including the error codes and exit statuses.
+The six commands are spelled the same way in all four bindings, and [`guides/fetch-v1.md`](guides/fetch-v1.md) is the contract they share, including the error codes and exit statuses.
 
 ## What "supported" means for a golden answer
 

@@ -6,7 +6,9 @@
 //!
 //! The seam (plan §1.3) is [`ensure`], [`resolve_installed`],
 //! [`list_installed`], [`verify_installed`] and [`fetch_signed`], returning
-//! [`Resolved`]. Nothing outside this module calls anything else here.
+//! [`Resolved`], with [`resolve::resolve`] and [`prune::prune`] beside it for
+//! the CLI, and [`hold::hold`], which the registry takes on every build it
+//! opens or fetches. Nothing outside this module calls anything else here.
 //!
 //! Every submodule is `pub` **within this private module only** — `mod
 //! ocifetch;` in `lib.rs` keeps all of it unreachable from a consumer of the
@@ -43,11 +45,18 @@ pub mod ensure;
 pub mod error;
 pub mod faults;
 pub mod goldens;
+// The in-use signal (public issue #494): the shared flock a registry holds on
+// every build it opens or fetches, and the exclusive one a prune takes.
+pub mod hold;
 pub mod http;
 pub mod layout;
 pub mod lock;
 pub mod oci;
+// `chtypes prune` (public issue #494).
+pub mod prune;
 pub mod referrers;
+// `chtypes resolve` (public issue #493).
+pub mod resolve;
 pub mod retired;
 pub mod tags;
 pub mod unpack;

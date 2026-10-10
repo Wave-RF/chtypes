@@ -129,6 +129,14 @@ func buildAliasCases(fs *FileSet) []Case {
 	exact.Expect.Requests.NoneMatching = []string{tagPathPattern("26.8.14.2")}
 	cases = append(cases, exact)
 
+	// The same alias through resolve (resolvebuildcases.go): every platform
+	// the alias's index offers, from the alias, and neither the tag nor a
+	// layer is ever requested.
+	resolved := newAliasCase("resolve-build-dev-alias", "26.8", strp(fixtureFingerprintA), "file", "http")
+	resolved.Expect.Resolutions = resolutionsOf(alias268)
+	resolved.Expect.Requests.NoneMatching = append([]string{tagPathPattern("26.8")}, layerRequests(alias268)...)
+	cases = append(cases, resolved)
+
 	// 2. No alias for this fingerprint (a 404), and the tag names a build of
 	// this SDK's own fingerprint (N): the tag answers, as today.
 	absent := newAliasCase("dev-alias-absent", "26.8", strp(fixtureFingerprintN), "file", "http")

@@ -21,6 +21,12 @@ Opens of different requests never wait for each other's fetch (public issue
 never held across steps 2 to 5. Concurrent opens of one request share one
 attempt, and so one fetch, and each gets that attempt's `Library` or its error;
 a failed attempt is never remembered, so the next open starts a new one.
+`fetch(request)` installs a build without opening it, and shares that same one
+fetch with a concurrent open (public issue #492).
+
+Every build a registry opens or fetches is held by this process until it exits
+(the fetch layer's `hold`, docs/guides/fetch-v1.md section 1), so `chtypes
+prune` never removes it meanwhile (public issue #494).
 """
 
 from __future__ import annotations
@@ -39,6 +45,7 @@ from ._ocifetch._dsse import TrustedKey as _TrustedKey
 from ._ocifetch._dsse import trusted_keys_from_hex
 from ._ocifetch._ensure import detect_host_platform, missing_notes, with_notes
 from ._ocifetch._errors import FetchError
+from ._ocifetch._hold import VANISHED, hold, removed_while_held
 from ._ocifetch._layout import resolve_cache_root, search_roots
 from ._ocifetch._oci import version_within_request
 from .library import Library, open_image
@@ -199,6 +206,19 @@ class _Flight:
         self.error: BaseException | None = None
 
 
+class _FetchFlight:
+    """One fetch of one request (the fetch layer's `ensure`): every open that
+    misses the cache and every `fetch` of that request made while it is in
+    progress waits on it and gets its answer, so they make one fetch."""
+
+    __slots__ = ("done", "error", "resolved")
+
+    def __init__(self) -> None:
+        self.done = threading.Event()
+        self.resolved: Resolved | None = None
+        self.error: BaseException | None = None
+
+
 class Registry:
     """Opens versions. Safe across threads. `autofetch` defaults to
     `CHTYPES_AUTOFETCH`, and is off when that is unset.
@@ -208,7 +228,8 @@ class Registry:
     construction, in list order, and never fetches, even with autofetch on.
 
     An open never waits for another request's fetch, and concurrent opens of
-    one request share one fetch (public issue #491).
+    one request share one fetch (public issue #491), which a `fetch` of the
+    same request shares too (public issue #492).
     """
 
     def __init__(
@@ -228,9 +249,13 @@ class Registry:
         self._lock = threading.Lock()
         self._memo: dict[str, Library] = {}
         self._flights: dict[str, _Flight] = {}
+        self._fetches: dict[str, _FetchFlight] = {}
         # A test hook, None outside tests: called each time an open starts
         # waiting on an attempt, its own or another open's.
         self._on_wait: Callable[[str], None] | None = None
+        # A test hook, None outside tests: called each time an open or a
+        # `fetch` starts waiting on a fetch, its own or another's.
+        self._on_fetch_wait: Callable[[str], None] | None = None
         if isinstance(preload, str):
             raise TypeError("preload must be a sequence of requests, not a single string")
         for request in preload:
@@ -241,6 +266,74 @@ class Registry:
         channel suffix). A request the registry opened before returns the same
         `Library`."""
         return self._open(request, allow_fetch=self._autofetch)
+
+    def fetch(self, request: str) -> Resolved:
+        """Resolve, fetch, verify and install the build `request` names into the
+        cache, as `chtypes fetch` does, and open nothing: no library is loaded
+        and the process setup is untouched, so it needs no `setup` (public
+        issue #492). It honors the registry's fetch options (offline, the
+        cache, and under the production channel the bases, the trust and the
+        lock), and shares one fetch with a concurrent open or `fetch` of the
+        same request. The `Resolved` names the installed version, build,
+        digests and library path. The build is held by this process until it
+        exits, so no `chtypes prune` removes it meanwhile. Errors are the fetch
+        codes' classes, as an open raises them."""
+        try:
+            fetch_request = Request(request)
+        except ValueError as exc:
+            raise errors._misuse(str(exc)) from None
+        _refuse_pinning(self._fetch._to_options())
+        try:
+            platform = detect_host_platform()
+        except ValueError as exc:
+            raise errors.ArtifactIncompatibleError(str(exc), reason="host_platform") from None
+        options = self._fetch._to_options(platform)
+        try:
+            return self._ensure_held(request, fetch_request, options)
+        except FetchError as exc:
+            raise _wrap(exc) from exc
+
+    def _ensure_shared(self, fetch_request: Request, options: Options) -> Resolved:
+        """The request's one fetch: join the fetch in progress for it, or run
+        it on this thread while every other caller waits on it. A failed fetch
+        is never remembered."""
+        key = fetch_request.spelling
+        with self._lock:
+            flight = self._fetches.get(key)
+            lead = flight is None
+            if flight is None:
+                flight = self._fetches[key] = _FetchFlight()
+        on_fetch_wait = self._on_fetch_wait
+        if on_fetch_wait is not None:
+            on_fetch_wait(key)
+        if lead:
+            try:
+                flight.resolved = ensure(fetch_request, options)
+            except BaseException as exc:
+                flight.error = exc
+            finally:
+                with self._lock:
+                    if self._fetches.get(key) is flight:
+                        del self._fetches[key]
+                flight.done.set()
+        else:
+            flight.done.wait()
+        if flight.error is not None:
+            raise flight.error
+        assert flight.resolved is not None
+        return flight.resolved
+
+    def _ensure_held(self, request: str, fetch_request: Request, options: Options) -> Resolved:
+        """The request's one fetch, then this process's hold on the build it
+        installed. A build a concurrent prune removed between the two is
+        fetched again, once; removed twice, it is `ArtifactMissingError`."""
+        resolved = self._ensure_shared(fetch_request, options)
+        if hold(resolved.dir) != VANISHED:
+            return resolved
+        resolved = self._ensure_shared(fetch_request, options)
+        if hold(resolved.dir) != VANISHED:
+            return resolved
+        raise removed_while_held(request, resolved.dir)
 
     def installed(self) -> tuple[Resolved, ...]:
         """What is installed, from the fetch layer's own listing."""
@@ -326,7 +419,7 @@ class Registry:
             raise errors.ArtifactIncompatibleError(str(exc), reason="host_platform") from None
         options = self._fetch._to_options(platform)
         try:
-            resolved = resolve_installed(fetch_request, platform, options)
+            resolved = _lookup_held(fetch_request, platform, options)
             if resolved is None:
                 if not allow_fetch:
                     raise errors.ArtifactMissingError(
@@ -336,7 +429,7 @@ class Registry:
                             missing_notes(options),
                         )
                     )
-                resolved = ensure(fetch_request, options)
+                resolved = self._ensure_held(request, fetch_request, options)
         except FetchError as exc:
             raise _wrap(exc) from exc
         # The adapter: the fetch layer's record, passed on exactly as it came.
@@ -344,6 +437,18 @@ class Registry:
         library = open_image(str(Path(resolved.library_path)), resolved.predicate, resolved)
         _check_within_request(library, request)
         return library
+
+
+def _lookup_held(fetch_request: Request, platform: str, options: Options) -> Resolved | None:
+    """The installed lookup, then this process's hold on the build it found,
+    taken before anything reads the library. A build a concurrent prune
+    removed between the two is looked up again, once; removed twice, it is a
+    miss."""
+    for _ in range(2):
+        resolved = resolve_installed(fetch_request, platform, options)
+        if resolved is None or hold(resolved.dir) != VANISHED:
+            return resolved
+    return None
 
 
 def _refuse_pinning(options: Options) -> None:

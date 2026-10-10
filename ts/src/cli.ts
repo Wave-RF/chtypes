@@ -12,11 +12,16 @@
  *   chtypes verify                      re-hash every installed library against its verified record
  *   chtypes list                        what is installed, and the versions the registry publishes
  *   chtypes where [--all]               the v1 cache root; --all: every directory searched
+ *   chtypes resolve <version> [--json]  the build and manifest each platform resolves to, verified; installs nothing
+ *   chtypes prune [--line <line>] [--keep <n>] [--dry-run]
+ *                                       remove the builds of each line newer ones supersede, keeping the newest n
  *
  * Options per cli-common: `fetch` takes `--platform`, `--cache`, `--lock`, `--frozen`,
  * `--offline`, `--update`; `verify`, `list` and `where` take `--cache` (`list` also
- * `--offline`); every command takes `--strict`; `-h/--help` anywhere, `--version` at
- * top level. The registry base comes only from `CHTYPES_ARTIFACTS_URL`.
+ * `--offline`); `resolve` takes `--cache`, `--offline` and `--json`; `prune` takes
+ * `--cache`, `--line`, `--keep` and `--dry-run`; every command takes `--strict`;
+ * `-h/--help` anywhere, `--version` at top level. The registry base comes only from
+ * `CHTYPES_ARTIFACTS_URL`.
  *
  * Exit statuses: 0 ok, 2 usage, and for every fetch error the status the
  * `errors` table of `spec/fetch-v1/constants.json` gives its code (generated
@@ -53,6 +58,7 @@ import {
   type FetchV1Options,
   hostPlatformKey,
   isFilesystemError,
+  isLine,
   isPlatformKey,
   listInstalled,
   listTags,
@@ -62,7 +68,10 @@ import {
   type PlatformKey,
   pinningRequested,
   probeCache,
+  prune,
+  resolveBuilds,
   searchDirs,
+  SpellingRefusedError,
   verifyInstalled,
 } from './ocifetch/index.js';
 
@@ -86,9 +95,17 @@ const USAGE = `usage: chtypes <command> [options]
   chtypes verify [--strict]
   chtypes list [--strict]
   chtypes where [--strict] [--all]
+  chtypes resolve <version> [--json] [--offline] [--strict]
+                                      the build and manifest each platform resolves to, verified; installs nothing
+  chtypes prune [--line <line>] [--keep <n>] [--dry-run] [--strict]
+                                      remove the builds of each line newer ones supersede, keeping the newest n (default 1)
 
   <version>   a ClickHouse version: 26.8, 26.8.15 or 26.8.15.10 (no "v", no channel suffix)
   --all       every line (two-part version) the registry publishes for the platform; with 'where', every directory searched (the cache root first)
+  --json      with 'resolve': one JSON array on one line, one object per platform, instead of one line per platform
+  --line      with 'prune': only this line, such as 26.8 (default: every line)
+  --keep      with 'prune': how many of each line's newest builds stay, per platform (at least 1; default 1)
+  --dry-run   with 'prune': print what would be removed, and remove nothing
   --frozen    fetch exactly what the lock file pins, by digest; refuse anything it does not (default lock: chtypes.lock)
   --offline   never touch the network: an installed, verified build is fine, anything else fails (or set CHTYPES_OFFLINE=1)
   --lock      record what was installed into this lock file
@@ -125,10 +142,17 @@ const CONFIG = {
     platform: { type: 'string' },
     cache: { type: 'string' },
     strict: { type: 'boolean' },
+    json: { type: 'boolean' },
+    line: { type: 'string' },
+    keep: { type: 'string' },
+    'dry-run': { type: 'boolean' },
     help: { type: 'boolean', short: 'h' },
     version: { type: 'boolean' },
   },
 } as const;
+
+/** The options only `resolve` and `prune` take: every other command refuses them as a usage error, as it did before they existed. */
+const RESOLVE_AND_PRUNE_OPTIONS = ['json', 'line', 'keep', 'dry-run'] as const;
 
 type Parsed = ReturnType<typeof parseArgs<typeof CONFIG>>;
 type Values = Parsed['values'];
@@ -176,13 +200,21 @@ export async function runCli(argv: readonly string[], io: CliIo = defaultIo): Pr
   try {
     switch (command) {
       case 'fetch':
+        refuseOptions(command, values, RESOLVE_AND_PRUNE_OPTIONS);
         return await cmdFetch(rest, values, io);
       case 'verify':
+        refuseOptions(command, values, RESOLVE_AND_PRUNE_OPTIONS);
         return await cmdVerify(rest, values, io);
       case 'list':
+        refuseOptions(command, values, RESOLVE_AND_PRUNE_OPTIONS);
         return await cmdList(rest, values, io);
       case 'where':
+        refuseOptions(command, values, RESOLVE_AND_PRUNE_OPTIONS);
         return await cmdWhere(rest, values, io);
+      case 'resolve':
+        return await cmdResolve(rest, values, io);
+      case 'prune':
+        return await cmdPrune(rest, values, io);
       default:
         throw new CliUsageError(`unknown command ${JSON.stringify(command)}`);
     }
@@ -330,6 +362,56 @@ async function cmdWhere(rest: readonly string[], values: Values, io: CliIo): Pro
   return EXIT_OK;
 }
 
+/** `chtypes resolve` (public issue #493): what one spelling resolves to on every platform, verified, and nothing installed. */
+async function cmdResolve(rest: readonly string[], values: Values, io: CliIo): Promise<number> {
+  refuseOptions('resolve', values, ['all', 'frozen', 'update', 'lock', 'platform', 'line', 'keep', 'dry-run']);
+  const [spelling] = rest;
+  if (spelling === undefined || rest.length !== 1) throw new CliUsageError(`resolve takes exactly one version spelling (got ${rest.length})`);
+  const options: FetchV1Options = { ...fetchOptions(values, false), ...(values.offline === true ? { offline: true } : {}) };
+  const { resolutions, warnings } = await resolveBuilds(spelling, options);
+  for (const w of warnings) io.stderr(`chtypes: warning: ${w}\n`);
+  if (values.json === true) {
+    // One line, the members in this order, as every binding's CLI prints them.
+    const doc = resolutions.map((r) => ({ platform: r.platform, version: r.version, build: r.build, manifest: r.manifest }));
+    io.stdout(`${JSON.stringify(doc)}\n`);
+    return EXIT_OK;
+  }
+  for (const r of resolutions) io.stdout(`resolved ${r.version} ${r.platform} ${r.build} ${r.manifest}\n`);
+  return EXIT_OK;
+}
+
+/** `chtypes prune` (public issue #494): remove the builds of each line newer installed builds supersede, keeping the newest n per platform, never one in use. */
+async function cmdPrune(rest: readonly string[], values: Values, io: CliIo): Promise<number> {
+  refuseOptions('prune', values, ['all', 'frozen', 'update', 'lock', 'platform', 'offline', 'json']);
+  if (rest.length > 0) throw new CliUsageError(`prune takes no positional arguments (${rest.join(' ')}); a line is --line <line>`);
+  const keepText = values.keep ?? '1';
+  if (!/^[+-]?[0-9]+$/.test(keepText)) throw new CliUsageError(`--keep takes a number of builds, at least 1, not ${JSON.stringify(keepText)}`);
+  const keep = Number(keepText);
+  if (keep < 1) throw new CliUsageError(`--keep is at least 1, not ${keep}`);
+  const line = values.line ?? '';
+  if (line !== '' && !isLine(line)) throw new CliUsageError(`--line takes a two-part line such as 26.8, not ${JSON.stringify(line)}`);
+  const dryRun = values['dry-run'] === true;
+  const options = fetchOptions(values, false);
+  const results = await prune(options, { line, keep, dryRun });
+  let removed = 0;
+  for (const r of results) {
+    const word = r.inUse ? 'in-use' : dryRun ? 'would-prune' : 'pruned';
+    if (!r.inUse) removed += 1;
+    io.stdout(`${word} ${r.version} ${r.platform} ${r.dir}\n`);
+  }
+  await sayNotes(io, options);
+  const root = cacheRoot(options.cacheDir);
+  io.stderr(dryRun ? `chtypes: would prune ${removed} build(s) under ${root}\n` : `chtypes: pruned ${removed} build(s) under ${root}\n`);
+  return EXIT_OK;
+}
+
+/** A usage error naming the first option in `names` the command was given: an option another command takes. */
+function refuseOptions(command: string, values: Values, names: readonly string[]): void {
+  for (const [name, value] of Object.entries(values)) {
+    if (value !== undefined && names.includes(name)) throw new CliUsageError(`${command} does not take --${name}`);
+  }
+}
+
 /** What the cache says about itself in the default mode: a warning per root or entry it could not read, and the 0.x hint. */
 async function sayNotes(io: CliIo, options: FetchV1Options): Promise<void> {
   for (const note of await missingNotes(options)) io.stderr(`chtypes: ${note}\n`);
@@ -345,7 +427,7 @@ function report(err: unknown, io: CliIo): number {
     io.stderr(`chtypes: ${err.message}\n${USAGE}`);
     return EXIT_USAGE;
   }
-  if (err instanceof PinningRefusedError) {
+  if (err instanceof PinningRefusedError || err instanceof SpellingRefusedError) {
     // The caller's misuse, never an artifact failure: the usage status.
     io.stderr(`${err.message}\n`);
     return EXIT_USAGE;

@@ -22,6 +22,7 @@ import (
 	"reflect"
 	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -45,6 +46,10 @@ type confSetup struct {
 	SystemDirs            []string `json:"system_dirs"`
 	Lock                  *string  `json:"lock"`
 	BeforeIndexRenameHook *string  `json:"before_index_rename_hook"`
+	// Held names installed builds this runner holds (Hold, the call the
+	// registry makes before a load) before the call: another process using
+	// them.
+	Held []string `json:"held"`
 }
 
 type confRequest struct {
@@ -61,6 +66,28 @@ type confRequest struct {
 	// alias step under that fixture fingerprint (UseOwnFingerprintForTests);
 	// null runs it under the v1 contract exactly, which never tries an alias.
 	OwnFingerprint *string `json:"own_fingerprint"`
+	// Prune is a prune- case's prune.
+	Prune *confPrune `json:"prune"`
+}
+
+type confPrune struct {
+	Line   *string `json:"line"`
+	Keep   int     `json:"keep"`
+	DryRun bool    `json:"dry_run"`
+}
+
+type confResolution struct {
+	Platform string `json:"platform"`
+	Version  string `json:"version"`
+	Build    string `json:"build"`
+	Manifest string `json:"manifest"`
+}
+
+type confPruneExpect struct {
+	Removed    []string `json:"removed"`
+	InUse      []string `json:"in_use"`
+	Gone       []string `json:"gone"`
+	IndexAfter []string `json:"index_after"`
 }
 
 type confExpect struct {
@@ -81,6 +108,10 @@ type confExpect struct {
 	// sanitized message), and what it must not contain anywhere.
 	MessageContains *string  `json:"message_contains"`
 	MessageExcludes []string `json:"message_excludes"`
+	// Resolutions is a resolve-build- case's answer, in platform order.
+	Resolutions *[]confResolution `json:"resolutions"`
+	// Prune is a prune- case's report and what it leaves behind.
+	Prune *confPruneExpect `json:"prune"`
 }
 
 type confRequestsExpect struct {
@@ -472,12 +503,38 @@ func runOneCase(t *testing.T, fixturesDir, subroot string, port, port2 int, regi
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	// held: each named build held by this process, as a process using it
+	// holds it, through the very call the registry makes before a load.
+	for _, d := range c.Setup.Held {
+		if got := Hold(filepath.Join(layoutDir, UnpackedDirName(), Digest(d).Hex())); got != HoldHeld {
+			row.Verdict, row.Detail = "fail", fmt.Sprintf("held: holding %s = %v, want HoldHeld", d, got)
+			return row
+		}
+	}
+	// A prune- case compares every file of the layout before and after.
+	var filesBefore []string
+	if c.Request.Prune != nil {
+		filesBefore = layoutFiles(layoutDir)
+	}
+
 	var resolvedManifest, resolvedLibrarySHA256 string
 	var resolvedVersion, resolvedBuild *string
 	var warnings, listedTags []string
+	var resolutions []Resolution
+	var pruned []Superseded
 	var runErr error
 
 	switch {
+	case strings.HasPrefix(c.ID, "resolve-build-"):
+		// What a request resolves to on every platform, never a layer
+		// (docs/guides/fetch-v1.md §10).
+		resolutions, warnings, runErr = Resolve(ctx, c.Request.Spelling, opts)
+	case strings.HasPrefix(c.ID, "prune-"):
+		p := PruneOptions{Keep: c.Request.Prune.Keep, DryRun: c.Request.Prune.DryRun}
+		if c.Request.Prune.Line != nil {
+			p.Line = *c.Request.Prune.Line
+		}
+		pruned, runErr = Prune(opts, p)
 	case strings.HasPrefix(c.ID, "goldens-"):
 		// request.spelling is the SUBJECT (a platform manifest); FetchSigned
 		// itself discovers its goldens referrers, verifies each and returns
@@ -543,6 +600,22 @@ func runOneCase(t *testing.T, fixturesDir, subroot string, port, port2 int, regi
 	if c.Expect.Tags != nil && runErr == nil && strings.Join(listedTags, " ") != strings.Join(*c.Expect.Tags, " ") {
 		row.Verdict, row.Detail = "fail", fmt.Sprintf("listed %q, want %q", listedTags, *c.Expect.Tags)
 		return row
+	}
+	if c.Expect.Resolutions != nil && runErr == nil {
+		got := make([]confResolution, 0, len(resolutions))
+		for _, r := range resolutions {
+			got = append(got, confResolution{Platform: r.Platform, Version: r.Version, Build: r.Build, Manifest: string(r.Manifest)})
+		}
+		if !reflect.DeepEqual(got, *c.Expect.Resolutions) {
+			row.Verdict, row.Detail = "fail", fmt.Sprintf("resolved %+v, want %+v", got, *c.Expect.Resolutions)
+			return row
+		}
+	}
+	if c.Expect.Prune != nil && runErr == nil {
+		if detail := checkPrune(*c.Expect.Prune, pruned, layoutDir, filesBefore); detail != "" {
+			row.Verdict, row.Detail = "fail", detail
+			return row
+		}
 	}
 
 	reqMu.Lock()
@@ -783,6 +856,79 @@ func checkRequests(expect confRequestsExpect, reqTexts []string, sawAuthOnSecond
 		return fmt.Sprintf("auth_on_second_origin = %v, want %v", sawAuthOnSecondOrigin, expect.AuthOnSecondOrigin)
 	}
 	return ""
+}
+
+// checkPrune compares a prune's report with expect, then the layout it left:
+// every path in expect.Gone is gone, every other file the layout held before
+// the call is still there, and index.json lists exactly expect.IndexAfter.
+func checkPrune(expect confPruneExpect, got []Superseded, layoutDir string, before []string) string {
+	removed, inUse := []string{}, []string{}
+	for _, s := range got {
+		if s.InUse {
+			inUse = append(inUse, string(s.Manifest))
+		} else {
+			removed = append(removed, string(s.Manifest))
+		}
+	}
+	if !reflect.DeepEqual(removed, expect.Removed) {
+		return fmt.Sprintf("prune reported removed %v, want %v", removed, expect.Removed)
+	}
+	if !reflect.DeepEqual(inUse, expect.InUse) {
+		return fmt.Sprintf("prune reported in use %v, want %v", inUse, expect.InUse)
+	}
+	underGone := func(rel string) bool {
+		for _, g := range expect.Gone {
+			if rel == g || strings.HasPrefix(rel, g+"/") {
+				return true
+			}
+		}
+		return false
+	}
+	var want []string
+	for _, rel := range before {
+		if !underGone(rel) {
+			want = append(want, rel)
+		}
+	}
+	if after := layoutFiles(layoutDir); strings.Join(after, "\n") != strings.Join(want, "\n") {
+		return fmt.Sprintf("the layout after the prune holds %v, want %v", after, want)
+	}
+	for _, g := range expect.Gone {
+		if _, err := os.Lstat(filepath.Join(layoutDir, filepath.FromSlash(g))); err == nil {
+			return fmt.Sprintf("%s is still there after the prune", g)
+		}
+	}
+	index := []string{}
+	if b, err := os.ReadFile(filepath.Join(layoutDir, "index.json")); err == nil {
+		var idx ociLayoutIndex
+		if err := json.Unmarshal(b, &idx); err != nil {
+			return fmt.Sprintf("index.json after the prune: %v", err)
+		}
+		for _, d := range idx.Manifests {
+			index = append(index, string(d.Digest))
+		}
+	}
+	if !reflect.DeepEqual(index, expect.IndexAfter) {
+		return fmt.Sprintf("index.json lists %v after the prune, want %v", index, expect.IndexAfter)
+	}
+	return ""
+}
+
+// layoutFiles is every file under dir, as slash-separated relative paths,
+// sorted. index.json, whose bytes a prune rewrites, is one of them, and its
+// entries are compared on their own.
+func layoutFiles(dir string) []string {
+	var out []string
+	_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		rel, _ := filepath.Rel(dir, path)
+		out = append(out, filepath.ToSlash(rel))
+		return nil
+	})
+	sort.Strings(out)
+	return out
 }
 
 // snapshotInstall is every file under <cache>/unpacked/sha256/<hex>/ for the

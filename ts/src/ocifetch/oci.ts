@@ -21,6 +21,18 @@ import { type RequestOptions, readFileUrl, requestBuffered, requestToSink } from
 import { digestOfHex, endpointUrl, hexOfDigest, MANIFEST_ACCEPT_HEADER, type PlatformKey, platformInfo } from './types.js';
 
 /**
+ * A version spelling `checkSpelling` refuses before any network call (guide
+ * §3): the caller's misuse, never a fetch error, so the `chtypes` command
+ * exits with the usage status for it, as Go's does.
+ */
+export class SpellingRefusedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = new.target.name;
+  }
+}
+
+/**
  * Refuses the two documented spelling mistakes (a `v` prefix, a
  * `-lts`/`-stable` channel suffix) before any network call (guide §3). A
  * spelling that is simply not numeric is NOT refused here: the tag lookup
@@ -32,7 +44,7 @@ import { digestOfHex, endpointUrl, hexOfDigest, MANIFEST_ACCEPT_HEADER, type Pla
  */
 export function checkSpelling(spelling: string): void {
   if (new RegExp(SPELLING_REFUSE_HINT_REGEX).test(spelling)) {
-    throw new Error(
+    throw new SpellingRefusedError(
       `chtypes: ${JSON.stringify(spelling)} is not a v1 version spelling (no "v" prefix, no "-lts"/"-stable" suffix); ` +
         'use the bare version, e.g. "26.8" or "26.8.15.10"',
     );
@@ -349,25 +361,27 @@ async function indexAcrossBases(
   return undefined;
 }
 
+/** A tag's image index, resolved (`resolveIndex`): the base that served it, and its bytes, parsed. */
+export interface ResolvedIndex {
+  /** The base that served the index: the repository its referrers are discovered in. */
+  readonly repositoryRoot: string;
+  readonly url: string;
+  readonly body: Buffer;
+  readonly json: Json;
+  /** As `IndexResolveResult.aliasAbsent`. */
+  readonly aliasAbsent: boolean;
+}
+
 /**
  * `GET manifests/<spelling>` across `bases` in order (guide §3, §7 A5's tag
  * rule: a tag 404 moves to the next base, and every base 404ing is
- * `UNPUBLISHED`), then the platform's manifest by digest across every base
- * (mirrors may carry the same tag pointing at the same digest, so a base
- * that served the index is not the only one asked for its blobs). Under the
- * dev channel a version spelling resolves its own fingerprint's alias first
- * (`aliasTag`, guide §3), and the tag only when every base 404'd the alias;
- * what the alias names is then checked exactly as the tag's answer would be.
+ * `UNPUBLISHED`), and the index's own shape. Under the dev channel a version
+ * spelling resolves its own fingerprint's alias first (`aliasTag`, guide §3),
+ * and the tag only when every base 404'd the alias.
  */
-export async function resolveTag(
-  bases: readonly string[],
-  spelling: string,
-  platform: PlatformKey,
-  options: RequestOptions,
-): Promise<IndexResolveResult> {
+export async function resolveIndex(bases: readonly string[], spelling: string, options: RequestOptions): Promise<ResolvedIndex> {
   checkSpelling(spelling);
   if (bases.length === 0) throw new Error('chtypes: no base URLs configured');
-  const info = platformInfo(platform);
   const triedBases: string[] = [];
   const alias = aliasTag(spelling);
   let found = alias === undefined ? undefined : await indexAcrossBases(bases, alias, options, [], true);
@@ -384,7 +398,19 @@ export async function resolveTag(
   if (mediaType !== '' && mediaType !== MEDIA_TYPE_INDEX) {
     throw new SourceIncompatibleError(`chtypes: ${url} has mediaType ${JSON.stringify(mediaType)}, not ${MEDIA_TYPE_INDEX}`);
   }
-  const manifests = items(field(json, 'manifests'));
+  return { repositoryRoot: base, url, body, json, aliasAbsent };
+}
+
+/**
+ * The descriptor of `platform`'s manifest in a resolved index. An index that
+ * offers no manifest for it is `ArtifactUnpublishedError` (the one outcome
+ * `chtypes resolve` passes over); one that names it twice is
+ * `ArtifactCorruptError`, and one of the wrong media type
+ * `SourceIncompatibleError`.
+ */
+export function selectPlatformDescriptor(index: ResolvedIndex, spelling: string, platform: PlatformKey): Descriptor {
+  const info = platformInfo(platform);
+  const manifests = items(field(index.json, 'manifests'));
   const matches = manifests.filter((m) => {
     const p = field(m, 'platform');
     return asString(field(p, 'os')) === info.os && asString(field(p, 'architecture')) === info.architecture;
@@ -419,7 +445,31 @@ export async function resolveTag(
       `chtypes: ${spelling}'s ${platform} descriptor has mediaType ${JSON.stringify(manifestDescriptor.mediaType)}, not ${MEDIA_TYPE_MANIFEST}`,
     );
   }
+  return manifestDescriptor;
+}
+
+/**
+ * The tag's index (`resolveIndex`), then the platform's manifest by digest
+ * across every base (`selectPlatformDescriptor`; mirrors may carry the same
+ * tag pointing at the same digest, so a base that served the index is not the
+ * only one asked for its blobs). What the dev channel's alias names is checked
+ * exactly as the tag's answer would be.
+ */
+export async function resolveTag(
+  bases: readonly string[],
+  spelling: string,
+  platform: PlatformKey,
+  options: RequestOptions,
+): Promise<IndexResolveResult> {
+  const index = await resolveIndex(bases, spelling, options);
+  const manifestDescriptor = selectPlatformDescriptor(index, spelling, platform);
   const manifestBytes = await fetchManifestBytesByDigest(bases, manifestDescriptor, options);
-  const manifest = parseManifest(manifestDigest, manifestBytes);
-  return { repositoryRoot: base, indexDigest: digestOfHex(sha256Hex(body)), indexBytes: body, manifest, aliasAbsent };
+  const manifest = parseManifest(manifestDescriptor.digest, manifestBytes);
+  return {
+    repositoryRoot: index.repositoryRoot,
+    indexDigest: digestOfHex(sha256Hex(index.body)),
+    indexBytes: index.body,
+    manifest,
+    aliasAbsent: index.aliasAbsent,
+  };
 }

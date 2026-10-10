@@ -6,7 +6,8 @@ logic lives in sibling modules. The seam (docs/guides/fetch-v1.md "The seam")
 is the only surface anything outside this package may use: `ensure`,
 `resolve_installed`, `list_installed`, `verify_installed` and
 `fetch_signed`, plus the `Request`/`Options`/`Resolved`/
-`VerifyResult` shapes they take and return. Every other module here
+`VerifyResult` shapes they take and return; and beside it the CLI's `resolve`
+and `prune` and the registry's in-use `hold` (§1, "In use"). Every other module here
 (`_http`, `_oci`, `_referrers`, `_dsse`, `_unpack`, `_layout`,
 `_lock`, `_errors`) is a private implementation detail of `_ensure`.
 
@@ -30,15 +31,23 @@ from chtypes._ocifetch._ensure import (
     resolve_installed,
     verify_installed,
 )
+from chtypes._ocifetch._hold import hold
+from chtypes._ocifetch._prune import Superseded, prune
+from chtypes._ocifetch._resolve import Resolution, resolve
 
 __all__ = [
     "Options",
     "Request",
+    "Resolution",
     "Resolved",
+    "Superseded",
     "VerifyResult",
     "ensure",
     "fetch_signed",
+    "hold",
     "list_installed",
+    "prune",
+    "resolve",
     "resolve_installed",
     "verify_installed",
 ]

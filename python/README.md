@@ -69,7 +69,7 @@ A bad **row** is a verdict, not an exception: `outcome` becomes `Outcome.REJECTE
 
 ## Fetching from the command line
 
-`chtypes fetch 26.8` (or `python -m chtypes fetch 26.8`) resolves, verifies and installs a build into the per-user cache; `chtypes verify`, `chtypes list` and `chtypes where` complete the four commands. `--lock FILE` records what was installed and `--frozen` fetches only what the lock pins. See the [Python API reference](https://github.com/wave-rf/chtypes/blob/main/docs/reference/python.md#the-command).
+`chtypes fetch 26.8` (or `python -m chtypes fetch 26.8`) resolves, verifies and installs a build into the per-user cache; `chtypes verify`, `chtypes list`, `chtypes where`, `chtypes resolve` and `chtypes prune` complete the six commands. `--lock FILE` records what was installed and `--frozen` fetches only what the lock pins. See the [Python API reference](https://github.com/wave-rf/chtypes/blob/main/docs/reference/python.md#the-command).
 
 ## Things specific to this binding
 

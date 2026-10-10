@@ -15,6 +15,8 @@
 //! chtypes verify [--cache <dir>] [--strict]       re-verify the installed cache
 //! chtypes list [--cache <dir>] [--offline] [--strict]   installed builds, and the published lines unless --offline
 //! chtypes where [--cache <dir>] [--strict] [--all]  the cache root (the v2-dev one); --all: every directory searched
+//! chtypes resolve <spelling> [--json] [--cache <dir>] [--offline] [--strict]   what each platform resolves to; installs nothing
+//! chtypes prune [--line <line>] [--keep <n>] [--dry-run] [--cache <dir>] [--strict]   remove superseded builds
 //! ```
 //!
 //! Progress and warnings go to stderr; results go to stdout. Exit statuses
@@ -39,13 +41,17 @@ use ocifetch::oci::VersionRequest;
 const EXIT_USAGE: u8 = 2;
 
 const USAGE: &str = "\
-chtypes: fetch, verify and list ClickHouse artifacts for the chtypes SDKs
+chtypes: fetch, verify, list, resolve and prune ClickHouse artifacts for the chtypes SDKs
 
   chtypes fetch <spelling>... [--platform <os-arch>] [--cache <dir>] [--lock <file>] [--frozen] [--offline] [--update] [--strict]
   chtypes fetch --all         [--platform <os-arch>] [--cache <dir>] [--lock <file>] [--frozen] [--offline] [--update] [--strict]
   chtypes verify [--cache <dir>] [--strict]            re-verify the installed cache
   chtypes list [--cache <dir>] [--offline] [--strict]  installed builds; without --offline, published lines too
   chtypes where [--cache <dir>] [--strict] [--all]     the cache root (<dir>/v2-dev); --all: every directory searched
+  chtypes resolve <spelling> [--json] [--cache <dir>] [--offline] [--strict]
+                                      the build and manifest each platform resolves to, verified; installs nothing
+  chtypes prune  [--line <line>] [--keep <n>] [--dry-run] [--cache <dir>] [--strict]
+                                      remove the builds of each line newer ones supersede, keeping the newest n (default 1)
   chtypes --version                         chtypes <version>
   chtypes -h | --help                       this text
 
@@ -55,6 +61,11 @@ the registry publishes. --lock writes the lock after a fetch; --frozen fetches
 exactly what the lock pins (default file chtypes.lock) and does no discovery;
 --offline (or CHTYPES_OFFLINE=1) reads the cache only; --update re-resolves every locked request and
 rewrites the lock (it requires --lock). `fetch` prints each installed directory.
+`resolve` prints `resolved <version> <platform> <build> <manifest>` for each
+platform the registry offers (--json: one JSON array), each signed statement
+verified and no layer downloaded. `prune` removes, from the cache only, the
+builds of each line and platform that n newer ones supersede, never one a
+running process holds (`in-use`); --dry-run prints what would go.
 --strict (or CHTYPES_CACHE_STRICT=1): a cache that cannot be read is
 CHTYPES_CACHE_UNUSABLE, never not-installed.
 
@@ -83,7 +94,19 @@ struct Args {
     offline: bool,
     update: bool,
     strict: bool,
+    /// `resolve --json`.
+    json: bool,
+    /// `prune --dry-run`.
+    dry_run: bool,
+    /// `prune --line <line>`.
+    line: Option<String>,
+    /// `prune --keep <n>`, as given: `cmd_prune` checks it.
+    keep: Option<String>,
 }
+
+/// The flags of `resolve` and `prune` alone, which every other command
+/// refuses.
+const RESOLVE_AND_PRUNE_FLAGS: &[&str] = &["--json", "--dry-run", "--line", "--keep"];
 
 fn parse(argv: &[String]) -> Result<Args, Usage> {
     let mut args = Args::default();
@@ -99,7 +122,9 @@ fn parse(argv: &[String]) -> Result<Args, Usage> {
             "--offline" => args.offline = true,
             "--update" => args.update = true,
             "--strict" => args.strict = true,
-            "--platform" | "--lock" | "--cache" => {
+            "--json" => args.json = true,
+            "--dry-run" => args.dry_run = true,
+            "--platform" | "--lock" | "--cache" | "--line" | "--keep" => {
                 let value = it
                     .next()
                     .filter(|v| !v.starts_with("--"))
@@ -108,6 +133,8 @@ fn parse(argv: &[String]) -> Result<Args, Usage> {
                 match arg.as_str() {
                     "--platform" => args.platform = Some(value),
                     "--cache" => args.cache = Some(value),
+                    "--line" => args.line = Some(value),
+                    "--keep" => args.keep = Some(value),
                     _ => args.lock = Some(PathBuf::from(value)),
                 }
             }
@@ -192,6 +219,8 @@ fn main() -> ExitCode {
         "verify" => cmd_verify(&args),
         "list" => cmd_list(&args),
         "where" => cmd_where(&args),
+        "resolve" => cmd_resolve(&args),
+        "prune" => cmd_prune(&args),
         other => Err(Usage(format!("unknown command: {other}"))),
     };
     match result {
@@ -218,6 +247,30 @@ fn no_platform(command: &str, args: &Args) -> Result<(), Usage> {
     }
 }
 
+/// Refuse the first flag in `refused` that `args` sets: it does not apply to
+/// `command`.
+fn refuse_flags(command: &str, args: &Args, refused: &[&str]) -> Result<(), Usage> {
+    let set = [
+        ("--all", args.all),
+        ("--platform", args.platform.is_some()),
+        ("--lock", args.lock.is_some()),
+        ("--frozen", args.frozen),
+        ("--offline", args.offline),
+        ("--update", args.update),
+        ("--json", args.json),
+        ("--dry-run", args.dry_run),
+        ("--line", args.line.is_some()),
+        ("--keep", args.keep.is_some()),
+    ];
+    match set
+        .into_iter()
+        .find(|&(flag, on)| on && refused.contains(&flag))
+    {
+        Some((flag, _)) => Err(Usage(format!("{flag} does not apply to {command}"))),
+        None => Ok(()),
+    }
+}
+
 fn cmd_fetch(args: &Args) -> Result<u8, Usage> {
     // A dev SDK pins nothing: the refusal comes before anything else, every
     // other check of the arguments and the network above all
@@ -225,6 +278,7 @@ fn cmd_fetch(args: &Args) -> Result<u8, Usage> {
     if let Some(refusal) = ocifetch::channel::refuse_pinning(&options(args)) {
         return Err(Usage(refusal));
     }
+    refuse_flags("fetch", args, RESOLVE_AND_PRUNE_FLAGS)?;
     if args.all && !args.spellings.is_empty() {
         return Err(Usage(format!(
             "--all fetches every published line; drop the spelling ({})",
@@ -282,6 +336,7 @@ fn cmd_fetch(args: &Args) -> Result<u8, Usage> {
 
 fn cmd_verify(args: &Args) -> Result<u8, Usage> {
     no_platform("verify", args)?;
+    refuse_flags("verify", args, RESOLVE_AND_PRUNE_FLAGS)?;
     if !args.spellings.is_empty() || args.all {
         return Err(Usage("verify takes no arguments".into()));
     }
@@ -322,6 +377,7 @@ fn cmd_verify(args: &Args) -> Result<u8, Usage> {
 
 fn cmd_list(args: &Args) -> Result<u8, Usage> {
     no_platform("list", args)?;
+    refuse_flags("list", args, RESOLVE_AND_PRUNE_FLAGS)?;
     if !args.spellings.is_empty() || args.all {
         return Err(Usage("list takes no arguments".into()));
     }
@@ -350,6 +406,7 @@ fn cmd_list(args: &Args) -> Result<u8, Usage> {
 
 fn cmd_where(args: &Args) -> Result<u8, Usage> {
     no_platform("where", args)?;
+    refuse_flags("where", args, RESOLVE_AND_PRUNE_FLAGS)?;
     if !args.spellings.is_empty() {
         return Err(Usage("where takes no arguments".into()));
     }
@@ -378,6 +435,150 @@ fn cmd_where(args: &Args) -> Result<u8, Usage> {
         }
         Err(e) => Ok(report(&e)),
     }
+}
+
+/// One `chtypes resolve --json` element: the same members, in the same order,
+/// from every binding's CLI.
+#[derive(serde::Serialize)]
+struct ResolutionJson<'a> {
+    platform: &'a str,
+    version: &'a str,
+    build: &'a str,
+    manifest: &'a str,
+}
+
+/// `chtypes resolve` (public issue #493): what a spelling resolves to on every
+/// platform, verified, with nothing installed; `--offline` asks the cache.
+fn cmd_resolve(args: &Args) -> Result<u8, Usage> {
+    refuse_flags(
+        "resolve",
+        args,
+        &[
+            "--all",
+            "--platform",
+            "--lock",
+            "--frozen",
+            "--update",
+            "--dry-run",
+            "--line",
+            "--keep",
+        ],
+    )?;
+    let [spelling] = args.spellings.as_slice() else {
+        return Err(Usage(format!(
+            "resolve takes exactly one version spelling (got {})",
+            args.spellings.len()
+        )));
+    };
+    match VersionRequest::parse(spelling) {
+        Ok(r) if !r.is_literal() => {}
+        Ok(_) => {
+            return Err(Usage(format!(
+                "{spelling:?} is not a version spelling (two, three or four numeric parts)"
+            )));
+        }
+        Err(e) => return Err(Usage(e.to_string())),
+    }
+    let (resolutions, warnings) = match ocifetch::resolve::resolve(spelling, options(args)) {
+        Ok(answer) => answer,
+        Err(e) => return Ok(report(&e)),
+    };
+    for warning in &warnings {
+        eprintln!("chtypes: warning: {warning}");
+    }
+    if args.json {
+        let doc: Vec<ResolutionJson<'_>> = resolutions
+            .iter()
+            .map(|r| ResolutionJson {
+                platform: &r.platform,
+                version: &r.version,
+                build: &r.build,
+                manifest: &r.manifest,
+            })
+            .collect();
+        match serde_json::to_string(&doc) {
+            Ok(line) => println!("{line}"),
+            Err(e) => return Ok(report(&Error::from(e))),
+        }
+        return Ok(0);
+    }
+    for r in &resolutions {
+        println!(
+            "resolved {} {} {} {}",
+            r.version, r.platform, r.build, r.manifest
+        );
+    }
+    Ok(0)
+}
+
+/// `chtypes prune` (public issue #494): remove, from the cache only, the
+/// builds of each line and platform newer ones supersede, keeping the newest
+/// `--keep` (default 1), and never one a running process holds.
+fn cmd_prune(args: &Args) -> Result<u8, Usage> {
+    refuse_flags(
+        "prune",
+        args,
+        &[
+            "--all",
+            "--platform",
+            "--lock",
+            "--frozen",
+            "--offline",
+            "--update",
+            "--json",
+        ],
+    )?;
+    if !args.spellings.is_empty() {
+        return Err(Usage(format!(
+            "prune takes no positional arguments ({}); a line is --line <line>",
+            args.spellings.join(" ")
+        )));
+    }
+    let keep = match args.keep.as_deref() {
+        None => 1,
+        Some(given) => match given.parse::<usize>() {
+            Ok(n) if n >= 1 => n,
+            _ => return Err(Usage(format!("--keep is at least 1, not {given}"))),
+        },
+    };
+    if let Some(line) = args
+        .line
+        .as_deref()
+        .filter(|l| !ocifetch::prune::is_line(l))
+    {
+        return Err(Usage(format!(
+            "--line takes a two-part line such as 26.8, not {line:?}"
+        )));
+    }
+    let results =
+        match ocifetch::prune::prune(options(args), args.line.as_deref(), keep, args.dry_run) {
+            Ok(results) => results,
+            Err(e) => return Ok(report(&e)),
+        };
+    let mut removed = 0usize;
+    for r in &results {
+        let word = if r.in_use {
+            "in-use"
+        } else if args.dry_run {
+            "would-prune"
+        } else {
+            "pruned"
+        };
+        if !r.in_use {
+            removed += 1;
+        }
+        println!("{word} {} {} {}", r.version, r.platform, r.dir.display());
+    }
+    print_notes(args);
+    let root = ocifetch::layout::cache_root(args.cache.as_deref())
+        .map(|r| r.display().to_string())
+        .unwrap_or_default();
+    if args.dry_run {
+        eprintln!("chtypes: would prune {removed} build(s) under {root}");
+    } else {
+        eprintln!("chtypes: pruned {removed} build(s) under {root}");
+    }
+    Ok(0)
 }
 
 /// What the cache says about itself in the default mode: a warning per root

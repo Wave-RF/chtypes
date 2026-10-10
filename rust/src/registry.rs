@@ -6,11 +6,19 @@
 //!   1. the registry's memo: a request it has opened before returns the same
 //!      Library, for the registry's life
 //!   2. resolved = resolve_installed(request, host platform, fetch options)   never the network
+//!      then hold(resolved.dir)
 //!   3. on a miss:  autofetch on  -> resolved = ensure(request, fetch options)  may use the network
+//!                                   (the request's one fetch), then hold(resolved.dir)
 //!                  autofetch off -> ArtifactMissing, naming the request and the platform
 //!   4. load the image from resolved.library_path with resolved.predicate, verbatim
 //!   5. return the image's Library, whose resolved() is the record that first opened it
 //! ```
+//!
+//! [`Registry::fetch`] is steps 3 and its hold alone, whatever the cache holds
+//! and whatever autofetch says: it installs and opens nothing (public issue
+//! #492). Every build the registry opens or fetches is held by this process,
+//! with a shared lock on its record, until the process exits, so `chtypes
+//! prune` never removes it meanwhile (public issue #494).
 //!
 //! **Construction opens nothing.** Nothing opens an artifact except a request
 //! for a version or `preload`, which opens each listed request at construction,
@@ -23,10 +31,13 @@
 //! no versions itself.
 //!
 //! **An open never waits for another request's fetch** (public issue #491). The
-//! registry's lock guards the memo and the attempts in progress, and is never
-//! held across steps 2 to 5. Concurrent opens of one request share one attempt,
-//! and so one fetch, and each gets that attempt's `Library` or its error; a
-//! failed attempt is never remembered, so the next open starts a new one.
+//! registry's lock guards the memo, the attempts in progress and the fetches in
+//! progress, and is never held across steps 2 to 5. Concurrent opens of one
+//! request share one attempt, and so one fetch, and each gets that attempt's
+//! `Library` or its error; a failed attempt is never remembered, so the next
+//! open starts a new one. A [`Registry::fetch`] of the request shares that same
+//! fetch, and so do two of them: one `ensure` call, whose answer each gets; a
+//! failed fetch is never remembered either.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -36,6 +47,7 @@ use crate::error::{Error, Refusal, Result};
 use crate::library::{Library, open_image, settle_failed_open};
 use crate::ocifetch::constants::ENV_AUTOFETCH_NAME;
 use crate::ocifetch::ensure::{self, Options, Resolved};
+use crate::ocifetch::hold::{self, HoldState};
 use crate::ocifetch::layout;
 use crate::ocifetch::oci::VersionRequest;
 use crate::setup;
@@ -188,32 +200,42 @@ struct Opened {
     library: Arc<Library>,
 }
 
-/// One attempt to open one request: the installed lookup, the fetch when there
-/// is one, and the load. Every open of that request made while it is in
-/// progress waits on it and gets its answer.
-#[derive(Default)]
-struct Flight {
-    landing: Mutex<Landing>,
+/// One attempt to open one request (a `Flight<Arc<Library>>`: the installed
+/// lookup, the fetch when there is one, and the load), or one fetch of one
+/// request (a `Flight<Resolved>`: `ensure`). Every caller that asks for that
+/// request while it is in progress waits on it and gets its answer.
+struct Flight<T> {
+    landing: Mutex<Landing<T>>,
     landed: Condvar,
 }
 
-#[derive(Default)]
-enum Landing {
-    #[default]
+impl<T> Default for Flight<T> {
+    fn default() -> Self {
+        Flight {
+            landing: Mutex::new(Landing::InFlight),
+            landed: Condvar::new(),
+        }
+    }
+}
+
+enum Landing<T> {
     InFlight,
-    Landed(Result<Arc<Library>>),
-    /// The leading open panicked: every open waiting on the attempt starts over.
+    Landed(Result<T>),
+    /// The leading caller panicked: every caller waiting on the flight starts
+    /// over.
     Abandoned,
 }
 
-impl Flight {
-    fn land(&self, landing: Landing) {
+impl<T> Flight<T> {
+    fn land(&self, landing: Landing<T>) {
         *lock(&self.landing) = landing;
         self.landed.notify_all();
     }
+}
 
-    /// The attempt's answer once it lands, or `None` if it was abandoned.
-    fn wait(&self) -> Option<Result<Arc<Library>>> {
+impl<T: Clone> Flight<T> {
+    /// The flight's answer once it lands, or `None` if it was abandoned.
+    fn wait(&self) -> Option<Result<T>> {
         let landing = self
             .landed
             .wait_while(lock(&self.landing), |l| matches!(l, Landing::InFlight))
@@ -225,11 +247,28 @@ impl Flight {
     }
 }
 
-/// What the registry's lock guards: the memo and the attempts in progress.
+/// The flights in progress, by request.
+type Flights<T> = HashMap<String, Arc<Flight<T>>>;
+
+/// What the registry's lock guards: the memo, the attempts in progress and the
+/// fetches in progress.
 #[derive(Default)]
 struct State {
     opened: Vec<Opened>,
-    flights: HashMap<String, Arc<Flight>>,
+    flights: Flights<Arc<Library>>,
+    /// The fetches in progress (public issue #492), apart from the attempts:
+    /// an open's fetch and a [`Registry::fetch`] of one request are one.
+    fetches: Flights<Resolved>,
+}
+
+/// The table of open attempts, for [`AbandonOnUnwind`].
+fn attempts_of(state: &mut State) -> &mut Flights<Arc<Library>> {
+    &mut state.flights
+}
+
+/// The table of fetches, for [`AbandonOnUnwind`].
+fn fetches_of(state: &mut State) -> &mut Flights<Resolved> {
+    &mut state.fetches
 }
 
 impl State {
@@ -241,33 +280,42 @@ impl State {
     }
 }
 
-/// Abandons an attempt whose leading open unwinds, so the opens waiting on it
-/// start over instead of waiting forever.
-struct AbandonOnUnwind<'a> {
+/// Abandons a flight whose leading caller unwinds, so the callers waiting on
+/// it start over instead of waiting forever.
+struct AbandonOnUnwind<'a, T> {
     registry: &'a Registry,
-    flight: &'a Flight,
+    flight: &'a Flight<T>,
     request: &'a str,
+    /// The table the flight is listed in.
+    table: fn(&mut State) -> &mut Flights<T>,
     armed: bool,
 }
 
-impl Drop for AbandonOnUnwind<'_> {
+impl<T> Drop for AbandonOnUnwind<'_, T> {
     fn drop(&mut self) {
         if self.armed {
-            lock(&self.registry.state).flights.remove(self.request);
+            {
+                let mut state = lock(&self.registry.state);
+                (self.table)(&mut state).remove(self.request);
+            }
             self.flight.land(Landing::Abandoned);
         }
     }
 }
 
-/// The test hook's type: called with the request each time an open starts
-/// waiting on an attempt.
+/// The test hooks' type: called with the request each time a caller starts
+/// waiting on a flight.
 #[cfg(test)]
 type OnWait = Box<dyn Fn(&str) + Send + Sync>;
 
 /// A request for a version, to a loaded library. `Send + Sync`.
 ///
 /// An open never waits for another request's fetch, and concurrent opens of
-/// one request share one fetch (public issue #491).
+/// one request share one fetch (public issue #491). A [`Registry::fetch`] of
+/// the request shares that same fetch (public issue #492).
+///
+/// Every build the registry opens or fetches is held by this process until it
+/// exits, so `chtypes prune` never removes it meanwhile (public issue #494).
 pub struct Registry {
     fetch: FetchOptions,
     autofetch: bool,
@@ -277,6 +325,10 @@ pub struct Registry {
     /// its own or another open's.
     #[cfg(test)]
     pub(crate) on_wait: Option<OnWait>,
+    /// A test hook: called each time an open or a [`Registry::fetch`] starts
+    /// waiting on a fetch, its own or another's.
+    #[cfg(test)]
+    pub(crate) on_fetch_wait: Option<OnWait>,
 }
 
 impl std::fmt::Debug for Registry {
@@ -301,6 +353,8 @@ impl Registry {
             state: Mutex::new(State::default()),
             #[cfg(test)]
             on_wait: None,
+            #[cfg(test)]
+            on_fetch_wait: None,
         };
         for request in &options.preload {
             registry.open(request, false)?;
@@ -314,6 +368,27 @@ impl Registry {
     /// later one for the same spelling returns the same `Arc<Library>`.
     pub fn for_version(&self, request: &str) -> Result<Arc<Library>> {
         self.open(request, true)
+    }
+
+    /// Resolve, fetch, verify and install the build `request` names into the
+    /// cache, as `chtypes fetch` does, and open nothing: no library is loaded
+    /// and the process setup is untouched, so it needs no `chtypes::setup`
+    /// (public issue #492). It honors the registry's fetch options (offline,
+    /// the cache, and under the production channel the bases, the trust and
+    /// the lock), whatever autofetch says, and it shares one fetch with a
+    /// concurrent open or `fetch` of the same request. The [`Resolved`] names
+    /// the installed version, build, digests and library path. The build is
+    /// held by this process until it exits, so no `chtypes prune` removes it
+    /// meanwhile (public issue #494).
+    ///
+    /// # Errors
+    /// The fetch codes, as an open's fetch raises them; a refused spelling and
+    /// a refused pin are [`Error::Usage`], as for an open.
+    pub fn fetch(&self, request: &str) -> Result<Resolved> {
+        // A refused version spelling is the caller's own misuse, refused before
+        // anything is attempted.
+        VersionRequest::parse(request)?;
+        self.ensure_held(request)
     }
 
     /// What is installed, from the fetch layer's `list_installed`.
@@ -370,11 +445,17 @@ impl Registry {
     /// failed unlocks the setup record while no image has completed load step
     /// 7, whatever failed: the resolve, the fetch, the signature or any load
     /// step (bindings-v1.md section 6, rule 4). It is never remembered.
-    fn attempt(&self, flight: &Flight, request: &str, may_fetch: bool) -> Result<Arc<Library>> {
+    fn attempt(
+        &self,
+        flight: &Flight<Arc<Library>>,
+        request: &str,
+        may_fetch: bool,
+    ) -> Result<Arc<Library>> {
         let mut abandon = AbandonOnUnwind {
             registry: self,
             flight,
             request,
+            table: attempts_of,
             armed: true,
         };
         let began = setup::generation();
@@ -408,16 +489,77 @@ impl Registry {
     #[cfg(not(test))]
     fn waiting(&self, _request: &str) {}
 
+    /// The fetch test hook (`on_fetch_wait`), when one is set.
+    #[cfg(test)]
+    fn fetch_waiting(&self, request: &str) {
+        if let Some(on_fetch_wait) = &self.on_fetch_wait {
+            on_fetch_wait(request);
+        }
+    }
+
+    #[cfg(not(test))]
+    fn fetch_waiting(&self, _request: &str) {}
+
+    /// The request's one fetch, then this process's hold on the build it
+    /// installed ([`hold::hold`]). A build a concurrent prune removed between
+    /// the two is fetched again, once; removed twice, it is
+    /// `CHTYPES_ARTIFACT_MISSING`.
+    fn ensure_held(&self, request: &str) -> Result<Resolved> {
+        let first = self.shared_fetch(request)?;
+        if hold::hold(&first.dir) != HoldState::Vanished {
+            return Ok(first);
+        }
+        let again = self.shared_fetch(request)?;
+        if hold::hold(&again.dir) != HoldState::Vanished {
+            return Ok(again);
+        }
+        Err(hold::removed_while_held(request, &again.dir).into())
+    }
+
+    /// The fetch in progress for `request`, joined, or one this caller runs on
+    /// its own thread with no lock held: the fetch layer's `ensure` for the
+    /// host platform, with the registry's fetch options. Every open that
+    /// misses the cache and every [`Registry::fetch`] of the request made while
+    /// it is in progress gets its answer; a failed fetch is never remembered.
+    fn shared_fetch(&self, request: &str) -> Result<Resolved> {
+        loop {
+            let mut lead = false;
+            let flight = {
+                let mut state = lock(&self.state);
+                let flight = state.fetches.entry(request.to_string()).or_insert_with(|| {
+                    lead = true;
+                    Arc::new(Flight::default())
+                });
+                Arc::clone(flight)
+            };
+            self.fetch_waiting(request);
+            if lead {
+                let mut abandon = AbandonOnUnwind {
+                    registry: self,
+                    flight: &flight,
+                    request,
+                    table: fetches_of,
+                    armed: true,
+                };
+                let outcome = ensure::ensure(request, self.fetch.to_options()).map_err(Error::from);
+                lock(&self.state).fetches.remove(request);
+                abandon.armed = false;
+                flight.land(Landing::Landed(outcome.clone()));
+                return outcome;
+            }
+            if let Some(outcome) = flight.wait() {
+                return outcome;
+            }
+        }
+    }
+
     /// Resolve a request, fetching when allowed, and open its image: the part
     /// of [`Registry::open`] whose failure settles the setup.
     fn resolve_and_open(&self, request: &str, may_fetch: bool) -> Result<Arc<Library>> {
         let platform = host_platform();
-        let resolved = match ensure::resolve_installed(request, &platform, self.fetch.to_options())?
-        {
+        let resolved = match lookup_held(request, &platform, &self.fetch)? {
             Some(r) => r,
-            None if self.autofetch && may_fetch => {
-                ensure::ensure(request, self.fetch.to_options())?
-            }
+            None if self.autofetch && may_fetch => self.ensure_held(request)?,
             None => {
                 let message = format!(
                     "nothing installed answers {request} for {platform}{}",
@@ -443,6 +585,23 @@ impl Registry {
         check_within_request(library.version(), library.path(), request)?;
         Ok(library)
     }
+}
+
+/// The installed lookup, then this process's hold on the build it found
+/// ([`hold::hold`]), taken before anything reads the library. A build a
+/// concurrent prune removed between the two is looked up again, once; removed
+/// twice, it is a miss.
+fn lookup_held(request: &str, platform: &str, fetch: &FetchOptions) -> Result<Option<Resolved>> {
+    for _ in 0..2 {
+        let Some(resolved) = ensure::resolve_installed(request, platform, fetch.to_options())?
+        else {
+            return Ok(None);
+        };
+        if hold::hold(&resolved.dir) != HoldState::Vanished {
+            return Ok(Some(resolved));
+        }
+    }
+    Ok(None)
 }
 
 /// The load-time assertion (docs/guides/fetch-v1.md section 9; public issue

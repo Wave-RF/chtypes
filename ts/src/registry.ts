@@ -15,6 +15,20 @@
  *     5. loader steps 1-6, once per image; step 7 under the process setup
  *     6. the image's Library, whose `resolved` is the record that first opened it
  *
+ *   registry.fetch(request)   (public issue #492)
+ *     ensure(request, fetch options) for this host, and nothing opened: no
+ *     image loaded, no setup touched, nothing memoized or in `libraries()`.
+ *
+ * One fetch per request at a time: an open that misses the cache and may fetch
+ * and a `fetch` of the same request share the fetch in progress, and each gets
+ * its answer; a failed fetch is never remembered.
+ *
+ * Every build the registry opens or fetches is held by this process until it
+ * exits (`hold`, the shared flock on the entry's `verified.json`), so
+ * `chtypes prune` never removes it meanwhile (public issue #494). A build a
+ * concurrent prune removed between the lookup and the hold is looked up (or
+ * fetched) again, once.
+ *
  * This is the 2.0.0-dev registry: its fetch layer speaks the ABI v2 dev channel
  * (`./ocifetch/channel.ts`; `spec/abi-v2/docs.md`, rules r5 and r6). A pinning
  * option (`frozen`, `lockPath`, `lockWrite`, `update`) is refused at
@@ -37,6 +51,7 @@ import {
   cacheRoot as fetchCacheRoot,
   ensure,
   type FetchV1Options,
+  hold,
   hostPlatformKey,
   isFilesystemError,
   listInstalled,
@@ -44,6 +59,7 @@ import {
   PinningRefusedError,
   type PlatformKey,
   refusePinning,
+  removedWhileHeld,
   type Resolved,
   resolveInstalled,
   satisfiesRequest,
@@ -150,11 +166,27 @@ function checkSpelling(request: string): void {
   }
 }
 
+/** The test hook a registry calls each time an open or a `fetch` starts waiting on a fetch, its own or another's; see `onFetchWaitForTests`. */
+const fetchWaitHooks = new WeakMap<Registry, (request: string) => void>();
+
+/**
+ * Test only: `hook` is called with the request each time an open or a `fetch`
+ * of `registry` starts waiting on a fetch, its own or another's, so a test can
+ * hold a fetch until every caller it starts is waiting on it, on events rather
+ * than a clock. `undefined` removes it. Not part of the public API.
+ */
+export function onFetchWaitForTests(registry: Registry, hook: ((request: string) => void) | undefined): void {
+  if (hook === undefined) fetchWaitHooks.delete(registry);
+  else fetchWaitHooks.set(registry, hook);
+}
+
 export class Registry {
   readonly #fetch: FetchV1Options;
   readonly #autofetch: boolean;
   readonly #memo = new Map<string, Promise<Library>>();
   readonly #opened: Library[] = [];
+  /** The fetches in progress, by request: every open that misses the cache and every `fetch` of the request waits on the one there. */
+  readonly #fetches = new Map<string, Promise<Resolved>>();
 
   private constructor(options: RegistryOptions) {
     // The environment fills what the caller left unset. CHTYPES_TARGET names
@@ -191,6 +223,27 @@ export class Registry {
     return listInstalled(this.#fetch);
   }
 
+  /**
+   * Resolve, fetch, verify and install the build `request` names into the cache, as `chtypes fetch` does, and open
+   * nothing: no library is loaded and the process setup is untouched, so it needs no `setup` (public issue #492). It
+   * honors the registry's fetch options (offline, the cache, and under a production channel the bases, the trust and
+   * the lock), and it shares one fetch with a concurrent open or `fetch` of the same request. The `Resolved` names the
+   * installed version, build, digests and library path. The build is held by this process until it exits, so no
+   * `chtypes prune` removes it meanwhile (public issue #494). A refused spelling is a `UsageError`, as for `for`;
+   * every other failure is the fetch layer's own error, an `ArtifactError` with its code.
+   */
+  async fetch(request: string): Promise<Resolved> {
+    checkSpelling(request); // misuse, refused before anything is attempted
+    if (hostPlatformKey(os.platform(), os.arch()) === undefined) {
+      throw new ArtifactMissingError(`chtypes: no artifact is published for this host (${os.platform()}-${os.arch()})`);
+    }
+    try {
+      return await this.#ensureHeld(request);
+    } catch (err) {
+      throw typedFilesystemError(err);
+    }
+  }
+
   /** The libraries this registry has opened, in order of first open. */
   libraries(): readonly Library[] {
     return [...this.#opened];
@@ -223,8 +276,8 @@ export class Registry {
     }
     let resolved: Resolved | undefined;
     try {
-      resolved = await resolveInstalled(request, platform, this.#fetch);
-      if (resolved === undefined && mayFetch) resolved = await ensure(request, this.#fetch);
+      resolved = await this.#lookupHeld(request, platform);
+      if (resolved === undefined && mayFetch) resolved = await this.#ensureHeld(request);
     } catch (err) {
       throw typedFilesystemError(err);
     }
@@ -259,6 +312,49 @@ export class Registry {
       });
     }
     return library;
+  }
+
+  /**
+   * The installed lookup, then this process's hold on the build it found (`hold`), taken before anything reads the
+   * library. A build a concurrent prune removed between the two is looked up again, once; removed twice, it is a
+   * miss.
+   */
+  async #lookupHeld(request: string, platform: PlatformKey): Promise<Resolved | undefined> {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const resolved = await resolveInstalled(request, platform, this.#fetch);
+      if (resolved === undefined) return undefined;
+      if (hold(resolved.dir) !== 'vanished') return resolved;
+    }
+    return undefined;
+  }
+
+  /**
+   * The request's one fetch (`#ensure`), then this process's hold on the build it installed. A build a concurrent
+   * prune removed between the two is fetched again, once; removed twice, it is `ArtifactMissingError`.
+   */
+  async #ensureHeld(request: string): Promise<Resolved> {
+    for (let attempt = 0; ; attempt++) {
+      const resolved = await this.#ensure(request);
+      if (hold(resolved.dir) !== 'vanished') return resolved;
+      if (attempt === 1) throw removedWhileHeld(request, resolved.dir);
+    }
+  }
+
+  /**
+   * Joins the fetch in progress for `request`, or starts it: every caller waiting on it gets its answer, and it
+   * leaves the table as it settles, so a failed fetch is never remembered and the next caller starts a new one.
+   */
+  #ensure(request: string): Promise<Resolved> {
+    let flight = this.#fetches.get(request);
+    if (flight === undefined) {
+      const started: Promise<Resolved> = ensure(request, this.#fetch).finally(() => {
+        if (this.#fetches.get(request) === started) this.#fetches.delete(request);
+      });
+      this.#fetches.set(request, started);
+      flight = started;
+    }
+    fetchWaitHooks.get(this)?.(request);
+    return flight;
   }
 }
 

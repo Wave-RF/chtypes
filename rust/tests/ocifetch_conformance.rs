@@ -127,6 +127,9 @@ struct Setup {
     system_dirs: Vec<String>,
     lock: Option<String>,
     before_index_rename_hook: Option<String>,
+    /// Installed builds this runner holds before the call (`hold`, the call a
+    /// registry makes before a load): another process using them.
+    held: Vec<String>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -143,6 +146,33 @@ struct Req {
     /// The dev channel's alias step under this fixture fingerprint
     /// (docs/guides/fetch-v1.md §3); `None` runs the v1 contract as it is.
     own_fingerprint: Option<String>,
+    /// A `prune-` case's prune.
+    prune: Option<PruneRequest>,
+}
+
+#[derive(Deserialize, Clone)]
+struct PruneRequest {
+    line: Option<String>,
+    keep: usize,
+    dry_run: bool,
+}
+
+/// One row of a `resolve-build-` case's answer.
+#[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
+struct ResolutionExpect {
+    platform: String,
+    version: String,
+    build: String,
+    manifest: String,
+}
+
+/// A `prune-` case's report, and what it leaves behind.
+#[derive(Deserialize, Clone)]
+struct PruneExpect {
+    removed: Vec<String>,
+    in_use: Vec<String>,
+    gone: Vec<String>,
+    index_after: Vec<String>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -170,6 +200,10 @@ struct Expect {
     message_contains: Option<String>,
     /// Text a failed call's error must not contain anywhere.
     message_excludes: Vec<String>,
+    /// A `resolve-build-` case's answer, in platform order.
+    resolutions: Option<Vec<ResolutionExpect>>,
+    /// A `prune-` case's report and what it leaves behind.
+    prune: Option<PruneExpect>,
 }
 
 /// `expect.code`, `expect.message_contains` and `expect.message_excludes`
@@ -520,11 +554,16 @@ fn execute_case(
         let trust = ocifetch::dsse::trusted_keys(case_trusted_keys(case).as_deref())
             .map_err(|e| format!("building the pre-seed trust list: {e}"))?;
         for digest in &marker.installed {
+            // Each build is installed for the platform its own index entry
+            // names (a layout may hold several platforms' builds), else the
+            // case's.
+            let platform = indexed_platform(&layout_dir, digest)
+                .unwrap_or_else(|| case.request.platform.clone());
             ocifetch::ensure::install_from_local_blobs(
                 &layout_dir,
                 &layout_dir,
                 digest,
-                &case.request.platform,
+                &platform,
                 &trust,
             )
             .map_err(|e| format!("pre-seeding installed digest {digest}: {e}"))?;
@@ -543,6 +582,25 @@ fn execute_case(
         }
         intact_before.push((d.clone(), snap));
     }
+
+    // setup.held: each named build held by this process, as a process using
+    // it holds it, through the very call a registry makes before a load.
+    for d in &case.setup.held {
+        let hex = d.strip_prefix("sha256:").unwrap_or(d);
+        let dir = layout_dir
+            .join(ocifetch::constants::CACHE_UNPACKED_DIR)
+            .join(hex);
+        let got = ocifetch::hold::hold(&dir);
+        if got != ocifetch::hold::HoldState::Held {
+            return Err(format!("held: holding {d} = {got:?}, want Held"));
+        }
+    }
+    // A prune- case compares every file of the layout before and after.
+    let files_before = if case.request.prune.is_some() {
+        layout_files(&layout_dir)
+    } else {
+        Vec::new()
+    };
 
     for (k, v) in &case.env {
         // SAFETY: this test runs single-threaded per case via
@@ -575,7 +633,45 @@ fn execute_case(
         .map(ocifetch::channel::use_own_fingerprint_for_tests);
 
     let is_generic_fetch = case.id.starts_with("goldens-") || case.id.starts_with("fixtures-");
-    let mut outcome = if is_generic_fetch {
+    // resolve-build- and prune- cases are dispatched before any other prefix,
+    // and before anything reads request.spelling (a prune case's is empty).
+    let mut outcome = if case.id.starts_with("resolve-build-") || case.id.starts_with("prune-") {
+        let options = Options {
+            platform: Some(case.request.platform.clone()),
+            bases: Some(bases),
+            cache_dir: Some(cache_dir.path().to_string_lossy().to_string()),
+            system_dirs,
+            offline: case.request.offline,
+            frozen: case.request.frozen,
+            lock_path: Some(lock_path.clone()),
+            lock_write: case.request.lock_write,
+            update: case.request.update,
+            allow_unsigned: case.request.allow_unsigned,
+            strict_cache: None,
+            trusted_keys: case_trusted_keys(case),
+            token: None,
+            clock: Some(fake_clock()),
+            before_index_rename: None,
+        };
+        if case.id.starts_with("resolve-build-") {
+            // What a request resolves to on every platform, never a layer
+            // (docs/guides/fetch-v1.md §10).
+            check_resolutions(
+                &case.expect,
+                ocifetch::resolve::resolve(&case.request.spelling, options),
+            )
+        } else {
+            match &case.request.prune {
+                Some(p) => check_prune(
+                    &case.expect,
+                    ocifetch::prune::prune(options, p.line.as_deref(), p.keep, p.dry_run),
+                    &layout_dir,
+                    &files_before,
+                ),
+                None => Err("a prune- case without request.prune".to_string()),
+            }
+        }
+    } else if is_generic_fetch {
         let predicate_type = if case.id.starts_with("goldens-") {
             ocifetch::constants::PREDICATE_TYPE_GOLDENS
         } else {
@@ -692,6 +788,176 @@ fn execute_case(
     }
 
     outcome
+}
+
+/// The platform key `layout_dir`'s own `index.json` gives `digest`, if any.
+fn indexed_platform(layout_dir: &Path, digest: &str) -> Option<String> {
+    let bytes = std::fs::read(layout_dir.join("index.json")).ok()?;
+    let index: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    let entry = index["manifests"]
+        .as_array()?
+        .iter()
+        .find(|d| d["digest"].as_str() == Some(digest))?;
+    let (os, arch) = (
+        entry["platform"]["os"].as_str()?,
+        entry["platform"]["architecture"].as_str()?,
+    );
+    ocifetch::constants::PLATFORMS
+        .iter()
+        .find(|p| p.os == os && p.architecture == arch)
+        .map(|p| p.key.to_string())
+}
+
+/// A `resolve-build-` case: the call's outcome, and when it succeeded its
+/// answer, row by row, against `expect.resolutions`.
+fn check_resolutions(
+    expect: &Expect,
+    result: Result<(Vec<ocifetch::resolve::Resolution>, Vec<String>), ocifetch::error::Error>,
+) -> Result<(), String> {
+    match (expect.ok, result) {
+        (true, Ok((resolutions, warnings))) => {
+            if let Some(want) = &expect.resolutions {
+                let got: Vec<ResolutionExpect> = resolutions
+                    .into_iter()
+                    .map(|r| ResolutionExpect {
+                        platform: r.platform,
+                        version: r.version,
+                        build: r.build,
+                        manifest: r.manifest,
+                    })
+                    .collect();
+                if got != *want {
+                    return Err(format!("resolved {got:?}, want {want:?}"));
+                }
+            }
+            for want in &expect.warnings {
+                if !warnings.iter().any(|got| got.contains(want.as_str())) {
+                    return Err(format!(
+                        "warnings {warnings:?} do not contain a warning matching {want:?}"
+                    ));
+                }
+            }
+            Ok(())
+        }
+        (false, Err(e)) => check_failure(expect, &e),
+        (true, Err(e)) => Err(format!("expected ok, got {e} ({})", e.code())),
+        (false, Ok((resolutions, _))) => Err(format!(
+            "expected failure {:?}, got {} resolutions",
+            expect.code,
+            resolutions.len()
+        )),
+    }
+}
+
+/// A `prune-` case: the call's outcome, and when it succeeded its report, then
+/// the layout it left: every path in `expect.prune.gone` is gone, every other
+/// file the layout held before the call is still there, and `index.json` lists
+/// exactly `expect.prune.index_after`.
+fn check_prune(
+    expect: &Expect,
+    result: Result<Vec<ocifetch::prune::Superseded>, ocifetch::error::Error>,
+    layout_dir: &Path,
+    before: &[String],
+) -> Result<(), String> {
+    let pruned = match (expect.ok, result) {
+        (true, Ok(pruned)) => pruned,
+        (false, Err(e)) => return check_failure(expect, &e),
+        (true, Err(e)) => return Err(format!("expected ok, got {e} ({})", e.code())),
+        (false, Ok(pruned)) => {
+            return Err(format!(
+                "expected failure {:?}, got {} reported",
+                expect.code,
+                pruned.len()
+            ));
+        }
+    };
+    let Some(want) = &expect.prune else {
+        return Ok(());
+    };
+    let (in_use, removed): (Vec<_>, Vec<_>) = pruned.into_iter().partition(|s| s.in_use);
+    let removed: Vec<String> = removed.into_iter().map(|s| s.manifest).collect();
+    let in_use: Vec<String> = in_use.into_iter().map(|s| s.manifest).collect();
+    if removed != want.removed {
+        return Err(format!(
+            "prune reported removed {removed:?}, want {:?}",
+            want.removed
+        ));
+    }
+    if in_use != want.in_use {
+        return Err(format!(
+            "prune reported in use {in_use:?}, want {:?}",
+            want.in_use
+        ));
+    }
+    let under_gone = |rel: &str| {
+        want.gone
+            .iter()
+            .any(|g| rel == g || rel.starts_with(&format!("{g}/")))
+    };
+    let want_files: Vec<String> = before
+        .iter()
+        .filter(|rel| !under_gone(rel.as_str()))
+        .cloned()
+        .collect();
+    let after = layout_files(layout_dir);
+    if after != want_files {
+        return Err(format!(
+            "the layout after the prune holds {after:?}, want {want_files:?}"
+        ));
+    }
+    for g in &want.gone {
+        if std::fs::symlink_metadata(layout_dir.join(g)).is_ok() {
+            return Err(format!("{g} is still there after the prune"));
+        }
+    }
+    let index: Vec<String> = match std::fs::read(layout_dir.join("index.json")) {
+        Ok(bytes) => {
+            let doc: serde_json::Value = serde_json::from_slice(&bytes)
+                .map_err(|e| format!("index.json after the prune: {e}"))?;
+            doc["manifests"]
+                .as_array()
+                .map(|m| {
+                    m.iter()
+                        .filter_map(|d| d["digest"].as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default()
+        }
+        Err(_) => Vec::new(),
+    };
+    if index != want.index_after {
+        return Err(format!(
+            "index.json lists {index:?} after the prune, want {:?}",
+            want.index_after
+        ));
+    }
+    Ok(())
+}
+
+/// Every file under `dir`, as `/`-separated relative paths, sorted. index.json,
+/// whose bytes a prune rewrites, is one of them, and its entries are compared
+/// on their own.
+fn layout_files(dir: &Path) -> Vec<String> {
+    fn walk(dir: &Path, root: &Path, out: &mut Vec<String>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(meta) = std::fs::symlink_metadata(&path) else {
+                continue;
+            };
+            if meta.is_dir() {
+                walk(&path, root, out);
+            } else if let Ok(rel) = path.strip_prefix(root) {
+                out.push(rel.to_string_lossy().into_owned());
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(dir, dir, &mut out);
+    out.sort();
+    out
 }
 
 /// Every file under `<cache>/unpacked/sha256/<hex>/`, by relative path, as its

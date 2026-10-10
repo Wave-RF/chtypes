@@ -45,7 +45,7 @@
         "setup": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["cache", "system_dirs", "lock", "before_index_rename_hook"],
+          "required": ["cache", "system_dirs", "lock", "before_index_rename_hook", "held"],
           "properties": {
             "cache": {"type": "string", "description": "\"empty\", or the name of a pre-seeded cache fixture."},
             "system_dirs": {"type": "array", "items": {"type": "string"}},
@@ -53,6 +53,12 @@
             "before_index_rename_hook": {
               "type": ["string", "null"],
               "description": "The name of a race hook the runner installs before the cache's index.json atomic rename (e.g. index-race-reapply), or null."
+            },
+            "held": {
+              "type": "array",
+              "items": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+              "uniqueItems": true,
+              "description": "Installed manifests the runner holds before the call, through its binding's own hold (the shared lock a registry takes on a build before it loads it; docs/guides/fetch-v1.md §1, \"In use\"): a build another process is using. Empty in every other case."
             }
           }
         },
@@ -60,7 +66,7 @@
           "type": "object",
           "additionalProperties": false,
           "required": ["spelling", "platform", "offline", "frozen", "lock_write", "update",
-                       "allow_unsigned", "trust", "bases", "own_fingerprint"],
+                       "allow_unsigned", "trust", "bases", "own_fingerprint", "prune"],
           "properties": {
             "spelling": {"type": "string"},
             "platform": {"type": "string", "enum": ["linux-amd64", "linux-arm64", "darwin-arm64"]},
@@ -80,6 +86,17 @@
               "type": ["string", "null"],
               "pattern": "^[0-9a-f]{64}$",
               "description": "The dev channel's alias step (docs/guides/fetch-v1.md §3): a fixture ABI fingerprint, 64 lowercase hex, the runner hands its binding's alias seam, so a version request resolves `<tag>--fp-<this>` before `<tag>`. null runs the case with no alias step, as the v1 contract and every production channel do."
+            },
+            "prune": {
+              "type": ["object", "null"],
+              "additionalProperties": false,
+              "required": ["line", "keep", "dry_run"],
+              "description": "For a `prune-` case (docs/guides/fetch-v1.md §10), what the prune removes: one two-part line or every line (null), how many of each line's newest builds stay per platform, and whether it is a dry run. null for every other case.",
+              "properties": {
+                "line": {"type": ["string", "null"], "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"},
+                "keep": {"type": "integer", "minimum": 1},
+                "dry_run": {"type": "boolean"}
+              }
             }
           }
         },
@@ -93,7 +110,7 @@
           "additionalProperties": false,
           "required": ["ok", "version", "build", "manifest", "library_sha256", "code", "sleeps",
                        "warnings", "requests", "lock_after", "tags", "records_intact",
-                       "message_contains", "message_excludes"],
+                       "message_contains", "message_excludes", "resolutions", "prune"],
           "properties": {
             "ok": {"type": "boolean"},
             "version": {"type": ["string", "null"]},
@@ -149,6 +166,33 @@
               "items": {"type": "string", "minLength": 1},
               "uniqueItems": true,
               "description": "Text the failed call's error message must not contain anywhere (a retired repository with no message must not print `null` or `undefined` in its place). Empty in every other case."
+            },
+            "resolutions": {
+              "type": ["array", "null"],
+              "description": "For a successful `resolve-build-` case (docs/guides/fetch-v1.md §10), what the binding's resolve must return, in the constants' platform order: each offered platform's signed version and build and its platform manifest digest. null for every other case.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["platform", "version", "build", "manifest"],
+                "properties": {
+                  "platform": {"type": "string", "enum": ["linux-amd64", "linux-arm64", "darwin-arm64"]},
+                  "version": {"type": "string"},
+                  "build": {"type": "string"},
+                  "manifest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+                }
+              }
+            },
+            "prune": {
+              "type": ["object", "null"],
+              "additionalProperties": false,
+              "required": ["removed", "in_use", "gone", "index_after"],
+              "description": "For a successful `prune-` case (docs/guides/fetch-v1.md §10): the manifests the prune reports removed (in a dry run, to be removed) and superseded but in use, each in report order; the paths under the cache's layout that must not exist after the call (every other file the layout held before it must); and what index.json lists after the call, in order. null for every other case.",
+              "properties": {
+                "removed": {"type": "array", "items": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, "uniqueItems": true},
+                "in_use": {"type": "array", "items": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, "uniqueItems": true},
+                "gone": {"type": "array", "items": {"type": "string", "pattern": "^(unpacked|blobs)/sha256/[0-9a-f]{64}$"}, "uniqueItems": true},
+                "index_after": {"type": "array", "items": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}}
+              }
             }
           }
         }

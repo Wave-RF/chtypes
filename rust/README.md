@@ -16,7 +16,7 @@ Two things: this crate, and at least one **artifact**, the per-version native li
 
 ```sh
 cargo add chtypes@=2.0.0-dev.N                  # name the dev pre-release: cargo never selects one on its own
-cargo install chtypes --version =2.0.0-dev.N    # the `chtypes` command: fetch, verify, list, where
+cargo install chtypes --version =2.0.0-dev.N    # the `chtypes` command: fetch, verify, list, where, resolve, prune
 chtypes fetch <line>                            # a line the staging dev channel publishes (`chtypes list` names them)
 ```
 

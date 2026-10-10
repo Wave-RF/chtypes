@@ -10,6 +10,10 @@ list-offline-empty-strict | exit=0 | stderr=empty | stdout=
 where | exit=0 | stderr=empty | stdout=<DIR>|
 where-strict | exit=0 | stderr=empty | stdout=<DIR>|
 where-all | exit=0 | stderr=empty | stdout=<DIR>|/usr/local/share/chtypes/v1|/opt/chtypes/v1|
+resolve-offline-empty | exit=1 | stderr=nonempty | stdout=
+resolve-offline-empty-json | exit=1 | stderr=nonempty | stdout=
+prune-empty | exit=0 | stderr=nonempty | stdout=
+prune-dry-run-empty | exit=0 | stderr=nonempty | stdout=
 usage-no-arguments | exit=2 | stderr=nonempty | stdout=
 usage-unknown-command | exit=2 | stderr=nonempty | stdout=
 usage-short-version | exit=2 | stderr=nonempty | stdout=
@@ -21,3 +25,10 @@ usage-fetch-needs-a-version | exit=2 | stderr=nonempty | stdout=
 usage-update-needs-lock | exit=2 | stderr=nonempty | stdout=
 usage-update-frozen | exit=2 | stderr=nonempty | stdout=
 usage-update-offline | exit=2 | stderr=nonempty | stdout=
+usage-resolve-needs-a-version | exit=2 | stderr=nonempty | stdout=
+usage-resolve-two-versions | exit=2 | stderr=nonempty | stdout=
+usage-resolve-platform | exit=2 | stderr=nonempty | stdout=
+usage-prune-positional | exit=2 | stderr=nonempty | stdout=
+usage-prune-keep-zero | exit=2 | stderr=nonempty | stdout=
+usage-prune-line | exit=2 | stderr=nonempty | stdout=
+usage-prune-offline | exit=2 | stderr=nonempty | stdout=

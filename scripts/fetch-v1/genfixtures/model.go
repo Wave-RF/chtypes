@@ -38,6 +38,11 @@ type Setup struct {
 	SystemDirs            []string `json:"system_dirs"`
 	Lock                  *string  `json:"lock"`
 	BeforeIndexRenameHook *string  `json:"before_index_rename_hook"`
+	// Held names installed manifests the runner holds before the call,
+	// through its binding's own hold (the shared lock a registry takes on a
+	// build before it loads it): another process using that build
+	// (prunecases.go). Empty for every other case.
+	Held []string `json:"held"`
 }
 
 type Request struct {
@@ -55,6 +60,17 @@ type Request struct {
 	// step (docs/guides/fetch-v1.md §3) under a fixture fingerprint. nil runs
 	// it with none, as the v1 contract and every production channel do.
 	OwnFingerprint *string `json:"own_fingerprint"`
+	// Prune is a `prune-` case's prune (prunecases.go); nil for every other
+	// case.
+	Prune *PruneRequest `json:"prune"`
+}
+
+// PruneRequest is what a `prune-` case prunes: one line or every line (nil),
+// how many of each line's newest builds stay, and whether it is a dry run.
+type PruneRequest struct {
+	Line   *string `json:"line"`
+	Keep   int     `json:"keep"`
+	DryRun bool    `json:"dry_run"`
 }
 
 type ExpectRequests struct {
@@ -90,6 +106,34 @@ type Expect struct {
 	// contain anywhere (retiredcases.go: no `null` or `undefined` where a
 	// registry sent no message). Empty for every other case.
 	MessageExcludes []string `json:"message_excludes"`
+	// Resolutions is what a `resolve-build-` case's resolve must return, in
+	// platform order (resolvebuildcases.go). nil for every other case.
+	Resolutions []Resolution `json:"resolutions"`
+	// Prune is what a `prune-` case's prune must report and leave behind
+	// (prunecases.go). nil for every other case.
+	Prune *PruneExpect `json:"prune"`
+}
+
+// Resolution is one platform's answer to a resolve: the signed version and
+// build, and the platform manifest's digest.
+type Resolution struct {
+	Platform string `json:"platform"`
+	Version  string `json:"version"`
+	Build    string `json:"build"`
+	Manifest string `json:"manifest"`
+}
+
+// PruneExpect is a prune's outcome. Removed and InUse are the manifests the
+// prune reports, each in report order: removed (or, in a dry run, to be
+// removed), and superseded but kept because a process holds them. Gone are
+// the paths under the cache's layout that must not exist after the call;
+// every other file the layout held before it must. IndexAfter is what
+// index.json lists after the call, in order.
+type PruneExpect struct {
+	Removed    []string `json:"removed"`
+	InUse      []string `json:"in_use"`
+	Gone       []string `json:"gone"`
+	IndexAfter []string `json:"index_after"`
 }
 
 // newCase returns a Case with every schema-required array/object field
@@ -108,6 +152,7 @@ func newCase(id, tree string, transports ...string) Case {
 			SystemDirs:            []string{},
 			Lock:                  nil,
 			BeforeIndexRenameHook: nil,
+			Held:                  []string{},
 		},
 		Request: Request{
 			Platform: "linux-arm64",
