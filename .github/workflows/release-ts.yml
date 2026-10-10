@@ -5,11 +5,15 @@
 # once the package does, so the FIRST publish is by hand from a logged-in
 # laptop (RELEASING.md); every one after that is this workflow.
 #
-# On this branch the only releasable tags are the channel's
-# (scripts/release-channel.sh; until the v2 lock, ts/v2.0.0-dev.N), published
-# under npm's `dev` dist-tag, so a plain `npm install @wavehouse/chtypes` keeps
-# resolving `latest`, the 1.x (#511). The `never-default` job asserts that
-# against npm itself after the publish, and its twin does in a dry run.
+# On this branch the tag selects one of two release modes, and nothing else
+# does (scripts/release-channel.sh, THE MODES; #511, #597):
+#   - dev, ts/v2.0.0-dev.N: published under npm's `dev` dist-tag, so a plain
+#     `npm install @wavehouse/chtypes` keeps resolving `latest`, the 1.x;
+#   - stable, ts/v2.N.N: published under `latest`, so a plain install resolves
+#     it. Its publish needs the maintainer's CHTYPES_V2_LOCKED_FP to name this
+#     package's fingerprint (THE GATE); without it, it can only dry-run.
+# The `never-default` job asserts the mode's answer against npm itself after
+# the publish, and its twin does in a dry run.
 name: release-ts
 on:
   push:
@@ -56,13 +60,20 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # Before anything is installed or built: the channel's own selftest, then
-      # the tag must be a release of this branch's channel.
-      - name: "the tag is a release of this branch's channel (scripts/release-channel.sh, #511)"
+      # the tag must be a release of this branch (it selects the mode), and a
+      # stable release that is not a dry run must pass THE GATE: the repository
+      # variable only the maintainer sets must name the fingerprint this
+      # package is built against.
+      - name: "the tag selects its mode and is a release of this branch, and a stable release passes the gate (scripts/release-channel.sh; #511, #597)"
         env:
           TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          RELEASE_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
+          CHTYPES_V2_LOCKED_FP: ${{ vars.CHTYPES_V2_LOCKED_FP }}
         run: |
           scripts/release-channel.sh --selftest
+          echo "release mode: $(scripts/release-channel.sh mode ts "$TAG_NAME")"
           scripts/release-channel.sh tag ts "$TAG_NAME"
+          scripts/release-channel.sh gate ts "$TAG_NAME" "$RELEASE_DRY_RUN"
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           # No version here on purpose: pnpm/action-setup reads packageManager from
@@ -114,18 +125,24 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && inputs.dry_run
         with: { name: ts-dist, path: "${{ runner.temp }}/ts-dist/" }
       # The record the never-default job compares against: what npm installs by
-      # default right now (dist-tags.latest). It must already be a stable 1.x,
-      # or nothing is published over it.
-      - name: record what npm installs by default before the publish (a stable 1.x)
+      # default right now (dist-tags.latest). In the dev mode it must already be
+      # a stable 1.x, or nothing is published over it; in the stable mode it
+      # must not already be this version.
+      - name: record what npm installs by default before the publish
         id: record
+        env:
+          TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
         run: |
-          default="$(scripts/release-channel.sh default ts)"
+          default="$(scripts/release-channel.sh default ts "$TAG_NAME")"
           echo "dist-tags.latest before the publish: $default"
           echo "default=$default" >> "$GITHUB_OUTPUT"
-      - name: publish (dry run), under the channel's dist-tag
+      - name: publish (dry run), under the mode's dist-tag
         if: github.event_name == 'workflow_dispatch' && inputs.dry_run
+        env:
+          TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
         run: |
-          dist_tag="$(scripts/release-channel.sh get NPM_DIST_TAG)"
+          dist_tag="$(scripts/release-channel.sh get ts "$TAG_NAME" NPM_DIST_TAG)"
+          echo "dist-tag: $dist_tag"
           cd ts && pnpm publish --dry-run --access public --no-git-checks --tag "$dist_tag"
   # The only job with `environment:`. It runs for a real publish alone: a tag
   # push, or a dispatch with dry_run=false (and not verify_only). It repeats the
@@ -149,18 +166,23 @@ jobs:
           node-version: "22.21"
           registry-url: "https://registry.npmjs.org"
       - run: cd ts && pnpm install --frozen-lockfile && pnpm build
-      - name: publish, under the channel's dist-tag (never latest before the lock)
+      - name: publish, under the mode's dist-tag (dev for a 2.0.0-dev.N, latest for a stable 2.N.N)
+        env:
+          TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
         run: |
-          dist_tag="$(scripts/release-channel.sh get NPM_DIST_TAG)"
+          dist_tag="$(scripts/release-channel.sh get ts "$TAG_NAME" NPM_DIST_TAG)"
+          echo "dist-tag: $dist_tag"
           cd ts && pnpm publish --provenance --access public --no-git-checks --tag "$dist_tag"
-  # "Never installed by default", asserted against npm itself, never left to a
-  # comment. After a publish: dist-tags.latest is still the 1.x the publish job
-  # recorded, on every read, and dist-tags.dev becomes this version (polled for
-  # npm's lag, up to an hour, as the verify job does). A dry run runs the same
-  # assertions against npm as it is now, the twin: latest is the recorded 1.x,
-  # the version is not published yet, and the same presence check finds the
-  # recorded version (its positive control). scripts/release-channel.sh
-  # holds both, and its selftest plants every refusal.
+  # What npm installs by default, asserted against npm itself, never left to a
+  # comment. Dev mode, "never installed by default": after a publish,
+  # dist-tags.latest is still the 1.x the build job recorded, on every read,
+  # and dist-tags.dev becomes this version. Stable mode, the opposite: the
+  # version is published AND dist-tags.latest is it. Both poll for npm's lag,
+  # up to an hour, as the verify job does. A dry run runs the same reads
+  # against npm as it is now, the twin: latest is the recorded version, this
+  # version is not published yet, and the same presence check finds the
+  # recorded version (its positive control). scripts/release-channel.sh holds
+  # both modes, and its selftest runs each against recorded npm answers.
   never-default:
     needs: [build, publish]
     if: ${{ !failure() && needs.build.result == 'success' && (needs.publish.result == 'success' || (needs.publish.result == 'skipped' && github.event_name == 'workflow_dispatch' && inputs.dry_run)) }}
@@ -170,24 +192,24 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: npm still installs the recorded 1.x by default, and dist-tags.dev names this version (a dry run asserts it against npm as it is)
+      - name: what npm installs by default (dev, still the recorded 1.x with dist-tags.dev on this version; stable, this version) (a dry run asserts it against npm as it is)
         env:
           TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
           RECORDED: ${{ needs.build.outputs.default }}
           PHASE: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'twin' || 'after' }}
         run: |
           version="$(scripts/release-channel.sh tag ts "$TAG_NAME")"
-          scripts/release-channel.sh never-default ts "$version" "$RECORDED" "$PHASE"
+          scripts/release-channel.sh default-check ts "$TAG_NAME" "$version" "$RECORDED" "$PHASE"
   # A publish step exiting 0 does not mean anyone can install the package.
   # Measured on ts/v0.1.1 (issue #10): the job went green ~7 minutes before
   # npm served the tarball, and for ~2 of those minutes `latest` resolved to
   # a version that 404'd. This installs the real thing from the public
   # registry, with no credentials, in a clean directory, and then makes it
-  # speak the channel: its generation-2 fingerprint constant must equal the
-  # one in include/v2/chtypes.h, its CLI must list, fetch and load from the
-  # channel's registry (staging chtypes/v2-dev) and no other, and the loaded
-  # library must report abi 2 and that fingerprint. The six checks are
-  # scripts/release-verify.sh's header.
+  # speak the mode's channel: its generation-2 fingerprint constant must equal
+  # the one in include/v2/chtypes.h, its CLI must list, fetch and load from the
+  # mode's registry (dev: staging chtypes/v2-dev; stable: production
+  # chtypes/v2) and no other, and the loaded library must report abi 2 and
+  # that fingerprint. The six checks are scripts/release-verify.sh's header.
   #
   # Its own job, so "Re-run failed jobs" on a timeout re-runs ONLY this:
   # `pnpm publish` cannot be retried, npm refuses to publish over a version
@@ -201,7 +223,9 @@ jobs:
   # runs the same steps against the package this run built, the registry
   # retry loop skipped; verify_only=true skips the publish job and runs them
   # against the already-published version the `tag` input names. So the parser
-  # of `chtypes list` and the whole sequence are exercised BEFORE a publish.
+  # of `chtypes list` and the whole sequence are exercised BEFORE a publish. A
+  # stable dry run verifies against the stand-in, and before the lock it runs
+  # the CLI under vitest, from ts/'s own lockfile (the script's header).
   verify:
     needs: [build, publish]
     if: ${{ !failure() && (needs.build.result == 'success' || (needs.build.result == 'skipped' && inputs.verify_only)) && (needs.publish.result == 'success' || needs.publish.result == 'skipped') && (github.event_name == 'push' || inputs.verify_only || inputs.dry_run || needs.publish.result == 'success') }}
@@ -213,19 +237,38 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with: { node-version: "22.21" }
+      - name: the verify's path (a stable dry run runs against the stand-in)
+        id: path
+        env:
+          TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          DRY: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && !inputs.verify_only && 'true' || 'false' }}
+        run: |
+          mode="$(scripts/release-channel.sh mode ts "$TAG_NAME")"
+          path=registry
+          if [ "$DRY" = true ]; then path=local; [ "$mode" != stable ] || path=standin; fi
+          echo "release mode: $mode; verify: $path"
+          echo "path=$path" >> "$GITHUB_OUTPUT"
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        if: steps.path.outputs.path == 'standin'
+        with:
+          package_json_file: ts/package.json
+      - name: the stand-in's test runner, vitest, from ts/'s own lockfile
+        if: steps.path.outputs.path == 'standin'
+        run: cd ts && pnpm install --frozen-lockfile
       - name: the verify script's own selftest (the list parser and every channel check)
         run: scripts/release-verify.sh --selftest
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         if: github.event_name == 'workflow_dispatch' && inputs.dry_run && !inputs.verify_only
         with: { name: ts-dist, path: "${{ runner.temp }}/ts-dist/" }
-      - name: it installs, speaks include/v2/chtypes.h's fingerprint, and lists, fetches and loads from the channel's registry only
+      - name: it installs, speaks include/v2/chtypes.h's fingerprint, and lists, fetches and loads from the mode's registry only (a stable dry run, from the stand-in)
         env:
           TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
-          MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && !inputs.verify_only && 'local' || 'registry' }}
+          MODE: ${{ steps.path.outputs.path }}
+          RELEASE_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && !inputs.verify_only && 'true' || 'false' }}
         run: |
           version="${TAG_NAME#ts/v}"
-          if [ "$MODE" = local ]; then
-            scripts/release-verify.sh ts local "$version" "$(ls "$RUNNER_TEMP"/ts-dist/*.tgz)"
-          else
+          if [ "$MODE" = registry ]; then
             scripts/release-verify.sh ts registry "$version"
+          else
+            scripts/release-verify.sh ts "$MODE" "$version" "$(ls "$RUNNER_TEMP"/ts-dist/*.tgz)"
           fi
