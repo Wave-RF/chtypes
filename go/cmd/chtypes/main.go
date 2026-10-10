@@ -9,6 +9,10 @@
 //	                                    what is installed, and what is published
 //	chtypes where  [--cache <dir>] [--strict] [--all]
 //	                                    the cache root; --all: every search directory
+//	chtypes resolve <spelling> [--json] [--cache <dir>] [--offline] [--strict]
+//	                                    the build and manifest each platform resolves to; nothing installed
+//	chtypes prune  [--line <line>] [--keep <n>] [--dry-run] [--cache <dir>] [--strict]
+//	                                    remove the superseded builds of each line, keeping the newest n
 //
 // Run it without installing anything:
 //
@@ -35,6 +39,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -57,6 +62,10 @@ const usageText = `usage:
                                       what is installed, and what is published
   chtypes where  [--cache <dir>] [--strict] [--all]
                                       the cache root; --all: every directory searched, in order
+  chtypes resolve <spelling> [--json] [--cache <dir>] [--offline] [--strict]
+                                      the build and manifest each platform resolves to, verified; installs nothing
+  chtypes prune  [--line <line>] [--keep <n>] [--dry-run] [--cache <dir>] [--strict]
+                                      remove the builds of each line newer ones supersede, keeping the newest n (default 1)
   chtypes --version
 
 --offline (or CHTYPES_OFFLINE=1): read the cache only, make no request
@@ -104,6 +113,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		err = cmdList(ctx, args[1:], stdout, stderr)
 	case "where":
 		err = cmdWhere(args[1:], stdout, stderr)
+	case "resolve":
+		err = cmdResolve(ctx, args[1:], stdout, stderr)
+	case "prune":
+		err = cmdPrune(args[1:], stdout, stderr)
 	case "--version":
 		fmt.Fprintf(stdout, "chtypes %s\n", version())
 		return 0
@@ -469,5 +482,99 @@ func cmdWhere(args []string, stdout, stderr io.Writer) error {
 		return nil
 	}
 	fmt.Fprintln(stdout, root)
+	return nil
+}
+
+// resolution is one `chtypes resolve --json` element: the same members, in
+// the same order, from every binding's CLI.
+type resolution struct {
+	Platform string `json:"platform"`
+	Version  string `json:"version"`
+	Build    string `json:"build"`
+	Manifest string `json:"manifest"`
+}
+
+func cmdResolve(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := newFlagSet("resolve", stderr)
+	var cf commonFlags
+	cf.bind(fs, false, true)
+	asJSON := fs.Bool("json", false, "print one JSON array, one object per platform, instead of one line per platform")
+	rest, err := parseInterleaved(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(rest) != 1 {
+		return &usageError{fmt.Sprintf("resolve takes exactly one version spelling (got %d)", len(rest))}
+	}
+	opts := cf.options()
+	out, warnings, err := ocifetch.Resolve(ctx, rest[0], opts)
+	if err != nil {
+		return err
+	}
+	for _, w := range warnings {
+		fmt.Fprintf(stderr, "chtypes: warning: %s\n", w)
+	}
+	if *asJSON {
+		doc := make([]resolution, 0, len(out))
+		for _, r := range out {
+			doc = append(doc, resolution{Platform: r.Platform, Version: r.Version, Build: r.Build, Manifest: string(r.Manifest)})
+		}
+		b, err := json.Marshal(doc)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "%s\n", b)
+		return nil
+	}
+	for _, r := range out {
+		fmt.Fprintf(stdout, "resolved %s %s %s %s\n", r.Version, r.Platform, r.Build, r.Manifest)
+	}
+	return nil
+}
+
+func cmdPrune(args []string, stdout, stderr io.Writer) error {
+	fs := newFlagSet("prune", stderr)
+	var cf commonFlags
+	cf.bind(fs, false, false)
+	line := fs.String("line", "", "prune only this line, such as 26.8 (default: every line)")
+	keep := fs.Int("keep", 1, "how many of each line's newest builds to keep, per platform (at least 1)")
+	dryRun := fs.Bool("dry-run", false, "print what would be removed, and remove nothing")
+	if rest, err := parseInterleaved(fs, args); err != nil {
+		return err
+	} else if len(rest) > 0 {
+		return &usageError{fmt.Sprintf("prune takes no positional arguments (%s); a line is --line <line>", strings.Join(rest, " "))}
+	}
+	if *keep < 1 {
+		return &usageError{fmt.Sprintf("--keep is at least 1, not %d", *keep)}
+	}
+	if *line != "" && !ocifetch.IsLine(*line) {
+		return &usageError{fmt.Sprintf("--line takes a two-part line such as 26.8, not %q", *line)}
+	}
+	opts := cf.options()
+	results, err := ocifetch.Prune(opts, ocifetch.PruneOptions{Line: *line, Keep: *keep, DryRun: *dryRun})
+	if err != nil {
+		return err
+	}
+	removed := 0
+	for _, r := range results {
+		word := "pruned"
+		switch {
+		case r.InUse:
+			word = "in-use"
+		case *dryRun:
+			word = "would-prune"
+		}
+		if !r.InUse {
+			removed++
+		}
+		fmt.Fprintf(stdout, "%s %s %s %s\n", word, r.Version, r.Platform, r.Dir)
+	}
+	printNotes(stderr, opts)
+	root, _ := ocifetch.CacheRoot(opts)
+	if *dryRun {
+		fmt.Fprintf(stderr, "chtypes: would prune %d build(s) under %s\n", removed, root)
+	} else {
+		fmt.Fprintf(stderr, "chtypes: pruned %d build(s) under %s\n", removed, root)
+	}
 	return nil
 }

@@ -103,7 +103,12 @@ func WithPreload(requests ...string) RegistryOption {
 // cache answers needs no network at all (public issue #491). Concurrent opens
 // of one request share one attempt, and one fetch: each gets that attempt's
 // Library or its error, and a failed attempt is never remembered, so the next
-// open of the request starts a new one.
+// open of the request starts a new one. A Fetch of the request shares that
+// same fetch (public issue #492).
+//
+// Every build the registry opens or fetches is held by this process until it
+// exits (ocifetch.Hold), so `chtypes prune` never removes it meanwhile
+// (public issue #494).
 type Registry struct {
 	fetch     FetchOptions
 	autofetch bool
@@ -111,11 +116,15 @@ type Registry struct {
 	mu      sync.Mutex
 	memo    map[string]*Library
 	libs    []*Library
-	flights map[string]*flight // the attempts in progress, by request
+	flights map[string]*flight      // the attempts in progress, by request
+	fetches map[string]*fetchFlight // the fetches in progress, by request
 	// onWait, nil outside tests, is called each time an open starts waiting
 	// on an attempt, its own or another open's, so a test can hold an
 	// attempt until every open it starts is waiting on it.
 	onWait func(request string)
+	// onFetchWait, nil outside tests, is called each time an open or a
+	// Fetch starts waiting on a fetch, its own or another's.
+	onFetchWait func(request string)
 }
 
 // flight is one attempt to open one request: the installed lookup, the fetch
@@ -135,6 +144,21 @@ type flight struct {
 	cancel  context.CancelFunc // ends its fetch; nil until it fetches
 }
 
+// fetchFlight is one fetch of one request (ocifetch.Ensure): every open that
+// misses the cache and every Fetch of that request made while it is in
+// progress waits on it and gets its answer, so they make one fetch.
+type fetchFlight struct {
+	done chan struct{} // closed when the fetch has an answer
+
+	// Written before done is closed, and read only after.
+	res *Resolved
+	err error
+
+	// Under Registry.mu.
+	waiters int                // the callers waiting on it
+	cancel  context.CancelFunc // ends the fetch
+}
+
 // NewRegistry builds a registry. Construction opens nothing; only a request
 // for a version, or WithPreload, opens an artifact.
 func NewRegistry(opts ...RegistryOption) (*Registry, error) {
@@ -144,7 +168,7 @@ func NewRegistry(opts ...RegistryOption) (*Registry, error) {
 			o(&c)
 		}
 	}
-	r := &Registry{fetch: c.fetch, memo: map[string]*Library{}, flights: map[string]*flight{}}
+	r := &Registry{fetch: c.fetch, memo: map[string]*Library{}, flights: map[string]*flight{}, fetches: map[string]*fetchFlight{}}
 	if c.autofetch != nil {
 		r.autofetch = *c.autofetch
 	} else {
@@ -228,7 +252,7 @@ func (r *Registry) lead(ctx context.Context, f *flight, request string, mayFetch
 	}()
 	opts := r.fetch.internal()
 	req := ocifetch.Request{Spelling: request}
-	res, err := ocifetch.ResolveInstalled(req, "", opts)
+	res, err := lookupHeld(req, opts)
 	switch {
 	case err != nil:
 		// A refused version spelling is the caller's own misuse, refused
@@ -248,7 +272,7 @@ func (r *Registry) lead(ctx context.Context, f *flight, request string, mayFetch
 		r.mu.Unlock()
 		go func() {
 			defer cancel()
-			res, err := ocifetch.Ensure(fetchCtx, req, opts)
+			res, err := r.ensureHeld(fetchCtx, request)
 			if err != nil {
 				r.land(f, request, nil, fetchError(err), true)
 				return
@@ -258,6 +282,120 @@ func (r *Registry) lead(ctx context.Context, f *flight, request string, mayFetch
 		}()
 	}
 	landed = true
+}
+
+// lookupHeld is the installed lookup, then this process's hold on the build
+// it found (ocifetch.Hold), taken before anything reads the library. A build a
+// concurrent prune removed between the two is looked up again, once; removed
+// twice, it is a miss.
+func lookupHeld(req ocifetch.Request, opts *ocifetch.Options) (*Resolved, error) {
+	for range 2 {
+		res, err := ocifetch.ResolveInstalled(req, "", opts)
+		if err != nil || res == nil {
+			return res, err
+		}
+		if ocifetch.Hold(res.Dir) != ocifetch.HoldVanished {
+			return res, nil
+		}
+	}
+	return nil, nil
+}
+
+// ensureHeld is the request's one fetch (ensure), then this process's hold on
+// the build it installed. A build a concurrent prune removed between the two
+// is fetched again, once; removed twice, it is ErrArtifactMissing.
+func (r *Registry) ensureHeld(ctx context.Context, request string) (*Resolved, error) {
+	for attempt := 0; ; attempt++ {
+		res, err := r.ensure(ctx, request)
+		if err != nil {
+			return nil, err
+		}
+		if ocifetch.Hold(res.Dir) != ocifetch.HoldVanished {
+			return res, nil
+		}
+		if attempt == 1 {
+			return nil, ocifetch.RemovedWhileHeld(request, res.Dir)
+		}
+	}
+}
+
+// ensure joins the fetch in progress for request, or starts it. The fetch
+// runs on its own goroutine under a context of its own that keeps ctx's
+// values. When ctx is done before the fetch has an answer, ensure returns
+// ctx.Err(); the fetch goes on for every other caller waiting on it, and is
+// canceled once none does.
+func (r *Registry) ensure(ctx context.Context, request string) (*Resolved, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err // a caller that has already given up starts no fetch
+	}
+	r.mu.Lock()
+	ff := r.fetches[request]
+	if ff == nil {
+		fetchCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+		ff = &fetchFlight{done: make(chan struct{}), cancel: cancel}
+		r.fetches[request] = ff
+		opts := r.fetch.internal()
+		go func() {
+			defer cancel()
+			res, err := ocifetch.Ensure(fetchCtx, ocifetch.Request{Spelling: request}, opts)
+			r.mu.Lock()
+			if r.fetches[request] == ff {
+				delete(r.fetches, request)
+			}
+			ff.res, ff.err = res, err
+			r.mu.Unlock()
+			close(ff.done)
+		}()
+	}
+	ff.waiters++
+	onFetchWait := r.onFetchWait
+	r.mu.Unlock()
+	if onFetchWait != nil {
+		onFetchWait(request)
+	}
+	select {
+	case <-ff.done:
+		return ff.res, ff.err
+	default:
+	}
+	select {
+	case <-ff.done:
+		return ff.res, ff.err
+	case <-ctx.Done():
+		r.mu.Lock()
+		ff.waiters--
+		last := ff.waiters == 0 && r.fetches[request] == ff
+		if last {
+			delete(r.fetches, request)
+		}
+		r.mu.Unlock()
+		if last {
+			ff.cancel()
+		}
+		return nil, ctx.Err()
+	}
+}
+
+// Fetch resolves, fetches, verifies and installs the build request names
+// into the cache, as `chtypes fetch` does, and opens nothing: no library is
+// loaded and the process setup is untouched, so it needs no Setup (public
+// issue #492). It honours the registry's fetch options (offline, the cache,
+// and under the production channel the bases, the trust and the lock), and
+// it shares one fetch with a concurrent open or Fetch of the same request.
+// The Resolved names the installed version, build, digests and library path.
+// The build is held by this process until it exits, so no `chtypes prune`
+// removes it meanwhile. When ctx is done before the fetch has an answer,
+// Fetch returns ctx.Err(), and the fetch goes on for any other caller waiting
+// on it. Errors are the fetch codes, as an *ArtifactError.
+func (r *Registry) Fetch(ctx context.Context, request string) (Resolved, error) {
+	res, err := r.ensureHeld(ctx, request)
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil && errors.Is(err, ctxErr) {
+			return Resolved{}, err
+		}
+		return Resolved{}, fetchError(err)
+	}
+	return *res, nil
 }
 
 // load opens the image a resolved build names (loader steps 1 to 7) and makes
