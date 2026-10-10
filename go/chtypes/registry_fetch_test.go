@@ -44,6 +44,16 @@ func newFetchFixture(t *testing.T) *flightFixture {
 	if !known {
 		t.Skipf("SKIPPED: this host (%s) is not a chtypes platform; the registry fetch tests did not run", platformKey)
 	}
+	// The test key and the fixture server live beside go/ in a checkout; the
+	// bare standalone copy (scripts/check-standalone.sh) has neither.
+	for _, need := range []string{
+		filepath.Join(repoRootDir(t), "tests", "fixtures", "fetch-v1", "test-key", "private.pem"),
+		filepath.Join(repoRootDir(t), "scripts", "fetch-v1", "server.py"),
+	} {
+		if _, err := os.Stat(need); err != nil {
+			t.Skipf("SKIPPED: %s is not beside this checkout (%v); the registry fetch tests did not run", need, err)
+		}
+	}
 	sum := sha256.Sum256(notALibrary)
 	predicate := map[string]any{
 		"abi": abi2.ChsAbiVersion, "abi_fingerprint": abi2.ChsAbiFingerprint,

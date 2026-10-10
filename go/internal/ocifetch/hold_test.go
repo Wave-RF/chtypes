@@ -58,7 +58,7 @@ func TestPruneKeepsWhatAnotherProcessHolds(t *testing.T) {
 	}
 	victim := dry[0]
 
-	helper := exec.Command(os.Args[0], "-test.run=^TestHoldHelperProcess$", "-test.count=1")
+	helper := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestHoldHelperProcess$", "-test.count=1")
 	helper.Env = append(os.Environ(), holdHelperEnv+"="+victim.Dir)
 	stdin, err := helper.StdinPipe()
 	if err != nil {
