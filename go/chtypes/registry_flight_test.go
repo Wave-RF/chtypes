@@ -531,6 +531,17 @@ func TestRegistryACanceledOpenLeavesTheFetchToTheOthers(t *testing.T) {
 // TestRegistryAFetchNoOpenWaitsForIsAbandoned: when the only open waiting on a
 // fetch is canceled, the fetch is canceled and the attempt abandoned, so the
 // next open of the request starts a new one (its request reaches the gate too).
+//
+// The next open starts only once the abandoned attempt has ENDED, not merely
+// once the canceled open has returned. The open returns as soon as it leaves
+// the attempt; the attempt's own goroutine sees the cancel later, on its own
+// schedule, and only then does the fetch stop being the request's. An open
+// made in between joins that fetch, which then has a waiter again and goes on
+// (the registry sharing a live fetch, which is correct), so only one request
+// ever reaches the gate and the wait for two fails at the server's bound
+// (public issue #491; seen on darwin-arm64 under -race, most often at -cpu 1).
+// The attempt's done channel closes only after its fetch has been left and,
+// with no waiter left, canceled: waiting on it closes that window.
 func TestRegistryAFetchNoOpenWaitsForIsAbandoned(t *testing.T) {
 	fx := newFlightFixture(t)
 	reg := fx.registry(t, "flight-abandon")
@@ -543,9 +554,22 @@ func TestRegistryAFetchNoOpenWaitsForIsAbandoned(t *testing.T) {
 		canceled <- err
 	}()
 	fx.waitParked(t, "flight-abandon", 1)
+	reg.mu.Lock()
+	abandoned := reg.flights["26.8"]
+	reg.mu.Unlock()
+	if abandoned == nil {
+		t.Fatal("no attempt of 26.8 is in progress while its request is parked at the gate")
+	}
 	cancel()
 	if err := receive(t, canceled, "the canceled open"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("the canceled open = %v, want context.Canceled", err)
+	}
+	receive(t, abandoned.done, "the abandoned attempt's end")
+	reg.mu.Lock()
+	flight, fetch := reg.flights["26.8"], reg.fetches["26.8"]
+	reg.mu.Unlock()
+	if flight != nil || fetch != nil {
+		t.Fatalf("the abandoned attempt has ended, yet 26.8 still has an attempt (%p) or a fetch (%p) in progress", flight, fetch)
 	}
 	next := make(chan openResult, 1)
 	go func() {
