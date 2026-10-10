@@ -53,22 +53,23 @@ __all__ = [
     "SourceUnreachableError",
     "UnsupportedError",
     "UsageError",
-    "internal",
-    "misuse",
 ]
 
-CODE_ARTIFACT_MISSING = "CHTYPES_ARTIFACT_MISSING"
-CODE_ARTIFACT_UNTRUSTED = "CHTYPES_ARTIFACT_UNTRUSTED"
-CODE_ARTIFACT_CORRUPT = "CHTYPES_ARTIFACT_CORRUPT"
-CODE_ARTIFACT_PINNED = "CHTYPES_ARTIFACT_PINNED"
-CODE_ARTIFACT_UNPUBLISHED = "CHTYPES_ARTIFACT_UNPUBLISHED"
-CODE_ARTIFACT_INCOMPATIBLE = "CHTYPES_ARTIFACT_INCOMPATIBLE"
-CODE_SOURCE_UNREACHABLE = "CHTYPES_SOURCE_UNREACHABLE"
-CODE_SOURCE_UNAUTHORIZED = "CHTYPES_SOURCE_UNAUTHORIZED"
-CODE_SOURCE_FORBIDDEN = "CHTYPES_SOURCE_FORBIDDEN"
-CODE_SOURCE_INCOMPATIBLE = "CHTYPES_SOURCE_INCOMPATIBLE"
-CODE_CACHE_UNUSABLE = "CHTYPES_CACHE_UNUSABLE"
-CODE_SOURCE_RETIRED = "CHTYPES_SOURCE_RETIRED"
+# The codes are generated from spec/fetch-v1/constants.json (public issue #500).
+from ._codes import (
+    CODE_ARTIFACT_CORRUPT,
+    CODE_ARTIFACT_INCOMPATIBLE,
+    CODE_ARTIFACT_MISSING,
+    CODE_ARTIFACT_PINNED,
+    CODE_ARTIFACT_UNPUBLISHED,
+    CODE_ARTIFACT_UNTRUSTED,
+    CODE_CACHE_UNUSABLE,
+    CODE_SOURCE_FORBIDDEN,
+    CODE_SOURCE_INCOMPATIBLE,
+    CODE_SOURCE_RETIRED,
+    CODE_SOURCE_UNAUTHORIZED,
+    CODE_SOURCE_UNREACHABLE,
+)
 
 # `chs_status` value of CHS_INVALID_ARGUMENT. The binding's own misuse errors
 # carry it so a handler sees one shape whichever side caught the misuse. It is
@@ -133,14 +134,14 @@ class InternalError(CallError):
     document that does not decode: a library bug, never the caller's."""
 
 
-def misuse(message: str) -> UsageError:
+def _misuse(message: str) -> UsageError:
     """The INVALID_ARGUMENT shape for a misuse the binding detects itself:
     status `CHS_INVALID_ARGUMENT`, `ch_code` 0, an empty `ch_name` and
     `column`, and a message naming the misuse."""
     return UsageError(_STATUS_INVALID_ARGUMENT, 0, "", message.encode("utf-8"), b"")
 
 
-def internal(message: str) -> InternalError:
+def _internal(message: str) -> InternalError:
     """A library bug the binding caught: a document that breaks its own schema.
     Carries `CHS_INTERNAL`'s shape, like the library's own."""
     return InternalError(_STATUS_INTERNAL, 0, "", message.encode("utf-8"), b"")
@@ -221,26 +222,11 @@ class ArtifactIncompatibleError(ArtifactError):
 
 
 class SourceUnreachableError(ArtifactError):
-    """The source could not be read.
-
-    Attributes:
-        retryable: whether the condition was transient.
-        retry_after: the source's own requested wait in seconds, when present
-            and within budget, else None.
-    """
+    """The source could not be read: the fetch layer has already spent its
+    retry table (docs/guides/fetch-v1.md section 7), and a `Retry-After` it
+    refused as over budget is named in the message."""
 
     code = CODE_SOURCE_UNREACHABLE
-
-    def __init__(
-        self,
-        message: str = "",
-        *,
-        retryable: bool = False,
-        retry_after: float | None = None,
-    ) -> None:
-        super().__init__(message)
-        self.retryable = retryable
-        self.retry_after = retry_after
 
 
 class SourceUnauthorizedError(ArtifactError):

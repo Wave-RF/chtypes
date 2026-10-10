@@ -3,6 +3,7 @@ package chtypes
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -114,7 +115,7 @@ func TestEverySharedCodeHasASentinel(t *testing.T) {
 		CodeArtifactMissing, CodeArtifactUntrusted, CodeArtifactCorrupt, CodeArtifactPinned, CodeArtifactUnpublished,
 		CodeSourceUnreachable, CodeSourceUnauthorized, CodeSourceForbidden, CodeSourceIncompatible, CodeArtifactIncompatible,
 	} {
-		e := &ArtifactError{Code: c, Msg: string(c)}
+		e := &ArtifactError{Code: c, msg: string(c)}
 		if !errors.Is(e, sentinel(c)) || sentinel(c) == nil {
 			t.Errorf("%s: no sentinel", c)
 		}
@@ -138,11 +139,13 @@ func TestWithinRequestAssertion(t *testing.T) {
 		if !errors.As(err, &ae) || !errors.Is(err, ErrArtifactCorrupt) {
 			t.Fatalf("request %q answered by 26.8.5.1: want an *ArtifactError matching ErrArtifactCorrupt, got %T %v", bad, err, err)
 		}
-		if ae.Reason != "build_info_mismatch:clickhouse_version" || ae.Want != bad || ae.Got != "26.8.5.1" || ae.Request != bad {
+		if ae.Reason != "build_info_mismatch:clickhouse_version" || ae.Want != bad || ae.Got != "26.8.5.1" {
 			t.Errorf("request %q: refusal fields %+v", bad, ae)
 		}
-		if !strings.Contains(ae.Error(), "CHTYPES_ARTIFACT_CORRUPT") {
-			t.Errorf("request %q: the message names no code: %s", bad, ae.Error())
+		for _, want := range []string{"CHTYPES_ARTIFACT_CORRUPT", strconv.Quote(bad), "linux-arm64"} {
+			if !strings.Contains(ae.Error(), want) {
+				t.Errorf("request %q: the message does not name %s: %s", bad, want, ae.Error())
+			}
 		}
 	}
 }

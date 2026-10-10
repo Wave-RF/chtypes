@@ -1605,7 +1605,7 @@ func describeError(err error, what string) {
 		kv("  message", truncate(ie.Message, 84))
 	case errors.As(err, &ae):
 		kv(what, "*ArtifactError  .Code="+string(ae.Code))
-		kv("  message", truncate(ae.Msg, 84))
+		kv("  message", truncate(ae.Error(), 84))
 		kv("  errors.Is(ErrArtifactMissing)", fmt.Sprintf("%v   <- one sentinel per code", errors.Is(err, chtypes.ErrArtifactMissing)))
 	default:
 		kv(what, fmt.Sprintf("%T: %v", err, err))

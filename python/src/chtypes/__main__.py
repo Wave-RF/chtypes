@@ -33,6 +33,7 @@ from collections.abc import Sequence
 
 from . import __version__ as chtypes_version
 from . import _ocifetch as fetch_layer
+from ._codes import CODE_ARTIFACT_CORRUPT
 from ._ocifetch import _channel
 from ._ocifetch import _constants as C
 from ._ocifetch._ensure import _translate_transport_error, detect_host_platform, missing_notes
@@ -50,7 +51,7 @@ EXIT_OK = 0
 EXIT_USAGE = 2
 # A failure that carries no code from the table (a lock file that cannot be
 # read, an interrupted run): the status the table gives its verification codes.
-_EXIT_FALLBACK = C.ERROR_EXIT_CODES["CHTYPES_ARTIFACT_CORRUPT"]
+_EXIT_FALLBACK = C.ERROR_EXIT_CODES[CODE_ARTIFACT_CORRUPT]
 _EXIT_INTERRUPTED = 130
 
 
@@ -297,7 +298,7 @@ def _cmd_verify(args: argparse.Namespace) -> int:
             _say(f"chtypes: FAILED {r.version} {r.platform} {r.dir}: {r.detail}")
     if failed:
         _say(f"chtypes: {failed} of {len(results)} installed build(s) FAILED verification")
-        return C.ERROR_EXIT_CODES["CHTYPES_ARTIFACT_CORRUPT"]
+        return C.ERROR_EXIT_CODES[CODE_ARTIFACT_CORRUPT]
     return EXIT_OK
 
 

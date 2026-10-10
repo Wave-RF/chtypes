@@ -150,3 +150,33 @@ pub const ERROR_EXIT_CODES: &[ErrorExitCode] = &[
     ErrorExitCode { code: "CHTYPES_CACHE_UNUSABLE", exit_code: 9 },
     ErrorExitCode { code: "CHTYPES_SOURCE_RETIRED", exit_code: 10 },
 ];
+
+/// The shared error codes (`docs/guides/fetch-v1.md` §8), one per entry of
+/// `ERROR_EXIT_CODES`, in its order: what `Error::code` returns for an artifact
+/// or fetch error. The crate re-exports this module as `chtypes::code`.
+pub mod code {
+    /// `CHTYPES_ARTIFACT_MISSING`.
+    pub const ARTIFACT_MISSING: &str = "CHTYPES_ARTIFACT_MISSING";
+    /// `CHTYPES_ARTIFACT_UNTRUSTED`.
+    pub const ARTIFACT_UNTRUSTED: &str = "CHTYPES_ARTIFACT_UNTRUSTED";
+    /// `CHTYPES_ARTIFACT_CORRUPT`.
+    pub const ARTIFACT_CORRUPT: &str = "CHTYPES_ARTIFACT_CORRUPT";
+    /// `CHTYPES_ARTIFACT_PINNED`.
+    pub const ARTIFACT_PINNED: &str = "CHTYPES_ARTIFACT_PINNED";
+    /// `CHTYPES_ARTIFACT_UNPUBLISHED`.
+    pub const ARTIFACT_UNPUBLISHED: &str = "CHTYPES_ARTIFACT_UNPUBLISHED";
+    /// `CHTYPES_SOURCE_UNREACHABLE`.
+    pub const SOURCE_UNREACHABLE: &str = "CHTYPES_SOURCE_UNREACHABLE";
+    /// `CHTYPES_SOURCE_UNAUTHORIZED`.
+    pub const SOURCE_UNAUTHORIZED: &str = "CHTYPES_SOURCE_UNAUTHORIZED";
+    /// `CHTYPES_SOURCE_FORBIDDEN`.
+    pub const SOURCE_FORBIDDEN: &str = "CHTYPES_SOURCE_FORBIDDEN";
+    /// `CHTYPES_SOURCE_INCOMPATIBLE`.
+    pub const SOURCE_INCOMPATIBLE: &str = "CHTYPES_SOURCE_INCOMPATIBLE";
+    /// `CHTYPES_ARTIFACT_INCOMPATIBLE`.
+    pub const ARTIFACT_INCOMPATIBLE: &str = "CHTYPES_ARTIFACT_INCOMPATIBLE";
+    /// `CHTYPES_CACHE_UNUSABLE`.
+    pub const CACHE_UNUSABLE: &str = "CHTYPES_CACHE_UNUSABLE";
+    /// `CHTYPES_SOURCE_RETIRED`.
+    pub const SOURCE_RETIRED: &str = "CHTYPES_SOURCE_RETIRED";
+}

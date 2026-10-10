@@ -3,6 +3,7 @@ package ocifetch
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -24,6 +25,31 @@ func TestFetchErrorIsSentinel(t *testing.T) {
 	}
 	if fe.Request != "26.8" || fe.Platform != "linux-arm64" {
 		t.Fatalf("FetchError fields = %+v, want Request=26.8 Platform=linux-arm64", fe)
+	}
+}
+
+// The message alone carries what the error concerns (public issue #500): the
+// public ArtifactError keeps no Request, Platform or Source field, so a text
+// like ensure.go's "layer: %v", which names none of them, must gain all three,
+// and one that already names one must not repeat it.
+func TestFetchErrorMessageCarriesRequestPlatformSource(t *testing.T) {
+	err := newError(CodeArtifactCorrupt, "26.8", "linux-arm64", "https://registry.example/chtypes/v2",
+		errors.New("digest mismatch"), "layer: %v", errors.New("digest mismatch"))
+	want := "chtypes: layer: digest mismatch (request 26.8, platform linux-arm64, " +
+		"source https://registry.example/chtypes/v2) [CHTYPES_ARTIFACT_CORRUPT]"
+	if err.Msg != want || err.Error() != want {
+		t.Fatalf("message = %q, want %q", err.Msg, want)
+	}
+
+	named := newError(CodeArtifactMissing, "26.8", "linux-arm64", "", nil,
+		"nothing installed answers %s for %s", "26.8", "linux-arm64")
+	if want := "chtypes: nothing installed answers 26.8 for linux-arm64 [CHTYPES_ARTIFACT_MISSING]"; named.Msg != want {
+		t.Fatalf("a message that names the request and platform = %q, want %q", named.Msg, want)
+	}
+
+	secret := newError(CodeSourceUnreachable, "26.8", "", "https://user:hunter2@registry.example/chtypes/v2", nil, "boom")
+	if strings.Contains(secret.Msg, "hunter2") || !strings.Contains(secret.Msg, "source https://user:xxxxx@registry.example/chtypes/v2") {
+		t.Fatalf("a source URL's password reached the message: %q", secret.Msg)
 	}
 }
 

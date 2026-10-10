@@ -98,7 +98,7 @@ from .errors import (
     UsageError,
 )
 from .library import Block, Filter, Library, Schema, Server, open_unverified
-from .registry import FetchOptions, Registry, Resolved, TrustedKey, cache_root, search_dirs
+from .registry import FetchOptions, Registry, Resolved, cache_root, search_dirs
 from .results import (
     AtMergeEntry,
     BatchResult,
@@ -201,7 +201,6 @@ __all__ = [
     "Span",
     "Status",
     "Transform",
-    "TrustedKey",
     "UnsupportedError",
     "UsageError",
     "Value",

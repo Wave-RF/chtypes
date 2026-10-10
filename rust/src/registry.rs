@@ -54,8 +54,6 @@ use crate::setup;
 /// subroot `<cache_dir>/v2-dev`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FetchOptions {
-    /// The platform key (`linux-arm64`, ...). `None` is this host's.
-    pub platform: Option<String>,
     /// Base URLs, most-preferred first. `None` is `$CHTYPES_ARTIFACTS_URL`, else
     /// the built-in default. Ignored by this 2.0.0-dev SDK, which fetches only
     /// from `https://registry-staging.wavehouse.dev/chtypes/v2-dev`.
@@ -101,7 +99,10 @@ impl FetchOptions {
     fn to_options(&self) -> Options {
         let defaults = Options::default();
         Options {
-            platform: self.platform.clone(),
+            // A registry opens libraries for this host only (the doc's
+            // sequence, docs/reference/bindings-v1.md §6); `chtypes fetch
+            // --platform` sets the fetch layer's own option.
+            platform: None,
             bases: self.bases.clone(),
             cache_dir: self.cache_dir.clone(),
             system_dirs: self.system_dirs.clone().unwrap_or(defaults.system_dirs),
@@ -410,7 +411,7 @@ impl Registry {
     /// Resolve a request, fetching when allowed, and open its image: the part
     /// of [`Registry::open`] whose failure settles the setup.
     fn resolve_and_open(&self, request: &str, may_fetch: bool) -> Result<Arc<Library>> {
-        let platform = self.fetch.platform.clone().unwrap_or_else(host_platform);
+        let platform = host_platform();
         let resolved = match ensure::resolve_installed(request, &platform, self.fetch.to_options())?
         {
             Some(r) => r,
@@ -462,7 +463,7 @@ fn check_within_request(version: &str, path: &Path, request: &str) -> Result<()>
         path: path.to_path_buf(),
         want: Some(request.to_string()),
         got: Some(version.to_string()),
-        detail: Some(format!(
+        message: Some(format!(
             "the library opened for ClickHouse {request} reports another version"
         )),
     }))
@@ -503,7 +504,6 @@ mod tests {
             std::env::temp_dir().join(format!("chtypes_registry_test_{}", std::process::id()));
         let r = Registry::new(RegistryOptions {
             fetch: FetchOptions {
-                platform: Some("linux-amd64".to_string()),
                 cache_dir: Some(dir.to_string_lossy().into_owned()),
                 system_dirs: Some(Vec::new()),
                 offline: true,
@@ -517,7 +517,7 @@ mod tests {
         let Error::ArtifactMissing(m) = &err else {
             panic!("want ArtifactMissing, got {err:?}")
         };
-        assert!(m.contains("25.8") && m.contains("linux-amd64"), "{m}");
+        assert!(m.contains("25.8") && m.contains(&host_platform()), "{m}");
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -537,7 +537,6 @@ mod tests {
         std::fs::write(dir.join("26.1").join("manifest.json"), b"{}").unwrap();
         let r = Registry::new(RegistryOptions {
             fetch: FetchOptions {
-                platform: Some("linux-amd64".to_string()),
                 cache_dir: Some(dir.to_string_lossy().into_owned()),
                 system_dirs: Some(Vec::new()),
                 ..Default::default()
@@ -578,7 +577,6 @@ mod tests {
         std::fs::write(dir.join("26.1").join("manifest.json"), b"{}").unwrap();
         let r = Registry::new(RegistryOptions {
             fetch: FetchOptions {
-                platform: Some("linux-amd64".to_string()),
                 cache_dir: Some(dir.to_string_lossy().into_owned()),
                 system_dirs: Some(Vec::new()),
                 strict_cache: Some(true),

@@ -39,7 +39,8 @@ from ._abi2._vocab import (
     Source,
     Verdict,
 )
-from .errors import ArtifactCorruptError, internal
+from .errors import ArtifactCorruptError
+from .errors import _internal as internal
 from .results import (
     AtMergeEntry,
     BatchResult,

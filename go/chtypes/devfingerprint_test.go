@@ -27,7 +27,7 @@ func TestDevFingerprintMessageIsRuleR6Exactly(t *testing.T) {
 	// The mapping alone, with no library.
 	err := loadError(&abi2.LoadError{Reason: "fingerprint", Path: "/p", Want: abi2.ChsAbiFingerprint, Got: other})
 	var ae *ArtifactError
-	if !errors.As(err, &ae) || ae.Code != CodeArtifactIncompatible || ae.Msg != want || err.Error() != want ||
+	if !errors.As(err, &ae) || ae.Code != CodeArtifactIncompatible || ae.Error() != want || err.Error() != want ||
 		!errors.Is(err, ErrArtifactIncompatible) {
 		t.Errorf("a fingerprint refusal = %v (%+v); want CHTYPES_ARTIFACT_INCOMPATIBLE with exactly %q", err, ae, want)
 	}
@@ -45,7 +45,7 @@ func TestDevFingerprintRefusalThroughALoad(t *testing.T) {
 	resetSetup(t)
 	t.Setenv("CHTYPES_ALLOW_UNVERIFIED_LIBRARY", "1")
 	_, err := OpenUnverified(stubFile(t, "fingerprint-other"), true)
-	if !errors.As(err, &ae) || ae.Code != CodeArtifactIncompatible || ae.Reason != "fingerprint" || ae.Msg != want {
+	if !errors.As(err, &ae) || ae.Code != CodeArtifactIncompatible || ae.Reason != "fingerprint" || ae.Error() != want {
 		t.Errorf("opening a library with another fingerprint = %v; want exactly %q", err, want)
 	}
 }

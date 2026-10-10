@@ -14,7 +14,7 @@ import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
-from .errors import misuse
+from .errors import _misuse as misuse
 
 __all__ = ["BytesIn", "ServerProfile", "Settings"]
 

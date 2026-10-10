@@ -33,7 +33,7 @@ func TestMissingFromAZeroXRegistryNamesIt(t *testing.T) {
 	_, err = r.For("26.1")
 	var ae *ArtifactError
 	hint := zeroX + " holds a 0.x registry (26.1/manifest.json)"
-	if !errors.As(err, &ae) || !errors.Is(err, ErrArtifactMissing) || !strings.Contains(ae.Msg, hint) {
+	if !errors.As(err, &ae) || !errors.Is(err, ErrArtifactMissing) || !strings.Contains(ae.Error(), hint) {
 		t.Fatalf("For on a 0.x registry = %v, want MISSING carrying %q", err, hint)
 	}
 }
@@ -88,7 +88,7 @@ func TestARetiredRepositoryIsTheSourceRetiredCode(t *testing.T) {
 	}
 	_, err = r.For("26.9")
 	var ae *ArtifactError
-	if !errors.As(err, &ae) || !errors.Is(err, ErrSourceRetired) || ae.Code != CodeSourceRetired || !strings.Contains(ae.Msg, message) {
+	if !errors.As(err, &ae) || !errors.Is(err, ErrSourceRetired) || ae.Code != CodeSourceRetired || !strings.Contains(ae.Error(), message) {
 		t.Fatalf("For on a retired repository = %#v", err)
 	}
 }

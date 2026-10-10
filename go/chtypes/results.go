@@ -281,7 +281,7 @@ type Discovery struct {
 // Capabilities is what a build supports, from its own build_info.
 type Capabilities struct {
 	// InputFormats and ExportFormats are ClickHouse format names, from this
-	// build's own format factory; compare with Format.CHName.
+	// build's own format factory; compare with Format.ChName.
 	InputFormats  []string
 	ExportFormats []string
 	DocFlags      []string

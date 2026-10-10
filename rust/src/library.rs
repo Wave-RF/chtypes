@@ -87,13 +87,13 @@ pub(crate) fn open_image(
     predicate: Option<&Json>,
     resolved: Option<Resolved>,
 ) -> Result<Arc<Library>> {
-    let refusal = |reason: &str, detail: String| {
+    let refusal = |reason: &str, got: String| {
         Error::from_refusal(Refusal {
             reason: reason.to_string(),
             path: path.to_path_buf(),
             want: None,
-            got: None,
-            detail: Some(detail),
+            got: Some(got),
+            message: None,
         })
     };
     let canonical = std::fs::canonicalize(path).map_err(|e| refusal("dlopen", e.to_string()))?;
