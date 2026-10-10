@@ -2,11 +2,16 @@
 # Trusted Publishing (OIDC): configure the publisher once on crates.io for the
 # `chtypes` crate (repo Wave-RF/chtypes, workflow release-rust.yml).
 #
-# On this branch the only releasable tags are the channel's
-# (scripts/release-channel.sh; until the v2 lock, rust/v2.0.0-dev.N): a semver
-# pre-release, which Cargo never resolves for a requirement that does not name
-# one (#511). The `never-default` job asserts that against crates.io and Cargo
-# themselves after the publish, and its twin does in a dry run.
+# On this branch the tag selects one of two release modes, and nothing else
+# does (scripts/release-channel.sh, THE MODES; #511, #597):
+#   - dev, rust/v2.0.0-dev.N: a semver pre-release, which Cargo never resolves
+#     for a requirement that does not name one;
+#   - stable, rust/v2.N.N: crates.io's max_stable_version, and what a plain
+#     `cargo add chtypes` locks. Its publish needs the maintainer's
+#     CHTYPES_V2_LOCKED_FP to name this crate's fingerprint (THE GATE);
+#     without it, it can only dry-run.
+# The `never-default` job asserts the mode's answer against crates.io and
+# Cargo themselves after the publish, and its twin does in a dry run.
 name: release-rust
 on:
   push:
@@ -53,13 +58,20 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # Before anything is installed or built: the channel's own selftest, then
-      # the tag must be a release of this branch's channel.
-      - name: "the tag is a release of this branch's channel (scripts/release-channel.sh, #511)"
+      # the tag must be a release of this branch (it selects the mode), and a
+      # stable release that is not a dry run must pass THE GATE: the repository
+      # variable only the maintainer sets must name the fingerprint this crate
+      # is built against.
+      - name: "the tag selects its mode and is a release of this branch, and a stable release passes the gate (scripts/release-channel.sh; #511, #597)"
         env:
           TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          RELEASE_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
+          CHTYPES_V2_LOCKED_FP: ${{ vars.CHTYPES_V2_LOCKED_FP }}
         run: |
           scripts/release-channel.sh --selftest
+          echo "release mode: $(scripts/release-channel.sh mode rust "$TAG_NAME")"
           scripts/release-channel.sh tag rust "$TAG_NAME"
+          scripts/release-channel.sh gate rust "$TAG_NAME" "$RELEASE_DRY_RUN"
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
       - name: the tag and the crate agree on the version
         env:
@@ -87,12 +99,15 @@ jobs:
           echo "binary: $got"
           [ "$got" = "chtypes $tag" ] || { echo "::error::the built binary reports '$got', the tag says chtypes $tag"; exit 1; }
       # The record the never-default job compares against: crates.io's
-      # max_stable_version right now. It must already be a stable 1.x, or
-      # nothing is published over it.
-      - name: record what crates.io installs by default before the publish (a stable 1.x)
+      # max_stable_version right now. In the dev mode it must already be a
+      # stable 1.x, or nothing is published over it; in the stable mode it
+      # must not already be this version.
+      - name: record what crates.io installs by default before the publish
         id: record
+        env:
+          TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
         run: |
-          default="$(scripts/release-channel.sh default rust)"
+          default="$(scripts/release-channel.sh default rust "$TAG_NAME")"
           echo "max_stable_version before the publish: $default"
           echo "default=$default" >> "$GITHUB_OUTPUT"
       - name: dry run, the publish rehearsal
@@ -117,16 +132,19 @@ jobs:
       - run: cd rust && cargo publish --locked
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
-  # "Never installed by default", asserted against crates.io and Cargo
-  # themselves, never left to a comment. After a publish: crates.io's
-  # max_stable_version is still the 1.x the publish job recorded, on every
-  # read, and a plain `cargo add chtypes` (no version) in a clean project still
-  # locks that 1.x, while the crate's own version page serves 2.0.0-dev.N
-  # (polled for lag, up to 15 minutes). A dry run runs the same assertions
-  # against crates.io as it is now, the twin: the default is the recorded 1.x,
-  # the version is not published yet, and the same presence check finds the
-  # recorded version (its positive control). scripts/release-channel.sh holds
-  # both, and its selftest plants every refusal.
+  # What Cargo installs by default, asserted against crates.io and Cargo
+  # themselves, never left to a comment. Dev mode, "never installed by
+  # default": after a publish, crates.io's max_stable_version is still the 1.x
+  # the build job recorded, on every read, and a plain `cargo add chtypes` (no
+  # version) in a clean project still locks that 1.x, while the crate's own
+  # version page serves 2.0.0-dev.N. Stable mode, the opposite: the version
+  # page serves 2.N.N, max_stable_version is it, and a plain `cargo add` locks
+  # it. Both poll for lag, up to 15 minutes. A dry run runs the same reads
+  # against crates.io as it is now, the twin: the default is the recorded
+  # version, this version is not published yet, and the same presence check
+  # finds the recorded version (its positive control).
+  # scripts/release-channel.sh holds both modes, and its selftest runs each
+  # against recorded crates.io answers.
   never-default:
     needs: [build, publish]
     if: ${{ !failure() && needs.build.result == 'success' && (needs.publish.result == 'success' || (needs.publish.result == 'skipped' && github.event_name == 'workflow_dispatch' && inputs.dry_run)) }}
@@ -137,14 +155,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
-      - name: crates.io and a plain cargo add still pick the recorded 1.x, and 2.0.0-dev.N is served (a dry run asserts it against crates.io as it is)
+      - name: what crates.io and a plain cargo add pick (dev, still the recorded 1.x; stable, this version), and this version is served (a dry run asserts it against crates.io as it is)
         env:
           TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
           RECORDED: ${{ needs.build.outputs.default }}
           PHASE: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'twin' || 'after' }}
         run: |
           version="$(scripts/release-channel.sh tag rust "$TAG_NAME")"
-          scripts/release-channel.sh never-default rust "$version" "$RECORDED" "$PHASE"
+          scripts/release-channel.sh default-check rust "$TAG_NAME" "$version" "$RECORDED" "$PHASE"
   # A publish step exiting 0 does not mean anyone can install the package.
   # Measured on ts/v0.1.1 (issue #10): the job went green ~7 minutes before
   # npm served the tarball, and for ~2 of those minutes `latest` resolved to
@@ -160,14 +178,16 @@ jobs:
   # crate, none read from this checkout's source tree): the crate installs
   # (the registry-lag retry loop, 15 minutes); its generation-2 fingerprint
   # constant equals CHS_ABI_FINGERPRINT in include/v2/chtypes.h; the published
-  # `chtypes` binary lists, fetches and loads from the channel's registry
-  # (staging chtypes/v2-dev) and no other; and the loaded library reports abi
-  # 2 and that fingerprint. The six checks are scripts/release-verify.sh's
-  # header.
+  # `chtypes` binary lists, fetches and loads from the mode's registry (dev:
+  # staging chtypes/v2-dev; stable: production chtypes/v2) and no other; and
+  # the loaded library reports abi 2 and that fingerprint. The six checks are
+  # scripts/release-verify.sh's header.
   # The steps are scripts/release-verify.sh, shared by every path:
   #   - a tag push: publish, then verify the registry's copy;
   #   - a dry run (dry_run=true): no publish; the same steps against the crate
-  #     in this checkout (`cargo install --path`), the retry loop skipped;
+  #     in this checkout (`cargo install --path`), the retry loop skipped; a
+  #     stable dry run against the stand-in, through the crate's own test
+  #     binaries before the lock;
   #   - verify_only=true: no publish; the same steps against the version the
   #     `tag` input names, already on crates.io.
   # The parser of `chtypes list` and the whole sequence are therefore exercised
@@ -184,14 +204,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
       - name: the verify script's own selftest (the list parser and every channel check)
         run: scripts/release-verify.sh --selftest
-      - name: the crate installs, speaks include/v2/chtypes.h's fingerprint, and lists, fetches and loads from the channel's registry only
+      - name: the crate installs, speaks include/v2/chtypes.h's fingerprint, and lists, fetches and loads from the mode's registry only (a stable dry run, from the stand-in)
         env:
           TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
           MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && !inputs.verify_only && 'local' || 'registry' }}
+          RELEASE_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && !inputs.verify_only && 'true' || 'false' }}
         run: |
           version="${TAG_NAME#rust/v}"
           if [ "$MODE" = local ]; then
-            scripts/release-verify.sh rust local "$version" rust
+            # A stable dry run verifies against the stand-in; the script refuses it on any other run.
+            if [ "$(scripts/release-channel.sh mode rust "$TAG_NAME")" = stable ]; then MODE=standin; fi
+            scripts/release-verify.sh rust "$MODE" "$version" rust
           else
             scripts/release-verify.sh rust registry "$version"
           fi
