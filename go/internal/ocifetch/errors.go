@@ -8,38 +8,19 @@ package ocifetch
 import (
 	"errors"
 	"fmt"
+	"net/url"
+	"strings"
 )
 
 // ErrorCode is one of the v1 shared codes in constants_gen.go's
-// ErrorExitCodes map.
+// ErrorExitCodes map. Its constants (CodeArtifactMissing …) are generated
+// beside that map from spec/fetch-v1/constants.json. CodeArtifactIncompatible
+// is the loader's: the fetch layer never raises it. CodeCacheUnusable's
+// FetchError names the Path, the Reason and the OSError (§1, the cache
+// faults; public issue #486). CodeSourceRetired is a source that answered 410
+// Gone, never retried and never sent to the next base (§2, "A retired
+// repository"; public issue #571).
 type ErrorCode string
-
-const (
-	CodeArtifactMissing     ErrorCode = "CHTYPES_ARTIFACT_MISSING"
-	CodeArtifactUntrusted   ErrorCode = "CHTYPES_ARTIFACT_UNTRUSTED"
-	CodeArtifactCorrupt     ErrorCode = "CHTYPES_ARTIFACT_CORRUPT"
-	CodeArtifactPinned      ErrorCode = "CHTYPES_ARTIFACT_PINNED"
-	CodeArtifactUnpublished ErrorCode = "CHTYPES_ARTIFACT_UNPUBLISHED"
-	CodeSourceUnreachable   ErrorCode = "CHTYPES_SOURCE_UNREACHABLE"
-	CodeSourceUnauthorized  ErrorCode = "CHTYPES_SOURCE_UNAUTHORIZED"
-	CodeSourceForbidden     ErrorCode = "CHTYPES_SOURCE_FORBIDDEN"
-	CodeSourceIncompatible  ErrorCode = "CHTYPES_SOURCE_INCOMPATIBLE"
-	// CodeArtifactIncompatible is reserved for the FFI/loader layer (§8 of
-	// the guide). The fetch layer never raises it; it is listed here only so
-	// ExitCode's table is complete for a caller that merges both layers'
-	// errors.
-	CodeArtifactIncompatible ErrorCode = "CHTYPES_ARTIFACT_INCOMPATIBLE"
-	// CodeCacheUnusable is a cache directory or entry the fetch layer could
-	// not read or write, or one strict mode refuses (§1, the cache faults;
-	// public issue #486). Its FetchError names the Path, the Reason and the
-	// OSError.
-	CodeCacheUnusable ErrorCode = "CHTYPES_CACHE_UNUSABLE"
-	// CodeSourceRetired is a source that answered 410 Gone: a retired
-	// repository, which is permanent, so it is never retried and never sends
-	// the request to the next base (§2, "A retired repository"; public issue
-	// #571). Its message names the URL and carries the registry's own message.
-	CodeSourceRetired ErrorCode = "CHTYPES_SOURCE_RETIRED"
-)
 
 // Sentinel errors. errors.Is(err, ocifetch.ErrArtifactCorrupt) is true for
 // any error this package produces with that code, however deeply wrapped.
@@ -142,15 +123,42 @@ func ExitCode(err error) int {
 }
 
 // newError builds a *FetchError. format/args produce the human-readable
-// part of Msg; the code is appended in brackets so a log line carries the
-// shared vocabulary without the reader unwrapping anything.
+// part of Msg; then every one of request, platform and source that is set and
+// that text does not already name is added as a clause, "(request 26.8,
+// platform linux-amd64, source https://…)", so the message alone carries what
+// the error concerns (the public package's ArtifactError keeps only the
+// message; public issue #500); the code is appended in brackets so a log
+// line carries the shared vocabulary without the reader unwrapping anything.
 func newError(code ErrorCode, request, platform, source string, cause error, format string, args ...any) *FetchError {
+	text := fmt.Sprintf(format, args...)
 	return &FetchError{
 		Code:     code,
 		Request:  request,
 		Platform: platform,
 		Source:   source,
 		Err:      cause,
-		Msg:      "chtypes: " + fmt.Sprintf(format, args...) + " [" + string(code) + "]",
+		Msg:      "chtypes: " + text + contextClause(text, request, platform, source) + " [" + string(code) + "]",
 	}
+}
+
+// contextClause is newError's " (request …, platform …, source …)": each of
+// the three that is set and that text does not already contain, or "" when
+// there is none to add. A source URL's password, if it carries one, is
+// redacted.
+func contextClause(text, request, platform, source string) string {
+	if u, err := url.Parse(source); err == nil && u.User != nil {
+		source = u.Redacted()
+	}
+	var parts []string
+	for _, p := range [...]struct{ name, value string }{
+		{"request", request}, {"platform", platform}, {"source", source},
+	} {
+		if p.value != "" && !strings.Contains(text, p.value) {
+			parts = append(parts, p.name+" "+p.value)
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " (" + strings.Join(parts, ", ") + ")"
 }

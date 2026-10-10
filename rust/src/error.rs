@@ -17,6 +17,7 @@ use std::path::PathBuf;
 use crate::abi2::calls_gen::RawCallError;
 use crate::abi2::errmap_gen::{ErrorClass, RefusalClass, refusal_class, status_class};
 use crate::abi2::vocab_gen::{Status, status};
+use crate::ocifetch::constants::code;
 use crate::raw::RawText;
 
 pub use crate::abi2::loader::Refusal;
@@ -193,22 +194,22 @@ impl Error {
         }
     }
 
-    /// The `CHTYPES_*` code of an artifact or fetch error, as the fetch
-    /// constants spell it; `None` for a call error.
+    /// The `CHTYPES_*` code of an artifact or fetch error, one of the
+    /// [`crate::code`] constants; `None` for a call error.
     pub fn code(&self) -> Option<&'static str> {
         Some(match self {
-            Error::ArtifactIncompatible(_) => "CHTYPES_ARTIFACT_INCOMPATIBLE",
-            Error::ArtifactCorrupt(_) => "CHTYPES_ARTIFACT_CORRUPT",
-            Error::ArtifactMissing(_) => "CHTYPES_ARTIFACT_MISSING",
-            Error::ArtifactUntrusted(_) => "CHTYPES_ARTIFACT_UNTRUSTED",
-            Error::ArtifactPinned(_) => "CHTYPES_ARTIFACT_PINNED",
-            Error::ArtifactUnpublished(_) => "CHTYPES_ARTIFACT_UNPUBLISHED",
-            Error::SourceUnreachable(_) => "CHTYPES_SOURCE_UNREACHABLE",
-            Error::SourceUnauthorized(_) => "CHTYPES_SOURCE_UNAUTHORIZED",
-            Error::SourceForbidden(_) => "CHTYPES_SOURCE_FORBIDDEN",
-            Error::SourceIncompatible(_) => "CHTYPES_SOURCE_INCOMPATIBLE",
-            Error::CacheUnusable(_) => "CHTYPES_CACHE_UNUSABLE",
-            Error::SourceRetired(_) => "CHTYPES_SOURCE_RETIRED",
+            Error::ArtifactIncompatible(_) => code::ARTIFACT_INCOMPATIBLE,
+            Error::ArtifactCorrupt(_) => code::ARTIFACT_CORRUPT,
+            Error::ArtifactMissing(_) => code::ARTIFACT_MISSING,
+            Error::ArtifactUntrusted(_) => code::ARTIFACT_UNTRUSTED,
+            Error::ArtifactPinned(_) => code::ARTIFACT_PINNED,
+            Error::ArtifactUnpublished(_) => code::ARTIFACT_UNPUBLISHED,
+            Error::SourceUnreachable(_) => code::SOURCE_UNREACHABLE,
+            Error::SourceUnauthorized(_) => code::SOURCE_UNAUTHORIZED,
+            Error::SourceForbidden(_) => code::SOURCE_FORBIDDEN,
+            Error::SourceIncompatible(_) => code::SOURCE_INCOMPATIBLE,
+            Error::CacheUnusable(_) => code::CACHE_UNUSABLE,
+            Error::SourceRetired(_) => code::SOURCE_RETIRED,
             _ => return None,
         })
     }
@@ -291,13 +292,9 @@ impl From<crate::ocifetch::error::Error> for Error {
         match e {
             F::ArtifactMissing(m) => Error::ArtifactMissing(m),
             F::ArtifactUntrusted(m) => Error::ArtifactUntrusted(m),
-            F::ArtifactCorrupt(m) => Error::ArtifactCorrupt(Refusal {
-                reason: "fetch".to_string(),
-                path: PathBuf::new(),
-                want: None,
-                got: None,
-                detail: Some(m),
-            }),
+            // The fetch layer's own corruption: no loader reason and no path,
+            // as in Go, Python and TypeScript; its message is the display.
+            F::ArtifactCorrupt(m) => Error::ArtifactCorrupt(Refusal::fetch_corruption(m)),
             F::ArtifactPinned(m) => Error::ArtifactPinned(m),
             F::ArtifactUnpublished(m) => Error::ArtifactUnpublished(m),
             F::SourceUnreachable(m) => Error::SourceUnreachable(m),
@@ -404,7 +401,7 @@ mod tests {
             path: PathBuf::from("/p"),
             want: Some(fingerprint.to_string()),
             got: Some(other.clone()),
-            detail: None,
+            message: None,
         });
         let want = format!(
             "this SDK speaks dev fingerprint {fingerprint}; the library has {other} — update your dev SDK"
@@ -412,6 +409,26 @@ mod tests {
         assert!(matches!(e, Error::ArtifactIncompatible(_)), "{e:?}");
         assert_eq!(e.code(), Some("CHTYPES_ARTIFACT_INCOMPATIBLE"));
         assert_eq!(e.to_string(), want);
+    }
+
+    /// The fetch layer's own corruption has no loader reason and no path, as in
+    /// the other bindings, and displays its message after the code.
+    #[test]
+    fn the_fetch_layers_corruption_has_no_reason_and_shows_its_message() {
+        let e = Error::from(crate::ocifetch::error::Error::ArtifactCorrupt(
+            "layer: digest mismatch".to_string(),
+        ));
+        let Error::ArtifactCorrupt(r) = &e else {
+            panic!("want ArtifactCorrupt, got {e:?}")
+        };
+        assert_eq!(r.reason, "");
+        assert_eq!(r.path, PathBuf::new());
+        assert_eq!((r.want.as_deref(), r.got.as_deref()), (None, None));
+        assert_eq!(e.code(), Some(code::ARTIFACT_CORRUPT));
+        assert_eq!(
+            e.to_string(),
+            "CHTYPES_ARTIFACT_CORRUPT: layer: digest mismatch"
+        );
     }
 
     #[test]
@@ -432,7 +449,7 @@ mod tests {
             path: PathBuf::from("/x"),
             want: None,
             got: None,
-            detail: None,
+            message: None,
         };
         assert!(matches!(
             Error::from_refusal(refusal("fingerprint")),

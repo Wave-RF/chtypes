@@ -5,30 +5,64 @@
  * nothing in `../errors.ts` is edited by this lane.
  */
 
-import { ERROR_EXIT_CODES } from './constants.gen.js';
+import {
+  CODE_ARTIFACT_CORRUPT,
+  CODE_ARTIFACT_MISSING,
+  CODE_ARTIFACT_PINNED,
+  CODE_ARTIFACT_UNPUBLISHED,
+  CODE_ARTIFACT_UNTRUSTED,
+  CODE_CACHE_UNUSABLE,
+  CODE_SOURCE_FORBIDDEN,
+  CODE_SOURCE_INCOMPATIBLE,
+  CODE_SOURCE_RETIRED,
+  CODE_SOURCE_UNAUTHORIZED,
+  CODE_SOURCE_UNREACHABLE,
+  ERROR_EXIT_CODES,
+  type ErrorCode,
+} from './constants.gen.js';
 
-export type FetchV1ErrorCode = keyof typeof ERROR_EXIT_CODES;
-
-export const CODE_ARTIFACT_MISSING = 'CHTYPES_ARTIFACT_MISSING' satisfies FetchV1ErrorCode;
-export const CODE_ARTIFACT_UNTRUSTED = 'CHTYPES_ARTIFACT_UNTRUSTED' satisfies FetchV1ErrorCode;
-export const CODE_ARTIFACT_CORRUPT = 'CHTYPES_ARTIFACT_CORRUPT' satisfies FetchV1ErrorCode;
-export const CODE_ARTIFACT_PINNED = 'CHTYPES_ARTIFACT_PINNED' satisfies FetchV1ErrorCode;
-export const CODE_ARTIFACT_UNPUBLISHED = 'CHTYPES_ARTIFACT_UNPUBLISHED' satisfies FetchV1ErrorCode;
-export const CODE_SOURCE_UNREACHABLE = 'CHTYPES_SOURCE_UNREACHABLE' satisfies FetchV1ErrorCode;
-export const CODE_SOURCE_UNAUTHORIZED = 'CHTYPES_SOURCE_UNAUTHORIZED' satisfies FetchV1ErrorCode;
-export const CODE_SOURCE_FORBIDDEN = 'CHTYPES_SOURCE_FORBIDDEN' satisfies FetchV1ErrorCode;
-export const CODE_SOURCE_INCOMPATIBLE = 'CHTYPES_SOURCE_INCOMPATIBLE' satisfies FetchV1ErrorCode;
 /**
- * Reserved for the FFI/loader layer (not yet built, blocked on the ABI v1
- * design). No case in this module's own conformance suite raises it — the
- * fetch layer never dlopens, checks glibc, or reads a `chs_*` symbol (plan
- * §1.3).
+ * The shared error codes and their type are generated from
+ * `spec/fetch-v1/constants.json` (`./constants.gen.ts`; public issue #500).
+ * `CODE_ARTIFACT_INCOMPATIBLE` is the loader's: the fetch layer never raises
+ * it. `CODE_CACHE_UNUSABLE` is a cache fault (guide §1; public issue #486), and
+ * `CODE_SOURCE_RETIRED` a source that answered 410 Gone, never retried and
+ * never sent to the next base (guide §2; public issue #571).
  */
-export const CODE_ARTIFACT_INCOMPATIBLE = 'CHTYPES_ARTIFACT_INCOMPATIBLE' satisfies FetchV1ErrorCode;
-/** A cache directory or entry the fetch layer could not read or write, or one strict mode refuses (guide §1; public issue #486). */
-export const CODE_CACHE_UNUSABLE = 'CHTYPES_CACHE_UNUSABLE' satisfies FetchV1ErrorCode;
-/** A source that answered 410 Gone: a retired repository, never retried and never sent to the next base (guide §2; public issue #571). */
-export const CODE_SOURCE_RETIRED = 'CHTYPES_SOURCE_RETIRED' satisfies FetchV1ErrorCode;
+export {
+  CODE_ARTIFACT_CORRUPT,
+  CODE_ARTIFACT_INCOMPATIBLE,
+  CODE_ARTIFACT_MISSING,
+  CODE_ARTIFACT_PINNED,
+  CODE_ARTIFACT_UNPUBLISHED,
+  CODE_ARTIFACT_UNTRUSTED,
+  CODE_CACHE_UNUSABLE,
+  CODE_SOURCE_FORBIDDEN,
+  CODE_SOURCE_INCOMPATIBLE,
+  CODE_SOURCE_RETIRED,
+  CODE_SOURCE_UNAUTHORIZED,
+  CODE_SOURCE_UNREACHABLE,
+  type ErrorCode,
+} from './constants.gen.js';
+
+/** One of the shared error codes: the generated `ErrorCode`, under the name this module has always used. */
+export type FetchV1ErrorCode = ErrorCode;
+
+/** A code's process exit status (`docs/guides/fetch-v1.md` §8's table, generated into `ERROR_EXIT_CODES`): the command line's, never the library's. */
+export function exitStatusOf(code: FetchV1ErrorCode): number {
+  // Every `ErrorCode` is one of `ERROR_EXIT_CODES`'s own keys (both are
+  // generated from the same table); the `| undefined` is only
+  // `noUncheckedIndexedAccess`'s caution, not a real possibility here.
+  return ERROR_EXIT_CODES[code]!;
+}
+
+/** A loader refusal's fields (`docs/reference/bindings-v1.md` §4): `sdk.json`'s reason (with its suffix), the library path, and what was wanted and what was found where the refusal names them. */
+export interface RefusalFields {
+  readonly reason: string;
+  readonly path: string;
+  readonly want?: string | undefined;
+  readonly got?: string | undefined;
+}
 
 /**
  * The base of every error this package throws on purpose: the fetch and
@@ -44,22 +78,31 @@ export abstract class ChtypesError extends Error {
   }
 }
 
-/** Base of every error this module throws. */
+/**
+ * Base of every error this module throws, exported as `ArtifactError`: the
+ * code, and a loader refusal's fields (`reason`, `path`, `want`, `got`), as
+ * Go's `*ArtifactError` and Python's `ArtifactError` carry them
+ * (`docs/reference/bindings-v1.md` §4). They are `undefined` for a fetch
+ * error; a cache fault sets `path` and `reason`.
+ */
 export class FetchV1Error extends ChtypesError {
   readonly code: FetchV1ErrorCode;
+  /** A loader refusal's reason (`sdk.json`'s `loader.refusals`, with `:<symbol>` or `:<field>` appended where it gives a suffix), or a cache fault's. */
+  readonly reason: string | undefined;
+  /** The library a loader refusal names, or the path a cache fault names. */
+  readonly path: string | undefined;
+  /** What a loader refusal's check wanted, where it names both sides. */
+  readonly want: string | undefined;
+  /** What a loader refusal's check found: beside `want`, or alone. */
+  readonly got: string | undefined;
 
-  constructor(code: FetchV1ErrorCode, message: string, options?: { cause?: unknown }) {
+  constructor(code: FetchV1ErrorCode, message: string, options?: { cause?: unknown; refusal?: RefusalFields }) {
     super(message, options);
     this.code = code;
-  }
-
-  /** `docs/guides/fetch-v1.md` §8's table, generated into `ERROR_EXIT_CODES`. */
-  get exitStatus(): number {
-    // `this.code` is always one of `ERROR_EXIT_CODES`'s own keys (the
-    // `FetchV1ErrorCode` union IS `keyof typeof ERROR_EXIT_CODES`); the
-    // `| undefined` is only `noUncheckedIndexedAccess`'s generic-index-signature
-    // caution, not a real possibility here.
-    return ERROR_EXIT_CODES[this.code]!;
+    this.reason = options?.refusal?.reason;
+    this.path = options?.refusal?.path;
+    this.want = options?.refusal?.want;
+    this.got = options?.refusal?.got;
   }
 }
 
@@ -78,7 +121,7 @@ export class ArtifactUntrustedError extends FetchV1Error {
 
 /** A hash mismatch, a malformed object, a duplicate JSON key, or a tar rule violation. */
 export class ArtifactCorruptError extends FetchV1Error {
-  constructor(message: string, options?: { cause?: unknown }) {
+  constructor(message: string, options?: { cause?: unknown; refusal?: RefusalFields }) {
     super(CODE_ARTIFACT_CORRUPT, message, options);
   }
 }
@@ -99,12 +142,8 @@ export class ArtifactUnpublishedError extends FetchV1Error {
 
 /** A source could not be reached, exhausted its retry budget, or `offline` forbade reaching it. */
 export class SourceUnreachableError extends FetchV1Error {
-  /** Named value of a `Retry-After` refused as past the remaining budget (§7 of the guide). */
-  readonly retryAfterRefused: number | undefined;
-
-  constructor(message: string, options?: { cause?: unknown; retryAfterRefused?: number }) {
+  constructor(message: string, options?: { cause?: unknown }) {
     super(CODE_SOURCE_UNREACHABLE, message, options);
-    this.retryAfterRefused = options?.retryAfterRefused;
   }
 }
 
@@ -157,14 +196,14 @@ export interface CacheFault {
  * faults; public issue #486).
  */
 export class CacheUnusableError extends FetchV1Error implements CacheFault {
-  readonly path: string;
-  readonly reason: string;
+  /** The exact path that failed (set by the base, from the fault). */
+  declare readonly path: string;
+  /** The fault's reason (set by the base, from the fault). */
+  declare readonly reason: string;
   readonly osError: string | undefined;
 
   constructor(message: string, fault: CacheFault, options?: { cause?: unknown }) {
-    super(CODE_CACHE_UNUSABLE, message, options);
-    this.path = fault.path;
-    this.reason = fault.reason;
+    super(CODE_CACHE_UNUSABLE, message, { ...options, refusal: { reason: fault.reason, path: fault.path } });
     this.osError = fault.osError;
   }
 }

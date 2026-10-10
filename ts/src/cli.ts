@@ -35,9 +35,9 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { isChtypesError, UsageError } from './abi2/index.js';
+import { ChtypesError, UsageError } from './abi2/index.js';
 import { withEnvironment } from './env.js';
-import { ERROR_EXIT_CODES } from './ocifetch/constants.gen.js';
+import { CODE_ARTIFACT_CORRUPT, ERROR_EXIT_CODES } from './ocifetch/constants.gen.js';
 import { strictMode } from './ocifetch/faults.js';
 import {
   activeChannel,
@@ -48,6 +48,7 @@ import {
   DEV_CHANNEL_BASE,
   DEV_KEY_ID,
   ensure,
+  exitStatusOf,
   FetchV1Error,
   type FetchV1Options,
   hostPlatformKey,
@@ -301,7 +302,7 @@ async function cmdVerify(rest: readonly string[], values: Values, io: CliIo): Pr
     }
   }
   if (bad > 0) io.stderr(`${bad} of ${results.length} build(s) FAILED verification in ${root}\n`);
-  return bad === 0 ? EXIT_OK : (ERROR_EXIT_CODES['CHTYPES_ARTIFACT_CORRUPT'] ?? EXIT_OTHER);
+  return bad === 0 ? EXIT_OK : (ERROR_EXIT_CODES[CODE_ARTIFACT_CORRUPT] ?? EXIT_OTHER);
 }
 
 async function cmdList(rest: readonly string[], values: Values, io: CliIo): Promise<number> {
@@ -351,13 +352,13 @@ function report(err: unknown, io: CliIo): number {
   }
   if (err instanceof FetchV1Error) {
     io.stderr(`${err.message} [${err.code}]\n`);
-    return err.exitStatus;
+    return exitStatusOf(err.code);
   }
   if (err instanceof UsageError) {
     io.stderr(`${err.message}\n`);
     return EXIT_USAGE;
   }
-  if (isChtypesError(err)) {
+  if (err instanceof ChtypesError) {
     io.stderr(`${err.message}\n`);
     return EXIT_OTHER;
   }

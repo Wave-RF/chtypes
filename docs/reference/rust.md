@@ -13,7 +13,7 @@ Unix only: the loader is `dlopen`. Minimum supported Rust version 1.87. `cargo d
 
 **Four call classes, peers of each other.** `Error::Schema` (ClickHouse itself would refuse), `Error::Unsupported` (this build declines; a server might accept), `Error::Usage` (misuse) and `Error::Internal` (a library bug) each carry a `CallError`: `status`, `ch_code`, `ch_name`, `message` and `column`, verbatim from the library. A decline is neither an acceptance nor a rejection: fall back to the server. `Error::call_error()` reads the five fields from any of the four.
 
-**One family with the artifact errors.** `Error::ArtifactIncompatible` and `Error::ArtifactCorrupt` carry a `Refusal` (`reason`, `path`, `want`, `got`); the fetch layer's codes are one variant each (`ArtifactMissing`, `ArtifactUntrusted`, `ArtifactPinned`, `ArtifactUnpublished`, `SourceUnreachable`, `SourceUnauthorized`, `SourceForbidden`, `SourceIncompatible`, `CacheUnusable`, `SourceRetired`), and `Error::code()` names the `CHTYPES_*` code.
+**One family with the artifact errors.** `Error::ArtifactIncompatible` and `Error::ArtifactCorrupt` carry a `Refusal` (`reason`, `path`, `want`, `got`: a one-sided refusal's finding is in `got`, and the fetch layer's own corruption has an empty `reason`); the fetch layer's codes are one variant each (`ArtifactMissing`, `ArtifactUntrusted`, `ArtifactPinned`, `ArtifactUnpublished`, `SourceUnreachable`, `SourceUnauthorized`, `SourceForbidden`, `SourceIncompatible`, `CacheUnusable`, `SourceRetired`), and `Error::code()` names the `CHTYPES_*` code, one of the `chtypes::code` constants generated from `spec/fetch-v1/constants.json`.
 
 **Bytes are bytes.** A column name, a statement, a message and a rendered value come back as `RawText`: `as_bytes()` is authoritative, `as_str()` is `None` for bytes that are not UTF-8, and `Display` is the one lossy form. Inputs are `impl AsRef<[u8]>`, so `&str`, `&[u8]` and `Vec<u8>` all work. An export is a `Vec<u8>`.
 
@@ -34,7 +34,7 @@ Unix only: the loader is `dlopen`. Minimum supported Rust version 1.87. `cargo d
 
 ## The fetch options
 
-`RegistryOptions::fetch` is a `FetchOptions` carrying everything [`fetch-v1.md`](../guides/fetch-v1.md) configures, each field defaulting to the fetch layer's own default (the environment, then the built-in value): `platform`, `bases`, `cache_dir`, `system_dirs`, `offline`, `frozen`, `lock_path`, `lock_write`, `update`, `allow_unsigned`, `trusted_keys` and `token`.
+`RegistryOptions::fetch` is a `FetchOptions` carrying everything [`fetch-v1.md`](../guides/fetch-v1.md) configures, each field defaulting to the fetch layer's own default (the environment, then the built-in value): `bases`, `cache_dir`, `system_dirs`, `offline`, `frozen`, `lock_path`, `lock_write`, `update`, `allow_unsigned`, `trusted_keys` and `token`. No field names a platform: a registry opens libraries for this host, and `chtypes fetch --platform` names another.
 
 `trusted_keys: Option<Vec<String>>` is the trust list: raw 32-byte ed25519 public keys, each as 64 hex digits. A non-empty list REPLACES the default trust (the release key); `None` reads `CHTYPES_TRUSTED_KEYS` (comma-separated), and the release key is used when neither names a key. A list never appends to the default, so trusting the SDK's fixture key means naming it (and the release key too, if both should verify). A key that is not 64 hex digits is `Error::Usage`.
 

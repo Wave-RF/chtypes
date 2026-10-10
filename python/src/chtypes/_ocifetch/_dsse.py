@@ -21,6 +21,7 @@ import base64
 import hashlib
 import json
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from chtypes import _ed25519
@@ -86,12 +87,21 @@ def env_trusted_keys() -> tuple[TrustedKey, ...] | None:
     items = [part.strip() for part in raw.split(",") if part.strip()]
     if not items:
         return None
+    return trusted_keys_from_hex(items, C.ENV_TRUSTED_KEYS_NAME)
+
+
+def trusted_keys_from_hex(items: Sequence[str], where: str) -> tuple[TrustedKey, ...]:
+    """Raw 32-byte ed25519 public keys, each as 64 hex digits (the
+    `CHTYPES_TRUSTED_KEYS` spelling, and the `trusted_keys` option's, as in
+    every binding), as trust-list records whose key id is the generated
+    constants' algorithm, sha256-first16hex of the raw key. A bad key is a
+    ValueError naming `where`."""
     keys = []
     for item in items:
         try:
-            public = _hex_to_bytes(item)
+            public = _hex_to_bytes(item.strip())
         except ValueError as exc:
-            raise ValueError(f"chtypes: {C.ENV_TRUSTED_KEYS_NAME} holds a bad key: {exc}") from None
+            raise ValueError(f"chtypes: {where} holds a bad key: {exc}") from None
         keys.append(TrustedKey(keyid=hashlib.sha256(public).hexdigest()[:16], public_key=public))
     return tuple(keys)
 

@@ -21,7 +21,7 @@ import path from 'node:path';
 import type { JsExternal } from 'ffi-rs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { HANDLE_INFO, SYMBOL } from '../../src/abi2/decls.gen.js';
-import { ArtifactIncompatibleError, LoaderCorruptError } from '../../src/abi2/errors.js';
+import { ArtifactCorruptError, ArtifactIncompatibleError } from '../../src/abi2/errors.js';
 import { LoadedImage, type LoadInput, openAbi2, type Predicate } from '../../src/abi2/loader.js';
 import { freeHandle, type HandleRef, NULL_EXTERNAL, type RawApi, type RawCallResult, rawCall } from '../../src/abi2/raw.js';
 
@@ -438,10 +438,10 @@ describe.skipIf(!stubsAvailable)('abi v2 conformance (ts)', () => {
           caught = err;
         }
         expect(caught).toBeDefined();
-        const isLoaderError = caught instanceof ArtifactIncompatibleError || caught instanceof LoaderCorruptError;
+        const isLoaderError = caught instanceof ArtifactIncompatibleError || caught instanceof ArtifactCorruptError;
         expect(isLoaderError).toBe(true);
         if (!isLoaderError) return;
-        const reason = (caught as ArtifactIncompatibleError | LoaderCorruptError).reason;
+        const reason = (caught as ArtifactIncompatibleError | ArtifactCorruptError).reason;
         expect(reason).toBe(expectedReason);
       });
     });

@@ -8,6 +8,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use super::constants;
+use super::constants::code;
 
 /// What a `CHTYPES_CACHE_UNUSABLE` names (docs/guides/fetch-v1.md §1, the
 /// cache faults; public issue #486): the exact path that failed, the reason,
@@ -73,21 +74,21 @@ pub enum Error {
 }
 
 impl Error {
-    /// The v1 error code name (`CHTYPES_ARTIFACT_MISSING`, and so on), as
-    /// `constants::ERROR_EXIT_CODES` spells it.
+    /// The v1 error code name (`CHTYPES_ARTIFACT_MISSING`, and so on): one of
+    /// the generated `constants::code` constants.
     pub fn code(&self) -> &'static str {
         match self {
-            Error::ArtifactMissing(_) => "CHTYPES_ARTIFACT_MISSING",
-            Error::ArtifactUntrusted(_) => "CHTYPES_ARTIFACT_UNTRUSTED",
-            Error::ArtifactCorrupt(_) => "CHTYPES_ARTIFACT_CORRUPT",
-            Error::ArtifactPinned(_) => "CHTYPES_ARTIFACT_PINNED",
-            Error::ArtifactUnpublished(_) => "CHTYPES_ARTIFACT_UNPUBLISHED",
-            Error::SourceUnreachable(_) => "CHTYPES_SOURCE_UNREACHABLE",
-            Error::SourceUnauthorized(_) => "CHTYPES_SOURCE_UNAUTHORIZED",
-            Error::SourceForbidden(_) => "CHTYPES_SOURCE_FORBIDDEN",
-            Error::SourceIncompatible(_) | Error::InvalidInput(_) => "CHTYPES_SOURCE_INCOMPATIBLE",
-            Error::CacheUnusable(_) => "CHTYPES_CACHE_UNUSABLE",
-            Error::SourceRetired(_) => "CHTYPES_SOURCE_RETIRED",
+            Error::ArtifactMissing(_) => code::ARTIFACT_MISSING,
+            Error::ArtifactUntrusted(_) => code::ARTIFACT_UNTRUSTED,
+            Error::ArtifactCorrupt(_) => code::ARTIFACT_CORRUPT,
+            Error::ArtifactPinned(_) => code::ARTIFACT_PINNED,
+            Error::ArtifactUnpublished(_) => code::ARTIFACT_UNPUBLISHED,
+            Error::SourceUnreachable(_) => code::SOURCE_UNREACHABLE,
+            Error::SourceUnauthorized(_) => code::SOURCE_UNAUTHORIZED,
+            Error::SourceForbidden(_) => code::SOURCE_FORBIDDEN,
+            Error::SourceIncompatible(_) | Error::InvalidInput(_) => code::SOURCE_INCOMPATIBLE,
+            Error::CacheUnusable(_) => code::CACHE_UNUSABLE,
+            Error::SourceRetired(_) => code::SOURCE_RETIRED,
         }
     }
 

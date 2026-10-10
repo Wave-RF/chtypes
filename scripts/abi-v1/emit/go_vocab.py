@@ -6,7 +6,7 @@ description's numbers and spellings, and no binding keeps a copy of its own.
 For Go this emitter owns ONE file, go/chtypes/vocab_gen.go, in package
 chtypes:
 
-  Format, ExportNone      chs_format (int32) and CHS_EXPORT_NONE; `CHName()`
+  Format, ExportNone      chs_format (int32) and CHS_EXPORT_NONE; `ChName()`
                           is the enum's own `ch_name` field
   DocFlags                the CHS_DOC_* constants
   Status                  chs_status (int32); `String()` is the C constant's
@@ -162,7 +162,7 @@ def _format(model) -> list[str]:
     out: list[str] = []
     out += _doc(
         "Format is chs_format: a body or export format, with the description's numbers. Each carries\n"
-        "ClickHouse's own name (CHName), which is how a build's capabilities list a format."
+        "ClickHouse's own name (ChName), which is how a build's capabilities list a format."
     )
     out.append("type Format int32")
     out.append("")
@@ -178,8 +178,11 @@ def _format(model) -> list[str]:
             out.append("")
     if model.major >= 2:
         out += _known_method("Format", [v.fields["ch_name"] for v in enum.values], "format", "f")
-    out += _doc("CHName is ClickHouse's own name for the format, the enum's ch_name field.")
-    out.append("func (f Format) CHName() string {")
+    out += _doc(
+        "ChName is ClickHouse's own name for the format, the enum's ch_name field (bindings-v1.md section 3,\n"
+        "spelled as section 4 spells CallError.ChName)."
+    )
+    out.append("func (f Format) ChName() string {")
     out.append(f"{TAB}switch f {{")
     for v in enum.values:
         ch_name = v.fields["ch_name"]

@@ -18,7 +18,7 @@ import threading
 from dataclasses import dataclass
 
 from ._input import Settings, string_map_json
-from .errors import misuse
+from .errors import _misuse as misuse
 
 __all__ = ["setup"]
 

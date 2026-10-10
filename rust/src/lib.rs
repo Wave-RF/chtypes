@@ -122,6 +122,10 @@ pub use abi2::vocab_gen::{
 };
 pub use error::{CacheFault, CallError, Error, Refusal, Result};
 pub use library::Library;
+/// The `CHTYPES_*` codes of the artifact and fetch errors, as
+/// [`Error::code`] returns them, generated from `spec/fetch-v1/constants.json`
+/// (`docs/reference/bindings-v1.md` §4, the codes).
+pub use ocifetch::constants::code;
 pub use ocifetch::ensure::Resolved;
 pub use raw::RawText;
 pub use registry::{FetchOptions, Registry, RegistryOptions, cache_root, search_dirs};

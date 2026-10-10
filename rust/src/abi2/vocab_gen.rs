@@ -849,7 +849,7 @@ pub mod reason {
 
     /// The description's `lossy` fact for a reason spelling; one the description
     /// does not list is `Reason::Unknown`, which reports the fallback's (rule r3).
-    pub fn is_lossy(reason: &str) -> bool {
+    pub fn lossy(reason: &str) -> bool {
         super::Reason::from_wire(reason).lossy()
     }
 }

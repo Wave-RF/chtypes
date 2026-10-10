@@ -14,7 +14,7 @@ import threading
 from collections.abc import Callable
 from types import TracebackType
 
-from .errors import misuse
+from .errors import _misuse as misuse
 
 __all__ = ["CloseGuard"]
 

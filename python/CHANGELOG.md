@@ -21,6 +21,11 @@ The four bindings in this repository are released together and give one answer, 
 
 ### Changed
 
+- **Breaking: the public surface the parity gate carried as exceptions is resolved, before the v2 lock (#499, #500).** A convenience exists in every binding or in none (`docs/reference/bindings-v1.md` §1, principle 2). Migration, old → new:
+  - `chtypes.errors.internal` and `chtypes.errors.misuse` → private (#499): they were the binding's own construction helpers, never documented. Catch `InternalError` and `UsageError`, as before.
+  - `SourceUnreachableError.retryable` and `.retry_after`, and the constructor's `retryable=` and `retry_after=` → removed: `retry_after` was never set, and the fetch layer has spent its retry table (`docs/guides/fetch-v1.md` §7) before it raises; a `Retry-After` it refused is named in the message.
+  - `FetchOptions(trusted_keys=(TrustedKey(keyid, public_key), …))` → `FetchOptions(trusted_keys=("<64 hex digits>", …))`: raw ed25519 public keys as hex, the `CHTYPES_TRUSTED_KEYS` spelling and Go's and Rust's, with each key id derived (`sha256-first16hex`). `chtypes.TrustedKey` is no longer public. A key that is not 64 hex digits is a `UsageError`; a channel that honors no trust override (this 2.0.0-dev SDK) ignores the option, with its one warning, as before.
+  - The `CODE_*` constants are now generated from `spec/fetch-v1/constants.json` (the private `chtypes._codes`); their names and values are unchanged.
 - `compile_filter` is the library's `CHS_DECLINED`, `UnsupportedError`, on a schema whose `filter_declined_settings` is not empty from any layer, and its message names each setting and its layer (ABI v2, #588). A declined setting from the defaults or the schema's own settings now fails the compile, where it was named at evaluation before; a filter's own settings and an evaluation's are still named at evaluation.
 - **Enforcement gate lifted** for `26.3` on `linux-amd64`.
 - **Enforcement gate lifted** for `26.7` on `linux-amd64`.

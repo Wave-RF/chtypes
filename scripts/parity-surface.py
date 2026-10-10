@@ -20,8 +20,8 @@ manifest of names. Read CONTRIBUTING.md's "Changing a public name" first.
 
 WHAT IS EXPECTED. The doc's own tables, parsed here: §2's operation tables
 and call options (with the TypeScript and Rust option-type paragraph below
-them), §3's per-language types, objects and vocabularies, §4's error classes
-and fields, and §5's documents. A cell in a language column gives that
+them), §3's per-language types, objects and vocabularies, §4's error classes,
+fields and codes, and §5's documents. A cell in a language column gives that
 language's spelling (`(r *Registry) For(…)`, `Registry.for_version(…)`,
 `registry.for(…)`, `Registry::for_version(…)`); §5 gives canonical snake_case
 fields, spelled per language by §1 principle 2's mechanical rule, whose list of
@@ -724,7 +724,9 @@ def parse_doc(text: str, delegated: list[str] | None = None, label: str = "bindi
         if b.kind == "table":
             first = b.header[0] if b.header else ""
             cols = language_columns(b.header)
-            if first == "operation" or first == "option" or first == "abstract type":
+            # §4's codes table (`| code | Go | …`) is read like an operation
+            # table: each cell spells the accessor or one code's constant.
+            if first in ("operation", "option", "abstract type", "code"):
                 for row in b.rows:
                     for i, lang in cols.items():
                         ctx = Ctx(lang, where, known_f, SECTION_OWNERS.get(b.h3), options=(first == "option"))

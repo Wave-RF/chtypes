@@ -42,8 +42,10 @@ def test_format_numbers_and_ch_names_are_the_descriptions() -> None:
 
 def test_status_matches_the_decl_table_and_the_binding_misuse_shape() -> None:
     assert {s.value: f"CHS_{s.name}" for s in Status} == _decls.STATUS_BY_VALUE
-    assert errors.misuse("x").status == Status.INVALID_ARGUMENT
-    assert errors.internal("x").status == Status.INTERNAL
+    assert errors._misuse("x").status == Status.INVALID_ARGUMENT
+    assert errors._internal("x").status == Status.INTERNAL
+    # Construction helpers, never public (public issue #499).
+    assert not {"internal", "misuse", "_internal", "_misuse"} & set(errors.__all__)
 
 
 def test_an_unknown_outcome_is_kept_never_read_as_the_fallback_or_accepted() -> None:

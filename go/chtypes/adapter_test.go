@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/klauspost/compress/zstd"
@@ -280,10 +281,11 @@ func TestRegistryOverTheRealFetchDerivation(t *testing.T) {
 		t.Errorf("Installed = %+v, %v", inst, err)
 	}
 	// A request nothing installed answers, with autofetch off: the ordinary
-	// missing-artifact error, naming the request and the platform.
+	// missing-artifact error, whose message names the request and the platform.
 	_, err = reg.For("25.8")
 	var ae *ArtifactError
-	if !errors.Is(err, ErrArtifactMissing) || !errors.As(err, &ae) || ae.Request != "25.8" || ae.Platform != platformKey {
+	if !errors.Is(err, ErrArtifactMissing) || !errors.As(err, &ae) || !strings.Contains(ae.Error(), "25.8") ||
+		!strings.Contains(ae.Error(), platformKey) {
 		t.Errorf("a miss = %v", err)
 	}
 	// A refused spelling is misuse, not an artifact problem.

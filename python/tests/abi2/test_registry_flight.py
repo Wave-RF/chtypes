@@ -43,7 +43,7 @@ N = 8
 class Flight:
     origin: str
     cache: Path
-    trusted: object
+    trusted: str  # the fixture key, as hex
     layer_path: str
 
     def registry(self, case_id: str) -> Registry:
@@ -53,7 +53,7 @@ class Flight:
                 bases=(f"{self.origin}/s-{case_id}/chtypes/v1",),
                 cache_dir=self.cache,
                 system_dirs=(),
-                trusted_keys=(self.trusted,),  # type: ignore[arg-type]
+                trusted_keys=(self.trusted,),
             ),
             autofetch=True,
         )
@@ -112,7 +112,7 @@ def flight(stub_copy, tmp_path) -> Iterator[Flight]:
         yield Flight(
             origin=f"http://127.0.0.1:{parts[1]}",
             cache=tmp_path / "cache",
-            trusted=tree.trusted,
+            trusted=tree.trusted.public_key.hex(),
             layer_path=f"/chtypes/v1/blobs/{layer['digest']}",
         )
     finally:

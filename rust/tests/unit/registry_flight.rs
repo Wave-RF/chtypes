@@ -65,7 +65,6 @@ struct Fixture {
     server: Server,
     work: PathBuf,
     cache: PathBuf,
-    platform: String,
     trusted: String,
     /// The layer blob's path under a case's repository.
     layer_path: String,
@@ -241,12 +240,6 @@ impl Fixture {
         if fields["os"] == "linux" {
             fields.entry("glibc_floor").or_insert(json!("2.17"));
         }
-        let platform = format!(
-            "{}-{}",
-            predicate["os"].as_str().unwrap(),
-            predicate["arch"].as_str().unwrap()
-        );
-
         static SEQ: AtomicUsize = AtomicUsize::new(0);
         let work = std::env::temp_dir().join(format!(
             "chtypes_registry_flight_{}_{}_{test}",
@@ -305,7 +298,6 @@ impl Fixture {
             server: Server { child, origin },
             cache: work.join("cache"),
             work,
-            platform,
             trusted: public_hex,
             layer_path: format!("/chtypes/v1/blobs/{layer}"),
         })
@@ -315,7 +307,6 @@ impl Fixture {
     fn registry(&self, case_id: &str) -> Registry {
         Registry::new(RegistryOptions {
             fetch: FetchOptions {
-                platform: Some(self.platform.clone()),
                 bases: Some(vec![format!(
                     "{}/s-{case_id}/chtypes/v1",
                     self.server.origin

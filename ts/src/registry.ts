@@ -28,10 +28,11 @@
  */
 
 import os from 'node:os';
-import { LoaderCorruptError, openAbi2 } from './abi2/index.js';
+import { corruptRefusal, openAbi2 } from './abi2/index.js';
 import { usageError } from './abi2/index.js';
 import { type Library, libraryOf } from './library.js';
 import {
+  activeChannel,
   ArtifactMissingError,
   cacheRoot as fetchCacheRoot,
   ensure,
@@ -50,11 +51,63 @@ import {
   withNotes,
 } from './ocifetch/index.js';
 import { ENV_AUTOFETCH_NAME, SPELLING_REGEX } from './ocifetch/constants.gen.js';
-import { withEnvironment } from './env.js';
+import { trustedKeysOfHex, withEnvironment } from './env.js';
 import { commitSetup, latchSetup, settleFailedOpen, setupGeneration } from './setup.js';
 
-/** The fetch layer's options (bases, cache directory, system directories, trusted keys, token, allow-unsigned, offline, frozen, lock path, ...) without its test-only hooks. */
-export type FetchOptions = Omit<FetchV1Options, 'beforeIndexRename' | 'httpLog' | 'clock'>;
+/**
+ * What the fetch layer is configured with (`docs/guides/fetch-v1.md`; `docs/reference/bindings-v1.md` §6), under
+ * the same names as Go's, Python's and Rust's fields, each falling back to its environment variable and then to
+ * the fetch layer's own default. The fetch layer's test hooks are not here, and a registry opens libraries for
+ * this host only (`chtypes fetch --platform` names another).
+ */
+export interface FetchOptions {
+  /** Base URLs, most preferred first; overrides `CHTYPES_ARTIFACTS_URL` and the built-in list. */
+  readonly bases?: readonly string[] | undefined;
+  /** The cache (`CHTYPES_CACHE`). */
+  readonly cacheDir?: string | undefined;
+  /** Read-only system directories searched after the cache; undefined is the built-in list, `[]` none. */
+  readonly systemDirs?: readonly string[] | undefined;
+  /** Raw 32-byte ed25519 public keys, each as 64 hex characters (`CHTYPES_TRUSTED_KEYS`'s spelling); the key id is derived. A non-empty list REPLACES the default trust. */
+  readonly trustedKeys?: readonly string[] | undefined;
+  /** Proceed, with a warning, when no signed statement verifies (`CHTYPES_ALLOW_UNSIGNED`). */
+  readonly allowUnsigned?: boolean | undefined;
+  /** Sent as `Authorization: Bearer <token>` to configured base hosts only (`CHTYPES_DOWNLOAD_TOKEN`). */
+  readonly token?: string | undefined;
+  /** The cache only, no request; on when this is true or `CHTYPES_OFFLINE` is `1` (public issue #528). */
+  readonly offline?: boolean | undefined;
+  /** Fetch exactly the lock's pinned digests. */
+  readonly frozen?: boolean | undefined;
+  /** The lock file. */
+  readonly lockPath?: string | undefined;
+  /** Write (or update) the lock after a successful fetch. */
+  readonly lockWrite?: boolean | undefined;
+  /** Re-resolve every locked request and rewrite the lock. */
+  readonly update?: boolean | undefined;
+  /** Strict mode (public issue #486): every fault of the cache and of an existing system dir is a `CacheUnusableError`. Unset reads `CHTYPES_CACHE_STRICT`. */
+  readonly strictCache?: boolean | undefined;
+}
+
+/** The public options as the fetch layer's own: each set field copied, and the trusted keys read from hex. */
+function fetchLayerOptions(options: FetchOptions = {}): FetchV1Options {
+  const out: { -readonly [K in keyof FetchV1Options]: FetchV1Options[K] } = {};
+  if (options.bases !== undefined) out.bases = options.bases;
+  if (options.cacheDir !== undefined) out.cacheDir = options.cacheDir;
+  if (options.systemDirs !== undefined) out.systemDirs = options.systemDirs;
+  if (options.trustedKeys !== undefined) {
+    // A channel that honors no trust override ignores the option, with its one
+    // warning, whatever it holds (rule r6), as every binding does.
+    out.trustedKeys = activeChannel().overridable ? trustedKeysOfHex(options.trustedKeys, 'the trustedKeys option') : [];
+  }
+  if (options.allowUnsigned !== undefined) out.allowUnsigned = options.allowUnsigned;
+  if (options.token !== undefined) out.token = options.token;
+  if (options.offline !== undefined) out.offline = options.offline;
+  if (options.frozen !== undefined) out.frozen = options.frozen;
+  if (options.lockPath !== undefined) out.lockPath = options.lockPath;
+  if (options.lockWrite !== undefined) out.lockWrite = options.lockWrite;
+  if (options.update !== undefined) out.update = options.update;
+  if (options.strictCache !== undefined) out.strictCache = options.strictCache;
+  return out;
+}
 
 /**
  * The cache root a fetch, list or `chtypes where` with `options` would use: `options.cacheDir`, else
@@ -71,7 +124,7 @@ export function cacheRoot(options: FetchOptions = {}): string {
  * the fetch layer's own, and on a tie the earlier directory wins. It creates nothing and touches no file.
  */
 export function searchDirs(options: FetchOptions = {}): readonly string[] {
-  return fetchSearchDirs(options);
+  return fetchSearchDirs(fetchLayerOptions(options));
 }
 
 export interface RegistryOptions {
@@ -98,20 +151,23 @@ function checkSpelling(request: string): void {
 }
 
 export class Registry {
-  readonly #fetch: FetchOptions;
+  readonly #fetch: FetchV1Options;
   readonly #autofetch: boolean;
   readonly #memo = new Map<string, Promise<Library>>();
   readonly #opened: Library[] = [];
 
   private constructor(options: RegistryOptions) {
-    this.#fetch = withEnvironment(options.fetch ?? {});
+    // The environment fills what the caller left unset. CHTYPES_TARGET names
+    // `chtypes fetch`'s platform, never a registry's: it opens for this host.
+    const { platform: _cliOnly, ...fetch } = withEnvironment(fetchLayerOptions(options.fetch));
+    this.#fetch = fetch;
     this.#autofetch = options.autofetch ?? envFlag(ENV_AUTOFETCH_NAME);
   }
 
   /** Construct a registry. It opens nothing, except each `preload` request, in list order. A pinning fetch option is refused here, as a `UsageError` (rule r6). */
   static async open(options: RegistryOptions = {}): Promise<Registry> {
     try {
-      refusePinning(options.fetch ?? {});
+      refusePinning(fetchLayerOptions(options.fetch));
     } catch (err) {
       if (err instanceof PinningRefusedError) throw usageError(err.message);
       throw err;
@@ -161,7 +217,7 @@ export class Registry {
   }
 
   async #openRequest(request: string, mayFetch: boolean): Promise<Library> {
-    const platform: PlatformKey | undefined = this.#fetch.platform ?? hostPlatformKey(os.platform(), os.arch());
+    const platform: PlatformKey | undefined = hostPlatformKey(os.platform(), os.arch());
     if (platform === undefined) {
       throw new ArtifactMissingError(`chtypes: no artifact is published for this host (${os.platform()}-${os.arch()})`);
     }
@@ -195,7 +251,7 @@ export class Registry {
     // own build_info must report a version within the request, whatever the
     // cache answered. The image stays loaded for the requests it does answer.
     if (!satisfiesRequest(request, library.version)) {
-      throw new LoaderCorruptError({
+      throw corruptRefusal({
         reason: 'build_info_mismatch:clickhouse_version',
         path: resolved.libraryPath,
         want: request,

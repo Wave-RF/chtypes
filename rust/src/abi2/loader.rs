@@ -46,23 +46,31 @@ use super::decls::{self, Api, CrossCheckKind, Handshake};
 /// `no_glibc`, `predicate_malformed`, `dlopen`, `not_v1`, `abi_version`,
 /// `build_info_malformed`, `fingerprint`, `build_info_mismatch:<field>` or
 /// `missing_symbol:<name>` — never a sentence built around one), the library
-/// path, and — where applicable — what was wanted, what was found, and any
-/// free-form detail. `reason` is what a conformance case compares against
-/// `scripts/abi-v1/emit/_stubshared.py`'s variant plan verbatim; it is never
-/// decorated, so that comparison can be a plain string equality.
+/// path, and — where applicable — what was wanted and what was found, as in
+/// every binding (`docs/reference/bindings-v1.md` §4). `reason` is what a
+/// conformance case compares against `scripts/abi-v1/emit/_stubshared.py`'s
+/// variant plan verbatim; it is never decorated, so that comparison can be a
+/// plain string equality.
+///
+/// The fetch layer's own corruption (`Error::ArtifactCorrupt` with no
+/// loader behind it) has an empty `reason` and `path`, as Go's has, and its
+/// message is the whole display.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Refusal {
     /// The `sdk.json` reason word, with `:<symbol>` or `:<field>` appended where
-    /// `sdk.json` gives a suffix.
+    /// `sdk.json` gives a suffix; empty for the fetch layer's own corruption.
     pub reason: String,
     /// The library the loader was opening.
     pub path: PathBuf,
     /// What the check wanted, where the refusal names both sides.
     pub want: Option<String>,
-    /// What the check found, where the refusal names both sides.
+    /// What the check found: beside `want` where the refusal names both, or
+    /// alone (the `dlopen` error, what a malformed `build_info` lacks).
     pub got: Option<String>,
-    /// Free-form detail, where there is any.
-    pub detail: Option<String>,
+    /// A sentence the display adds after the fields, or the whole display of
+    /// the fetch layer's own corruption.
+    pub(crate) message: Option<String>,
 }
 
 impl Refusal {
@@ -72,17 +80,29 @@ impl Refusal {
             path: path.to_path_buf(),
             want: None,
             got: None,
-            detail: None,
+            message: None,
         }
     }
 
-    fn with_detail(reason: impl Into<String>, path: &Path, detail: impl Into<String>) -> Refusal {
+    /// A refusal that names what the check found, with no `want`.
+    fn found(reason: impl Into<String>, path: &Path, got: impl Into<String>) -> Refusal {
         Refusal {
             reason: reason.into(),
             path: path.to_path_buf(),
             want: None,
+            got: Some(got.into()),
+            message: None,
+        }
+    }
+
+    /// The fetch layer's own corruption, whose message is the whole display.
+    pub(crate) fn fetch_corruption(message: impl Into<String>) -> Refusal {
+        Refusal {
+            reason: String::new(),
+            path: PathBuf::new(),
+            want: None,
             got: None,
-            detail: Some(detail.into()),
+            message: Some(message.into()),
         }
     }
 
@@ -97,7 +117,7 @@ impl Refusal {
             path: path.to_path_buf(),
             want: Some(want.into()),
             got: Some(got.into()),
-            detail: None,
+            message: None,
         }
     }
 }
@@ -133,12 +153,18 @@ impl std::fmt::Display for Refusal {
         if let Some(message) = self.dev_message() {
             return f.write_str(&message);
         }
-        write!(f, "{}: {}", self.path.display(), self.reason)?;
-        if let (Some(want), Some(got)) = (&self.want, &self.got) {
-            write!(f, " (want {want}, got {got})")?;
+        if self.reason.is_empty() {
+            // The fetch layer's own corruption: its message is the display.
+            return f.write_str(self.message.as_deref().unwrap_or_default());
         }
-        if let Some(detail) = &self.detail {
-            write!(f, ": {detail}")?;
+        write!(f, "{}: {}", self.path.display(), self.reason)?;
+        match (&self.want, &self.got) {
+            (Some(want), Some(got)) => write!(f, " (want {want}, got {got})")?,
+            (None, Some(got)) => write!(f, ": {got}")?,
+            _ => {}
+        }
+        if let Some(message) = &self.message {
+            write!(f, ": {message}")?;
         }
         Ok(())
     }
@@ -221,7 +247,7 @@ fn predicate_object<'p>(
     path: &Path,
 ) -> Result<&'p serde_json::Map<String, serde_json::Value>, Refusal> {
     predicate.as_object().ok_or_else(|| {
-        Refusal::with_detail(
+        Refusal::found(
             "predicate_malformed",
             path,
             "the predicate is not a JSON object",
@@ -238,10 +264,10 @@ fn cross_check(
 ) -> Result<(), Refusal> {
     for (bi_field, pred_field, kind) in decls::CROSS_CHECK_FIELDS {
         let bi_value = build_info.get(*bi_field).ok_or_else(|| {
-            Refusal::with_detail("build_info_malformed", path, format!("missing {bi_field}"))
+            Refusal::found("build_info_malformed", path, format!("missing {bi_field}"))
         })?;
         let pred_value = predicate.get(*pred_field).ok_or_else(|| {
-            Refusal::with_detail("predicate_malformed", path, format!("missing {pred_field}"))
+            Refusal::found("predicate_malformed", path, format!("missing {pred_field}"))
         })?;
         let equal = match kind {
             CrossCheckKind::Int => {
@@ -292,7 +318,7 @@ fn load_checked(input: LoadInput<'_>) -> Result<Checked, Refusal> {
     // reference fails HERE, not on first use — the "unbound" stub variant's
     // whole point) and RTLD_LOCAL keeps two loaded versions from colliding.
     let lib = unsafe { UnixLibrary::open(Some(path), RTLD_NOW | RTLD_LOCAL) }
-        .map_err(|e| Refusal::with_detail("dlopen", path, e.to_string()))?;
+        .map_err(|e| Refusal::found("dlopen", path, e.to_string()))?;
 
     // Step 3: chs_abi_version. `Handshake::resolve` also resolves
     // chs_build_info (step 4 needs it next), so its error names whichever of
@@ -329,7 +355,7 @@ fn load_checked(input: LoadInput<'_>) -> Result<Checked, Refusal> {
     // SAFETY: same handshake contract as chs_abi_version above.
     let raw = unsafe { (handshake.chs_build_info)() };
     if raw.is_null() {
-        return Err(Refusal::with_detail(
+        return Err(Refusal::found(
             "build_info_malformed",
             path,
             "chs_build_info returned NULL",
@@ -342,7 +368,7 @@ fn load_checked(input: LoadInput<'_>) -> Result<Checked, Refusal> {
     let build_info = parse_build_info(bytes, path)?;
     let schema = build_info.get("schema").and_then(serde_json::Value::as_i64);
     if schema != Some(1) {
-        return Err(Refusal::with_detail(
+        return Err(Refusal::found(
             "build_info_malformed",
             path,
             format!("schema is {schema:?}, want 1"),
@@ -352,7 +378,7 @@ fn load_checked(input: LoadInput<'_>) -> Result<Checked, Refusal> {
         .get("abi_fingerprint")
         .and_then(serde_json::Value::as_str)
         .ok_or_else(|| {
-            Refusal::with_detail(
+            Refusal::found(
                 "build_info_malformed",
                 path,
                 "abi_fingerprint is missing or not a string",
@@ -399,17 +425,13 @@ fn parse_build_info(
     path: &Path,
 ) -> Result<serde_json::Map<String, serde_json::Value>, Refusal> {
     if !bytes.is_ascii() {
-        return Err(Refusal::with_detail(
-            "build_info_malformed",
-            path,
-            "not ASCII",
-        ));
+        return Err(Refusal::found("build_info_malformed", path, "not ASCII"));
     }
     let DupCheckedObject(map) = serde_json::from_slice(bytes)
-        .map_err(|e| Refusal::with_detail("build_info_malformed", path, e.to_string()))?;
+        .map_err(|e| Refusal::found("build_info_malformed", path, e.to_string()))?;
     for name in decls::BUILD_INFO_REQUIRED {
         if !map.contains_key(*name) {
-            return Err(Refusal::with_detail(
+            return Err(Refusal::found(
                 "build_info_malformed",
                 path,
                 format!("missing {name}"),
@@ -474,7 +496,7 @@ fn check_glibc(
         .get("glibc_floor")
         .and_then(serde_json::Value::as_str)
         .ok_or_else(|| {
-            Refusal::with_detail(
+            Refusal::found(
                 "predicate_malformed",
                 path,
                 "a linux predicate has no glibc_floor",
@@ -496,7 +518,7 @@ fn check_glibc(
     // SAFETY: the symbol above resolved against the documented signature.
     let version_ptr = unsafe { version_fn() };
     if version_ptr.is_null() {
-        return Err(Refusal::with_detail(
+        return Err(Refusal::found(
             "no_glibc",
             path,
             "gnu_get_libc_version returned NULL",
@@ -562,10 +584,7 @@ mod tests {
         let err = parse_build_info(br#"{"schema":1,"schema":1}"#, p).unwrap_err();
         assert_eq!(err.reason, "build_info_malformed");
         assert!(
-            err.detail
-                .as_deref()
-                .unwrap_or_default()
-                .contains("duplicate"),
+            err.got.as_deref().unwrap_or_default().contains("duplicate"),
             "{err}"
         );
     }
@@ -575,7 +594,12 @@ mod tests {
         let p = Path::new("/dev/null");
         let err = parse_build_info(b"{\"schema\":1,\"x\":\"\xc3\x28\"}", p).unwrap_err();
         assert_eq!(err.reason, "build_info_malformed");
-        assert_eq!(err.detail.as_deref(), Some("not ASCII"));
+        assert_eq!(err.got.as_deref(), Some("not ASCII"));
+        assert_eq!(err.want, None);
+        assert_eq!(
+            err.to_string(),
+            "/dev/null: build_info_malformed: not ASCII"
+        );
     }
 
     /// Rule r6, the mapping alone: a fingerprint refusal of this dev SDK reads

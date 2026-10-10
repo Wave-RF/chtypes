@@ -31,13 +31,13 @@ import {
   ArtifactMissingError,
   type BatchResult,
   CallError,
+  ChtypesError,
   DefaultKind,
   DocFlags,
   type FilterResult,
   Format,
   formatChName,
   InternalError,
-  isChtypesError,
   type Library,
   Registry,
   type RowResult,
@@ -731,7 +731,7 @@ function section10(lib: Library): void {
   kv('four peers', 'SchemaError, UnsupportedError, UsageError, InternalError');
   kv('common base', `CallError: ${new SchemaError(callFields()) instanceof CallError}   (the explicit way to catch all four)`);
   kv('UnsupportedError is a SchemaError?', `${new UnsupportedError(callFields()) instanceof SchemaError}   <- peers, not a hierarchy`);
-  kv('artifact errors', `ArtifactError is not a CallError: ${!(new ArtifactMissingError('x') instanceof CallError)}; isChtypesError is true for both`);
+  kv('artifact errors', `ArtifactError is not a CallError: ${!(new ArtifactMissingError('x') instanceof CallError)}; both are ChtypesErrors: ${new ArtifactMissingError('x') instanceof ChtypesError}`);
   kv('row verdicts are DATA', 'result.outcome, not a thrown error');
   note('a row the server would reject RETURNS (outcome "rejected", errCode = the server\'s');
   note('code): nothing throws. Exceptions are for questions that could not be asked.');
@@ -1298,7 +1298,7 @@ async function openOrNote(registry: Registry, line: string): Promise<Library | u
   try {
     return await registry.for(line);
   } catch (err) {
-    if (!isChtypesError(err)) throw err;
+    if (!(err instanceof ChtypesError)) throw err;
     kv(`  ${line}`, `SKIPPED  ${truncate(err.message, 70)}`);
     return undefined;
   }

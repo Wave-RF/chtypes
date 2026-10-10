@@ -13,7 +13,6 @@ import (
 	"os"
 	"runtime"
 	"sync"
-	"time"
 
 	"github.com/wave-rf/chtypes/go/v2/internal/abi2"
 	"github.com/wave-rf/chtypes/go/v2/internal/ocifetch"
@@ -27,19 +26,17 @@ type Resolved = ocifetch.Resolved
 // field falls back to its environment variable, then to the documented default.
 // It converts to the fetch layer's options without that layer's test hooks.
 type FetchOptions struct {
-	Bases           []string // CHTYPES_ARTIFACTS_URL
-	CacheDir        string   // CHTYPES_CACHE
-	SystemDirs      []string
-	TrustedKeys     []string // raw hex ed25519 public keys; CHTYPES_TRUSTED_KEYS
-	Token           string   // CHTYPES_DOWNLOAD_TOKEN
-	AllowUnsigned   bool     // also set by CHTYPES_ALLOW_UNSIGNED=1
-	Offline         bool     // also set by CHTYPES_OFFLINE=1 (public issue #528); the cache only, no request
-	Frozen          bool
-	LockPath        string
-	LockWrite       bool
-	Update          bool
-	ConnectTimeout  time.Duration
-	IdleReadTimeout time.Duration
+	Bases         []string // CHTYPES_ARTIFACTS_URL
+	CacheDir      string   // CHTYPES_CACHE
+	SystemDirs    []string
+	TrustedKeys   []string // raw hex ed25519 public keys; CHTYPES_TRUSTED_KEYS
+	Token         string   // CHTYPES_DOWNLOAD_TOKEN
+	AllowUnsigned bool     // also set by CHTYPES_ALLOW_UNSIGNED=1
+	Offline       bool     // also set by CHTYPES_OFFLINE=1 (public issue #528); the cache only, no request
+	Frozen        bool
+	LockPath      string
+	LockWrite     bool
+	Update        bool
 	// StrictCache makes every fault of the cache and of an existing system
 	// dir a CodeCacheUnusable naming the path, never "not installed" and
 	// never a fall-through to a system dir. nil means CHTYPES_CACHE_STRICT
@@ -52,7 +49,6 @@ func (o FetchOptions) internal() *ocifetch.Options {
 		Bases: o.Bases, CacheDir: o.CacheDir, SystemDirs: o.SystemDirs, TrustedKeys: o.TrustedKeys,
 		Token: o.Token, AllowUnsigned: o.AllowUnsigned, Offline: o.Offline, Frozen: o.Frozen,
 		LockPath: o.LockPath, LockWrite: o.LockWrite, Update: o.Update, StrictCache: o.StrictCache,
-		ConnectTimeout: o.ConnectTimeout, IdleReadTimeout: o.IdleReadTimeout,
 	}
 }
 
@@ -362,11 +358,11 @@ func checkWithinRequest(l *Library, request, platform string) error {
 		return nil
 	}
 	return &ArtifactError{
-		Code: CodeArtifactCorrupt, Request: request, Platform: platform,
+		Code:   CodeArtifactCorrupt,
 		Reason: "build_info_mismatch:clickhouse_version", Path: l.Path, Want: request, Got: l.Version,
-		Msg: fmt.Sprintf("chtypes: %s refused: build_info_mismatch:clickhouse_version (want a build within %q, got %q): "+
-			"the library opened for ClickHouse %s reports another version [%s]",
-			l.Path, request, l.Version, request, CodeArtifactCorrupt),
+		msg: fmt.Sprintf("chtypes: %s refused: build_info_mismatch:clickhouse_version (want a build within %q, got %q): "+
+			"the library opened for ClickHouse %s (%s) reports another version [%s]",
+			l.Path, request, l.Version, request, platform, CodeArtifactCorrupt),
 	}
 }
 
@@ -382,10 +378,7 @@ func missingError(request string, notes []string) error {
 	}
 	msg := ocifetch.WithNotes(fmt.Sprintf("no installed artifact for ClickHouse %s (%s), and autofetch is off. "+
 		"Fetch it first, or enable autofetch with WithAutoFetch or %s=1", request, platform, ocifetch.EnvAutofetchName), notes)
-	return &ArtifactError{
-		Code: CodeArtifactMissing, Request: request, Platform: platform,
-		Msg: fmt.Sprintf("chtypes: %s [%s]", msg, CodeArtifactMissing),
-	}
+	return &ArtifactError{Code: CodeArtifactMissing, msg: fmt.Sprintf("chtypes: %s [%s]", msg, CodeArtifactMissing)}
 }
 
 // Installed lists what the fetch layer holds: never the network.

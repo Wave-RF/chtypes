@@ -45,6 +45,19 @@ export {
   ArtifactUntrustedError,
   CacheUnusableError,
   ChtypesError,
+  CODE_ARTIFACT_CORRUPT,
+  CODE_ARTIFACT_INCOMPATIBLE,
+  CODE_ARTIFACT_MISSING,
+  CODE_ARTIFACT_PINNED,
+  CODE_ARTIFACT_UNPUBLISHED,
+  CODE_ARTIFACT_UNTRUSTED,
+  CODE_CACHE_UNUSABLE,
+  CODE_SOURCE_FORBIDDEN,
+  CODE_SOURCE_INCOMPATIBLE,
+  CODE_SOURCE_RETIRED,
+  CODE_SOURCE_UNAUTHORIZED,
+  CODE_SOURCE_UNREACHABLE,
+  exitStatusOf,
   FetchV1Error,
   SourceForbiddenError,
   SourceIncompatibleError,
@@ -52,7 +65,7 @@ export {
   SourceUnauthorizedError,
   SourceUnreachableError,
 } from './errors.js';
-export type { CacheFault, FetchV1ErrorCode } from './errors.js';
+export type { CacheFault, ErrorCode, FetchV1ErrorCode, RefusalFields } from './errors.js';
 export type {
   ArtifactPredicate,
   Clock,

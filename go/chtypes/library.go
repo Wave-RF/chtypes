@@ -69,8 +69,8 @@ func openImage(key string, load func(zone, defaults []byte) (*abi2.Table, error)
 	info, err := decodeBuildInfo([]byte(tbl.BuildInfo()))
 	if err != nil {
 		return nil, &ArtifactError{
-			Code: CodeArtifactCorrupt, Reason: "build_info_malformed", Path: path, Err: err,
-			Msg: "chtypes: " + path + ": build_info does not decode [" + string(CodeArtifactCorrupt) + "]",
+			Code: CodeArtifactCorrupt, Reason: "build_info_malformed", Path: path, cause: err,
+			msg: "chtypes: " + path + ": build_info does not decode [" + string(CodeArtifactCorrupt) + "]",
 		}
 	}
 	l := &Library{

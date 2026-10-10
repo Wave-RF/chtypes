@@ -15,8 +15,8 @@ from chtypes.errors import (
     SchemaError,
     UnsupportedError,
     UsageError,
-    misuse,
 )
+from chtypes.errors import _misuse as misuse
 
 __all__ = [
     "ArtifactCorruptError",

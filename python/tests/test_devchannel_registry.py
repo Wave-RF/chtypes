@@ -74,7 +74,7 @@ def test_fetch_options_overrides_are_ignored_and_named_once(
         monkeypatch.setenv(C.ENV_ALLOW_UNSIGNED_NAME, "1")
         fetch = FetchOptions(
             bases=("http://127.0.0.1:9/x",),
-            trusted_keys=fixture_trusted_keys(),
+            trusted_keys=tuple(k.public_key.hex() for k in fixture_trusted_keys()),
             allow_unsigned=True,
             cache_dir=tmp_path,
         )

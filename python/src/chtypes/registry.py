@@ -35,14 +35,15 @@ from . import _setup, errors
 from ._ocifetch import Options, Request, Resolved, ensure, list_installed, resolve_installed
 from ._ocifetch import _channel as _fetch_channel
 from ._ocifetch import _constants as _fetch_constants
-from ._ocifetch._dsse import TrustedKey
+from ._ocifetch._dsse import TrustedKey as _TrustedKey
+from ._ocifetch._dsse import trusted_keys_from_hex
 from ._ocifetch._ensure import detect_host_platform, missing_notes, with_notes
 from ._ocifetch._errors import FetchError
 from ._ocifetch._layout import resolve_cache_root, search_roots
 from ._ocifetch._oci import version_within_request
 from .library import Library, open_image
 
-__all__ = ["FetchOptions", "Registry", "Resolved", "TrustedKey", "cache_root", "search_dirs"]
+__all__ = ["FetchOptions", "Registry", "Resolved", "cache_root", "search_dirs"]
 
 _TRUTHY = ("1", "true", "yes", "on")
 
@@ -86,7 +87,10 @@ class FetchOptions:
     cache_dir: str | os.PathLike[str] | None = None
     system_dirs: Sequence[str | os.PathLike[str]] | None = None
     token: str | None = None
-    trusted_keys: Sequence[TrustedKey] | None = None
+    # Raw 32-byte ed25519 public keys, each as 64 hex digits, as CHTYPES_TRUSTED_KEYS
+    # spells them; the key id is derived (sha256-first16hex). A non-empty list
+    # REPLACES the default trust. A key that is not 64 hex digits is a UsageError.
+    trusted_keys: Sequence[str] | None = None
     allow_unsigned: bool | None = None
     # Offline reads the cache only and makes no request. It is on when this is
     # set OR CHTYPES_OFFLINE=1; neither turns the other off (public issue #528).
@@ -100,6 +104,20 @@ class FetchOptions:
     # "not installed", and never a fall-through to a system dir. None reads
     # CHTYPES_CACHE_STRICT ("1" is on), else off.
     strict_cache: bool | None = None
+
+    def _trusted_keys(self) -> tuple[_TrustedKey, ...] | None:
+        if self.trusted_keys is None:
+            return None
+        if not _fetch_channel.active().overridable:
+            # A channel that honors no trust override ignores the option, with
+            # its one warning, whatever it holds (rule r6), as every binding does.
+            return ()
+        if isinstance(self.trusted_keys, str):
+            raise errors._misuse("chtypes: trusted_keys is a sequence of hex keys, not one string")
+        try:
+            return trusted_keys_from_hex(self.trusted_keys, "the trusted_keys option")
+        except (ValueError, AttributeError) as exc:
+            raise errors._misuse(str(exc)) from None
 
     def _to_options(self, platform: str | None = None) -> Options:
         token = self.token
@@ -119,7 +137,7 @@ class FetchOptions:
             cache_dir=self.cache_dir,
             system_dirs=None if self.system_dirs is None else tuple(self.system_dirs),
             token=token,
-            trusted_keys=None if self.trusted_keys is None else tuple(self.trusted_keys),
+            trusted_keys=self._trusted_keys(),
             allow_unsigned=allow_unsigned,
             offline=self.offline,
             frozen=self.frozen,
@@ -161,12 +179,6 @@ def _wrap(exc: FetchError) -> errors.ArtifactError:
             path=getattr(exc, "path", ""),
             reason=getattr(exc, "reason", ""),
             os_error=getattr(exc, "os_error", None),
-        )
-    elif cls is errors.SourceUnreachableError:
-        wrapped = errors.SourceUnreachableError(
-            str(exc),
-            retryable=getattr(exc, "retryable", False),
-            retry_after=getattr(exc, "retry_after", None),
         )
     else:
         wrapped = cls(str(exc))
@@ -258,7 +270,7 @@ class Registry:
         try:
             fetch_request = Request(request)
         except ValueError as exc:
-            raise errors.misuse(str(exc)) from None
+            raise errors._misuse(str(exc)) from None
         # So is a pinning request on the dev channel (rule r6).
         _refuse_pinning(self._fetch._to_options())
         with self._lock:
@@ -341,7 +353,7 @@ def _refuse_pinning(options: Options) -> None:
     try:
         _fetch_channel.enforce(options)
     except _fetch_channel.PinningRefusedError as exc:
-        raise errors.misuse(str(exc)) from None
+        raise errors._misuse(str(exc)) from None
 
 
 def _check_within_request(library: Library, request: str) -> None:

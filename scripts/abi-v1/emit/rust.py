@@ -1281,7 +1281,7 @@ def render_vocab(model) -> str:
         "",
         "    /// The description's `lossy` fact for a reason; a reason the description does",
         "    /// not list takes the fallback's fact.",
-        "    pub fn is_lossy(reason: &str) -> bool {",
+        "    pub fn lossy(reason: &str) -> bool {",
         "        match reason {",
     ]
     for v in reason.values:
@@ -1814,7 +1814,7 @@ def render_vocab_v2(model) -> str:
         "",
         "    /// The description's `lossy` fact for a reason spelling; one the description",
         "    /// does not list is `Reason::Unknown`, which reports the fallback's (rule r3).",
-        "    pub fn is_lossy(reason: &str) -> bool {",
+        "    pub fn lossy(reason: &str) -> bool {",
         "        super::Reason::from_wire(reason).lossy()",
         "    }",
         "}",

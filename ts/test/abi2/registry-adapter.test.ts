@@ -33,7 +33,6 @@ import {
   ArtifactCorruptError,
   ArtifactError,
   ArtifactMissingError,
-  LoaderCorruptError,
   Registry,
   UsageError,
 } from '../../src/index.js';
@@ -207,7 +206,7 @@ async function buildLayout(cache: string, patch: Record<string, unknown> = {}): 
   return { cacheDir: cache, predicate };
 }
 
-const trustTest = [{ keyid: TEST_KEY.keyid, ed25519Hex: TEST_KEY.ed25519Hex }];
+const trustTest = [TEST_KEY.ed25519Hex];
 
 describe.skipIf(!stubsAvailable)('the registry over the real fetch derivation, on the stub', () => {
   let work: string;
@@ -321,8 +320,8 @@ describe.skipIf(!stubsAvailable)('the registry over the real fetch derivation, o
     );
     // A second image (another path), signed correctly but disagreeing with its own build info: loader step 5 refuses.
     expect(err).toBeInstanceOf(ArtifactCorruptError);
-    expect(err).toBeInstanceOf(LoaderCorruptError);
-    expect((err as LoaderCorruptError).reason).toBe('build_info_mismatch:build');
-    expect((err as LoaderCorruptError).code).toBe('CHTYPES_ARTIFACT_CORRUPT');
+    expect((err as ArtifactError).reason).toBe('build_info_mismatch:build');
+    expect((err as ArtifactError).code).toBe('CHTYPES_ARTIFACT_CORRUPT');
+    expect((err as ArtifactError).name).toBe('ArtifactCorruptError');
   });
 });

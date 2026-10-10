@@ -15,7 +15,7 @@ A bad **row** is never an exception: the verdict is `RowResult#outcome`, one of 
 - `UsageError`: caller misuse, whichever side caught it (a closed object, a refused version spelling, a zone given twice).
 - `InternalError`: a library bug, or a document that does not decode.
 
-The four are **peers** under the abstract `CallError`: a decline never satisfies `instanceof SchemaError`. Loader and fetch errors are `ArtifactError`s (`ArtifactIncompatibleError`, `ArtifactCorruptError`, `ArtifactMissingError` and the rest of the fetch family); `ArtifactError` extends `ChtypesError`, as the other bindings' hierarchies have it, so catching `ChtypesError` takes the fetch and loader errors along with the call errors, and `isChtypesError` is true for every error this package throws on purpose.
+The four are **peers** under the abstract `CallError`: a decline never satisfies `instanceof SchemaError`. Loader and fetch errors are `ArtifactError`s (`ArtifactIncompatibleError`, `ArtifactCorruptError`, `ArtifactMissingError` and the rest of the fetch family); `ArtifactError` extends `ChtypesError`, as the other bindings' hierarchies have it, so catching `ChtypesError` (`e instanceof ChtypesError`) takes the fetch and loader errors along with the call errors. `ArtifactError` carries `code` (an `ErrorCode`, one of the generated `CODE_*` constants) and a loader refusal's `reason`, `path`, `want` and `got`, which a fetch error leaves `undefined`.
 
 ## Setup, registry and library
 

@@ -172,3 +172,19 @@ var ErrorExitCodes = map[string]int{
 	`CHTYPES_CACHE_UNUSABLE`:        9,
 	`CHTYPES_SOURCE_RETIRED`:        10,
 }
+
+// The shared error codes, one per entry of ErrorExitCodes, in its order.
+const (
+	CodeArtifactMissing      ErrorCode = `CHTYPES_ARTIFACT_MISSING`
+	CodeArtifactUntrusted    ErrorCode = `CHTYPES_ARTIFACT_UNTRUSTED`
+	CodeArtifactCorrupt      ErrorCode = `CHTYPES_ARTIFACT_CORRUPT`
+	CodeArtifactPinned       ErrorCode = `CHTYPES_ARTIFACT_PINNED`
+	CodeArtifactUnpublished  ErrorCode = `CHTYPES_ARTIFACT_UNPUBLISHED`
+	CodeSourceUnreachable    ErrorCode = `CHTYPES_SOURCE_UNREACHABLE`
+	CodeSourceUnauthorized   ErrorCode = `CHTYPES_SOURCE_UNAUTHORIZED`
+	CodeSourceForbidden      ErrorCode = `CHTYPES_SOURCE_FORBIDDEN`
+	CodeSourceIncompatible   ErrorCode = `CHTYPES_SOURCE_INCOMPATIBLE`
+	CodeArtifactIncompatible ErrorCode = `CHTYPES_ARTIFACT_INCOMPATIBLE`
+	CodeCacheUnusable        ErrorCode = `CHTYPES_CACHE_UNUSABLE`
+	CodeSourceRetired        ErrorCode = `CHTYPES_SOURCE_RETIRED`
+)

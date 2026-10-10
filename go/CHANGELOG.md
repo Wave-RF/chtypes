@@ -21,6 +21,12 @@ The four bindings in this repository are released together and give one answer, 
 
 ### Changed
 
+- **Breaking: the public surface the parity gate carried as exceptions is resolved, before the v2 lock (#499, #500).** A convenience exists in every binding or in none (`docs/reference/bindings-v1.md` §1, principle 2). Migration, old → new:
+  - `ArtifactError.Msg` → `err.Error()`. `ArtifactError.Err` → `errors.Unwrap(err)`, `errors.Is` or `errors.As` (`Unwrap` stays).
+  - `ArtifactError.Request`, `.Platform` and `.Source` → the message: every fetch error's `Error()` now names the request, the platform and the source it concerns, as `(request 26.8, platform linux-amd64, source https://…)` where its text does not already, with a source URL's password redacted.
+  - `FetchOptions.ConnectTimeout` and `.IdleReadTimeout` → removed: the timeouts are the fetch constants' (30 s connect, 60 s idle read), as in the other bindings.
+  - `ErrorCode` is a type of this package's own, generated from `spec/fetch-v1/constants.json` with its `Code…` constants, so `ErrorCode.ExitCode()` and `.Sentinel()` are gone: a code's exit status is the `chtypes` command's, and `errors.Is(err, chtypes.ErrArtifactMissing)` (one sentinel per code) is the test. `ArtifactError.Code`, the `Code…` constants and the sentinels are unchanged.
+  - `Format.CHName()` → `Format.ChName()`, as §4 spells `CallError.ChName`.
 - `CompileFilter` is the library's `CHS_DECLINED`, `*UnsupportedError`, on a schema whose `filter_declined_settings` is not empty from any layer, and its message names each setting and its layer (ABI v2, #588). A declined setting from the defaults or the schema's own settings now fails the compile, where it was named at evaluation before; a filter's own settings and an evaluation's are still named at evaluation.
 - **Enforcement gate lifted** for `26.3` on `linux-amd64`.
 - **Enforcement gate lifted** for `26.7` on `linux-amd64`.

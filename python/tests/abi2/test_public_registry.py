@@ -36,7 +36,7 @@ def fetch_options(tree, tmp_path, **overrides) -> FetchOptions:
     fields = {
         "bases": (tree.base_url,),
         "cache_dir": tmp_path / "cache",
-        "trusted_keys": (tree.trusted,),
+        "trusted_keys": (tree.trusted.public_key.hex(),),
     }
     fields.update(overrides)
     return FetchOptions(**fields)

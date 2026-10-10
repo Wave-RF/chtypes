@@ -119,3 +119,32 @@ export const ERROR_EXIT_CODES: Readonly<Record<string, number>> = {
   "CHTYPES_CACHE_UNUSABLE": 9,
   "CHTYPES_SOURCE_RETIRED": 10,
 };
+
+/** One of the shared error codes (docs/guides/fetch-v1.md §8): the `code` of every `ArtifactError`. */
+export type ErrorCode =
+  | "CHTYPES_ARTIFACT_MISSING"
+  | "CHTYPES_ARTIFACT_UNTRUSTED"
+  | "CHTYPES_ARTIFACT_CORRUPT"
+  | "CHTYPES_ARTIFACT_PINNED"
+  | "CHTYPES_ARTIFACT_UNPUBLISHED"
+  | "CHTYPES_SOURCE_UNREACHABLE"
+  | "CHTYPES_SOURCE_UNAUTHORIZED"
+  | "CHTYPES_SOURCE_FORBIDDEN"
+  | "CHTYPES_SOURCE_INCOMPATIBLE"
+  | "CHTYPES_ARTIFACT_INCOMPATIBLE"
+  | "CHTYPES_CACHE_UNUSABLE"
+  | "CHTYPES_SOURCE_RETIRED";
+
+// The shared error codes, one per entry of ERROR_EXIT_CODES, in its order.
+export const CODE_ARTIFACT_MISSING = "CHTYPES_ARTIFACT_MISSING" satisfies ErrorCode;
+export const CODE_ARTIFACT_UNTRUSTED = "CHTYPES_ARTIFACT_UNTRUSTED" satisfies ErrorCode;
+export const CODE_ARTIFACT_CORRUPT = "CHTYPES_ARTIFACT_CORRUPT" satisfies ErrorCode;
+export const CODE_ARTIFACT_PINNED = "CHTYPES_ARTIFACT_PINNED" satisfies ErrorCode;
+export const CODE_ARTIFACT_UNPUBLISHED = "CHTYPES_ARTIFACT_UNPUBLISHED" satisfies ErrorCode;
+export const CODE_SOURCE_UNREACHABLE = "CHTYPES_SOURCE_UNREACHABLE" satisfies ErrorCode;
+export const CODE_SOURCE_UNAUTHORIZED = "CHTYPES_SOURCE_UNAUTHORIZED" satisfies ErrorCode;
+export const CODE_SOURCE_FORBIDDEN = "CHTYPES_SOURCE_FORBIDDEN" satisfies ErrorCode;
+export const CODE_SOURCE_INCOMPATIBLE = "CHTYPES_SOURCE_INCOMPATIBLE" satisfies ErrorCode;
+export const CODE_ARTIFACT_INCOMPATIBLE = "CHTYPES_ARTIFACT_INCOMPATIBLE" satisfies ErrorCode;
+export const CODE_CACHE_UNUSABLE = "CHTYPES_CACHE_UNUSABLE" satisfies ErrorCode;
+export const CODE_SOURCE_RETIRED = "CHTYPES_SOURCE_RETIRED" satisfies ErrorCode;

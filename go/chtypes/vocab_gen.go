@@ -68,7 +68,7 @@ func statusOfName(name string) (Status, bool) {
 }
 
 // Format is chs_format: a body or export format, with the description's numbers. Each carries
-// ClickHouse's own name (CHName), which is how a build's capabilities list a format.
+// ClickHouse's own name (ChName), which is how a build's capabilities list a format.
 type Format int32
 
 // JSONEachRow is CHS_JSON_EACH_ROW.
@@ -120,8 +120,9 @@ func (f Format) Known() bool {
 	return false
 }
 
-// CHName is ClickHouse's own name for the format, the enum's ch_name field.
-func (f Format) CHName() string {
+// ChName is ClickHouse's own name for the format, the enum's ch_name field (bindings-v1.md section 3,
+// spelled as section 4 spells CallError.ChName).
+func (f Format) ChName() string {
 	switch f {
 	case JSONEachRow:
 		return "JSONEachRow"

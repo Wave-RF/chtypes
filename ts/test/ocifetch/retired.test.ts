@@ -9,7 +9,7 @@ import * as http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { describe, expect, it } from 'vitest';
 import { RETIRED_BODY_MAX_BYTES } from '../../src/ocifetch/constants.gen.js';
-import { type FetchV1Error, SourceRetiredError } from '../../src/ocifetch/errors.js';
+import { exitStatusOf, type FetchV1Error, SourceRetiredError } from '../../src/ocifetch/errors.js';
 import { requestBuffered, requestToSink } from '../../src/ocifetch/http.js';
 import { retiredMessage } from '../../src/ocifetch/retired.js';
 import type { Clock } from '../../src/ocifetch/types.js';
@@ -82,7 +82,7 @@ describe('a 410 Gone', () => {
       );
       expect(err).toBeInstanceOf(SourceRetiredError);
       expect((err as FetchV1Error).code).toBe('CHTYPES_SOURCE_RETIRED');
-      expect((err as FetchV1Error).exitStatus).toBe(10);
+      expect(exitStatusOf((err as FetchV1Error).code)).toBe(10);
       expect((err as Error).message).toBe(`chtypes: ${url} answered 410 Gone: the repository is retired; the registry says: ${MESSAGE}`);
       expect(requests).toEqual(['/v2/chtypes/v1/manifests/26.9']);
       expect(clock.sleeps).toEqual([]);

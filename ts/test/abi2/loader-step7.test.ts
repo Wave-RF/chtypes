@@ -13,7 +13,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { ArtifactIncompatibleError, LoaderCorruptError, SchemaError, UsageError } from '../../src/abi2/errors.js';
+import { ArtifactCorruptError, ArtifactIncompatibleError, SchemaError, UsageError } from '../../src/abi2/errors.js';
 import { type LoadInput, openAbi2, type Predicate } from '../../src/abi2/loader.js';
 
 const STUBS_DIR = process.env.CHTYPES_ABI2_STUBS;
@@ -51,14 +51,14 @@ describe.skipIf(!stubsAvailable)('loader step 7 and the re-check of an open imag
 
   it('refuses a new request whose signed statement disagrees with the open image, and leaves the image open for the requests it matches', () => {
     const open = openAbi2(input('ok-b'));
-    expect(() => openAbi2(input('ok-b', {}, { build: '19990101.000000' }))).toThrow(LoaderCorruptError);
+    expect(() => openAbi2(input('ok-b', {}, { build: '19990101.000000' }))).toThrow(ArtifactCorruptError);
     let caught: unknown;
     try {
       openAbi2(input('ok-b', {}, { core_commit: 'f'.repeat(40) }));
     } catch (err) {
       caught = err;
     }
-    expect((caught as LoaderCorruptError).reason).toBe('build_info_mismatch:core_commit');
+    expect((caught as ArtifactCorruptError).reason).toBe('build_info_mismatch:core_commit');
     expect(openAbi2(input('ok-b'))).toBe(open);
   });
 

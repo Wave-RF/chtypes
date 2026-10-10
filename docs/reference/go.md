@@ -23,13 +23,13 @@ go build -tags chtypes_linked ./...   # + chtypes.OpenLinked (needs the artifact
 
 Row and batch verdicts are **never** Go errors: they are `Outcome` in the result. Go errors are for the call as a whole, and each is a peer type, so a decline can never satisfy `errors.As` against the refusal type ([`bindings-v1.md` §4](bindings-v1.md#4-errors)).
 
-| type                | class                                                                                                                     |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `*SchemaError`      | `CHS_REJECTED`: ClickHouse refused. `ChCode` is a real ClickHouse code, `ChName` its name in this build                   |
-| `*UnsupportedError` | `CHS_DECLINED`: this build declines. Fall back to the server; never report it as a rejection                              |
-| `*UsageError`       | `CHS_INVALID_ARGUMENT`: misuse, such as a closed object, a refused spelling or a conflicting `Setup`                      |
-| `*InternalError`    | `CHS_INTERNAL`, or a document that does not decode                                                                        |
-| `*ArtifactError`    | a fetch or load failure, with a `Code` (one of ten) and a sentinel per code for `errors.Is`, such as `ErrArtifactMissing` |
+| type                | class                                                                                                                                                                 |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `*SchemaError`      | `CHS_REJECTED`: ClickHouse refused. `ChCode` is a real ClickHouse code, `ChName` its name in this build                                                               |
+| `*UnsupportedError` | `CHS_DECLINED`: this build declines. Fall back to the server; never report it as a rejection                                                                          |
+| `*UsageError`       | `CHS_INVALID_ARGUMENT`: misuse, such as a closed object, a refused spelling or a conflicting `Setup`                                                                  |
+| `*InternalError`    | `CHS_INTERNAL`, or a document that does not decode                                                                                                                    |
+| `*ArtifactError`    | a fetch or load failure, with a `Code` (an `ErrorCode`, one of the generated `Code…` constants) and a sentinel per code for `errors.Is`, such as `ErrArtifactMissing` |
 
 All four call types embed `CallError`, whose five fields (`Status`, `ChCode`, `ChName`, `Message`, `Column`) read directly; `AsCallError` reads them from any of the four. `Message` and `Column` are byte strings, and `Error()` is the one lossy display form.
 
@@ -58,7 +58,7 @@ A string or byte-string input is a Go `string`, and a body is `[]byte`. A `Value
 
 ## The exit status of a failure
 
-The library carries no exit status. `ErrorCode.ExitCode()` is a method of the shared code vocabulary, generated from `spec/fetch-v1/constants.json` (the table is [`fetch-v1.md` §8](../guides/fetch-v1.md#8-errors)), and the command below is the only caller that turns an error into a process status.
+The library carries no exit status. `ErrorCode` and its `Code…` constants are generated from `spec/fetch-v1/constants.json`, with no method; a code's exit status is the table of [`fetch-v1.md` §8](../guides/fetch-v1.md#8-errors), and the command below is the only caller that turns an error into a process status. An `*ArtifactError`'s `Error()` names the request, the platform and the source a fetch error concerns, and `errors.Unwrap` reaches its cause.
 
 ## The command
 

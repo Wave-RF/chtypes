@@ -45,7 +45,7 @@ import type { JsExternal } from 'ffi-rs';
 import { type BuildInfo, decodeBuildInfo } from './buildinfo.js';
 import { Calls } from './calls.gen.js';
 import { ABI_FINGERPRINT, ABI_VERSION, CROSS_CHECK, DESCRIBED_SYMBOLS, SYMBOL } from './decls.gen.js';
-import { ArtifactIncompatibleError, LoaderCorruptError, UsageError, usageError } from './errors.js';
+import { ArtifactIncompatibleError, corruptRefusal, UsageError, usageError } from './errors.js';
 import { compareDottedVersions, ffiOpen, glibcVersionString, lastDlError, rawDlopen, rawDlsym } from './libc.js';
 import { defineRawFunctions, type RawApi, rawCall } from './raw.js';
 
@@ -102,7 +102,7 @@ function refuseIncompatible(path: string, reason: string, want?: string, got?: s
 }
 
 function refuseCorrupt(path: string, reason: string, want?: string, got?: string): never {
-  throw new LoaderCorruptError({ reason, path, want, got });
+  throw corruptRefusal({ reason, path, want, got });
 }
 
 // --------------------------------------------------------------- image cache

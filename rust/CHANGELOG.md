@@ -8,6 +8,7 @@ The four bindings in this repository are released together and give one answer, 
 
 ### Added
 
+- `chtypes::code`: the `CHTYPES_*` codes as constants (`code::ARTIFACT_MISSING` …), generated from `spec/fetch-v1/constants.json`, which `Error::code()` returns (#500; `docs/reference/bindings-v1.md` §4, the codes).
 - Every settings layer's filter-declined settings, in one list (ABI v2; moves the dev fingerprint; #588): `SchemaDescription::filter_declined_settings`, a `Vec<DeclinedSetting>`, decoded from `schema_description`'s new required top-level `filter_declined_settings`, over every layer known at schema compile (`setup`'s defaults as the compile captured them, the server profile, and the schema's own settings). `DeclinedSetting` gains `layer`, the highest layer that sets the name, from the new `DeclinedLayer` vocabulary (`Defaults`, `Server`, `Schema`, `Unknown`). One entry per name, ordered by layer and then by name bytes, as the library writes it; the binding sorts nothing.
 - `Schema::describe` raises the library's `CHS_REJECTED` with ch_code 306 (TOO_DEEP_RECURSION), an `Error::Schema`, for a deep input the server's stack check refuses (ABI v2: `chs_schema_describe` now lists `CHS_REJECTED`).
 - The server's filter-declined settings (ABI v2; moves the dev fingerprint): `SchemaServer::filter_declined_settings`, a `Vec<DeclinedSetting>` (`name`, `tier`), decoded from `schema_description`'s new required `server.filter_declined_settings`, with the new `DeclinedTier` vocabulary (`Predicate`, `PredicateUnflipped`, `ResultContent`, `Unknown`). `Schema::compile_filter` on a schema whose server lists any is the library's `CHS_DECLINED`, an `Error::Unsupported` carrying its message; a filter's own settings other than `session_timezone` are no longer declined at compile, and a declined one is named at evaluation instead.
@@ -21,6 +22,11 @@ The four bindings in this repository are released together and give one answer, 
 
 ### Changed
 
+- **Breaking: the public surface the parity gate carried as exceptions is resolved, before the v2 lock (#500).** A convenience exists in every binding or in none (`docs/reference/bindings-v1.md` §1, principle 2). Migration, old → new:
+  - `Refusal.detail` → `Refusal.got`: what a one-sided refusal found (the `dlopen` error, what a malformed `build_info` lacks) is in `got`, with `want` `None`, as in the other bindings; the display still prints it. `Refusal` is `#[non_exhaustive]`, so build one only through the crate.
+  - The fetch layer's own corruption (`Error::ArtifactCorrupt` with no loader behind it) has an empty `reason` (was `"fetch"`), as Go's has, and displays its message alone.
+  - `FetchOptions.platform` → removed: a registry opens libraries for this host only, as in the other bindings. `chtypes fetch --platform` is unchanged.
+  - `chtypes::reason::is_lossy(r)` → `chtypes::reason::lossy(r)`, the fact's documented name (`Reason::lossy()` is unchanged).
 - `Schema::compile_filter` is the library's `CHS_DECLINED`, `Error::Unsupported`, on a schema whose `filter_declined_settings` is not empty from any layer, and its message names each setting and its layer (ABI v2, #588). A declined setting from the defaults or the schema's own settings now fails the compile, where it was named at evaluation before; a filter's own settings and an evaluation's are still named at evaluation.
 - **Enforcement gate lifted** for `26.3` on `linux-amd64`.
 - **Enforcement gate lifted** for `26.7` on `linux-amd64`.

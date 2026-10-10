@@ -151,25 +151,10 @@ func callError(c *abi2.CallError) error {
 	}
 }
 
-// ErrorCode is one of the shared artifact codes, the fetch layer's own type.
-type ErrorCode = ocifetch.ErrorCode
-
-// The shared artifact codes (docs/guides/fetch-v1.md section 8), the fetch
-// layer's own values; CodeArtifactIncompatible is the loader's.
-const (
-	CodeArtifactMissing      = ocifetch.CodeArtifactMissing
-	CodeArtifactUntrusted    = ocifetch.CodeArtifactUntrusted
-	CodeArtifactCorrupt      = ocifetch.CodeArtifactCorrupt
-	CodeArtifactPinned       = ocifetch.CodeArtifactPinned
-	CodeArtifactUnpublished  = ocifetch.CodeArtifactUnpublished
-	CodeSourceUnreachable    = ocifetch.CodeSourceUnreachable
-	CodeSourceUnauthorized   = ocifetch.CodeSourceUnauthorized
-	CodeSourceForbidden      = ocifetch.CodeSourceForbidden
-	CodeSourceIncompatible   = ocifetch.CodeSourceIncompatible
-	CodeArtifactIncompatible = ocifetch.CodeArtifactIncompatible
-	CodeCacheUnusable        = ocifetch.CodeCacheUnusable
-	CodeSourceRetired        = ocifetch.CodeSourceRetired
-)
+// ErrorCode and its constants (CodeArtifactMissing …) are generated from
+// spec/fetch-v1/constants.json into codes_gen.go: a type of this package's own,
+// with no methods. A code's exit status is the command's (docs/guides/fetch-v1.md
+// section 8), never the library's.
 
 // The sentinels, one per code: errors.Is(err, chtypes.ErrArtifactCorrupt) is
 // true for the fetch layer's corrupt layer and the loader's step 5 alike. The
@@ -193,22 +178,18 @@ func sentinel(c ErrorCode) error {
 	if c == CodeArtifactIncompatible {
 		return ErrArtifactIncompatible
 	}
-	return c.Sentinel()
+	return ocifetch.ErrorCode(c).Sentinel()
 }
 
 // ArtifactError is every fetch-time and load-time failure: one of the shared
-// codes, what it concerns, and a complete message. errors.Is matches the
-// sentinel for Code; errors.As reaches the struct. The fetch layer's errors
-// and the loader's are one family: a caller catching ErrArtifactCorrupt
-// catches both.
+// codes, a loader refusal's or a cache fault's fields, and a complete message,
+// Error(), which names the request, the platform and the source a fetch error
+// concerns. errors.Is matches the sentinel for Code, errors.As reaches the
+// struct, and errors.Unwrap the underlying cause. The fetch layer's errors and
+// the loader's are one family: a caller catching ErrArtifactCorrupt catches
+// both.
 type ArtifactError struct {
 	Code ErrorCode
-	// Request is the version spelling as requested; Platform is
-	// "<os>-<arch>"; Source is the base or path being read. Each is empty
-	// when the failure has none.
-	Request  string
-	Platform string
-	Source   string
 	// Reason, Path, Want and Got describe a loader refusal: Reason is one of
 	// sdk.json's loader.refusals reasons, with ":<symbol>" or ":<field>"
 	// appended where it gives a suffix; Want and Got only where the refusal
@@ -221,16 +202,16 @@ type ArtifactError struct {
 	Want    string
 	Got     string
 	OSError string
-	// Msg is the complete message.
-	Msg string
-	// Err is the underlying cause, when there is one.
-	Err error
+
+	msg   string // the complete message
+	cause error  // the underlying cause, when there is one
 }
 
-func (e *ArtifactError) Error() string { return e.Msg }
+// Error is the complete message.
+func (e *ArtifactError) Error() string { return e.msg }
 
 // Unwrap exposes the underlying cause.
-func (e *ArtifactError) Unwrap() error { return e.Err }
+func (e *ArtifactError) Unwrap() error { return e.cause }
 
 // Is makes errors.Is(err, ErrArtifact...) true for the matching code.
 func (e *ArtifactError) Is(target error) bool { return target != nil && target == sentinel(e.Code) }
@@ -245,8 +226,7 @@ func fetchError(err error) error {
 	var fe *ocifetch.FetchError
 	if errors.As(err, &fe) {
 		return &ArtifactError{
-			Code: fe.Code, Request: fe.Request, Platform: fe.Platform, Source: fe.Source,
-			Path: fe.Path, Reason: fe.Reason, OSError: fe.OSError, Msg: fe.Msg, Err: fe,
+			Code: ErrorCode(fe.Code), Path: fe.Path, Reason: fe.Reason, OSError: fe.OSError, msg: fe.Msg, cause: fe,
 		}
 	}
 	return usageError("%s", err.Error())
@@ -275,8 +255,8 @@ func loadError(err error) error {
 			msg = exact
 		}
 		return &ArtifactError{
-			Code: code, Reason: le.Reason, Path: le.Path, Want: le.Want, Got: le.Got, Err: le,
-			Msg: msg,
+			Code: code, Reason: le.Reason, Path: le.Path, Want: le.Want, Got: le.Got, cause: le,
+			msg: msg,
 		}
 	}
 	var ce *abi2.CallError
