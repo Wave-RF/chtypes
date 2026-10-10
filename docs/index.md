@@ -58,6 +58,7 @@ chtypes derives that report and it is not optional: every accepted row carries a
 | [`quickstart.md`](quickstart.md)                 | the same first program, four times                                                                       |
 | [`../examples/README.md`](../examples/README.md) | a longer runnable tour, section for section in all four — a diff between two of them shows only spelling |
 | [`support-v1.md`](support-v1.md)                 | which languages, platforms and ClickHouse lines                                                          |
+| [`support-v2.md`](support-v2.md)                 | the same for v2, generated from the registry's verified statements                                       |
 
 ### Guides
 

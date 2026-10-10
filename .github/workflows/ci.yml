@@ -87,7 +87,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # fetch-depth 2: the support-v2 steps below diff HEAD against its first
+      # parent (the base of a pull request's merge ref, the previous entry of
+      # a merge queue's) to learn whether the PR touches the page or its
+      # generator.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       # Every binding used to carry its own copy of ClickHouse's identifier
       # quoting, and all four were wrong the same way (#52). The copies are
       # deleted; chs_back_quote, chs_back_quote_if_needed and chs_quote_string
@@ -219,6 +226,40 @@ jobs:
         run: scripts/check-selftests-wired.py --selftest
       - name: every scripts/* --selftest mode is actually invoked by CI, directly or through a verified caller
         run: scripts/check-selftests-wired.py
+      # docs/support-v2.md is GENERATED from the registry's signed statements
+      # (public issue #438), and kept current by a pull request someone opens
+      # when a production publish lands (RELEASING.md), not by a check that
+      # goes red when the delivery side publishes. So the generator's own
+      # selftest runs on every pull request (loopback only), while the page's
+      # byte-for-byte check, which does reach the registry, runs ONLY when the
+      # pull request touches the page or the generator. On every other pull
+      # request these steps are skipped, which is success, and a publish can
+      # never redden an unrelated one. These are steps of this required job on
+      # purpose: a separate job would be a new required context, and a
+      # non-required one could not stop a stale page from being enqueued by
+      # scripts/policy-merge-check.py (the page is deliberately not a
+      # protected path; the scripts and workflow beside it are).
+      - name: selftest — the support-v2 generator omits what does not verify, refuses a private name, and takes its channel from the binding
+        run: uv run scripts/support-v2/gen.py --selftest
+      - name: does this pull request touch docs/support-v2.md or its generator?
+        id: support-v2
+        run: |
+          if changed="$(git diff --name-only HEAD^1 HEAD 2>/dev/null)"; then
+            # Only the page and its generator: a fetch-layer change is checked by
+            # the generator's selftest above, and gating it on the live page
+            # would redden it whenever the delivery side publishes a line.
+            if grep -qE '^(docs/support-v2\.md|scripts/support-v2/)' <<<"$changed"; then
+              echo "touched=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "touched=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "the diff against the first parent is unavailable; running the page check" >&2
+            echo "touched=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: support-v2 — docs/support-v2.md equals the generator's output from the active channel's registry
+        if: steps.support-v2.outputs.touched == 'true'
+        run: uv run scripts/support-v2/gen.py --check
 
   go:
     name: "go — build, vet, standalone check (no artifacts)"

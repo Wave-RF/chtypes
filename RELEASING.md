@@ -100,6 +100,14 @@ The Go twin reads the version list rather than the version, so a dry run never a
 
 **The lock.** When #511's conditions hold, one block flips: THE CHANNEL in `scripts/release-channel.sh`, from `CHANNEL="v2-dev"` to `CHANNEL="v2"`. The pull request that does it writes the `v2` arm there: versions `2.N.N` (not pre-releases), the production repository `https://registry.wavehouse.dev/chtypes/v2`, the release key (`deb275922dbff76e`), the cache subroot `v2`, npm's `latest` dist-tag. In the same pull request the `never-default` jobs are replaced by their opposite, because the 2.x then IS the default. Until that pull request, any other value of `CHANNEL` refuses everything. SDK `2.0.0` then ships from production, signed with the release key.
 
+**The support page after a publish.** [`docs/support-v2.md`](docs/support-v2.md) is generated from the registry the Python binding's active generation-2 channel names (the staging dev repository today, production `chtypes/v2` with the release key after the lock's one-line `active()` switch), every signed statement verified before a fact is read from it, no layer downloaded. Nothing regenerates it automatically and no check turns red when the delivery side publishes: when a production publish notice arrives, open the regeneration pull request with
+
+```sh
+uv run scripts/support-v2/gen.py --write
+```
+
+Exit status 0 means the page is complete, 3 means it was written with some rows omitted (each is named on stderr: read them before committing), and 4 means nothing was written. A pull request that touches only `docs/support-v2.md` is enqueued by the policy merge once `checks` passes; on a pull request that touches the page or the generator, `checks` reruns `gen.py --check` against the registry and fails unless the page equals the output byte for byte.
+
 ## Before the first tag of each package
 
 1. Bump the manifest version (`python/pyproject.toml`, `ts/package.json`, `rust/Cargo.toml`; Go has none — the tag is the version — so bump `bindingVersion` in `go/internal/ocifetch/useragent.go` instead; it is the version in the fetch layer's `User-Agent`).
