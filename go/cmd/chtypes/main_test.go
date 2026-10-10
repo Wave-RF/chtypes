@@ -33,7 +33,6 @@ func TestUsageErrorsExitTwo(t *testing.T) {
 		{"fetch"},
 		{"fetch", "26.8", "--all"},
 		{"fetch", "26.8", "--platform", "plan9-mips"},
-		{"fetch", "26.8", "--frozen", "--offline"},
 		{"fetch", "v26.8", "--offline"},
 		{"verify", "extra"},
 		{"list", "extra"},

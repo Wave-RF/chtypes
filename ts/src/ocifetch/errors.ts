@@ -30,13 +30,26 @@ export const CODE_CACHE_UNUSABLE = 'CHTYPES_CACHE_UNUSABLE' satisfies FetchV1Err
 /** A source that answered 410 Gone: a retired repository, never retried and never sent to the next base (guide §2; public issue #571). */
 export const CODE_SOURCE_RETIRED = 'CHTYPES_SOURCE_RETIRED' satisfies FetchV1ErrorCode;
 
+/**
+ * The base of every error this package throws on purpose: the fetch and
+ * loader errors (`FetchV1Error`, exported as `ArtifactError`) and the call
+ * errors (`CallError`, `abi2/errors.ts`). It lives here, under the fetch
+ * layer, so `FetchV1Error` can extend it without the two modules importing
+ * each other (public issue #487).
+ */
+export abstract class ChtypesError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = new.target.name;
+  }
+}
+
 /** Base of every error this module throws. */
-export class FetchV1Error extends Error {
+export class FetchV1Error extends ChtypesError {
   readonly code: FetchV1ErrorCode;
 
   constructor(code: FetchV1ErrorCode, message: string, options?: { cause?: unknown }) {
     super(message, options);
-    this.name = new.target.name;
     this.code = code;
   }
 

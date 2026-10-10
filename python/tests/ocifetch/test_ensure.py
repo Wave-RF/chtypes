@@ -96,6 +96,29 @@ def test_ensure_second_call_makes_no_referrer_or_layer_requests(
     assert second.library_path.read_bytes() == tree.library_bytes
 
 
+def test_ensure_index_json_never_gets_a_second_entry_for_one_manifest(tmp_path: Path) -> None:
+    """Public issue #487: concurrent installs of one build each appended an
+    entry, leaving several for the SAME digest. A competing installer of the
+    same build landing in the rename gap must be folded in, not repeated."""
+    import json
+
+    tree = build_tree(tmp_path / "registry")
+    cache = tmp_path / "cache"
+
+    def competing_installer() -> None:
+        competing = {"schemaVersion": 2, "manifests": [{"digest": tree.manifest_digest}]}
+        (cache / "index.json").write_text(json.dumps(competing))
+
+    options = _options(
+        tree, tmp_path, platform="linux-arm64", before_index_rename=competing_installer
+    )
+    resolved = ensure(Request("26.8"), options)
+    assert resolved.digests["manifest"] == tree.manifest_digest
+
+    entries = json.loads((cache / "index.json").read_text())["manifests"]
+    assert [e["digest"] for e in entries] == [tree.manifest_digest]
+
+
 def test_ensure_untrusted_signature_raises(tmp_path: Path) -> None:
     tree = build_tree(tmp_path / "registry")
     other_key = TrustedKey(keyid="someone-else", public_key=b"\x00" * 32)
