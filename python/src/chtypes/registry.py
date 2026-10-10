@@ -108,6 +108,10 @@ class FetchOptions:
     def _trusted_keys(self) -> tuple[_TrustedKey, ...] | None:
         if self.trusted_keys is None:
             return None
+        if not _fetch_channel.active().overridable:
+            # A channel that honors no trust override ignores the option, with
+            # its one warning, whatever it holds (rule r6), as every binding does.
+            return ()
         if isinstance(self.trusted_keys, str):
             raise errors._misuse("chtypes: trusted_keys is a sequence of hex keys, not one string")
         try:

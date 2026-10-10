@@ -110,7 +110,6 @@ export async function withRetry<T>(
       if (outcome.retryAfterSeconds > RETRY_AFTER_BUDGET_S) {
         throw new SourceUnreachableError(
           `chtypes: Retry-After named ${outcome.retryAfterSeconds}s, past the ${RETRY_AFTER_BUDGET_S}s retry budget; refusing rather than sleeping it`,
-          { retryAfterRefused: outcome.retryAfterSeconds },
         );
       }
       waitSeconds = Math.max(0, outcome.retryAfterSeconds);

@@ -1,12 +1,12 @@
 /**
  * `BuildInfo`: the decoded form of the library's static build-info JSON
  * (`docs/reference/bindings-v1.md` §5, `BuildInfo`). Decoded once, at loader
- * step 4, where a malformed document is a `LoaderCorruptError`
+ * step 4, where a malformed document is an `ArtifactCorruptError`
  * (`build_info_malformed`): ASCII only, no duplicate key at any depth,
  * `schema` equal to 1, every required field of its type.
  */
 
-import { LoaderCorruptError } from './errors.js';
+import { corruptRefusal } from './errors.js';
 import { DuplicateKeyError, isAsciiOnly, parseStrictJson } from './strictjson.js';
 
 /** What the build itself says it supports, from its own format factory and document groups. */
@@ -42,7 +42,7 @@ export interface BuildInfo {
 }
 
 function malformed(path: string, want: string, got: string): never {
-  throw new LoaderCorruptError({ reason: 'build_info_malformed', path, want, got });
+  throw corruptRefusal({ reason: 'build_info_malformed', path, want, got });
 }
 
 function kindOf(v: unknown): string {

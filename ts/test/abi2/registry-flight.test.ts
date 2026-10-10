@@ -263,7 +263,7 @@ describe.skipIf(!stubsAvailable)('the registry with a fetch in flight (public is
         bases: [`${server.origin}/s-${caseId}/chtypes/v1`],
         cacheDir: cache,
         systemDirs: [],
-        trustedKeys: [{ keyid: TEST_KEY.keyid, ed25519Hex: TEST_KEY.ed25519Hex }],
+        trustedKeys: [TEST_KEY.ed25519Hex],
       },
       autofetch: true,
     });

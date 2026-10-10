@@ -16,13 +16,6 @@
     },
     {
       "binding": "go",
-      "kind": "spelling",
-      "doc": "Format.ChName",
-      "as": "Format.CHName",
-      "reason": "§3 names the fact `ch_name`, which principle 2 spells ChName in Go (as §4 does for CallError.ChName), but the generated Go vocabulary (scripts/abi-v1/emit/go_vocab.py) treats CH as an initialism. Renaming a published method is a breaking change, so the difference is carried here rather than fixed in this gate's pull request."
-    },
-    {
-      "binding": "go",
       "kind": "extra",
       "names": [
         "ColumnsOption",
@@ -34,45 +27,9 @@
       "binding": "go",
       "kind": "extra",
       "names": [
-        "ArtifactError.Err",
-        "ArtifactError.Msg",
-        "ArtifactError.Platform",
-        "ArtifactError.Request",
-        "ArtifactError.Source"
-      ],
-      "issue": 500,
-      "reason": "Go has one ArtifactError for the loader's refusals and the fetch layer's errors (§4: 'the fetch layer's and the loader's errors are one family'), so it also carries the fetch error's message, the platform, request and source it was answering, and the wrapped cause (Unwrap). §4 names only the refusal's fields."
-    },
-    {
-      "binding": "go",
-      "kind": "extra",
-      "names": [
         "ArtifactError.OSError"
       ],
       "reason": "§4's 'a cache fault' bullet: a CHTYPES_CACHE_UNUSABLE (fetch-v1.md §1, the cache faults; public issue #486) carries the path, the reason and the errno name, which the doc names in prose and does not spell per language. Go keeps the path and the reason on ArtifactError's Path and Reason, which a loader refusal also uses."
-    },
-    {
-      "binding": "go",
-      "kind": "extra",
-      "names": [
-        "ErrorCode",
-        "ErrorCode.ExitCode",
-        "ErrorCode.Sentinel",
-        "CodeArtifactCorrupt",
-        "CodeArtifactIncompatible",
-        "CodeArtifactMissing",
-        "CodeArtifactPinned",
-        "CodeArtifactUnpublished",
-        "CodeArtifactUntrusted",
-        "CodeSourceForbidden",
-        "CodeSourceIncompatible",
-        "CodeSourceUnauthorized",
-        "CodeSourceUnreachable",
-        "CodeCacheUnusable",
-        "CodeSourceRetired"
-      ],
-      "issue": 500,
-      "reason": "The typed values of ArtifactError.Code, which §4's Go column names (`*ArtifactError` with `Code` CHTYPES_…): one constant per code in spec/fetch-v1/constants.json, re-exported from the fetch layer, with the code's CLI exit status and sentinel. Python keeps the same codes as CODE_* constants (its own entry); §4 gives no spelling for them."
     },
     {
       "binding": "go",
@@ -92,16 +49,6 @@
         "FetchOptions.StrictCache"
       ],
       "reason": "§6: the fetch options carry everything fetch-v1.md configures (bases, cache directory, system directories, trusted keys, token, allow-unsigned, offline, frozen, the lock path) 'under the fetch module's own names', which the doc names in prose and does not spell per language. LockWrite and Update are the lock's write and update modes of fetch-v1.md §6."
-    },
-    {
-      "binding": "go",
-      "kind": "extra",
-      "names": [
-        "FetchOptions.ConnectTimeout",
-        "FetchOptions.IdleReadTimeout"
-      ],
-      "reason": "Go-only: the fetch layer's connect and idle-read timeouts (spec/fetch-v1/constants.json `timeouts`), settable on Go's FetchOptions alone. Principle 2 says this convenience belongs in all four or in none; it is carried here as found, not changed, because removing a published field is a breaking change.",
-      "issue": 500
     },
     {
       "binding": "python",
@@ -129,19 +76,6 @@
       "binding": "python",
       "kind": "extra",
       "names": [
-        "CODE_ARTIFACT_CORRUPT",
-        "CODE_ARTIFACT_INCOMPATIBLE",
-        "CODE_ARTIFACT_MISSING",
-        "CODE_ARTIFACT_PINNED",
-        "CODE_ARTIFACT_UNPUBLISHED",
-        "CODE_ARTIFACT_UNTRUSTED",
-        "CODE_SOURCE_FORBIDDEN",
-        "CODE_SOURCE_INCOMPATIBLE",
-        "CODE_SOURCE_UNAUTHORIZED",
-        "CODE_SOURCE_UNREACHABLE",
-        "CODE_CACHE_UNUSABLE",
-        "CODE_SOURCE_RETIRED",
-        "ArtifactError.code",
         "ArtifactCorruptError.code",
         "ArtifactIncompatibleError.code",
         "ArtifactMissingError.code",
@@ -155,8 +89,7 @@
         "CacheUnusableError.code",
         "SourceRetiredError.code"
       ],
-      "issue": 500,
-      "reason": "The fetch codes of spec/fetch-v1/constants.json, and each artifact class's code: the attribute §4's Go column calls ArtifactError's `Code` (Go's own entry). §4's Python column names the classes only."
+      "reason": "Each artifact class's own code, a class attribute set on every class the binding raises (Python's spelling of one code per class); §4's codes give ArtifactError.code, which every class has, and each binding's CODE_* constants."
     },
     {
       "binding": "python",
@@ -166,13 +99,11 @@
         "ArtifactError(path=)",
         "ArtifactError(want=)",
         "ArtifactError(got=)",
-        "SourceUnreachableError(retryable=)",
-        "SourceUnreachableError(retry_after=)",
         "CacheUnusableError(path=)",
         "CacheUnusableError(reason=)",
         "CacheUnusableError(os_error=)"
       ],
-      "reason": "Keyword-only constructor parameters of error classes the binding raises: they set §4's refusal fields (reason, path, want, got) and the fetch layer's retry hints. A caller catches these classes and does not construct them."
+      "reason": "Keyword-only constructor parameters of error classes the binding raises: they set §4's refusal fields (reason, path, want, got) and a cache fault's. A caller catches these classes and does not construct them."
     },
     {
       "binding": "python",
@@ -181,16 +112,6 @@
         "CacheUnusableError.os_error"
       ],
       "reason": "§4's 'a cache fault' bullet: a CHTYPES_CACHE_UNUSABLE (fetch-v1.md §1, the cache faults; public issue #486) carries the path, the reason and the errno name, which the doc names in prose and does not spell per language. Python keeps the path and the reason on ArtifactError's path and reason, which a loader refusal also uses."
-    },
-    {
-      "binding": "python",
-      "kind": "extra",
-      "names": [
-        "SourceUnreachableError.retryable",
-        "SourceUnreachableError.retry_after"
-      ],
-      "reason": "The fetch layer's retry hints on an unreachable source (fetch-v1.md §7, the retry table): whether a retry may help, and the server's Retry-After. §4 names the class, not its fields.",
-      "issue": 500
     },
     {
       "binding": "python",
@@ -215,40 +136,12 @@
       "binding": "python",
       "kind": "extra",
       "names": [
-        "TrustedKey",
-        "TrustedKey.keyid",
-        "TrustedKey.public_key"
-      ],
-      "reason": "Python's trusted keys are TrustedKey records (key id and raw public key) where Go's FetchOptions.TrustedKeys takes hex strings: a shape difference inside §6's 'trusted keys', carried as found. Changing either is a breaking change.",
-      "issue": 500
-    },
-    {
-      "binding": "python",
-      "kind": "extra",
-      "names": [
         "errors",
         "library",
         "registry",
         "results"
       ],
       "reason": "The package's implementation modules, public by name. Every public name they hold is re-exported at the top level (measured by this gate: it lists any that is not), and the top level is what the doc describes and the gate compares."
-    },
-    {
-      "binding": "python",
-      "kind": "extra",
-      "names": [
-        "errors.internal",
-        "errors.misuse"
-      ],
-      "reason": "Found by this gate: the binding's own constructors for InternalError and UsageError, listed in chtypes.errors.__all__ and so public through the submodule, though the package does not re-export them and the doc gives neither. Dropping them from __all__ is a public-API change for its own pull request; carried here until then.",
-      "issue": 499
-    },
-    {
-      "binding": "rust",
-      "kind": "spelling",
-      "doc": "reason.lossy",
-      "as": "reason.is_lossy",
-      "reason": "§3's `lossy` fact is a free function in Rust's `reason` module, spelled with Rust's is_ prefix for a predicate, as `source::is_stored` is (that fact's own name already starts with is_). The generated module (scripts/abi-v1/emit/rust.py) is published at 1.0, so renaming it is a breaking change."
     },
     {
       "binding": "rust",
@@ -269,7 +162,8 @@
         "DefaultKind.as_str",
         "MergeReason.as_str",
         "DeclinedTier.as_str",
-        "DeclinedLayer.as_str"
+        "DeclinedLayer.as_str",
+        "DiscoverQueryParam.as_str"
       ],
       "reason": "A string vocabulary's document spelling. Rust's vocabularies are enums, so the text is a method, where Python's StrEnum member and TypeScript's const-object value are the string itself and Go's type is a string. Generated from the description by scripts/abi-v1/gen.py."
     },
@@ -294,15 +188,6 @@
       "binding": "rust",
       "kind": "extra",
       "names": [
-        "Error.code"
-      ],
-      "issue": 500,
-      "reason": "The fetch code of an artifact variant (spec/fetch-v1/constants.json): the Rust spelling of Go's ArtifactError.Code and Python's `.code` (their own entries). §4 gives no Rust spelling."
-    },
-    {
-      "binding": "rust",
-      "kind": "extra",
-      "names": [
         "ErrorCodeTable.len",
         "ErrorCodeTable.is_empty"
       ],
@@ -321,15 +206,6 @@
         "RawText.to_lossy"
       ],
       "reason": "§3: Rust keeps v0's RawText for every byte output, with the bytes, as_bytes(), as_str() -> Option<&str> and a lossy Display (named in §3's prose, not a table). The rest are its byte-string helpers. The other bindings' byte type is the language's own (string, bytes, Buffer), so they have nothing to name."
-    },
-    {
-      "binding": "rust",
-      "kind": "extra",
-      "names": [
-        "Refusal.detail"
-      ],
-      "issue": 500,
-      "reason": "Rust's loader refusal carries a free-text detail beside §4's reason, path, want and got (noted in the 1.0 comparison, #435). It is Rust-only, carried as found: removing a published field is a breaking change."
     },
     {
       "binding": "rust",
@@ -361,89 +237,32 @@
       "reason": "§6: the fetch options carry everything fetch-v1.md configures (bases, cache directory, system directories, trusted keys, token, allow-unsigned, offline, frozen, the lock path) 'under the fetch module's own names', which the doc names in prose and does not spell per language. lock_write and update are the lock's write and update modes of fetch-v1.md §6."
     },
     {
-      "binding": "rust",
-      "kind": "extra",
-      "names": [
-        "FetchOptions.platform"
-      ],
-      "reason": "Rust-only: the platform to fetch for, where the other bindings fetch for the host. Principle 2 says this belongs in all four or in none; it is carried here as found, not changed, because removing a published field is a breaking change.",
-      "issue": 500
-    },
-    {
       "binding": "ts",
       "kind": "spelling",
       "doc": "Format.chName",
       "as": "formatChName",
-      "reason": "§3's vocabularies are const objects in TypeScript (`Format.JSONEachRow` is a number, not an object), which cannot carry a member, so each fact is a free function named for its vocabulary (the 1.0 comparison, #435). Generated from the description by scripts/abi-v1/gen.py; a rename is a breaking change.",
-      "issue": 500
+      "reason": "§3's 'A fact in TypeScript is a free function': TypeScript's vocabularies are const objects (`Format.JSONEachRow` is a number, not an object), which cannot carry a member, so each fact is a free function named for its vocabulary, the language's idiom. Generated from the description by scripts/abi-v1/gen.py. The gate's §3 reader expects a member, so the spelling is carried here."
     },
     {
       "binding": "ts",
       "kind": "spelling",
       "doc": "Reason.lossy",
       "as": "reasonLossy",
-      "reason": "§3's vocabularies are const objects in TypeScript (`Format.JSONEachRow` is a number, not an object), which cannot carry a member, so each fact is a free function named for its vocabulary (the 1.0 comparison, #435). Generated from the description by scripts/abi-v1/gen.py; a rename is a breaking change.",
-      "issue": 500
+      "reason": "§3's 'A fact in TypeScript is a free function': TypeScript's vocabularies are const objects (`Format.JSONEachRow` is a number, not an object), which cannot carry a member, so each fact is a free function named for its vocabulary, the language's idiom. Generated from the description by scripts/abi-v1/gen.py. The gate's §3 reader expects a member, so the spelling is carried here."
     },
     {
       "binding": "ts",
       "kind": "spelling",
       "doc": "Source.isStored",
       "as": "sourceIsStored",
-      "reason": "§3's vocabularies are const objects in TypeScript (`Format.JSONEachRow` is a number, not an object), which cannot carry a member, so each fact is a free function named for its vocabulary (the 1.0 comparison, #435). Generated from the description by scripts/abi-v1/gen.py; a rename is a breaking change.",
-      "issue": 500
+      "reason": "§3's 'A fact in TypeScript is a free function': TypeScript's vocabularies are const objects (`Format.JSONEachRow` is a number, not an object), which cannot carry a member, so each fact is a free function named for its vocabulary, the language's idiom. Generated from the description by scripts/abi-v1/gen.py. The gate's §3 reader expects a member, so the spelling is carried here."
     },
     {
       "binding": "ts",
       "kind": "spelling",
       "doc": "Verdict.answered",
       "as": "verdictAnswered",
-      "reason": "§3's vocabularies are const objects in TypeScript (`Format.JSONEachRow` is a number, not an object), which cannot carry a member, so each fact is a free function named for its vocabulary (the 1.0 comparison, #435). Generated from the description by scripts/abi-v1/gen.py; a rename is a breaking change.",
-      "issue": 500
-    },
-    {
-      "binding": "ts",
-      "kind": "missing",
-      "names": [
-        "ArtifactError.reason",
-        "ArtifactError.path",
-        "ArtifactError.want",
-        "ArtifactError.got"
-      ],
-      "reason": "TypeScript keeps a loader refusal's fields (§4: reason, path, want, got) on the classes a refusal raises, ArtifactIncompatibleError and LoaderCorruptError (both implement LoaderErrorFields; their own entry), not on the ArtifactError base the fetch layer's errors share, which carries the code. §4 names the carrier for Go (*ArtifactError) and Rust (Refusal) only; the gate reads Go's for TypeScript and Python, and Python's base does carry them.",
-      "issue": 500
-    },
-    {
-      "binding": "ts",
-      "kind": "extra",
-      "names": [
-        "ArtifactIncompatibleError.reason",
-        "ArtifactIncompatibleError.path",
-        "ArtifactIncompatibleError.want",
-        "ArtifactIncompatibleError.got",
-        "LoaderCorruptError",
-        "LoaderCorruptError.reason",
-        "LoaderCorruptError.path",
-        "LoaderCorruptError.want",
-        "LoaderCorruptError.got",
-        "LoaderErrorFields",
-        "LoaderErrorFields.reason",
-        "LoaderErrorFields.path",
-        "LoaderErrorFields.want",
-        "LoaderErrorFields.got"
-      ],
-      "reason": "Where TypeScript keeps §4's refusal fields (see its `missing` entry for ArtifactError): LoaderCorruptError is the loader's corrupt refusal, a subclass of ArtifactCorruptError so that catching ArtifactCorruptError still catches both (§4's one family); TypeScript-only, noted in the 1.0 comparison (#435). LoaderErrorFields is the interface both refusal classes implement.",
-      "issue": 500
-    },
-    {
-      "binding": "ts",
-      "kind": "extra",
-      "names": [
-        "ArtifactError.code",
-        "ArtifactError.exitStatus"
-      ],
-      "issue": 500,
-      "reason": "The fetch code (spec/fetch-v1/constants.json) and its CLI exit status: TypeScript's spelling of Go's ArtifactError.Code and ErrorCode.ExitCode, Python's `.code` and Rust's Error.code (their own entries). §4 gives no TypeScript spelling."
+      "reason": "§3's 'A fact in TypeScript is a free function': TypeScript's vocabularies are const objects (`Format.JSONEachRow` is a number, not an object), which cannot carry a member, so each fact is a free function named for its vocabulary, the language's idiom. Generated from the description by scripts/abi-v1/gen.py. The gate's §3 reader expects a member, so the spelling is carried here."
     },
     {
       "binding": "ts",
@@ -463,6 +282,25 @@
       "binding": "ts",
       "kind": "extra",
       "names": [
+        "FetchOptions.bases",
+        "FetchOptions.cacheDir",
+        "FetchOptions.systemDirs",
+        "FetchOptions.trustedKeys",
+        "FetchOptions.allowUnsigned",
+        "FetchOptions.token",
+        "FetchOptions.offline",
+        "FetchOptions.frozen",
+        "FetchOptions.lockPath",
+        "FetchOptions.lockWrite",
+        "FetchOptions.update",
+        "FetchOptions.strictCache"
+      ],
+      "reason": "§6: the fetch options carry everything fetch-v1.md configures (bases, cache directory, system directories, trusted keys, token, allow-unsigned, offline, frozen, the lock path) 'under the fetch module's own names', which the doc names in prose and does not spell per language. lockWrite and update are the lock's write and update modes of fetch-v1.md §6. An interface since public issue #500, so the gate reads its fields as it reads the other bindings'."
+    },
+    {
+      "binding": "ts",
+      "kind": "extra",
+      "names": [
         "CallErrorFields",
         "CallErrorFields.status",
         "CallErrorFields.chCode",
@@ -471,30 +309,6 @@
         "CallErrorFields.column"
       ],
       "reason": "The interface of §4's five call-error fields, which CallError implements and its constructors take: a type-level name for the same fields, so it adds no field. The other bindings spell the fields once, on CallError (Go's struct, Python's class, Rust's struct)."
-    },
-    {
-      "binding": "ts",
-      "kind": "extra",
-      "names": [
-        "BatchOutcome",
-        "BatchOutcome.Accepted",
-        "BatchOutcome.AcceptedPoisoned",
-        "BatchOutcome.Rejected",
-        "BatchOutcome.Unsupported"
-      ],
-      "reason": "The description's batch_outcome vocabulary on its own, generated by scripts/abi-v1/gen.py and exported by TypeScript alone; §3 folds row_outcome and batch_outcome into one Outcome, which TypeScript also exports. TypeScript-only, carried as found: removing an export is a breaking change.",
-      "issue": 500
-    },
-    {
-      "binding": "ts",
-      "kind": "extra",
-      "names": [
-        "DiscoverQueryParam",
-        "DiscoverQueryParam.Database",
-        "DiscoverQueryParam.Table"
-      ],
-      "reason": "The description's discover_query_param vocabulary (the discovery query's two parameters, which §5 names in prose), generated by scripts/abi-v1/gen.py and exported by TypeScript alone. TypeScript-only, carried as found: removing an export is a breaking change.",
-      "issue": 500
     },
     {
       "binding": "ts",
@@ -513,24 +327,6 @@
       "reason": "TypeScript's iteration protocol over the table, beside all(): the counterpart of Rust's IntoIterator, which §5 names. The gate counts TypeScript's [Symbol.dispose] as a name because §2 and §3 name it, so this one is listed rather than treated as protocol."
     },
     {
-      "binding": "ts",
-      "kind": "extra",
-      "names": [
-        "SourceUnreachableError.retryAfterRefused"
-      ],
-      "reason": "The fetch layer's retry hint on an unreachable source (fetch-v1.md §7, the retry table): the Retry-After the client refused to wait for. Python carries retryable and retry_after instead (its own entry): the two bindings differ here, carried as found.",
-      "issue": 500
-    },
-    {
-      "binding": "ts",
-      "kind": "extra",
-      "names": [
-        "isChtypesError"
-      ],
-      "reason": "True for any error the package throws on purpose. TypeScript's ArtifactError (the fetch layer's error class, re-exported) does not extend ChtypesError, so one guard covers the call errors and the artifact errors together; Python's ArtifactError is a ChtypesError, Go has no base and Rust has one Error enum, so none of them needs it. TypeScript-only, carried as found.",
-      "issue": 487
-    },
-    {
       "binding": "go",
       "kind": "extra",
       "names": [
@@ -545,13 +341,10 @@
         "MergeReason.Known",
         "DeclinedTier.Known",
         "DeclinedLayer.Known",
-        "DiscoverQueryParam",
-        "DiscoverQueryParam.Known",
-        "QueryParamDatabase",
-        "QueryParamTable"
+        "DiscoverQueryParam.Known"
       ],
       "issue": 511,
-      "reason": "The ABI v2 dev binding's rule r3 (spec/abi-v2/docs.md): every vocabulary has an unknown(n) member, an unlisted value kept per field, which Go spells as the raw value plus Known() false; discover_query_param is an enum like every other, so it gains its type. docs/reference/bindings-v1.md is the 1.x surface and names neither; the v2 surface document lands with the other three dev bindings (public issue #511), and this entry goes with it."
+      "reason": "The ABI v2 dev binding's rule r3 (spec/abi-v2/docs.md): every vocabulary has an unknown(n) member, an unlisted value kept per field, which Go spells as the raw value plus Known() false. docs/reference/bindings-v1.md is the 1.x surface and names none of them; the v2 surface document lands with the other three dev bindings (public issue #511), and this entry goes with it."
     },
     {
       "binding": "python",
@@ -568,14 +361,11 @@
         "MergeReason.known",
         "DeclinedTier.known",
         "DeclinedLayer.known",
-        "DiscoverQueryParam",
-        "DiscoverQueryParam.DATABASE",
-        "DiscoverQueryParam.TABLE",
         "DiscoverQueryParam.known",
         "DiscoverQueryParam.of"
       ],
       "issue": 511,
-      "reason": "The ABI v2 dev binding's rule r3 (spec/abi-v2/docs.md), as Python spells it: an unlisted value of an enum class is that class's unknown(n) member (`Outcome(\"x\")`, named `unknown(x)`), and every vocabulary gains `known`, False for exactly that member (a property on the enum classes, a function on the plain-string Reason and Source); discover_query_param is an enum like every other, so it gains its type, with `of` like the other document vocabularies. docs/reference/bindings-v1.md is the 1.x surface and names neither; the v2 surface document lands with the other dev bindings (public issue #511), and this entry goes with it."
+      "reason": "The ABI v2 dev binding's rule r3 (spec/abi-v2/docs.md), as Python spells it: an unlisted value of an enum class is that class's unknown(n) member (`Outcome(\"x\")`, named `unknown(x)`), and every vocabulary gains `known`, False for exactly that member (a property on the enum classes, a function on the plain-string Reason and Source); DiscoverQueryParam has `of`, as the other document vocabularies have (their own entry). docs/reference/bindings-v1.md is the 1.x surface and names neither; the v2 surface document lands with the other dev bindings (public issue #511), and this entry goes with it."
     },
     {
       "binding": "ts",
@@ -587,7 +377,6 @@
         "reasonKnown",
         "sourceKnown",
         "outcomeKnown",
-        "batchOutcomeKnown",
         "filterOutcomeKnown",
         "verdictKnown",
         "defaultKindKnown",
@@ -635,12 +424,14 @@
         "Reason.*",
         "Source",
         "Source.*",
-        "DiscoverQueryParam",
-        "DiscoverQueryParam.*",
-        "Refusal.dev_message"
+        "Refusal.dev_message",
+        "DiscoverQueryParam.Unknown",
+        "DiscoverQueryParam.from_wire",
+        "DiscoverQueryParam.is_known",
+        "DiscoverQueryParam.ch_type"
       ],
       "issue": 511,
-      "reason": "The ABI v2 dev binding's rule r3 (spec/abi-v2/docs.md): every vocabulary has an explicit unknown(n) member, an unlisted value kept per field, which Rust spells as an Unknown variant carrying the raw value, with is_known() false and from_wire/from_code to read one; the call status, the transform reasons and the value sources gain types of their own (Status, Reason, Source; the 1.x status, reason and source modules stay beside them), and discover_query_param gains DiscoverQueryParam. Refusal.dev_message is rule r6's exact fingerprint message. docs/reference/bindings-v1.md is the 1.x surface and names none of them; the v2 surface document lands with the other dev bindings (public issue #511), and this entry goes with it."
+      "reason": "The ABI v2 dev binding's rule r3 (spec/abi-v2/docs.md): every vocabulary has an explicit unknown(n) member, an unlisted value kept per field, which Rust spells as an Unknown variant carrying the raw value, with is_known() false and from_wire/from_code to read one; the call status, the transform reasons and the value sources gain types of their own (Status, Reason, Source; the 1.x status, reason and source modules stay beside them). DiscoverQueryParam.ch_type is the description's ch_type fact of the discovery query's parameters, which Rust alone exposes; the v2 surface document settles it. Refusal.dev_message is rule r6's exact fingerprint message. docs/reference/bindings-v1.md is the 1.x surface and names none of them; the v2 surface document lands with the other dev bindings (public issue #511), and this entry goes with it."
     }
   ]
 }

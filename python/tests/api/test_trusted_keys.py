@@ -9,7 +9,17 @@ import pytest
 
 import chtypes
 from chtypes import FetchOptions, UsageError
+from chtypes._ocifetch import _channel
 from chtypes._ocifetch import _constants as C
+
+
+@pytest.fixture(autouse=True)
+def _overridable() -> object:
+    """The keys are read where the channel honors a trust override; the dev
+    channel ignores the option whatever it holds (the last test)."""
+    restore = _channel.allow_overrides_for_tests()
+    yield
+    restore()
 
 
 def test_a_hex_key_becomes_a_record_whose_key_id_is_derived() -> None:
@@ -29,3 +39,11 @@ def test_a_key_that_is_not_64_hex_digits_is_misuse(bad: object) -> None:
 def test_no_trusted_key_record_type_is_public() -> None:
     assert not hasattr(chtypes, "TrustedKey")
     assert FetchOptions()._trusted_keys() is None
+
+
+def test_the_dev_channel_ignores_the_option_whatever_it_holds() -> None:
+    restore = _channel.use_dev_channel_for_tests()
+    try:
+        assert FetchOptions(trusted_keys=("zz",))._trusted_keys() == ()
+    finally:
+        restore()

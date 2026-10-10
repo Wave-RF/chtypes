@@ -237,10 +237,11 @@ fn package(
     }
 }
 
-fn registry_over(layout: &Layout, platform: &str, trusted: &str) -> Registry {
+/// A registry over `layout`, for this host: the stub is built for it, and a
+/// registry opens libraries for this host only (public issue #500).
+fn registry_over(layout: &Layout, trusted: &str) -> Registry {
     Registry::new(RegistryOptions {
         fetch: FetchOptions {
-            platform: Some(platform.to_string()),
             cache_dir: Some(layout.cache.to_string_lossy().into_owned()),
             system_dirs: Some(Vec::new()),
             offline: true,
@@ -303,7 +304,7 @@ fn a_signed_layout_resolves_adapts_and_loads_and_a_mismatch_is_refused() {
 
     // --- the good statement: resolve, adapt, load ------------------------------
     let good = package(&work.join("good"), &library, &predicate, &key, &keyid);
-    let registry = registry_over(&good, &platform, &public_hex);
+    let registry = registry_over(&good, &public_hex);
     assert!(
         registry.libraries().is_empty(),
         "construction opens nothing"
@@ -314,7 +315,6 @@ fn a_signed_layout_resolves_adapts_and_loads_and_a_mismatch_is_refused() {
     // statement (nothing installed answers the request).
     let untrusting = Registry::new(RegistryOptions {
         fetch: FetchOptions {
-            platform: Some(platform.clone()),
             cache_dir: Some(good.cache.to_string_lossy().into_owned()),
             system_dirs: Some(Vec::new()),
             offline: true,
@@ -364,7 +364,7 @@ fn a_signed_layout_resolves_adapts_and_loads_and_a_mismatch_is_refused() {
         manifest_digest: String::new(),
     };
     std::fs::create_dir_all(&empty.cache).unwrap();
-    let missing = registry_over(&empty, &platform, &public_hex)
+    let missing = registry_over(&empty, &public_hex)
         .for_version("1.1")
         .unwrap_err();
     let Error::ArtifactMissing(message) = &missing else {
@@ -379,7 +379,7 @@ fn a_signed_layout_resolves_adapts_and_loads_and_a_mismatch_is_refused() {
     let mut lying = predicate.clone();
     lying["inputs_sha256"] = json!("d".repeat(64));
     let bad = package(&work.join("bad"), &library, &lying, &key, &keyid);
-    let err = registry_over(&bad, &platform, &public_hex)
+    let err = registry_over(&bad, &public_hex)
         .for_version(&minor)
         .unwrap_err();
     let Error::ArtifactCorrupt(refusal) = &err else {
@@ -390,7 +390,6 @@ fn a_signed_layout_resolves_adapts_and_loads_and_a_mismatch_is_refused() {
     // preload opens at construction and never fetches.
     let preloaded = Registry::new(RegistryOptions {
         fetch: FetchOptions {
-            platform: Some(platform.clone()),
             cache_dir: Some(good.cache.to_string_lossy().into_owned()),
             system_dirs: Some(Vec::new()),
             offline: true,
@@ -404,7 +403,6 @@ fn a_signed_layout_resolves_adapts_and_loads_and_a_mismatch_is_refused() {
     assert_eq!(preloaded.libraries().len(), 1);
     let missing_preload = Registry::new(RegistryOptions {
         fetch: FetchOptions {
-            platform: Some(platform),
             cache_dir: Some(empty.cache.to_string_lossy().into_owned()),
             system_dirs: Some(Vec::new()),
             offline: true,
@@ -457,11 +455,6 @@ fn the_dev_channel_honors_no_trust_override() {
     if fields["os"] == "linux" {
         fields.entry("glibc_floor").or_insert(json!("2.17"));
     }
-    let platform = format!(
-        "{}-{}",
-        predicate["os"].as_str().unwrap(),
-        predicate["arch"].as_str().unwrap()
-    );
     let minor = predicate["clickhouse_minor"].as_str().unwrap().to_string();
     let (key, public_hex, keyid) = test_signing_key();
     let work = std::env::temp_dir().join(format!(
@@ -470,7 +463,7 @@ fn the_dev_channel_honors_no_trust_override() {
     ));
     let _ = std::fs::remove_dir_all(&work);
     let layout = package(&work.join("good"), &library, &predicate, &key, &keyid);
-    let err = registry_over(&layout, &platform, &public_hex)
+    let err = registry_over(&layout, &public_hex)
         .for_version(&minor)
         .unwrap_err();
     assert!(

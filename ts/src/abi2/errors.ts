@@ -11,18 +11,19 @@
  *     that forgot the distinction turn every decline into a rejection. They
  *     share one abstract base, `CallError`, under `ChtypesError`, which is the
  *     explicit way to catch all four.
- *   - a LOADER error: a refusal reason, the path, and the want/got pair where
- *     the reason has one (sdk.json `loader.refusals`). These extend the fetch
- *     layer's own classes, so a caller catching `ArtifactCorruptError` catches
- *     the fetch layer's corruption and the loader's step 5 alike, and every
- *     artifact error (fetch or loader) is an `ArtifactError`.
+ *   - a LOADER error: a refusal reason, the path, and want and got where the
+ *     refusal names them (sdk.json `loader.refusals`), carried on the
+ *     `ArtifactError` base as in Go and Python. A refusal is the fetch layer's
+ *     own class for its code, so a caller catching `ArtifactCorruptError`
+ *     catches the fetch layer's corruption and the loader's step 5 alike, and
+ *     every artifact error (fetch or loader) is an `ArtifactError`.
  *
  * `messageBytes` and `column` are raw bytes, never assumed UTF-8. `chName` is
  * a plain string: its content is ASCII by the ABI's own promise. `message`
  * (the string every `Error` has) is the one lossy display form.
  */
 
-import { ArtifactCorruptError, ChtypesError, FetchV1Error } from '../ocifetch/index.js';
+import { ArtifactCorruptError, ChtypesError, CODE_ARTIFACT_INCOMPATIBLE, FetchV1Error, type RefusalFields } from '../ocifetch/index.js';
 import { ABI_STABILITY } from './decls.gen.js';
 import { Status } from './vocab.gen.js';
 
@@ -32,13 +33,8 @@ export { ChtypesError };
 /** The base of every fetch error and every loader refusal: the fetch layer's own base class, re-exported under the name the rest of the family uses. */
 export { FetchV1Error as ArtifactError };
 
-/** Re-exported unchanged: the fetch layer's corruption error, which the loader's step-5 refusal extends. */
+/** Re-exported unchanged: the fetch layer's corruption error, which the loader's step-4 and step-5 refusals are too. */
 export { ArtifactCorruptError };
-
-/** True for any error this package throws on purpose: a call error, a fetch error or a loader refusal. */
-export function isChtypesError(err: unknown): err is ChtypesError {
-  return err instanceof ChtypesError;
-}
 
 /** The five fields of a library error object, read verbatim. */
 export interface CallErrorFields {
@@ -120,15 +116,7 @@ export function internalError(message: string): InternalError {
   return new InternalError(binding(Status.Internal, message));
 }
 
-/** A loader refusal's fields: the reason, the artifact path, and want/got where the reason has one. */
-export interface LoaderErrorFields {
-  readonly reason: string;
-  readonly path: string;
-  readonly want?: string | undefined;
-  readonly got?: string | undefined;
-}
-
-function renderLoaderMessage(label: string, f: LoaderErrorFields): string {
+function renderLoaderMessage(label: string, f: RefusalFields): string {
   const detail = f.want !== undefined || f.got !== undefined ? ` (want ${f.want ?? '?'}, got ${f.got ?? '?'})` : '';
   return `chtypes: ${f.path}: ${label}: ${f.reason}${detail}`;
 }
@@ -143,7 +131,7 @@ export function devFingerprintMessage(sdk: string, library: string): string {
 }
 
 /** An incompatible-artifact refusal's message: rule r6's exact text for a fingerprint refusal while the description is unstable (a 2.0.0-dev SDK), the loader's own otherwise. */
-function incompatibleMessage(f: LoaderErrorFields): string {
+function incompatibleMessage(f: RefusalFields): string {
   if (f.reason === 'fingerprint' && ABI_STABILITY === 'unstable' && f.want !== undefined && f.got !== undefined) {
     return devFingerprintMessage(f.want, f.got);
   }
@@ -151,38 +139,18 @@ function incompatibleMessage(f: LoaderErrorFields): string {
 }
 
 /** A loader step 1-4 or 6 refusal: the artifact is not one this binding can speak to (wrong ABI generation, a different fingerprint, a missing symbol, an unresolvable link). A fingerprint refusal by a 2.0.0-dev SDK carries rule r6's exact message. */
-export class ArtifactIncompatibleError extends FetchV1Error implements LoaderErrorFields {
-  readonly reason: string;
-  readonly path: string;
-  readonly want: string | undefined;
-  readonly got: string | undefined;
-
-  constructor(f: LoaderErrorFields) {
-    super('CHTYPES_ARTIFACT_INCOMPATIBLE', incompatibleMessage(f));
-    this.reason = f.reason;
-    this.path = f.path;
-    this.want = f.want;
-    this.got = f.got;
+export class ArtifactIncompatibleError extends FetchV1Error {
+  constructor(f: RefusalFields) {
+    super(CODE_ARTIFACT_INCOMPATIBLE, incompatibleMessage(f), { refusal: f });
   }
 }
 
 /**
  * A loader step 4 (malformed build info) or step 5 (a cross-check mismatch)
- * refusal: the artifact's own signed statement and its bytes disagree. It
- * extends the fetch layer's `ArtifactCorruptError`, so the two are one class
- * to a caller who catches it.
+ * refusal, or the load-time assertion's: the artifact's own signed statement
+ * and its bytes disagree. It is the fetch layer's `ArtifactCorruptError`, with
+ * the refusal's fields, so the two are one class to a caller who catches it.
  */
-export class LoaderCorruptError extends ArtifactCorruptError implements LoaderErrorFields {
-  readonly reason: string;
-  readonly path: string;
-  readonly want: string | undefined;
-  readonly got: string | undefined;
-
-  constructor(f: LoaderErrorFields) {
-    super(renderLoaderMessage('corrupt artifact', f));
-    this.reason = f.reason;
-    this.path = f.path;
-    this.want = f.want;
-    this.got = f.got;
-  }
+export function corruptRefusal(f: RefusalFields): ArtifactCorruptError {
+  return new ArtifactCorruptError(renderLoaderMessage('corrupt artifact', f), { refusal: f });
 }

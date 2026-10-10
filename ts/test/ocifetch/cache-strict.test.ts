@@ -11,8 +11,8 @@ import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'n
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { isChtypesError } from '../../src/abi2/index.js';
-import { CacheUnusableError, type FetchV1Options } from '../../src/ocifetch/index.js';
+import { ChtypesError } from '../../src/abi2/index.js';
+import { CacheUnusableError, exitStatusOf, type FetchV1Options } from '../../src/ocifetch/index.js';
 import { ensure, listInstalled, missingNotes, probeCache, resolveInstalled, verifyInstalled } from '../../src/ocifetch/ensure.js';
 import { encodeRecord, unpackedDir, type VerifiedRecord } from '../../src/ocifetch/layout.js';
 import type { ArtifactPredicate } from '../../src/ocifetch/types.js';
@@ -212,9 +212,9 @@ describe.skipIf(asRoot)('every cache fault in both modes (public issue #486)', (
             caught = err;
           }
           expect(caught).toBeInstanceOf(CacheUnusableError);
-          expect(isChtypesError(caught)).toBe(true);
+          expect(caught).toBeInstanceOf(ChtypesError);
           const e = caught as CacheUnusableError;
-          expect({ code: e.code, reason: e.reason, path: e.path, exit: e.exitStatus }).toEqual({
+          expect({ code: e.code, reason: e.reason, path: e.path, exit: exitStatusOf(e.code) }).toEqual({
             code: 'CHTYPES_CACHE_UNUSABLE',
             reason: fault.reason,
             path: faultPath,

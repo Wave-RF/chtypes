@@ -38,6 +38,23 @@ function flag(name: string): boolean {
   return v !== undefined && ['1', 'true', 'yes', 'on'].includes(v.trim().toLowerCase());
 }
 
+/**
+ * Raw 32-byte ed25519 public keys, each as 64 hex characters (the
+ * `CHTYPES_TRUSTED_KEYS` spelling, and the `trustedKeys` option's, as in every
+ * binding), as trust-list records whose key id is derived (`sha256-first16hex`).
+ * A key that is not 64 hex characters is a `UsageError` naming `where`.
+ */
+export function trustedKeysOfHex(keys: readonly string[], where: string): TrustedKey[] {
+  const list: TrustedKey[] = [];
+  for (const k of keys) {
+    if (typeof k !== 'string' || !RAW_KEY.test(k)) {
+      throw usageError(`${where}: ${JSON.stringify(k)} is not a raw ed25519 public key (64 hex characters)`);
+    }
+    list.push({ keyid: keyIdOfRawKey(k), ed25519Hex: k.toLowerCase() });
+  }
+  return list;
+}
+
 /** Fills each option the caller left unset from its environment variable. Pure over `process.env`, except the one retired-variable warning. */
 export function withEnvironment<T extends FetchV1Options>(options: T): T {
   const out: { -readonly [K in keyof FetchV1Options]: FetchV1Options[K] } = { ...options };
@@ -55,14 +72,10 @@ export function withEnvironment<T extends FetchV1Options>(options: T): T {
   if (overridable && out.allowUnsigned === undefined && flag(ENV_ALLOW_UNSIGNED_NAME)) out.allowUnsigned = true;
   const keys = process.env[ENV_TRUSTED_KEYS_NAME];
   if (overridable && out.trustedKeys === undefined && keys !== undefined && keys.trim() !== '') {
-    const list: TrustedKey[] = [];
-    for (const k of keys.split(',').map((x) => x.trim()).filter((x) => x !== '')) {
-      if (!RAW_KEY.test(k)) {
-        throw usageError(`${ENV_TRUSTED_KEYS_NAME}: ${JSON.stringify(k)} is not a raw ed25519 public key (64 hex characters)`);
-      }
-      list.push({ keyid: keyIdOfRawKey(k), ed25519Hex: k.toLowerCase() });
-    }
-    out.trustedKeys = list;
+    out.trustedKeys = trustedKeysOfHex(
+      keys.split(',').map((x) => x.trim()).filter((x) => x !== ''),
+      ENV_TRUSTED_KEYS_NAME,
+    );
   }
   const target = process.env[ENV_TARGET_NAME];
   if (out.platform === undefined && target !== undefined && target !== '') {
