@@ -10,6 +10,11 @@
 //! each ignored override is named exactly once. Nothing here reaches the
 //! network.
 
+// The fingerprint this binary speaks, from the generated constant itself, so
+// the hand-written records below are the binary's own fingerprint's.
+#[path = "../src/ocifetch/abi_fingerprint.rs"]
+mod abi_fingerprint;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -307,5 +312,158 @@ fn offline_env_is_the_offline_flag() {
         "fetch under CHTYPES_OFFLINE=1: {code} {out:?} {err}"
     );
     assert!(!cache.exists(), "an offline fetch made {}", cache.display());
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// `resolve` and `prune` usage errors exit 2 with nothing on stdout, and their
+/// flags are refused by every other command (public issues #493 and #494).
+#[test]
+fn resolve_and_prune_usage_errors_exit_two() {
+    let base = scratch("resolve-prune-usage");
+    let cache = base.join("cache");
+    for args in [
+        vec!["resolve"],
+        vec!["resolve", "26.8", "26.9"],
+        vec!["resolve", "v26.8"],
+        vec!["resolve", "26.8", "--platform", "linux-arm64"],
+        vec!["resolve", "26.8", "--dry-run"],
+        vec!["prune", "26.8"],
+        vec!["prune", "--keep", "0"],
+        vec!["prune", "--keep", "x"],
+        vec!["prune", "--line", "26.8.15"],
+        vec!["prune", "--line", "v26.8"],
+        vec!["prune", "--offline"],
+        vec!["prune", "--platform", "linux-arm64"],
+        vec!["prune", "--json"],
+        vec!["fetch", "26.8", "--json"],
+        vec!["list", "--dry-run"],
+    ] {
+        let (code, out, err) = run_env(&args, &[("CHTYPES_CACHE", cache.to_str().unwrap())]);
+        assert!(
+            code == 2 && out.is_empty() && !err.is_empty(),
+            "{args:?}: {code} stdout {out:?} stderr {err}"
+        );
+    }
+    assert!(!cache.exists(), "a usage error made {}", cache.display());
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// The 64 hex digits of test record `n`'s manifest.
+fn hex(n: u64) -> String {
+    format!("{n:064x}")
+}
+
+/// One record of this binary's own fingerprint, written by hand where the dev
+/// CLI reads the explicit cache `cache` (its v2-dev subroot), as an install
+/// leaves it; `n` names its manifest. Returns the entry directory.
+fn install_record(cache: &Path, n: u64, version: &str, build: &str) -> PathBuf {
+    let entry = cache.join(DEV).join("unpacked/sha256").join(hex(n));
+    std::fs::create_dir_all(&entry).unwrap();
+    let record = serde_json::json!({
+        "schema": 2,
+        "platform": "linux-arm64",
+        "version": version,
+        "channel": null,
+        "build": build,
+        "library": "libchtypes.so",
+        "library_sha256": "0".repeat(64),
+        "library_bytes": 0,
+        "digests": {
+            "index": null,
+            "manifest": format!("sha256:{}", hex(n)),
+            "layer": format!("sha256:{}", hex(n + 1000)),
+            "bundle": null,
+            "bundle_manifest": null,
+        },
+        "signed_by": null,
+        "predicate": {
+            "clickhouse_version": version,
+            "build": build,
+            "abi_fingerprint": abi_fingerprint::DEV_ABI_FINGERPRINT,
+        },
+    });
+    std::fs::write(
+        entry.join("verified.json"),
+        serde_json::to_vec(&record).unwrap(),
+    )
+    .unwrap();
+    entry
+}
+
+/// `resolve --offline` answers from the cache, one line per platform it has a
+/// build for, and `--json` gives the same rows as one array; with nothing
+/// installed it is CHTYPES_ARTIFACT_MISSING (exit 1). `prune` removes the
+/// builds of a line newer ones supersede: a dry run names them and removes
+/// nothing, `--line` and `--keep` narrow it (public issues #493 and #494). The
+/// real binary reaches only the staging registry, so the online answer is the
+/// conformance suite's (`resolve-build-*`).
+#[test]
+fn resolve_offline_and_prune_over_a_dev_cache() {
+    let base = scratch("resolve-prune");
+    let cache = base.join("cache");
+    let c = cache.to_str().unwrap();
+    let (code, out, err) = run(&["resolve", "26.8", "--offline", "--cache", c]);
+    assert!(
+        code == 1 && out.is_empty() && err.contains("CHTYPES_ARTIFACT_MISSING"),
+        "resolve --offline with nothing installed: {code} {out:?} {err}"
+    );
+
+    let older = install_record(&cache, 1, "26.7.10.3", "20260710.000000");
+    let line_newest = install_record(&cache, 2, "26.7.15.5", "20260715.000000");
+    let newest = install_record(&cache, 3, "26.8.15.10", "20261001.183455");
+    let (code, out, err) = run(&["resolve", "26.8", "--offline", "--cache", c]);
+    let want = format!(
+        "resolved 26.8.15.10 linux-arm64 20261001.183455 sha256:{}\n",
+        hex(3)
+    );
+    assert_eq!((code, out.as_str()), (0, want.as_str()), "{err}");
+    let (code, out, err) = run(&["resolve", "--json", "26.8", "--offline", "--cache", c]);
+    let want = format!(
+        "[{{\"platform\":\"linux-arm64\",\"version\":\"26.8.15.10\",\"build\":\"20261001.183455\",\"manifest\":\"sha256:{}\"}}]\n",
+        hex(3)
+    );
+    assert_eq!((code, out.as_str()), (0, want.as_str()), "{err}");
+
+    let would = format!("would-prune 26.7.10.3 linux-arm64 {}\n", older.display());
+    let (code, out, err) = run(&["prune", "--dry-run", "--cache", c]);
+    let summary = format!(
+        "chtypes: would prune 1 build(s) under {}",
+        cache.join(DEV).display()
+    );
+    assert!(
+        code == 0 && out == would && err.contains(&summary),
+        "prune --dry-run: {code} {out:?} {err}"
+    );
+    assert!(older.exists(), "the dry run removed {}", older.display());
+    for args in [
+        ["prune", "--line", "26.8", "--cache", c],
+        ["prune", "--keep", "2", "--cache", c],
+    ] {
+        let (code, out, err) = run(&args);
+        assert_eq!((code, out.as_str()), (0, ""), "{args:?}: {err}");
+    }
+    let (code, out, err) = run(&["prune", "--line", "26.7", "--cache", c]);
+    assert!(
+        code == 0
+            && out == would.replacen("would-prune", "pruned", 1)
+            && err.contains("chtypes: pruned 1 build(s) under "),
+        "prune --line 26.7: {code} {out:?} {err}"
+    );
+    assert!(!older.exists(), "{} is still there", older.display());
+    assert!(line_newest.exists() && newest.exists());
+    let (code, out, err) = run(&["list", "--offline", "--cache", c]);
+    assert!(
+        code == 0
+            && !out.contains("26.7.10.3")
+            && out.contains("installed 26.7.15.5 ")
+            && out.contains("installed 26.8.15.10 "),
+        "list --offline after the prune: {code} {out:?} {err}"
+    );
+    let (code, out, err) = run(&["prune", "--cache", c]);
+    assert_eq!(
+        (code, out.as_str()),
+        (0, ""),
+        "a second prune: nothing left to prune: {err}"
+    );
     let _ = std::fs::remove_dir_all(&base);
 }

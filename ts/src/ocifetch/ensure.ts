@@ -3,7 +3,10 @@
  * `listInstalled`, `verifyInstalled`, `fetchSigned`. This is the only file
  * that wires resolve (`oci.ts`), trust (`dsse.ts`), bytes (`unpack.ts`), the
  * cache (`layout.ts`) and the lock (`lock.ts`) together; nothing outside
- * `index.ts` calls into those modules directly.
+ * `index.ts` calls into those modules directly. `resolve.ts` (`chtypes
+ * resolve`) takes the same resolve and trust steps, through
+ * `verifyManifestTrust`, and `prune.ts` (`chtypes prune`) reads and removes
+ * cache entries under the in-use hold (`hold.ts`).
  */
 
 import { randomBytes } from 'node:crypto';
@@ -24,7 +27,7 @@ import {
   SPELLING_REGEX,
   TAGS_LIST_MAX_BYTES,
 } from './constants.gen.js';
-import { checkArtifactStatement, checkGenericStatement, parseStatement, verifyAnyReferrerBundle, verifyBundleSignature } from './dsse.js';
+import { checkArtifactStatement, checkGenericStatement, parseStatement, type TrustResult, verifyAnyReferrerBundle, verifyBundleSignature } from './dsse.js';
 import {
   ArtifactCorruptError,
   ArtifactMissingError,
@@ -59,7 +62,7 @@ import { type GoldensCandidate, selectGoldens, statementRevision } from './golde
 import { discoverSignatureCandidates } from './referrers.js';
 import { probeRoots, strictMode, unwritable } from './faults.js';
 import { verifyAndInstallFromLocalBlobs } from './localverify.js';
-import { type Descriptor, fetchBlobBytesByDigest, fetchManifestByDigest, resolveTag } from './oci.js';
+import { type Descriptor, fetchBlobBytesByDigest, fetchManifestByDigest, type ManifestInfo, resolveTag } from './oci.js';
 import { emptyLock, getPin, type LockFile, type LockPin, readLock, withPin, writeLock } from './lock.js';
 import { digestOfHex, endpointUrl, hexOfDigest, platformInfo, realClock, resolvePlatformOption } from './types.js';
 import type { ArtifactPredicate, FetchV1Options, PlatformKey, Resolved, TrustedKey, VerifyResult } from './types.js';
@@ -73,7 +76,7 @@ function defaultTrustedKeys(options: FetchV1Options): readonly TrustedKey[] {
 }
 
 /** The bases: the caller's or `CHTYPES_ARTIFACTS_URL` when the active contract honors them, else the contract's own (the staging dev channel alone, rule r6). */
-function resolveBases(options: FetchV1Options): readonly string[] {
+export function resolveBases(options: FetchV1Options): readonly string[] {
   const channel = activeChannel();
   if (!channel.overridable) return channel.bases;
   if (options.bases !== undefined && options.bases.length > 0) return options.bases;
@@ -114,7 +117,8 @@ function tokenHostsFor(bases: readonly string[]): readonly string[] {
   return hosts;
 }
 
-function requestOptionsFor(options: FetchV1Options, bases: readonly string[]): Omit<RequestOptions, 'maxBytes'> {
+/** The request options every fetch over `bases` sends: the clock, and the token for the configured base hosts only. */
+export function requestOptionsFor(options: FetchV1Options, bases: readonly string[]): Omit<RequestOptions, 'maxBytes'> {
   return {
     clock: options.clock ?? realClock(),
     ...(options.token !== undefined ? { token: options.token } : {}),
@@ -497,43 +501,17 @@ async function ensureIn(request: string, options: FetchV1Options): Promise<Resol
       warnings = [...warnings, monotonic.warning];
     }
   } else {
-    const info = platformInfo(platform);
-    const trust = await verifyAnyReferrerBundle(
+    const verified = await verifyManifestTrust(
       resolveResult.repositoryRoot,
-      resolveResult.manifest.digest,
-      MEDIA_TYPE_BUNDLE,
-      trustedKeys,
-      (statement) =>
-        checkArtifactStatement(statement, PREDICATE_TYPE_ARTIFACT, resolveResult.manifest.layer.digest, {
-          os: info.os,
-          arch: info.architecture,
-          requestedSpelling: request,
-        }),
-      { ...baseReqOptions, maxBytes: 0 },
+      resolveResult.manifest,
+      resolveResult.aliasAbsent,
+      platform,
+      request,
+      options,
+      baseReqOptions,
     );
-
-    let predicate: ArtifactPredicate;
-    let signedBy: string;
-    if (trust === undefined) {
-      if (!allowUnsigned(options)) {
-        throw new ArtifactUntrustedError(
-          activeChannel().overridable
-            ? `chtypes: no referrer of ${resolveResult.manifest.digest} verified under a trusted key (CHTYPES_ALLOW_UNSIGNED=1 to proceed anyway)`
-            : `chtypes: no referrer of ${resolveResult.manifest.digest} verified under the staging key ${activeChannel().keys.map((k) => k.keyid).join(', ')}`,
-        );
-      }
-      predicate = await unsignedPredicateFallback(resolveResult.repositoryRoot, resolveResult.manifest, request, info, baseReqOptions);
-      signedBy = '';
-      warnings = [...warnings, 'chtypes: proceeding with an unsigned artifact (CHTYPES_ALLOW_UNSIGNED)'];
-    } else {
-      predicate = trust.statement.predicate as unknown as ArtifactPredicate;
-      signedBy = trust.signedBy;
-      // An SDK ahead of the registry (public issue #578): the alias for its
-      // own fingerprint answered 404 on every base, and the tag's build is
-      // signed for another. Refused from the signed statement, before the
-      // layer is requested, so nothing is downloaded or installed.
-      await aheadOfRegistry(resolveResult.aliasAbsent, predicate, () => cachedOwnBuild(options, platform, request));
-    }
+    const { trust, predicate, signedBy } = verified;
+    warnings = [...warnings, ...verified.warnings];
 
     const monotonic = await checkMonotonic(root, platform, request, predicate);
     if (monotonic !== undefined) {
@@ -609,6 +587,68 @@ async function ensureIn(request: string, options: FetchV1Options): Promise<Resol
   }
 
   return resolvedFromRecord(record, platform, request, recordDir, resolveResult.repositoryRoot, alreadyInstalled, warnings);
+}
+
+/** What `verifyManifestTrust` established for one platform manifest. */
+export interface ManifestTrust {
+  /** The verified signature, or `undefined` when the call proceeds unsigned (allow-unsigned). */
+  readonly trust: TrustResult | undefined;
+  /** The signed predicate, or under allow-unsigned the config blob's (`unsignedPredicateFallback`). */
+  readonly predicate: ArtifactPredicate;
+  /** The key id that verified the signature, `''` when unsigned. */
+  readonly signedBy: string;
+  readonly warnings: readonly string[];
+}
+
+/**
+ * The trust step of a fetch for one platform manifest (guide §4), exactly as
+ * `ensure` takes it before anything is downloaded: a signature referrer of the
+ * manifest verified under the trust list, its statement checked against the
+ * manifest's layer, the platform and `request`; no signature that verifies is
+ * `ArtifactUntrustedError` unless allow-unsigned is honored, when the config
+ * blob's metadata stands in with a warning. A signed build is then checked by
+ * the dev channel's ahead-of-registry rule (public issue #578: the alias for
+ * its own fingerprint answered 404 on every base, and the tag's build is
+ * signed for another), refused from the signed statement, before any layer is
+ * requested. `chtypes resolve` takes the same step for every platform.
+ */
+export async function verifyManifestTrust(
+  repositoryRoot: string,
+  manifest: ManifestInfo,
+  aliasAbsent: boolean,
+  platform: PlatformKey,
+  request: string,
+  options: FetchV1Options,
+  baseReqOptions: Omit<RequestOptions, 'maxBytes'>,
+): Promise<ManifestTrust> {
+  const info = platformInfo(platform);
+  const trust = await verifyAnyReferrerBundle(
+    repositoryRoot,
+    manifest.digest,
+    MEDIA_TYPE_BUNDLE,
+    defaultTrustedKeys(options),
+    (statement) =>
+      checkArtifactStatement(statement, PREDICATE_TYPE_ARTIFACT, manifest.layer.digest, {
+        os: info.os,
+        arch: info.architecture,
+        requestedSpelling: request,
+      }),
+    { ...baseReqOptions, maxBytes: 0 },
+  );
+  if (trust === undefined) {
+    if (!allowUnsigned(options)) {
+      throw new ArtifactUntrustedError(
+        activeChannel().overridable
+          ? `chtypes: no referrer of ${manifest.digest} verified under a trusted key (CHTYPES_ALLOW_UNSIGNED=1 to proceed anyway)`
+          : `chtypes: no referrer of ${manifest.digest} verified under the staging key ${activeChannel().keys.map((k) => k.keyid).join(', ')}`,
+      );
+    }
+    const predicate = await unsignedPredicateFallback(repositoryRoot, manifest, request, info, baseReqOptions);
+    return { trust, predicate, signedBy: '', warnings: ['chtypes: proceeding with an unsigned artifact (CHTYPES_ALLOW_UNSIGNED)'] };
+  }
+  const predicate = trust.statement.predicate as unknown as ArtifactPredicate;
+  await aheadOfRegistry(aliasAbsent, predicate, () => cachedOwnBuild(options, platform, request));
+  return { trust, predicate, signedBy: trust.signedBy, warnings: [] };
 }
 
 /**

@@ -126,7 +126,7 @@ def _resolve_online(
     warnings: list[str] = []
     # Bundles are read through a scratch directory OUTSIDE the cache: a resolve
     # writes nothing there.
-    with tempfile.TemporaryDirectory(prefix="chtypes-resolve-") as scratch:
+    with tempfile.TemporaryDirectory(prefix="resolve-scratch-") as scratch:
         for p in C.PLATFORMS:
             platform_key = p["key"]
             try:

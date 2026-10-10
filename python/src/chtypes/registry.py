@@ -271,7 +271,7 @@ class Registry:
         """Resolve, fetch, verify and install the build `request` names into the
         cache, as `chtypes fetch` does, and open nothing: no library is loaded
         and the process setup is untouched, so it needs no `setup` (public
-        issue #492). It honours the registry's fetch options (offline, the
+        issue #492). It honors the registry's fetch options (offline, the
         cache, and under the production channel the bases, the trust and the
         lock), and shares one fetch with a concurrent open or `fetch` of the
         same request. The `Resolved` names the installed version, build,

@@ -14,7 +14,8 @@
  * Nothing here reimplements a ClickHouse rule: every answer comes from
  * ClickHouse's own C++, vendored per release behind the C ABI, and every result
  * is a one-to-one decode of the document the library returned. `Registry.open`,
- * `for` and `installed` are asynchronous only because the fetch layer is.
+ * `for`, `installed` and `fetch` are asynchronous only because the fetch layer
+ * is; `fetch` installs a build and opens nothing.
  */
 
 export {

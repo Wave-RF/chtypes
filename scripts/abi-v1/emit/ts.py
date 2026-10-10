@@ -621,10 +621,11 @@ def render_libc(model) -> str:
         "  return Number(libc().strlen([ptr]));",
         "}",
         "",
-        "/** flock(fd, operation) against the process's own libc: 0 when it succeeded, else the errno it failed with. */",
+        "/** flock(fd, operation) against the process's own libc: 0 when it succeeded, else the errno it failed with (-1 when none was captured), never 0 for a failure. */",
         "export function flock(fd: number, operation: number): number {",
         "  const r = libc().flock([fd, operation]);",
-        "  return r.value === 0 ? 0 : r.errnoCode;",
+        "  if (r.value === 0) return 0;",
+        "  return r.errnoCode !== 0 ? r.errnoCode : -1;",
         "}",
         "",
     ]

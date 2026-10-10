@@ -11,7 +11,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EXIT_OK, EXIT_USAGE, runCli } from '../src/cli.js';
-import { ERROR_EXIT_CODES } from '../src/ocifetch/constants.gen.js';
+import { ERROR_EXIT_CODES, TEST_KEYS } from '../src/ocifetch/constants.gen.js';
 import { listTags } from '../src/ocifetch/index.js';
 import { useFetchV1ForTests } from '../src/ocifetch/channel.js';
 
@@ -215,5 +215,117 @@ describe('against a static tree', () => {
     writeTags(['26.8', '26.8.15.10']);
     const r = await run('fetch', '--all', '--cache', cache);
     expect(r.code).toBe(ERROR_EXIT_CODES['CHTYPES_ARTIFACT_UNPUBLISHED']);
+  });
+});
+
+/**
+ * `chtypes resolve` (public issue #493) and `chtypes prune` (public issue #494) over the conformance fixtures' `basic`
+ * tree, signed with the fixtures' test key, as Go's `go/cmd/chtypes/resolve_prune_test.go` drives them.
+ */
+describe('resolve and prune', () => {
+  const basicTree = path.resolve(import.meta.dirname, '../../tests/fixtures/fetch-v1/trees/basic/v2/chtypes/v1');
+
+  /** The environment every case here runs under: the basic tree, the test key, `cache`, and nothing else set. */
+  function useBasicTree(): void {
+    for (const k of ['CHTYPES_ARTIFACTS_URL', 'CHTYPES_CACHE', 'CHTYPES_TRUSTED_KEYS', 'CHTYPES_ALLOW_UNSIGNED', 'CHTYPES_TARGET', 'CHTYPES_CACHE_STRICT', 'CHTYPES_OFFLINE']) {
+      vi.stubEnv(k, '');
+    }
+    vi.stubEnv('CHTYPES_ARTIFACTS_URL', pathToFileURL(basicTree).href);
+    vi.stubEnv('CHTYPES_TRUSTED_KEYS', TEST_KEYS[0].ed25519Hex);
+    vi.stubEnv('CHTYPES_CACHE', cache);
+  }
+
+  it('refuses a missing, extra or refused spelling, an option the command does not take, and a bad --line or --keep, with the usage status and nothing on stdout', async () => {
+    useBasicTree();
+    for (const argv of [
+      ['resolve'],
+      ['resolve', '26.8', '26.9'],
+      ['resolve', 'v26.8'],
+      ['resolve', '26.8', '--platform', 'linux-arm64'],
+      ['resolve', '26.8', '--keep', '2'],
+      ['prune', '26.8'],
+      ['prune', '--keep', '0'],
+      ['prune', '--keep', 'x'],
+      ['prune', '--line', '26.8.15'],
+      ['prune', '--line', 'v26.8'],
+      ['prune', '--offline'],
+      ['prune', '--platform', 'linux-arm64'],
+      ['prune', '--json'],
+      ['list', '--json'],
+      ['where', '--dry-run'],
+    ]) {
+      const r = await run(...argv);
+      expect({ argv, code: r.code, out: r.out }).toEqual({ argv, code: EXIT_USAGE, out: '' });
+      expect(r.err).not.toBe('');
+    }
+  });
+
+  it('resolve names the build and manifest of every platform in platform order, as lines or one JSON array, and installs nothing; offline it is the cache\'s answer', async () => {
+    useBasicTree();
+    const lined = await run('resolve', '26.8');
+    expect({ code: lined.code, err: lined.err }).toEqual({ code: EXIT_OK, err: '' });
+    const lines = lined.out.replace(/\n$/, '').split('\n');
+    expect(lines).toHaveLength(3);
+    for (const [i, platform] of ['linux-amd64', 'linux-arm64', 'darwin-arm64'].entries()) {
+      expect(lines[i]).toMatch(new RegExp(`^resolved 26\\.8\\.15\\.10 ${platform} 20261001\\.183455 sha256:[0-9a-f]{64}$`));
+    }
+    // Nothing was installed: resolve downloads no layer and writes nothing.
+    expect(existsSync(cache)).toBe(false);
+
+    const json = await run('resolve', '--json', '26.8');
+    expect(json.code).toBe(EXIT_OK);
+    expect(json.out.endsWith(']\n')).toBe(true);
+    expect(json.out.split('\n')).toHaveLength(2);
+    expect(json.out.startsWith('[{"platform":"linux-amd64","version":"26.8.15.10","build":"20261001.183455","manifest":"sha256:')).toBe(true);
+    const doc = JSON.parse(json.out) as readonly Record<string, string>[];
+    expect(doc.map((row) => Object.keys(row).join(','))).toEqual(lines.map(() => 'platform,version,build,manifest'));
+    expect(doc.map((row) => `resolved ${row['version']} ${row['platform']} ${row['build']} ${row['manifest']}`)).toEqual(lines);
+
+    const miss = await run('resolve', '26.8', '--offline');
+    expect({ code: miss.code, out: miss.out }).toEqual({ code: ERROR_EXIT_CODES['CHTYPES_ARTIFACT_MISSING'], out: '' });
+    expect(miss.err).toContain('CHTYPES_ARTIFACT_MISSING');
+    vi.stubEnv('CHTYPES_TARGET', 'linux-arm64');
+    expect((await run('fetch', '26.8')).code).toBe(EXIT_OK);
+    const hit = await run('resolve', '26.8', '--offline');
+    expect({ code: hit.code, out: hit.out }).toEqual({ code: EXIT_OK, out: `${lines[1]}\n` });
+
+    const unpublished = await run('resolve', '1.1');
+    expect(unpublished.code).toBe(ERROR_EXIT_CODES['CHTYPES_ARTIFACT_UNPUBLISHED']);
+    expect(unpublished.err).toContain('CHTYPES_ARTIFACT_UNPUBLISHED');
+  });
+
+  it('prune removes the builds of a line a newer one supersedes, keeping the newest n per platform; a dry run removes nothing', async () => {
+    useBasicTree();
+    vi.stubEnv('CHTYPES_TARGET', 'linux-arm64');
+    const dirs = new Map<string, string>();
+    for (const spelling of ['26.7.10.3', '26.7', '26.8']) {
+      const r = await run('fetch', spelling);
+      expect({ spelling, code: r.code }).toEqual({ spelling, code: EXIT_OK });
+      dirs.set(spelling, r.out.trim());
+    }
+    const victim = dirs.get('26.7.10.3') as string;
+    const older = `would-prune 26.7.10.3 linux-arm64 ${victim}\n`;
+    const root = path.resolve(cache);
+
+    const dry = await run('prune', '--dry-run');
+    expect({ code: dry.code, out: dry.out }).toEqual({ code: EXIT_OK, out: older });
+    expect(dry.err).toContain(`chtypes: would prune 1 build(s) under ${root}\n`);
+    expect(existsSync(victim)).toBe(true);
+
+    expect(await run('prune', '--line', '26.8')).toMatchObject({ code: EXIT_OK, out: '' });
+    expect(await run('prune', '--keep', '2')).toMatchObject({ code: EXIT_OK, out: '' });
+    expect(existsSync(victim)).toBe(true);
+
+    const pruned = await run('prune', '--line', '26.7');
+    expect({ code: pruned.code, out: pruned.out }).toEqual({ code: EXIT_OK, out: older.replace('would-prune', 'pruned') });
+    expect(pruned.err).toContain(`chtypes: pruned 1 build(s) under ${root}\n`);
+    expect(existsSync(victim)).toBe(false);
+
+    const listed = await run('list', '--offline');
+    expect(listed.code).toBe(EXIT_OK);
+    expect(listed.out).not.toContain('26.7.10.3');
+    expect(listed.out).toContain('installed 26.7.15.5 ');
+    expect(listed.out).toContain('installed 26.8.15.10 ');
+    expect(await run('prune')).toMatchObject({ code: EXIT_OK, out: '' });
   });
 });

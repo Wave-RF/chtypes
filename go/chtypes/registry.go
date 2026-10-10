@@ -379,7 +379,7 @@ func (r *Registry) ensure(ctx context.Context, request string) (*Resolved, error
 // Fetch resolves, fetches, verifies and installs the build request names
 // into the cache, as `chtypes fetch` does, and opens nothing: no library is
 // loaded and the process setup is untouched, so it needs no Setup (public
-// issue #492). It honours the registry's fetch options (offline, the cache,
+// issue #492). It honors the registry's fetch options (offline, the cache,
 // and under the production channel the bases, the trust and the lock), and
 // it shares one fetch with a concurrent open or Fetch of the same request.
 // The Resolved names the installed version, build, digests and library path.

@@ -4,7 +4,8 @@
  * tests/fixtures/fetch-v1>` runs every case in `cases.json` on every
  * transport it lists for this binding (`file`, `http`; `registry` is the
  * `v1-network` job's own leg, not attempted here), against this binding's
- * `ensure`/`fetchSigned` seam, and writes `CHTYPES_V1_REPORT`. Unset, it
+ * `ensure`/`fetchSigned` seam (a `resolve-build-` case runs `resolveBuilds`,
+ * a `prune-` case `prune`), and writes `CHTYPES_V1_REPORT`. Unset, it
  * **skips loudly by name**.
  *
  * CI runs this exact command (plan §3.3, `.github/workflows/v1.yml`):
@@ -13,7 +14,7 @@
 
 import { type ChildProcessByStdio, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, lstat, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { Readable } from 'node:stream';
@@ -21,9 +22,13 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ensure, fetchSigned, listTags, resolveInstalled } from '../../src/ocifetch/ensure.js';
 import { FIXTURES_REPO_SUFFIX, PREDICATE_TYPE_FIXTURES, PREDICATE_TYPE_GOLDENS, RELEASE_KEYS, TEST_KEYS } from '../../src/ocifetch/constants.gen.js';
 import { ArtifactMissingError, type FetchV1ErrorCode } from '../../src/ocifetch/errors.js';
+import { hold } from '../../src/ocifetch/hold.js';
+import { readIndexEntries } from '../../src/ocifetch/layout.js';
 import { verifyAndInstallFromLocalBlobs } from '../../src/ocifetch/localverify.js';
 import { readLock, type LockFile } from '../../src/ocifetch/lock.js';
-import type { Clock, PlatformKey } from '../../src/ocifetch/types.js';
+import { prune, type Superseded } from '../../src/ocifetch/prune.js';
+import { resolveBuilds } from '../../src/ocifetch/resolve.js';
+import { type Clock, isPlatformKey, type PlatformKey } from '../../src/ocifetch/types.js';
 import { channelName, useOwnFingerprintForTests, useFetchV1ForTests, useProdV2ForTests } from '../../src/ocifetch/channel.js';
 
 // This file tests the v1 fetch contract that the ABI v2 dev channel narrows
@@ -90,6 +95,8 @@ interface ConformanceCase {
     readonly system_dirs: readonly string[];
     readonly lock: string | null;
     readonly before_index_rename_hook: string | null;
+    /** Installed builds this runner holds (`hold`, the call a registry makes before a load) before the call: another process using them. */
+    readonly held: readonly string[];
   };
   readonly request: {
     readonly spelling: string;
@@ -103,6 +110,8 @@ interface ConformanceCase {
     readonly bases: readonly string[];
     /** The dev channel's alias step under this fixture fingerprint (guide §3); null runs the v1 contract as it is. */
     readonly own_fingerprint: string | null;
+    /** A `prune-` case's prune. */
+    readonly prune: { readonly line: string | null; readonly keep: number; readonly dry_run: boolean } | null;
   };
   readonly env: Readonly<Record<string, string>>;
   readonly expect: {
@@ -124,7 +133,27 @@ interface ConformanceCase {
     readonly message_contains: string | null;
     /** Text a failed call's error must not contain anywhere. */
     readonly message_excludes: readonly string[];
+    /** A `resolve-build-` case's answer, in platform order. */
+    readonly resolutions: readonly ResolutionExpect[] | null;
+    /** A `prune-` case's report and what it leaves behind. */
+    readonly prune: PruneExpect | null;
   };
+}
+
+interface ResolutionExpect {
+  readonly platform: string;
+  readonly version: string;
+  readonly build: string;
+  readonly manifest: string;
+}
+
+interface PruneExpect {
+  readonly removed: readonly string[];
+  readonly in_use: readonly string[];
+  /** Layout-relative paths the prune removes: each, and everything under it. */
+  readonly gone: readonly string[];
+  /** index.json's manifest digests after the prune, in order (`[]` for no file). */
+  readonly index_after: readonly string[];
 }
 
 interface ReportResult {
@@ -348,8 +377,15 @@ async function runOne(
     const installedPath = path.join(layoutDir, 'installed.json');
     try {
       const raw = JSON.parse(await readFile(installedPath, 'utf8')) as { installed: readonly string[] };
+      // Each digest for the platform its own index.json entry names, as Go's
+      // pre-install reads it (a prune layout holds builds of two platforms);
+      // the request's when the entry names none.
+      const indexEntries = await readIndexEntries(layoutDir);
       for (const digest of raw.installed) {
-        await verifyAndInstallFromLocalBlobs(layoutDir, layoutDir, digest, c.request.platform, trustedKeys);
+        const named = indexEntries.find((e) => e.digest === digest)?.platform;
+        const key = named === undefined ? '' : `${named.os}-${named.architecture}`;
+        const platform = isPlatformKey(key) ? key : c.request.platform;
+        await verifyAndInstallFromLocalBlobs(layoutDir, layoutDir, digest, platform, trustedKeys);
       }
     } catch {
       // No installed.json for this fixture — nothing to pre-install.
@@ -398,12 +434,27 @@ async function runOne(
       intactBefore.set(d, snap);
     }
 
+    // held: each named build held by this process, as a process using it
+    // holds it, through the very call the registry makes before a load.
+    for (const d of c.setup.held ?? []) {
+      const state = hold(path.join(layoutDir, 'unpacked', 'sha256', d.replace(/^sha256:/, '')));
+      if (state !== 'held') return `held: holding ${d} = ${state}, want held`;
+    }
+    // A prune- case compares every file of the layout before and after.
+    const filesBefore = c.request.prune === null || c.request.prune === undefined ? [] : await layoutFiles(layoutDir);
+
     // The dev channel's alias step (guide §3), under the case's fixture
     // fingerprint; a null one leaves the v1 contract as it is.
     const restoreAlias = c.request.own_fingerprint === null ? undefined : useOwnFingerprintForTests(c.request.own_fingerprint);
     let resultDetail: string;
     try {
-      if (c.id.startsWith('goldens-') || c.id.startsWith('fixtures-')) {
+      // Before any other prefix, and before anything reads request.spelling
+      // (a prune- case's is the empty string).
+      if (c.id.startsWith('resolve-build-')) {
+        resultDetail = await runResolveBuilds(c, baseOptions);
+      } else if (c.id.startsWith('prune-')) {
+        resultDetail = await runPrune(c, baseOptions, layoutDir, filesBefore);
+      } else if (c.id.startsWith('goldens-') || c.id.startsWith('fixtures-')) {
         resultDetail = await runGenericFetch(c, bases, baseOptions);
       } else if (c.id.startsWith('list-tags-')) {
         resultDetail = await runListTags(c, baseOptions);
@@ -488,6 +539,101 @@ async function runEnsure(c: ConformanceCase, baseOptions: EnsureOptions, lockPat
       return `code ${code} != expected ${c.expect.code} (${err instanceof Error ? err.message : String(err)})`;
     }
     return messageDetail(c, err);
+  }
+}
+
+/** A `resolve-build-` case (guide §10): what the spelling resolves to on every platform, never a layer. */
+async function runResolveBuilds(c: ConformanceCase, baseOptions: EnsureOptions): Promise<string> {
+  try {
+    const { resolutions, warnings } = await resolveBuilds(c.request.spelling, baseOptions);
+    if (!c.expect.ok) return `expected failure (code ${c.expect.code}), got ok with ${resolutions.length} resolution(s)`;
+    const want = c.expect.resolutions;
+    if (want !== null && want !== undefined) {
+      const got = resolutions.map((r) => ({ platform: r.platform, version: r.version, build: r.build, manifest: r.manifest }));
+      if (got.length !== want.length || !got.every((g, i) => deepEqual(g, want[i]))) {
+        return `resolved ${JSON.stringify(got)}, want ${JSON.stringify(want)}`;
+      }
+    }
+    for (const w of c.expect.warnings) {
+      if (!warnings.some((have) => have.includes(w))) {
+        return `expected a warning containing ${JSON.stringify(w)}, got [${warnings.join(' | ')}]`;
+      }
+    }
+    return '';
+  } catch (err) {
+    if (c.expect.ok) return `unexpected throw: ${err instanceof Error ? err.message : String(err)}`;
+    const code = (err as { code?: string }).code;
+    if (c.expect.code !== null && code !== c.expect.code) {
+      return `code ${code} != expected ${c.expect.code} (${err instanceof Error ? err.message : String(err)})`;
+    }
+    return messageDetail(c, err);
+  }
+}
+
+/** A `prune-` case (guide §10): the prune's report, then the layout it left. */
+async function runPrune(c: ConformanceCase, baseOptions: EnsureOptions, layoutDir: string, filesBefore: readonly string[]): Promise<string> {
+  const request = c.request.prune;
+  if (request === null || request === undefined) return 'a prune- case with no request.prune';
+  try {
+    const pruned = await prune(baseOptions ?? {}, { line: request.line ?? '', keep: request.keep, dryRun: request.dry_run });
+    if (!c.expect.ok) return `expected failure (code ${c.expect.code}), got ok with ${pruned.length} build(s) reported`;
+    if (c.expect.prune !== null && c.expect.prune !== undefined) return await checkPrune(c.expect.prune, pruned, layoutDir, filesBefore);
+    return '';
+  } catch (err) {
+    if (c.expect.ok) return `unexpected throw: ${err instanceof Error ? err.message : String(err)}`;
+    const code = (err as { code?: string }).code;
+    if (c.expect.code !== null && code !== c.expect.code) {
+      return `code ${code} != expected ${c.expect.code} (${err instanceof Error ? err.message : String(err)})`;
+    }
+    return messageDetail(c, err);
+  }
+}
+
+/**
+ * A prune's report against `expected`, then the layout it left: every path in
+ * `expected.gone` is gone, every other file the layout held before the call is
+ * still there, and index.json lists exactly `expected.index_after`.
+ */
+async function checkPrune(expected: PruneExpect, got: readonly Superseded[], layoutDir: string, before: readonly string[]): Promise<string> {
+  const removed = got.filter((s) => !s.inUse).map((s) => s.manifest);
+  const inUse = got.filter((s) => s.inUse).map((s) => s.manifest);
+  if (removed.join(' ') !== expected.removed.join(' ')) return `prune reported removed [${removed.join(', ')}], want [${expected.removed.join(', ')}]`;
+  if (inUse.join(' ') !== expected.in_use.join(' ')) return `prune reported in use [${inUse.join(', ')}], want [${expected.in_use.join(', ')}]`;
+  const underGone = (rel: string): boolean => expected.gone.some((g) => rel === g || rel.startsWith(`${g}/`));
+  const want = before.filter((rel) => !underGone(rel));
+  const after = await layoutFiles(layoutDir);
+  if (after.join('\n') !== want.join('\n')) return `the layout after the prune holds [${after.join(', ')}], want [${want.join(', ')}]`;
+  for (const g of expected.gone) {
+    const present = await lstat(path.join(layoutDir, ...g.split('/'))).then(
+      () => true,
+      () => false,
+    );
+    if (present) return `${g} is still there after the prune`;
+  }
+  let index: string[] = [];
+  const raw = await readFile(path.join(layoutDir, 'index.json'), 'utf8').catch(() => undefined);
+  if (raw !== undefined) {
+    let doc: { manifests?: readonly { digest?: unknown }[] };
+    try {
+      doc = JSON.parse(raw) as { manifests?: readonly { digest?: unknown }[] };
+    } catch (err) {
+      return `index.json after the prune: ${err instanceof Error ? err.message : String(err)}`;
+    }
+    index = (doc.manifests ?? []).map((m) => String(m.digest));
+  }
+  if (index.join(' ') !== expected.index_after.join(' ')) return `index.json lists [${index.join(', ')}] after the prune, want [${expected.index_after.join(', ')}]`;
+  return '';
+}
+
+/** Every file under `dir`, as `/`-separated relative paths, sorted. index.json, whose bytes a prune rewrites, is one of them; its entries are compared on their own. */
+async function layoutFiles(dir: string): Promise<string[]> {
+  try {
+    return (await readdir(dir, { recursive: true, withFileTypes: true }))
+      .filter((e) => !e.isDirectory())
+      .map((e) => path.relative(dir, path.join(e.parentPath, e.name)).split(path.sep).join('/'))
+      .sort();
+  } catch {
+    return [];
   }
 }
 

@@ -13,7 +13,12 @@
 //! A UNIT test for the reason `registry_stub.rs` gives: the test key is
 //! reachable only through the fetch layer's test-only seam, which is per
 //! thread, so every thread that opens takes it. `CHTYPES_ABI2_STUBS` unset:
-//! every test here skips LOUDLY by name and passes.
+//! every open test here skips LOUDLY by name and passes.
+//!
+//! The `Registry::fetch` tests at the end (public issue #492) need no stub:
+//! they serve a signed artifact whose "library" is not a library at all, so
+//! nothing could load it, and a fetch that tried to open it would fail. None of
+//! them skips on a chtypes platform.
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
@@ -27,13 +32,16 @@ use base64::Engine as _;
 use ed25519_dalek::{Signer, SigningKey};
 use serde_json::{Value, json};
 
+use crate::ocifetch::abi_fingerprint::DEV_ABI_FINGERPRINT;
 use crate::ocifetch::channel;
+use crate::ocifetch::ensure::{self, Options};
+use crate::ocifetch::hold::{self, Claim, HoldState};
 use crate::registry_stub_tests::{
     ARTIFACT_TYPE, ENV_STUBS, LIBRARY_NAME, MEDIA_BUNDLE, MEDIA_CONFIG, MEDIA_EMPTY, MEDIA_INDEX,
     MEDIA_LAYER, MEDIA_MANIFEST, PAYLOAD_TYPE, PREDICATE_TYPE, STATEMENT_TYPE, pae, repo_root,
     sha256_hex, test_signing_key,
 };
-use crate::{FetchOptions, Library, Registry, RegistryOptions};
+use crate::{Error, FetchOptions, Library, Registry, RegistryOptions};
 
 /// Turns a hang into a failure; a working registry answers at once.
 const BOUND: Duration = Duration::from_secs(30);
@@ -77,6 +85,13 @@ impl Drop for Fixture {
         let _ = std::fs::remove_dir_all(&self.work);
     }
 }
+
+/// The `Registry::fetch` tests' case ids, each served from the one tree.
+const FETCH_CASES: [&str; 3] = ["fetch-installs", "fetch-shared", "fetch-unpublished"];
+
+/// The fetch tests' library bytes: no loader accepts them.
+const NOT_A_LIBRARY: &[u8] =
+    b"chtypes registry fetch test: these bytes are not a loadable library\n";
 
 /// Opens the gate it names when dropped, whatever happened, so no thread is
 /// left parked.
@@ -240,6 +255,55 @@ impl Fixture {
         if fields["os"] == "linux" {
             fields.entry("glibc_floor").or_insert(json!("2.17"));
         }
+        Some(Fixture::serve(test, &CASES, &library, &predicate))
+    }
+
+    /// [`NOT_A_LIBRARY`] served as tag 26.8 of every case in [`FETCH_CASES`],
+    /// signed with the test key for this SDK's own fingerprint, or `None`
+    /// (after a loud skip line) on a host that is not a chtypes platform.
+    fn not_a_library(test: &str) -> Option<Fixture> {
+        let arch = match std::env::consts::ARCH {
+            "x86_64" => "amd64",
+            "aarch64" => "arm64",
+            other => other,
+        };
+        let os = match std::env::consts::OS {
+            "macos" => "darwin",
+            other => other,
+        };
+        if !crate::ocifetch::constants::PLATFORMS
+            .iter()
+            .any(|p| p.os == os && p.architecture == arch)
+        {
+            eprintln!(
+                "SKIPPED (loudly): registry_flight_tests::{test}: this host ({os}-{arch}) is not a chtypes platform; nothing was exercised"
+            );
+            return None;
+        }
+        let predicate = json!({
+            "abi": channel::DEV_ABI_GENERATION,
+            "abi_fingerprint": DEV_ABI_FINGERPRINT,
+            "clickhouse_version": "26.8.15.10",
+            "clickhouse_minor": "26.8",
+            "channel": "lts",
+            "build": "20261001.183455",
+            "os": os,
+            "arch": arch,
+            "library": LIBRARY_NAME,
+            "library_sha256": sha256_hex(NOT_A_LIBRARY),
+            "library_bytes": NOT_A_LIBRARY.len(),
+        });
+        Some(Fixture::serve(
+            test,
+            &FETCH_CASES,
+            NOT_A_LIBRARY,
+            &predicate,
+        ))
+    }
+
+    /// `library` as tag 26.8 of every case in `cases`, signed with the test
+    /// key over `predicate`, from a fixture server of its own.
+    fn serve(test: &str, cases: &[&str], library: &[u8], predicate: &Value) -> Fixture {
         static SEQ: AtomicUsize = AtomicUsize::new(0);
         let work = std::env::temp_dir().join(format!(
             "chtypes_registry_flight_{}_{}_{test}",
@@ -252,12 +316,12 @@ impl Fixture {
         let layer = write_route_tree(
             &fixtures.join("trees/stub/v2/chtypes/v1"),
             "26.8",
-            &library,
-            &predicate,
+            library,
+            predicate,
             &key,
             &keyid,
         );
-        let cases: Vec<Value> = CASES
+        let cases: Vec<Value> = cases
             .iter()
             .map(|id| json!({"id": id, "tree": "stub"}))
             .collect();
@@ -294,13 +358,13 @@ impl Fixture {
         std::thread::spawn(move || {
             let _ = std::io::copy(&mut reader, &mut std::io::sink());
         });
-        Some(Fixture {
+        Fixture {
             server: Server { child, origin },
             cache: work.join("cache"),
             work,
             trusted: public_hex,
             layer_path: format!("/chtypes/v1/blobs/{layer}"),
-        })
+        }
     }
 
     /// Autofetch on, the one base `case_id`'s repository on the server.
@@ -540,4 +604,176 @@ fn a_failed_fetch_reaches_every_waiter_and_is_not_remembered() {
         Some(&2),
         "a failure is never remembered"
     );
+}
+
+/// `Registry::fetch` installs the build and returns its record, and opens
+/// nothing: the library it installed cannot be loaded and no `Library` exists.
+/// The installed lookup an open makes then answers with no request, this
+/// process holds the build (a prune's claim of it is in use), and a second
+/// fetch finds it already installed and requests no layer.
+#[test]
+fn a_fetch_installs_without_opening() {
+    let _overrides = channel::allow_overrides_for_tests();
+    let Some(fx) = Fixture::not_a_library("a_fetch_installs_without_opening") else {
+        return;
+    };
+    let registry = fx.registry("fetch-installs");
+    let resolved = registry.fetch("26.8").expect("fetch(26.8)");
+    assert_eq!(
+        (
+            resolved.version.as_str(),
+            resolved.build.as_str(),
+            resolved.request.as_str()
+        ),
+        ("26.8.15.10", "20261001.183455", "26.8")
+    );
+    let hex = resolved
+        .dir
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    assert_eq!(resolved.digests.manifest, format!("sha256:{hex}"));
+    assert_eq!(
+        std::fs::read(&resolved.library_path).ok().as_deref(),
+        Some(NOT_A_LIBRARY),
+        "the installed library at {}",
+        resolved.library_path.display()
+    );
+    assert!(
+        registry.libraries().is_empty(),
+        "fetch opened a library; it must open nothing"
+    );
+    // The installed lookup an open makes now answers, with no request.
+    let found = ensure::resolve_installed(
+        "26.8",
+        &resolved.platform,
+        Options {
+            cache_dir: Some(fx.cache.to_string_lossy().into_owned()),
+            system_dirs: Vec::new(),
+            ..Options::default()
+        },
+    )
+    .expect("the installed lookup")
+    .expect("the fetched build answers 26.8");
+    assert_eq!(found.digests.manifest, resolved.digests.manifest);
+    // This process holds the build: a prune's exclusive claim of it is in use.
+    assert!(
+        matches!(hold::claim(&resolved.dir), Claim::InUse),
+        "the fetched build is not held"
+    );
+    assert_eq!(hold::hold(&resolved.dir), HoldState::Held);
+    // A second fetch is answered again, and keeps the build.
+    let again = registry.fetch("26.8").expect("the second fetch(26.8)");
+    assert_eq!(again.digests.manifest, resolved.digests.manifest);
+    assert!(again.already_installed, "the second fetch installed again");
+    let requests = fx.requests("fetch-installs");
+    assert_eq!(
+        requests.get(&format!("GET {}", fx.layer_path)),
+        Some(&1),
+        "the layer, once over two fetches: {requests:?}"
+    );
+    assert!(registry.libraries().is_empty());
+}
+
+/// With the fetch held at the gate, a fetch and an open of the same request
+/// both wait on ONE fetch; when it lands the fetch has the build, the open
+/// goes on to its load (which fails: the bytes are no library), and the server
+/// saw one tag request and one layer request.
+#[test]
+fn a_fetch_and_an_open_of_one_request_share_one_fetch() {
+    let _overrides = channel::allow_overrides_for_tests();
+    let Some(fx) = Fixture::not_a_library("a_fetch_and_an_open_of_one_request_share_one_fetch")
+    else {
+        return;
+    };
+    let (tx, waiting) = mpsc::channel();
+    let mut registry = fx.registry("fetch-shared");
+    registry.on_fetch_wait = Some(Box::new(move |_request: &str| {
+        let _ = tx.send(());
+    }));
+    let registry = Arc::new(registry);
+    let _gate = fx.close_gate("fetch-shared");
+
+    let (fetched_tx, fetched_rx) = mpsc::channel();
+    {
+        let registry = Arc::clone(&registry);
+        std::thread::spawn(move || {
+            let _overrides = channel::allow_overrides_for_tests();
+            let _ = fetched_tx.send(registry.fetch("26.8"));
+        });
+    }
+    waiting
+        .recv_timeout(BOUND)
+        .expect("the fetch never waited on its fetch");
+    let (opened_tx, opened_rx) = mpsc::channel();
+    spawn_open(&registry, "26.8", opened_tx);
+    waiting
+        .recv_timeout(BOUND)
+        .expect("the open never waited on the same fetch");
+    assert_eq!(
+        fx.wait_parked("fetch-shared", 1),
+        1,
+        "a fetch and an open waiting on one fetch park one request"
+    );
+    fx.open_gate("fetch-shared");
+
+    let fetched = fetched_rx
+        .recv_timeout(BOUND)
+        .expect("the fetch never answered")
+        .expect("the fetch sharing the fetch");
+    assert_eq!(fetched.version, "26.8.15.10");
+    let opened = opened_rx
+        .recv_timeout(BOUND)
+        .expect("the open never answered");
+    let err = opened.expect_err("bytes that are no library never open");
+    assert!(err.code().is_some(), "a load refusal, got {err:?}");
+    let requests = fx.requests("fetch-shared");
+    assert_eq!(
+        requests.get("GET /chtypes/v1/manifests/26.8"),
+        Some(&1),
+        "the tag, once: {requests:?}"
+    );
+    assert_eq!(
+        requests.get(&format!("GET {}", fx.layer_path)),
+        Some(&1),
+        "the layer, once: {requests:?}"
+    );
+    assert!(registry.libraries().is_empty());
+}
+
+/// A request nothing serves is the fetch layer's own code, a refused spelling
+/// is misuse, and an offline fetch with nothing installed is
+/// `CHTYPES_ARTIFACT_MISSING`.
+#[test]
+fn a_fetch_fails_with_the_fetch_codes() {
+    let _overrides = channel::allow_overrides_for_tests();
+    let Some(fx) = Fixture::not_a_library("a_fetch_fails_with_the_fetch_codes") else {
+        return;
+    };
+    let registry = fx.registry("fetch-unpublished");
+    let err = registry.fetch("26.3").expect_err("nothing serves 26.3");
+    assert_eq!(
+        err.code(),
+        Some(crate::code::ARTIFACT_UNPUBLISHED),
+        "{err:?}"
+    );
+    assert!(
+        matches!(registry.fetch("v26.8"), Err(Error::Usage(_))),
+        "a refused spelling is misuse"
+    );
+    let offline = Registry::new(RegistryOptions {
+        fetch: FetchOptions {
+            cache_dir: Some(fx.work.join("offline").to_string_lossy().into_owned()),
+            system_dirs: Some(Vec::new()),
+            offline: true,
+            ..Default::default()
+        },
+        autofetch: Some(false),
+        preload: Vec::new(),
+    })
+    .expect("construction opens nothing");
+    let err = offline
+        .fetch("26.8")
+        .expect_err("nothing installed, and offline");
+    assert_eq!(err.code(), Some(crate::code::ARTIFACT_MISSING), "{err:?}");
 }

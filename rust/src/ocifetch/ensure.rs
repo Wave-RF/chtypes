@@ -139,15 +139,16 @@ impl Default for Options {
     }
 }
 
-struct Resources {
-    root: PathBuf,
-    platform: String,
-    bases: Vec<String>,
-    system_dirs: Vec<PathBuf>,
-    strict: bool,
-    client: Client,
-    auth: AuthConfig,
-    trust: Vec<TrustedKey>,
+/// One call's shared state, which `resolve` and `prune` build the same way.
+pub(super) struct Resources {
+    pub(super) root: PathBuf,
+    pub(super) platform: String,
+    pub(super) bases: Vec<String>,
+    pub(super) system_dirs: Vec<PathBuf>,
+    pub(super) strict: bool,
+    pub(super) client: Client,
+    pub(super) auth: AuthConfig,
+    pub(super) trust: Vec<TrustedKey>,
 }
 
 /// The ordered base list one call uses: the options' own, else
@@ -160,7 +161,7 @@ pub fn configured_bases(options: &Options) -> Vec<String> {
 /// One call's shared state. It creates nothing: a lookup is read-only, and
 /// only a fetch makes the layout (`ensure`, past its offline branch;
 /// docs/guides/fetch-v1.md §6, public issue #486).
-fn resources(options: &mut Options) -> Result<Resources> {
+pub(super) fn resources(options: &mut Options) -> Result<Resources> {
     // The dev channel refuses every pinning request before anything else, the
     // network above all (rule r6), and names each ignored override once.
     if let Some(refusal) = channel::refuse_pinning(options) {
@@ -820,7 +821,7 @@ fn resolve_offline(
 
 /// The cache and its system dirs, checked the way `res`'s mode asks: the
 /// default mode's warnings, or strict mode's `CHTYPES_CACHE_UNUSABLE`.
-fn probe(res: &Resources) -> Result<Vec<String>> {
+pub(super) fn probe(res: &Resources) -> Result<Vec<String>> {
     probe_as(res, res.strict)
 }
 
@@ -862,7 +863,7 @@ pub fn missing_notes(options: &Options) -> Vec<String> {
     notes
 }
 
-fn notes_for(res: &Resources) -> Vec<String> {
+pub(super) fn notes_for(res: &Resources) -> Vec<String> {
     let mut notes = probe_as(res, false).unwrap_or_default();
     notes.extend(layout::zero_x_hint(&res.root));
     notes
@@ -880,7 +881,7 @@ pub fn with_notes(message: &str, notes: &[String]) -> String {
 /// The build id of the newest cached record of this SDK's OWN fingerprint that
 /// answers the request (`find_installed`'s filter), empty when it names none,
 /// or `None` when the cache holds no such record (public issue #581).
-fn cached_own_build(
+pub(super) fn cached_own_build(
     root: &Path,
     system_dirs: &[PathBuf],
     version_request: &VersionRequest,
@@ -1241,7 +1242,10 @@ pub fn validate_predicate(
 /// hashes from: the manifest's own config blob, which carries the same
 /// fields value-for-value (layout-v2 §4.1) but was never verified — which is
 /// exactly why the caller reports it as unsigned and never as signed.
-fn unsigned_config(source: &Source<'_>, manifest: &oci::Manifest) -> Result<serde_json::Value> {
+pub(super) fn unsigned_config(
+    source: &Source<'_>,
+    manifest: &oci::Manifest,
+) -> Result<serde_json::Value> {
     let config = manifest
         .config
         .as_ref()
@@ -1261,7 +1265,10 @@ fn unsigned_config(source: &Source<'_>, manifest: &oci::Manifest) -> Result<serd
 /// believed: its `predicateType` is the artifact one, and its subject is the
 /// manifest's own layer (the signature covers THESE bytes, not some other
 /// artifact's).
-fn check_artifact_statement(stmt: &dsse::VerifiedStatement, layer_digest: &str) -> Result<()> {
+pub(super) fn check_artifact_statement(
+    stmt: &dsse::VerifiedStatement,
+    layer_digest: &str,
+) -> Result<()> {
     if stmt.predicate_type != constants::PREDICATE_TYPE_ARTIFACT {
         return Err(Error::ArtifactCorrupt(format!(
             "signed statement predicateType is {:?}, want {:?}",
@@ -1360,7 +1367,7 @@ fn version_key(version: &str) -> [u64; 4] {
 /// directory... the first request for one verifies it against its
 /// signature exactly as a freshly downloaded layer would, then unpacks
 /// it") — entirely offline, from local blobs only.
-fn find_installed(
+pub(super) fn find_installed(
     root: &Path,
     system_dirs: &[PathBuf],
     version_request: &VersionRequest,

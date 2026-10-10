@@ -41,13 +41,15 @@ pub struct VerifiedRecord {
     pub predicate: serde_json::Value,
 }
 
-fn is_hex64(s: &str) -> bool {
+/// 64 lowercase hex digits: a blob's or an entry's name.
+pub fn is_hex64(s: &str) -> bool {
     s.len() == 64
         && s.bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
-fn is_digest(s: &str) -> bool {
+/// `sha256:` and 64 lowercase hex digits.
+pub fn is_digest(s: &str) -> bool {
     s.strip_prefix("sha256:").is_some_and(is_hex64)
 }
 
@@ -614,8 +616,9 @@ const TEMP_ATTEMPTS: usize = 16;
 
 /// A new, empty directory `<prefix><pid>-<random>` in `parent`, created with
 /// `create_dir`: a name that already exists is never reused, another is drawn
-/// (public issue #482). A failure is the cache's, naming the path.
-fn create_unique_dir(parent: &Path, prefix: &str) -> Result<PathBuf> {
+/// (public issue #482). A failure is the cache's, naming the path. A prune
+/// moves an entry aside into one (`.prune-*`).
+pub fn create_unique_dir(parent: &Path, prefix: &str) -> Result<PathBuf> {
     let mut last = None;
     for _ in 0..TEMP_ATTEMPTS {
         let dir = parent.join(format!("{prefix}{}", unique_suffix()));

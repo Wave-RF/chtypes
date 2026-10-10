@@ -37,6 +37,10 @@ export {
   withNotes,
 } from './ensure.js';
 export type { FetchSignedResult } from './ensure.js';
+export { hold, type HoldState, removedWhileHeld } from './hold.js';
+export { SpellingRefusedError } from './oci.js';
+export { isLine, lineOf, prune, type PruneOptions, type Superseded } from './prune.js';
+export { type Resolution, resolveBuilds, type ResolveBuildsResult } from './resolve.js';
 export {
   ArtifactCorruptError,
   ArtifactMissingError,
