@@ -146,6 +146,14 @@ done
 
 The manifests must say `2.0.0` (and Go's `bindingVersion`) for the version agreement to pass, as for every release.
 
+**The support page after a publish.** [`docs/support-v2.md`](docs/support-v2.md) is generated from the registry the Python binding's active generation-2 channel names (the staging dev repository today, production `chtypes/v2` with the release key after the lock's one-line `active()` switch), every signed statement verified before a fact is read from it, no layer downloaded. Nothing regenerates it automatically and no check turns red when the delivery side publishes: when a production publish notice arrives, open the regeneration pull request with
+
+```sh
+uv run scripts/support-v2/gen.py --write
+```
+
+Exit status 0 means the page is complete, 3 means it was written with some rows omitted (each is named on stderr: read them before committing), and 4 means nothing was written. A pull request that touches only `docs/support-v2.md` is enqueued by the policy merge once `checks` passes; on a pull request that touches the page or the generator, `checks` reruns `gen.py --check` against the registry and fails unless the page equals the output byte for byte.
+
 ## Before the first tag of each package
 
 1. Bump the manifest version (`python/pyproject.toml`, `ts/package.json`, `rust/Cargo.toml`; Go has none — the tag is the version — so bump `bindingVersion` in `go/internal/ocifetch/useragent.go` instead; it is the version in the fetch layer's `User-Agent`).
