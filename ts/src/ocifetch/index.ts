@@ -44,6 +44,7 @@ export {
   ArtifactUnpublishedError,
   ArtifactUntrustedError,
   CacheUnusableError,
+  ChtypesError,
   FetchV1Error,
   SourceForbiddenError,
   SourceIncompatibleError,

@@ -237,6 +237,9 @@ pub fn ensure(request: &str, mut options: Options) -> Result<Resolved> {
     };
 
     if channel::offline_mode(options.offline) {
+        if options.frozen {
+            return resolve_frozen_offline(&res, request, &options, lock.as_ref());
+        }
         return resolve_offline(&res, &version_request, request, &options, lock.as_ref());
     }
     if res.strict {
@@ -561,34 +564,11 @@ fn ensure_frozen(
         client: &res.client,
         auth: &res.auth,
     };
-    let already = is_fully_installed(&layout::unpacked_dir(&res.root, &entry.manifest)?)?;
-    if already {
-        let dir = layout::unpacked_dir(&res.root, &entry.manifest)?;
-        let record = layout::read_verified(&dir)?.ok_or_else(|| {
-            Error::ArtifactCorrupt(format!("{}: missing verified.json", dir.display()))
-        })?;
-        return Ok(Resolved {
-            abi_generation: channel::active().abi,
-            platform: platform.to_string(),
-            request: request.to_string(),
-            version: record.version,
-            channel: record.channel,
-            build: record.build,
-            library_path: dir.join(&record.library),
-            dir,
-            digests: Digests {
-                index: entry.index.clone(),
-                manifest: entry.manifest.clone(),
-                layer: entry.layer.clone(),
-                bundle: Some(entry.bundle.clone()),
-                bundle_manifest: record.bundle_manifest_digest.clone(),
-            },
-            predicate: record.predicate,
-            signed_by: record.signed_by,
-            source: "cache".to_string(),
-            already_installed: true,
-            warnings: Vec::new(),
-        });
+    // A build already installed under exactly the pinned manifest, layer and
+    // bundle digests is used as it is: zero requests (docs/guides/fetch-v1.md
+    // §6; public issues #414 and #487).
+    if let Some(resolved) = installed_by_pin(res, request, entry)? {
+        return Ok(resolved);
     }
 
     let fetched_manifest =
@@ -679,6 +659,104 @@ fn ensure_frozen(
         already_installed: false,
         warnings,
     })
+}
+
+/// The installed build a lock entry pins, with no network: an unpacked
+/// directory named by the pinned manifest digest, in the cache or a system
+/// directory, whose `verified.json` is for this platform and records exactly
+/// the pinned manifest, layer and bundle digests. `None` when none matches.
+fn installed_by_pin(res: &Resources, request: &str, entry: &LockEntry) -> Result<Option<Resolved>> {
+    Ok(lookup_by_pin(res, request, entry)?.0)
+}
+
+/// [`installed_by_pin`], also saying whether a record exists under the
+/// pinned manifest but disagrees with the pin.
+fn lookup_by_pin(
+    res: &Resources,
+    request: &str,
+    entry: &LockEntry,
+) -> Result<(Option<Resolved>, bool)> {
+    let mut mismatch = false;
+    for (i, root) in layout::search_roots(&res.root, &res.system_dirs)
+        .iter()
+        .enumerate()
+    {
+        let dir = layout::unpacked_dir(root, &entry.manifest)?;
+        let Some(record) = layout::read_verified(&dir)? else {
+            continue;
+        };
+        if record.platform == res.platform
+            && record.manifest_digest == entry.manifest
+            && record.layer_digest == entry.layer
+            && record.bundle_digest.as_deref() == Some(entry.bundle.as_str())
+            && dir.join(&record.library).is_file()
+        {
+            let source = if i == 0 {
+                "cache".to_string()
+            } else {
+                format!("system:{}", root.display())
+            };
+            return Ok((
+                Some(record_to_resolved(
+                    request,
+                    &res.platform,
+                    &dir,
+                    record,
+                    &source,
+                    true,
+                )),
+                false,
+            ));
+        }
+        mismatch = true;
+    }
+    Ok((None, mismatch))
+}
+
+/// `--frozen --offline`: verify the installed build against the lock with
+/// zero network. No lock, no entry for the request, or an installed record
+/// that does not match the pin is `CHTYPES_ARTIFACT_PINNED`; a pinned build
+/// that is not installed is `CHTYPES_ARTIFACT_MISSING`.
+fn resolve_frozen_offline(
+    res: &Resources,
+    request: &str,
+    options: &Options,
+    lock: Option<&Lock>,
+) -> Result<Resolved> {
+    let warnings = probe(res)?;
+    let lock = lock.ok_or_else(|| {
+        Error::ArtifactPinned(format!(
+            "--frozen was requested but {} does not exist",
+            options
+                .lock_path
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "<no lock path given>".to_string())
+        ))
+    })?;
+    let entry = lock.entry(request, &res.platform).ok_or_else(|| {
+        Error::ArtifactPinned(format!(
+            "--frozen: the lock does not pin {request} for {}",
+            res.platform
+        ))
+    })?;
+    match lookup_by_pin(res, request, entry)? {
+        (Some(resolved), _) => Ok(Resolved {
+            warnings,
+            ..resolved
+        }),
+        (None, true) => Err(Error::ArtifactPinned(format!(
+            "--frozen --offline: the installed build for {request} ({}) does not match the lock's pin {}",
+            res.platform, entry.manifest
+        ))),
+        (None, false) => Err(Error::ArtifactMissing(with_notes(
+            &format!(
+                "--frozen --offline: the build the lock pins ({}) is not installed for {request} ({})",
+                entry.manifest, res.platform
+            ),
+            &notes_for(res),
+        ))),
+    }
 }
 
 fn resolve_offline(

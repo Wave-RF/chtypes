@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "source": {
-    "generator_commit": "73a5e07dca90fe16ea06320892541bf9852394b2",
+    "generator_commit": "d5ed5bf1566a6e5c32c6e55345c2e069ca5b48b3",
     "go_sum_sha256": "e998462ee1660f7d0b42c45fd0e16ddef8c688e81aaa22c466ada3c69565eec9"
   },
   "cases": [
@@ -5368,6 +5368,206 @@
         "manifest": "sha256:bd3ba4f58235a99fc17266604cc6fcabcd214c70742c097554bc4ffb5d9f668d",
         "library_sha256": "3468da8c52922d08acc6aef884b53b3e38a17f7230aac7ebb839d7b2d00c5ec8",
         "code": null,
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": 0,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
+      }
+    },
+    {
+      "id": "frozen-warm-cache-zero-requests",
+      "tree": "lock-frozen-warm",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "frozen-warm",
+        "system_dirs": [],
+        "lock": "frozen-warm",
+        "before_index_rename_hook": null
+      },
+      "request": {
+        "spelling": "26.10.7.1",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": true,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null
+      },
+      "env": {},
+      "expect": {
+        "ok": true,
+        "version": "26.10.7.1",
+        "build": "20261010.000008",
+        "manifest": "sha256:d830c7a6486420dde9a6c468e9beb6f2e4ffdce8d7823fd5a41ddd781a5b9ea1",
+        "library_sha256": "e98d2dfdfaf226b7012f4a456aa55400e87c4b67ee0fb7342ff5a48a751240d1",
+        "code": null,
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": 0,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
+      }
+    },
+    {
+      "id": "frozen-offline-lock-match",
+      "tree": "lock-frozen-warm",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "frozen-warm",
+        "system_dirs": [],
+        "lock": "frozen-warm",
+        "before_index_rename_hook": null
+      },
+      "request": {
+        "spelling": "26.10.7.1",
+        "platform": "linux-arm64",
+        "offline": true,
+        "frozen": true,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null
+      },
+      "env": {},
+      "expect": {
+        "ok": true,
+        "version": "26.10.7.1",
+        "build": "20261010.000008",
+        "manifest": "sha256:d830c7a6486420dde9a6c468e9beb6f2e4ffdce8d7823fd5a41ddd781a5b9ea1",
+        "library_sha256": "e98d2dfdfaf226b7012f4a456aa55400e87c4b67ee0fb7342ff5a48a751240d1",
+        "code": null,
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": 0,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
+      }
+    },
+    {
+      "id": "frozen-offline-lock-mismatch",
+      "tree": "lock-frozen-warm",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "frozen-warm",
+        "system_dirs": [],
+        "lock": "frozen-warm-mismatch",
+        "before_index_rename_hook": null
+      },
+      "request": {
+        "spelling": "26.10.7.1",
+        "platform": "linux-arm64",
+        "offline": true,
+        "frozen": true,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_ARTIFACT_PINNED",
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": 0,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": []
+      }
+    },
+    {
+      "id": "frozen-offline-lock-not-installed",
+      "tree": "lock-frozen-warm",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "frozen-warm",
+        "system_dirs": [],
+        "lock": "frozen-warm-not-installed",
+        "before_index_rename_hook": null
+      },
+      "request": {
+        "spelling": "26.10.7.1",
+        "platform": "linux-arm64",
+        "offline": true,
+        "frozen": true,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_ARTIFACT_MISSING",
         "sleeps": [],
         "warnings": [],
         "requests": {

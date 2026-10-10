@@ -867,7 +867,13 @@ def _ensure_floating(
     assert record is not None
 
     def _add_entry(doc: dict) -> dict:
-        entries = [*(doc.get("manifests") or []), {"digest": platform_desc.digest}]
+        entries = list(doc.get("manifests") or [])
+        # One entry per manifest digest: a re-install, or a concurrent one that
+        # landed first, never writes a second (public issue #487).
+        if not any(
+            isinstance(e, dict) and e.get("digest") == platform_desc.digest for e in entries
+        ):
+            entries.append({"digest": platform_desc.digest})
         return {**doc, "manifests": entries}
 
     try:
@@ -899,6 +905,82 @@ def _ensure_floating(
     return resolved
 
 
+def _installed_by_pin(
+    request: Request, platform_key: str, options: Options, pin: LockPin
+) -> Resolved | None:
+    return _lookup_by_pin(request, platform_key, options, pin)[0]
+
+
+def _lookup_by_pin(
+    request: Request, platform_key: str, options: Options, pin: LockPin
+) -> tuple[Resolved | None, bool]:
+    """The installed build a lock pin names, with no network: an unpacked
+    directory named by the pinned manifest digest, in the cache or a system
+    directory, whose `verified.json` is for this platform and records exactly
+    the pinned manifest, layer and bundle digests (public issues #414, #487).
+    `None` when no installed build matches; the flag is true when a record
+    exists under the pinned manifest but disagrees with the pin."""
+    roots = search_roots(options.cache_dir, options.system_dirs)
+    manifest_hex = parse_digest(pin.manifest)
+    mismatch = False
+    for root in roots:
+        udir = unpacked_dir_for(root, manifest_hex)
+        record = read_verified_record(udir)
+        if record is None:
+            continue
+        if (
+            record.platform == platform_key
+            and record.manifest == pin.manifest
+            and record.layer == pin.layer
+            and record.bundle == pin.bundle
+        ):
+            return (
+                _record_to_resolved(
+                    udir,
+                    record,
+                    request_spelling=request.spelling,
+                    already_installed=True,
+                    source=_source_for_dir(udir, roots),
+                ),
+                False,
+            )
+        mismatch = True
+    return None, mismatch
+
+
+def _resolve_frozen_offline(
+    request: Request, platform_key: str, options: Options, lock: Lock | None
+) -> Resolved:
+    """`--frozen --offline`: verify the installed build against the lock with
+    zero network. No lock entry for the request, or an installed record that
+    does not match the pin, is `CHTYPES_ARTIFACT_PINNED`; a pinned build that
+    is not installed is `CHTYPES_ARTIFACT_MISSING`."""
+    if lock is None:
+        raise ArtifactPinnedError("chtypes: --frozen requires a lock file; none was given")
+    pin = lock.pin_for(request.spelling, platform_key)
+    if pin is None:
+        raise ArtifactPinnedError(
+            f"chtypes: --frozen: no pin for {request.spelling!r} ({platform_key}) in the lock"
+        )
+    roots = search_roots(options.cache_dir, options.system_dirs)
+    warnings = probe_roots(roots, options.resolved_strict())
+    installed, mismatch = _lookup_by_pin(request, platform_key, options, pin)
+    if installed is None:
+        if mismatch:
+            raise ArtifactPinnedError(
+                f"chtypes: --frozen --offline: the installed build for {request.spelling} "
+                f"({platform_key}) does not match the lock's pin {pin.manifest}"
+            )
+        raise ArtifactMissingError(
+            with_notes(
+                f"chtypes: --frozen --offline: the build the lock pins ({pin.manifest}) "
+                f"is not installed for {request.spelling} ({platform_key})",
+                missing_notes(options),
+            )
+        )
+    return replace(installed, warnings=(*warnings, *installed.warnings))
+
+
 def _ensure_frozen(
     request: Request, platform_key: str, options: Options, lock: Lock | None
 ) -> Resolved:
@@ -916,17 +998,9 @@ def _ensure_frozen(
     cache_root_path = roots[0]
     scratch_root = _scratch_root(cache_root_path)
 
-    manifest_hex = parse_digest(pin.manifest)
-    existing_dir = unpacked_dir_for(cache_root_path, manifest_hex)
-    existing_record = read_verified_record(existing_dir)
-    if existing_record is not None and existing_record.platform == platform_key:
-        return _record_to_resolved(
-            existing_dir,
-            existing_record,
-            request_spelling=request.spelling,
-            already_installed=True,
-            source="cache",
-        )
+    installed = _installed_by_pin(request, platform_key, options, pin)
+    if installed is not None:
+        return installed
 
     manifest_doc, _raw = fetch_manifest_by_digest(bases, pin.manifest, policy=policy, retry=retry)
     layer_desc = manifest_layer_descriptor(manifest_doc)
@@ -1049,6 +1123,9 @@ def _ensure(
     request: Request, platform_key: str, options: Options, lock: Lock | None, roots: Sequence[Path]
 ) -> Resolved:
     try:
+        if options.resolved_offline() and options.frozen:
+            return _resolve_frozen_offline(request, platform_key, options, lock)
+
         if options.resolved_offline():
             resolved = resolve_installed(request, platform_key, options)
             if resolved is None:

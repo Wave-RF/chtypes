@@ -282,8 +282,6 @@ func cmdFetch(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 		return &usageError{fmt.Sprintf("--all fetches every line; drop the version arguments (%s)", strings.Join(spellings, " "))}
 	case !all && !update && len(spellings) == 0:
 		return &usageError{"a ClickHouse version spelling is required (or --all)"}
-	case frozen && cf.offline:
-		return &usageError{"--frozen fetches by digest and --offline forbids the network; pass one"}
 	}
 	opts := cf.options()
 	opts.Frozen, opts.LockPath = frozen, lock
