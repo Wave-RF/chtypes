@@ -60,7 +60,7 @@ import { discoverSignatureCandidates } from './referrers.js';
 import { probeRoots, strictMode, unwritable } from './faults.js';
 import { verifyAndInstallFromLocalBlobs } from './localverify.js';
 import { type Descriptor, fetchBlobBytesByDigest, fetchManifestByDigest, resolveTag } from './oci.js';
-import { emptyLock, getPin, type LockFile, readLock, withPin, writeLock } from './lock.js';
+import { emptyLock, getPin, type LockFile, type LockPin, readLock, withPin, writeLock } from './lock.js';
 import { digestOfHex, endpointUrl, hexOfDigest, platformInfo, realClock, resolvePlatformOption } from './types.js';
 import type { ArtifactPredicate, FetchV1Options, PlatformKey, Resolved, TrustedKey, VerifyResult } from './types.js';
 import { fetchVerifyAndUnpackLayer, measureLibrary, verifyInstalledLibrary } from './unpack.js';
@@ -444,6 +444,7 @@ async function ensureIn(request: string, options: FetchV1Options): Promise<Resol
   // An offline lookup is read-only: it creates nothing, so a read-only mount
   // reads cleanly (guide §6; public issue #486). Only a fetch makes the layout.
   if (offlineMode(options.offline)) {
+    if (options.frozen === true) return resolveFrozenOffline(request, platform, options);
     const hit = await resolveInstalled(request, platform, options);
     if (hit === undefined) {
       throw new ArtifactMissingError(
@@ -664,8 +665,11 @@ async function unsignedPredicateFallback(
   }
 }
 
-async function ensureFrozen(request: string, platform: PlatformKey, options: FetchV1Options): Promise<Resolved> {
-  const root = cacheRoot(options.cacheDir);
+/**
+ * The lock's pin for `request`/`platform`: no lock file, or a lock with no
+ * entry for them, is `CHTYPES_ARTIFACT_PINNED`.
+ */
+async function lockedPin(request: string, platform: PlatformKey, options: FetchV1Options): Promise<LockPin> {
   const lockPath = options.lockPath ?? path.join(process.cwd(), 'chtypes.lock');
   const lock = await readLock(lockPath);
   if (lock === undefined) {
@@ -675,6 +679,59 @@ async function ensureFrozen(request: string, platform: PlatformKey, options: Fet
   if (pin === undefined) {
     throw new ArtifactPinnedError(`chtypes: ${lockPath} names no entry for ${request}/${platform}; re-lock with \`fetch --lock\``);
   }
+  return pin;
+}
+
+/**
+ * The installed build a lock pin names, with no network: an unpacked
+ * directory named by the pinned manifest digest, in the cache or a system
+ * directory, whose `verified.json` is for this platform and records exactly
+ * the pinned manifest, layer and bundle digests (public issues #414, #487).
+ * `undefined` when no installed build matches.
+ */
+async function installedByPin(request: string, platform: PlatformKey, options: FetchV1Options, pin: LockPin): Promise<Resolved | undefined> {
+  const warnings = await probeRoots(
+    searchRoots(options).map((r) => r.root),
+    strictMode(options.strictCache),
+  );
+  for (const r of searchRoots(options)) {
+    const dir = unpackedDir(r.root, hexOfDigest(pin.manifest));
+    const record = await readVerifiedRecord(dir);
+    if (
+      record !== undefined &&
+      record.platform === platform &&
+      record.manifestDigest === pin.manifest &&
+      record.layerDigest === pin.layer &&
+      record.bundleDigest === pin.bundle
+    ) {
+      return resolvedFromRecord(record, platform, request, dir, r.source, true, warnings);
+    }
+  }
+  return undefined;
+}
+
+/** `--frozen --offline`: verify the installed build against the lock, with zero network. No lock entry, or no installed build matching the pin, is `CHTYPES_ARTIFACT_PINNED`. */
+async function resolveFrozenOffline(request: string, platform: PlatformKey, options: FetchV1Options): Promise<Resolved> {
+  const pin = await lockedPin(request, platform, options);
+  const hit = await installedByPin(request, platform, options, pin);
+  if (hit === undefined) {
+    throw new ArtifactPinnedError(
+      withNotes(
+        `chtypes: --frozen --offline: no installed build matches the lock's pin ${pin.manifest} for ${request} (${platform})`,
+        await missingNotes(options),
+      ),
+    );
+  }
+  return hit;
+}
+
+async function ensureFrozen(request: string, platform: PlatformKey, options: FetchV1Options): Promise<Resolved> {
+  const root = cacheRoot(options.cacheDir);
+  const pin = await lockedPin(request, platform, options);
+  // A build already installed under exactly the pinned digests is used as it
+  // is: zero requests (guide §6; public issues #414 and #487).
+  const installed = await installedByPin(request, platform, options, pin);
+  if (installed !== undefined) return installed;
   const bases = resolveBases(options);
   const baseReqOptions = requestOptionsFor(options, bases);
   const trustedKeys = defaultTrustedKeys(options);
@@ -814,7 +871,7 @@ async function writeLockEntry(
     bundle: record.bundleDigest ?? '',
   });
 
-  if (options.lockAllPlatforms === true) {
+  if (options.lockAllPlatforms !== false) {
     const indexJson = parseJsonValue(indexBytes);
     const manifests = items(field(indexJson ?? undefined, 'manifests'));
     const trustedKeys = defaultTrustedKeys(options);

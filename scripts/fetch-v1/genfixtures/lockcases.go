@@ -236,6 +236,53 @@ func buildLockCases(fs *FileSet) []Case {
 	offlineFrozen.Expect.Requests.Max = intp(0)
 	cases = append(cases, offlineFrozen)
 
-	flushTrees(fs, noDiscoveryTree, basicLockTree, lockWriteTree, updateTree, mirrorTree, offlineFrozenTree)
+	// --- frozen-warm-cache-zero-requests, frozen-offline-lock-match and
+	// frozen-offline-lock-mismatch (public issue #414): a build installed
+	// under exactly the lock's pinned manifest, layer and bundle digests
+	// answers --frozen with ZERO requests, --frozen --offline verifies the
+	// installed build against the lock with zero network, and an installed
+	// build that is not the pinned one is CHTYPES_ARTIFACT_PINNED. ---------
+	warmTree := NewTree("lock-frozen-warm")
+	warmArt := buildPlatformArtifact(warmTree, testKey, "linux-arm64", "26.10.7.1", "20261010.000008", "lts", ArtifactOptions{LibraryContentSeed: "frozen-warm"})
+	otherArt := buildPlatformArtifact(warmTree, testKey, "linux-arm64", "26.10.7.1", "20261010.000009", "lts", ArtifactOptions{LibraryContentSeed: "frozen-warm-other"})
+	warmLayout := NewLayout("frozen-warm")
+	copyArtifactIntoLayout(warmLayout, warmTree, warmArt, "26.10.7.1")
+	warmLayout.SetInstalled(warmArt.ManifestDesc.Digest)
+	warmLayout.Flush(fs)
+	warmLock := Lock3{Schema: 3, ABI: fixtureABI, Platforms: []string{"linux-arm64"},
+		Requests: map[string]map[string]LockPin{"26.10.7.1": {"linux-arm64": pinFor(warmArt, warmArt.BundleDigest, "")}}}
+	putInputLock(fs, "frozen-warm", warmLock)
+	otherLock := Lock3{Schema: 3, ABI: fixtureABI, Platforms: []string{"linux-arm64"},
+		Requests: map[string]map[string]LockPin{"26.10.7.1": {"linux-arm64": pinFor(otherArt, otherArt.BundleDigest, "")}}}
+	putInputLock(fs, "frozen-warm-mismatch", otherLock)
+	for _, w := range []struct {
+		id, lock string
+		offline  bool
+		ok       bool
+	}{
+		{"frozen-warm-cache-zero-requests", "frozen-warm", false, true},
+		{"frozen-offline-lock-match", "frozen-warm", true, true},
+		{"frozen-offline-lock-mismatch", "frozen-warm-mismatch", true, false},
+	} {
+		c := newCase(w.id, "lock-frozen-warm", "file", "http")
+		c.Request.Spelling = "26.10.7.1"
+		c.Request.Frozen = true
+		c.Request.Offline = w.offline
+		c.Setup.Cache = "frozen-warm"
+		c.Setup.Lock = strp(w.lock)
+		c.Expect.OK = w.ok
+		c.Expect.Requests.Max = intp(0)
+		if w.ok {
+			c.Expect.Version = strp(warmArt.Predicate.ClickHouseVersion)
+			c.Expect.Build = strp(warmArt.Predicate.Build)
+			c.Expect.Manifest = strp(warmArt.ManifestDesc.Digest)
+			c.Expect.LibrarySHA256 = strp(warmArt.Predicate.LibrarySHA256)
+		} else {
+			c.Expect.Code = strp("CHTYPES_ARTIFACT_PINNED")
+		}
+		cases = append(cases, c)
+	}
+
+	flushTrees(fs, noDiscoveryTree, basicLockTree, lockWriteTree, updateTree, mirrorTree, offlineFrozenTree, warmTree)
 	return cases
 }
