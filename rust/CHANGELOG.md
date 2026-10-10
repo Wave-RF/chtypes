@@ -25,6 +25,7 @@ The four bindings in this repository are released together and give one answer, 
 
 ### Changed
 
+- `chtypes list` and the tag listing name the published lines only (two-part, numeric order), as Go's always did; `chtypes resolve <line>` prints the exact version a line resolves to (#613).
 - **Breaking: the public surface the parity gate carried as exceptions is resolved, before the v2 lock (#500).** A convenience exists in every binding or in none (`docs/reference/bindings-v1.md` §1, principle 2). Migration, old → new:
   - `Refusal.detail` → `Refusal.got`: what a one-sided refusal found (the `dlopen` error, what a malformed `build_info` lacks) is in `got`, with `want` `None`, as in the other bindings; the display still prints it. `Refusal` is `#[non_exhaustive]`, so build one only through the crate.
   - The fetch layer's own corruption (`Error::ArtifactCorrupt` with no loader behind it) has an empty `reason` (was `"fetch"`), as Go's has, and displays its message alone.

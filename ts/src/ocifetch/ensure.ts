@@ -1172,6 +1172,9 @@ async function fetchGoldens(
 
 // ---------------------------------------------------------------------- listTags
 
+/** The published lines: exactly two numeric parts, no leading zeros (Go's `lineTag`). */
+const LINE_SPELLING = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
+
 /** Compares two version spellings component by component, numerically. */
 function compareSpellings(a: string, b: string): number {
   const pa = a.split('.').map(Number);
@@ -1184,18 +1187,18 @@ function compareSpellings(a: string, b: string): number {
 }
 
 /**
- * The version spellings a repository publishes: `GET tags/list` from the first
- * base that has the repository, every tag that is not a version spelling
- * (`SPELLING_REGEX`: the `sha256-<hex>` referrers fallback tags, symbolic tags)
- * dropped, the rest in ascending numeric order. A tag names a version, not a
- * platform: whether a platform is offered is that tag's index, which only a
- * resolve reads. A next page is followed through the `Link` header.
+ * The lines a repository publishes: `GET tags/list` from the first base that
+ * has the repository, every tag that is not a two-part line (three- and
+ * four-part versions, aliases, the `sha256-<hex>` referrers fallback tags,
+ * symbolic tags) dropped, the rest in ascending numeric order. A tag names a
+ * line, not a platform: whether a platform is offered is that tag's index,
+ * which only a resolve reads. A next page is followed through the `Link`
+ * header.
  */
 export async function listTags(options: FetchV1Options = {}): Promise<readonly string[]> {
   noteIgnoredOverrides(options);
   const bases = resolveBases(options);
   const reqOptions = { ...requestOptionsFor(options, bases), maxBytes: TAGS_LIST_MAX_BYTES };
-  const spelling = new RegExp(SPELLING_REGEX);
   let lastUnreachable: SourceUnreachableError | undefined;
   for (let i = 0; i < bases.length; i++) {
     const base = bases[i]!;
@@ -1225,7 +1228,7 @@ export async function listTags(options: FetchV1Options = {}): Promise<readonly s
       found = true;
       for (const t of items(field(json, 'tags'))) {
         const tag = asString(t);
-        if (spelling.test(tag)) tags.add(tag);
+        if (LINE_SPELLING.test(tag)) tags.add(tag);
       }
       const link = res.headers['link'];
       const next = link === undefined ? undefined : /<([^>]+)>\s*;\s*rel="?next"?/.exec(link)?.[1];

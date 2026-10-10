@@ -1,5 +1,5 @@
 //! `GET /v2/<repository>/tags/list`: the tags a registry publishes, filtered
-//! to version spellings. The CLI's `list` and `fetch --all` read it; the
+//! to the published lines (two-part tags). The CLI's `list` and `fetch --all` read it; the
 //! fetch layer's resolve never does (`--frozen` makes no discovery request,
 //! docs/guides/fetch-v1.md §6).
 
@@ -15,10 +15,10 @@ struct TagList {
     tags: Option<Vec<String>>,
 }
 
-/// The version spellings (two, three or four numeric parts) the first base
-/// that answers publishes, oldest first. Other tags (the `sha256-<hex>`
-/// fallback tags, a literal channel name) are not version spellings and are
-/// dropped. A base that answers 404 is skipped; no base answering is
+/// The lines (two-part tags, no leading zeros) the first base that answers
+/// publishes, oldest first, in numeric order. Every other tag (three- and
+/// four-part versions, aliases, the `sha256-<hex>` fallback tags, a literal
+/// channel name) is dropped. A base that answers 404 is skipped; no base answering is
 /// `CHTYPES_ARTIFACT_UNPUBLISHED`.
 pub fn published_versions(options: &Options) -> Result<Vec<String>> {
     let bases = configured_bases(options);
@@ -50,7 +50,9 @@ pub fn published_versions(options: &Options) -> Result<Vec<String>> {
                     .unwrap_or_default()
                     .into_iter()
                     .filter_map(|tag| match VersionRequest::parse(&tag) {
-                        Ok(r) if !r.is_literal() => Some((r.components, tag)),
+                        Ok(r) if !r.is_literal() && r.components.len() == 2 => {
+                            Some((r.components, tag))
+                        }
                         _ => None,
                     })
                     .collect();

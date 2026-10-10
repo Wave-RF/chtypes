@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "source": {
-    "generator_commit": "207b16076570234b05e37239da80ea91678d1be7",
+    "generator_commit": "9742de758ca2f721e0c6a7482a5a950151969c0e",
     "go_sum_sha256": "e998462ee1660f7d0b42c45fd0e16ddef8c688e81aaa22c466ada3c69565eec9"
   },
   "cases": [
@@ -8808,6 +8808,64 @@
         "tags": [
           "26.8",
           "26.9"
+        ],
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null
+      }
+    },
+    {
+      "id": "list-tags-lines-only",
+      "tree": "lines-only-list",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null
+      },
+      "env": {},
+      "expect": {
+        "ok": true,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": null,
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": null,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": [
+          "26.8",
+          "26.9",
+          "26.10"
         ],
         "records_intact": [],
         "message_contains": null,

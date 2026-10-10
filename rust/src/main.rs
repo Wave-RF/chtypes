@@ -316,10 +316,7 @@ fn cmd_fetch(args: &Args) -> Result<u8, Usage> {
     }
     let spellings = if args.all {
         match ocifetch::tags::published_versions(&options(args)) {
-            Ok(all) => all
-                .into_iter()
-                .filter(|v| v.matches('.').count() == 1)
-                .collect(),
+            Ok(lines) => lines,
             Err(e) => return Ok(report(&e)),
         }
     } else {
