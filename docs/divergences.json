@@ -41,7 +41,13 @@
     {
       "id": "datetime-vs-string-text-over-accept",
       "heading": "A date-time column compared with a string constant or a `{p:String}` parameter, in text the server converts differently",
-      "note": "no machine check is expressible in this register's schema: the divergence is a filter verdict against a real server's SELECT … WHERE, which no check here drives. Retirement: on the artifact producer's measured re-run against a library build that ships the fix, with the new cases in its standing filter differential, never on CI.",
+      "note": "no machine check is expressible in this register's schema: the divergence is a filter verdict against a real server's SELECT … WHERE, which no check here drives. Retirement: on the artifact producer's measured re-run against a library build that ships the fix, with the new cases in its standing filter differential, never on CI. From build 20261010.180314 the shapes are declined (decline reasons string-reading and equals-fold) rather than answered, so a later check may assert the decline.",
+      "checks": []
+    },
+    {
+      "id": "create-default-needs-server-function-over-accept",
+      "heading": "A column default expression that calls a function needing a server compiles here; a stock server refuses the CREATE",
+      "note": "no machine check is expressible in this register's schema: the case is decided at schema creation, and a check asserts the outcome of a payload driven through a schema that compiled, not the schema-create call's own verdict. Measured by the artifact producer on builds 20261009.145808 and 20261010.180314. Retirement: on the artifact producer's measured re-run against the build that ships the fix, never on CI.",
       "checks": []
     }
   ]
