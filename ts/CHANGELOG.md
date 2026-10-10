@@ -27,6 +27,7 @@ The four bindings in this repository are released together and give one answer, 
 
 ### Changed
 
+- `chtypes list` and the tag listing name the published lines only (two-part, numeric order), as Go's always did; `chtypes resolve <line>` prints the exact version a line resolves to (#613).
 - `chtypes fetch` of a refused spelling (a `v` prefix, a `-lts`/`-stable` suffix) exits with the usage status, 2, as Go's does, and prints the refusal alone; it exited 1 and printed a stack trace.
 - **Breaking: the public surface the parity gate carried as exceptions is resolved, before the v2 lock (#500).** A convenience exists in every binding or in none (`docs/reference/bindings-v1.md` §1, principle 2). Migration, old → new:
   - `isChtypesError(e)` → `e instanceof ChtypesError`: `ArtifactError` extends `ChtypesError` (#487), so the guard was the same test.

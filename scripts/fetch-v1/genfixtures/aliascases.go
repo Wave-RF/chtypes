@@ -346,11 +346,51 @@ func buildAliasCases(fs *FileSet) []Case {
 	listing.Expect.Tags = listingWithoutAliases(listTree)
 	cases = append(cases, listing)
 
+	// 6. list-tags-lines-only: the listing names the published LINES only
+	// (docs/guides/fetch-v1.md section 3). The tree carries a three- and a
+	// four-part version beside the lines, an alias and a referrers fallback
+	// tag (sha256-<hex>); all four bindings drop every one of them and give
+	// the lines in numeric order, so 26.10 sorts after 26.9. The tags go in
+	// unsorted on purpose.
+	linesTree := NewTree("lines-only-list")
+	oneAmd := []string{"linux-amd64"}
+	buildAliasIndex(linesTree, "26.8.15.10", "20261005.120000", fixtureFingerprintN,
+		[]string{"26.8", "26.8.15", "26.8.15.10", aliasOf("26.8", fixtureFingerprintA)}, oneAmd)
+	buildAliasIndex(linesTree, "26.10.1.1", "20261006.000000", fixtureFingerprintN, []string{"26.10"}, oneAmd)
+	buildAliasIndex(linesTree, "26.9.1.1", "20261001.000000", fixtureFingerprintN, []string{"26.9"}, oneAmd)
+	// A fallback tag for a subject nothing else in the tree refers to, so it
+	// cannot collide with a real referrers fallback file.
+	fallbackIndex := canonicalJSON(ImageIndex{SchemaVersion: 2, MediaType: ociIndexMediaType, Manifests: []Descriptor{}})
+	linesTree.PutManifest("sha256-"+sha256Hex([]byte("lines-only-list fallback tag")), ociIndexMediaType, fallbackIndex)
+	flushTrees(fs, linesTree)
+	linesOnly := newCase("list-tags-lines-only", "lines-only-list", "file", "http")
+	linesOnly.Expect.Tags = linesOfTree(linesTree)
+	if got := strings.Join(linesOnly.Expect.Tags, " "); got != "26.8 26.9 26.10" {
+		panic("genfixtures: list-tags-lines-only expects 26.8 26.9 26.10, derived " + got)
+	}
+	if len(linesTree.tagOrder) != 7 {
+		panic(fmt.Sprintf("genfixtures: tree lines-only-list must carry 7 tags (3 lines, 2 versions, an alias, a fallback tag), has %d: %v", len(linesTree.tagOrder), linesTree.tagOrder))
+	}
+	cases = append(cases, linesOnly)
+
 	checkAliasCases(cases)
 	return cases
 }
 
 var twoPartLine = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
+
+// linesOfTree is the tree's own tags/list kept to the two-part lines, in
+// numeric order: what the listing of every binding must return.
+func linesOfTree(t *Tree) []string {
+	var out []string
+	for _, tag := range t.tagOrder {
+		if twoPartLine.MatchString(tag) {
+			out = append(out, tag)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return versionLessGen(out[i], out[j]) })
+	return out
+}
 
 // listingWithoutAliases is the tree's own tags/list less every alias, in
 // version order. It panics unless every tag it keeps is a two-part line, the

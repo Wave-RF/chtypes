@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 2,
+  "mediaType": "application/vnd.oci.image.index.v1+json",
+  "manifests": [
+    {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:f4639c1a932e905639553d172900d83f53175878e34cb215fdc76bb522c54bda",
+      "size": 552,
+      "artifactType": "application/vnd.wavehouse.chtypes.artifact.v1",
+      "platform": {
+        "os": "linux",
+        "architecture": "amd64"
+      }
+    }
+  ]
+}

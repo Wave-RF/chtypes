@@ -85,7 +85,7 @@ Exit statuses: 0 for success, 2 for a usage error (an unknown command or flag, a
 
 Environment: `CHTYPES_ARTIFACTS_URL` (the bases, comma separated), `CHTYPES_CACHE`, `CHTYPES_TRUSTED_KEYS` (replaces the embedded release key), `CHTYPES_ALLOW_UNSIGNED=1` (skip verification, loudly), `CHTYPES_DOWNLOAD_TOKEN`, `CHTYPES_TARGET`.
 
-`chtypes --help` and `-h` print the usage to stdout and exit 0 wherever they appear; a usage error prints to stderr and exits 2. `chtypes --version` prints `chtypes <version>` and a newline (`0.0.0-dev` for an untagged build). `list` prints one flat line per entry, with no header: first `installed <version> <platform> <dir>` for each installed build, then, unless `--offline`, `published <spelling> support unknown` for each tag in the registry's `tags/list`. `--platform` belongs to `fetch` alone; on `verify`, `list` or `where` it is a usage error. `scripts/check-cli-parity.sh` holds all four bindings' commands to these rules.
+`chtypes --help` and `-h` print the usage to stdout and exit 0 wherever they appear; a usage error prints to stderr and exits 2. `chtypes --version` prints `chtypes <version>` and a newline (`0.0.0-dev` for an untagged build). `list` prints one flat line per entry, with no header: first `installed <version> <platform> <dir>` for each installed build, then, unless `--offline`, `published <line> support unknown` for each published line (a two-part tag of the registry's `tags/list`, in numeric order). `--platform` belongs to `fetch` alone; on `verify`, `list` or `where` it is a usage error. `scripts/check-cli-parity.sh` holds all four bindings' commands to these rules.
 
 ## Concurrency and memory
 

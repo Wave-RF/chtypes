@@ -186,9 +186,9 @@ describe('commands that touch no network', () => {
 });
 
 describe('against a static tree', () => {
-  it('lists the version spellings a repository publishes, in numeric order, and drops every other tag', async () => {
+  it('lists the lines a repository publishes, in numeric order, and drops every other tag', async () => {
     const base = writeTags(['26.8', '26.8.15.10', 'sha256-0123abcd', 'latest', '25.10', '25.3', '26.7', 'v26.8']);
-    expect(await listTags({ bases: [base] })).toEqual(['25.3', '25.10', '26.7', '26.8', '26.8.15.10']);
+    expect(await listTags({ bases: [base] })).toEqual(['25.3', '25.10', '26.7', '26.8']);
   });
 
   it('prints the published tags from the list command', async () => {

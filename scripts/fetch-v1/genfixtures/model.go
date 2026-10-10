@@ -91,8 +91,8 @@ type Expect struct {
 	Requests      ExpectRequests `json:"requests"`
 	LockAfter     *string        `json:"lock_after"`
 	// Tags is what a `list-tags-` case's listing must return, in order: the
-	// tree's own tags/list less every alias (aliascases.go). nil for every
-	// other case.
+	// tree's own tags/list kept to the two-part lines, in numeric order
+	// (aliascases.go). nil for every other case.
 	Tags []string `json:"tags"`
 	// RecordsIntact names installed manifests whose unpacked/sha256/<hex>/
 	// directory must be byte for byte the same after the call as before it

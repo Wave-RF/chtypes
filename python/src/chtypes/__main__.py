@@ -159,7 +159,7 @@ def build_parser() -> argparse.ArgumentParser:
     listing = sub.add_parser(
         "list",
         help="what is installed, and what the registry publishes",
-        description="What is installed, and the version tags the registry publishes.",
+        description="What is installed, and the lines the registry publishes.",
     )
     cache_option(listing)
     listing.add_argument(
@@ -253,13 +253,15 @@ def _options(args: argparse.Namespace, *, platform: str | None = None):
     return fetch._to_options(platform)
 
 
-_LINE_SPELLING = re.compile(r"^[0-9]+\.[0-9]+$")
+# The published lines: exactly two parts, no leading zeros (Go's `lineTag`).
+_LINE_SPELLING = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 
 
 def _published_tags(options) -> list[str]:
-    """The registry's `tags/list`, kept to the tags that are v1 version spellings
-    (`spelling.regex`): the referrers fallback tags (`sha256-<hex>`) and anything
-    else a repository carries are not versions."""
+    """The registry's `tags/list`, kept to the published lines (two-part tags),
+    in numeric order: three- and four-part versions, aliases, the referrers
+    fallback tags (`sha256-<hex>`) and anything else a repository carries are
+    dropped (docs/guides/fetch-v1.md section 3)."""
     try:
         resp = fetch_from_bases(
             options.resolved_bases(),
@@ -276,7 +278,7 @@ def _published_tags(options) -> list[str]:
         tags = json.loads(resp.body.decode("utf-8")).get("tags") or []
     except (ValueError, AttributeError) as exc:
         raise ArtifactCorruptError(f"chtypes: tags/list was not a tag list ({exc})") from exc
-    keep = [t for t in tags if isinstance(t, str) and re.fullmatch(C.SPELLING_REGEX, t)]
+    keep = [t for t in tags if isinstance(t, str) and _LINE_SPELLING.fullmatch(t)]
     return sorted(set(keep), key=lambda t: tuple(int(p) for p in t.split(".")))
 
 
@@ -305,7 +307,7 @@ def _cmd_fetch(args: argparse.Namespace) -> int:
             lock = load_lock(options.lock_path)
             spellings = list(lock.requests)
         else:
-            spellings = [t for t in _published_tags(options) if _LINE_SPELLING.match(t)]
+            spellings = _published_tags(options)
             if not spellings:
                 _say("chtypes: the registry publishes no lines")
     else:

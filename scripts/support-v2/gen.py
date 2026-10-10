@@ -593,12 +593,15 @@ def _selftest() -> int:
     src = FIXTURES / "trees" / TREE
     other = (FIXTURES / "other-key" / "public.hex").read_text().strip()
     cases: dict[str, Tree] = {}
-    for name in ("valid", "tampered", "allbad", "planted-rendered", "planted-hidden"):
+    for name in (
+        "valid", "tampered", "tampered-env", "tampered-allowed", "allbad",
+        "planted-rendered", "planted-hidden",
+    ):  # fmt: skip
         t = Tree(src, tmp / "trees" / name / TREE)
         t.set_tags(["26.8", "26.6"])
         cases[name] = t
-    amd = cases["tampered"].platform_manifest("26.8", "linux-amd64")
-    cases["tampered"].tamper(amd, "99999999.999999")
+    for name in ("tampered", "tampered-env", "tampered-allowed"):
+        cases[name].tamper(cases[name].platform_manifest("26.8", "linux-amd64"), "99999999.999999")
     arm = cases["planted-rendered"].platform_manifest("26.8", "linux-arm64")
     # The planted strings are composed at run time so this file carries no
     # private-looking token itself (scripts/lint-public.sh would flag it).
@@ -631,9 +634,19 @@ def _selftest() -> int:
                     trusted_keys=trusted_keys_from_hex(keys, "selftest"),
                     cache_dir=str(tmp / "cache" / name),
                     system_dirs=(),
+                    # The control: the one way an unsigned platform gets in.
+                    allow_unsigned=name == "tampered-allowed",
                 )
                 said: list[str] = []
-                status, page = generate(options, dev, said.append)
+                # The rider (#438): CHTYPES_ALLOW_UNSIGNED=1 in the environment
+                # must not let an unsigned platform into the page.
+                if name == "tampered-env":
+                    os.environ[C.ENV_ALLOW_UNSIGNED_NAME] = "1"
+                try:
+                    status, page = generate(options, dev, said.append)
+                finally:
+                    if name == "tampered-env":
+                        del os.environ[C.ENV_ALLOW_UNSIGNED_NAME]
                 results[name] = (status, page, "\n".join(said), base)
                 if os.environ.get("SUPPORT_V2_SELFTEST_SHOW") == name:
                     print(page, "\n".join(said), sep="\n--stderr--\n")
@@ -672,6 +685,15 @@ def _selftest() -> int:
           "one platform tampered: its forged fact is nowhere")  # fmt: skip
     check("`linux-arm64`" in page and "`darwin-arm64`" in page and page.count("26.8.15.10") == 2,
           "one platform tampered: the other rows are kept")  # fmt: skip
+    status, page, said, _ = results["tampered-env"]
+    check(status == EXIT_PARTIAL, "ALLOW_UNSIGNED=1, one platform tampered: still exit 3")
+    check("26.8 linux-amd64: omitted" in said, "ALLOW_UNSIGNED=1: the platform is named on stderr")
+    check("99999999" not in page, "ALLOW_UNSIGNED=1: its forged fact is nowhere")
+    # The control proves the row can fail: the same tree with the option itself
+    # set (not the variable) admits the platform unsigned, with no omission.
+    c_status, _, c_said, _ = results["tampered-allowed"]
+    check(c_status == EXIT_OK and "linux-amd64: omitted" not in c_said,
+          "the control: allow_unsigned=True admits it, so the rows bite")  # fmt: skip
     status, page, said, _ = results["allbad"]
     check(status == EXIT_NOTHING and page == "", "every statement bad: nothing written (4)")
     check(said.count("omitted") >= 5, "every statement bad: each omission is named")

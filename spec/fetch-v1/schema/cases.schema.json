@@ -149,7 +149,7 @@
             "tags": {
               "type": ["array", "null"],
               "items": {"type": "string"},
-              "description": "For a `list-tags-` case (docs/guides/fetch-v1.md §10), the published tags the binding's listing must return, in order: the tree's tags/list less every alias. null for every other case."
+              "description": "For a `list-tags-` case (docs/guides/fetch-v1.md §10), the published lines the binding's listing must return, in numeric order: the two-part tags of the tree's tags/list, with every other tag (aliases, three- and four-part versions, sha256- fallback tags) dropped. null for every other case."
             },
             "records_intact": {
               "type": "array",

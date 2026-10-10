@@ -65,11 +65,11 @@ def test_verify_passes_then_fails_when_the_library_changes(env, capsys) -> None:
     assert code == C.ERROR_EXIT_CODES["CHTYPES_ARTIFACT_CORRUPT"] and "FAILED" in err and out == ""
 
 
-def test_list_shows_installed_and_only_version_tags(env, capsys) -> None:
+def test_list_shows_installed_and_only_the_published_lines(env, capsys) -> None:
     code, out, _ = run(capsys, "list")
     assert code == 0 and "installed" not in out
     assert "published 26.8 support unknown\n" in out
-    assert "published 26.8.15.10 support unknown\n" in out
+    assert "published 26.8.15.10" not in out and "26.8.15" not in out
     assert "v26.8" not in out and "sha256-" not in out
     run(capsys, "fetch", "26.8")
     _, out, _ = run(capsys, "list", "--offline")

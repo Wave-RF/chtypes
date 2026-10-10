@@ -10,7 +10,7 @@
  *
  *   chtypes fetch <version>... | --all  [--frozen] [--offline] [--lock <file>] [--update] [--strict]
  *   chtypes verify                      re-hash every installed library against its verified record
- *   chtypes list                        what is installed, and the versions the registry publishes
+ *   chtypes list                        what is installed, and the lines the registry publishes
  *   chtypes where [--all]               the v1 cache root; --all: every directory searched
  *   chtypes resolve <version> [--json]  the build and manifest each platform resolves to, verified; installs nothing
  *   chtypes prune [--line <line>] [--keep <n>] [--dry-run]
@@ -306,7 +306,7 @@ async function allLines(options: FetchV1Options): Promise<readonly string[]> {
     for (const r of await listInstalled(options)) if (r.platform === platform) lines.add(r.predicate.clickhouse_minor);
     return [...lines];
   }
-  return (await listTags(options)).filter((t) => t.split('.').length === 2);
+  return listTags(options);
 }
 
 async function cmdVerify(rest: readonly string[], values: Values, io: CliIo): Promise<number> {

@@ -25,6 +25,7 @@ The four bindings in this repository are released together and give one answer, 
 
 ### Changed
 
+- `chtypes list` and the tag listing name the published lines only (two-part, numeric order), as Go's always did; `chtypes resolve <line>` prints the exact version a line resolves to (#613).
 - **Breaking: the public surface the parity gate carried as exceptions is resolved, before the v2 lock (#499, #500).** A convenience exists in every binding or in none (`docs/reference/bindings-v1.md` §1, principle 2). Migration, old → new:
   - `chtypes.errors.internal` and `chtypes.errors.misuse` → private (#499): they were the binding's own construction helpers, never documented. Catch `InternalError` and `UsageError`, as before.
   - `SourceUnreachableError.retryable` and `.retry_after`, and the constructor's `retryable=` and `retry_after=` → removed: `retry_after` was never set, and the fetch layer has spent its retry table (`docs/guides/fetch-v1.md` §7) before it raises; a `Retry-After` it refused is named in the message.
