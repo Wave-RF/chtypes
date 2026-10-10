@@ -59,6 +59,10 @@ func TestR2UnknownMembersAreIgnored(t *testing.T) {
 	} else if r.Outcome != Accepted || len(r.Columns) != 1 || r.Columns[0].Text != "abc" || r.InputSpan == nil || r.InputSpan.Len != 3 ||
 		len(r.Computed) != 1 || len(r.Transformed) != 1 || len(r.UnknownFields) != 1 || len(r.UnsupportedSettings) != 1 {
 		t.Errorf("row = %+v", r)
+	} else if tr := r.Transformed[0]; tr.Column != "s" || tr.Input != "1" || tr.Stored != "2" || tr.Reason != ReasonValueChanged ||
+		!tr.Lossy || tr.Row != 0 {
+		// Public issue #384: the library's own transformed entry is what Transformed reports; nothing is derived here.
+		t.Errorf("row.Transformed[0] = %+v, want the document's value_changed entry for column s", tr)
 	}
 	if b, err := schema.Rows(JSONEachRow, []byte(`{"x":1}`), WithExport(JSONEachRow)); err != nil {
 		t.Errorf("batch with unknown members: %v", err)

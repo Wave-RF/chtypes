@@ -106,6 +106,13 @@ describe.skipIf(!stubsAvailable)('r2: unknown members are ignored at every level
     expect(r.inputSpan).toEqual({ off: 0, len: 3 });
     expect(r.computed).toHaveLength(1);
     expect(r.transformed).toHaveLength(1);
+    // Public issue #384: the library's own transformed entry is reported; nothing is derived.
+    expect(r.transformed[0]?.column.toString()).toBe('s');
+    expect(r.transformed[0]?.input.toString()).toBe('1');
+    expect(r.transformed[0]?.stored.toString()).toBe('2');
+    expect(r.transformed[0]?.reason).toBe(Reason.ValueChanged);
+    expect(r.transformed[0]?.lossy).toBe(true);
+    expect(r.transformed[0]?.row).toBe(0);
     expect(r.unknownFields.map((b) => b.toString())).toEqual(['u']);
     expect(r.unsupportedSettings.map((b) => b.toString())).toEqual(['st']);
 
