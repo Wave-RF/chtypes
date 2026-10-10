@@ -22,7 +22,7 @@
   <a href="docs/">Docs</a> ·
   <a href="#install">Install</a> ·
   <a href="#quickstart">Quickstart</a> ·
-  <a href="docs/support-v1.md">Supported versions</a> ·
+  <a href="docs/support-v2.md">Supported versions</a> ·
   <a href="#how-it-compares">How it compares</a> ·
   <a href="examples/">Examples</a>
 </p>
@@ -172,7 +172,7 @@ A short list of places where 1.0 does less than you might expect, each with what
 | [Install](docs/install.md) · [Quickstart](docs/quickstart.md) | getting a binding and a library, and the first program                          |
 | [Guides](docs/guides/)                                        | fetching, settings, batches, filters, discovery, multi-version, transformations |
 | [Reference](docs/reference/)                                  | per-language API, the C ABI contract, the binding contract                      |
-| [Supported versions](docs/support-v1.md)                      | languages, platforms, ClickHouse lines                                          |
+| [Supported versions](docs/support-v2.md)                      | languages, platforms, ClickHouse lines                                          |
 | [Examples](examples/)                                         | four side-by-side runnable tours, same sections in every language               |
 
 ## Project status

@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import json
 import tempfile
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from chtypes._ocifetch import _channel
@@ -32,6 +33,7 @@ from chtypes._ocifetch._errors import (
     ArtifactMissingError,
     ArtifactUnpublishedError,
     ArtifactUntrustedError,
+    FetchError,
 )
 from chtypes._ocifetch._faults import unwritable
 from chtypes._ocifetch._http import FetchPolicy, TransportError
@@ -46,18 +48,34 @@ from chtypes._ocifetch._oci import (
     resolve_platform_manifest,
 )
 
-__all__ = ["Resolution", "resolve"]
+__all__ = ["PlatformOutcome", "Resolution", "resolve", "resolve_each"]
 
 
 @dataclass(frozen=True)
 class Resolution:
     """What a request resolves to on one platform: the signed version and
-    build, and the platform manifest's digest."""
+    build, and the platform manifest's digest. `predicate` is the predicate the
+    answer was read from (the verified statement's); it is carried for a caller
+    that reads a field the command line does not print, such as `glibc_floor`,
+    and takes no part in equality."""
 
     platform: str
     version: str
     build: str
     manifest: str
+    predicate: Mapping[str, object] = field(default_factory=dict, compare=False, repr=False)
+
+
+@dataclass(frozen=True)
+class PlatformOutcome:
+    """One platform's answer from `resolve_each`: exactly one of `resolution`
+    (verified), `error` (the index offered the platform and its statement or
+    manifest failed to verify or parse) or neither (the index does not offer
+    this platform)."""
+
+    platform: str
+    resolution: Resolution | None = None
+    error: FetchError | None = None
 
 
 def resolve(request: Request, options: Options) -> tuple[list[Resolution], list[str]]:
@@ -112,6 +130,48 @@ def _resolve_offline(request: Request, options: Options) -> list[Resolution]:
 def _resolve_online(
     request: Request, options: Options, roots: list[Path] | tuple[Path, ...]
 ) -> tuple[list[Resolution], list[str]]:
+    out: list[Resolution] = []
+    warnings: list[str] = []
+    for outcome in _online_outcomes(request, options, roots, warnings, raise_on_error=True):
+        if outcome.resolution is not None:
+            out.append(outcome.resolution)
+    if not out:
+        raise ArtifactUnpublishedError(
+            f"chtypes: the index for {request.spelling} offers no platform this SDK knows"
+        )
+    return out, warnings
+
+
+def resolve_each(request: Request, options: Options) -> list[PlatformOutcome]:
+    """`resolve`, online, with each platform's failure kept apart: one
+    `PlatformOutcome` per platform in the constants' order, a verified
+    `Resolution`, the `FetchError` that platform's statement or manifest
+    raised, or neither when the index does not offer the platform. The index
+    itself failing (a missing line, an unreachable registry) still raises, as
+    in `resolve`; nothing is requested beyond what `resolve` requests, and a
+    platform's failure never stops the next from being verified. Verification
+    is `resolve`'s own, line for line."""
+    _channel.enforce(options)
+    roots = search_roots(options.cache_dir, options.system_dirs)
+    try:
+        return list(_online_outcomes(request, options, roots, [], raise_on_error=False))
+    except TransportError as exc:
+        raise _translate_transport_error(exc) from exc
+    except OSError as exc:
+        typed = unwritable(exc, roots)
+        if typed is None:
+            raise
+        raise typed from exc
+
+
+def _online_outcomes(
+    request: Request,
+    options: Options,
+    roots: list[Path] | tuple[Path, ...],
+    warnings: list[str],
+    *,
+    raise_on_error: bool,
+) -> list[PlatformOutcome]:
     bases = options.resolved_bases()
     policy = FetchPolicy(token=options.token, clock=options.clock)
     retry = options.retry
@@ -122,8 +182,7 @@ def _resolve_online(
         retry=retry,
         alias=_channel.alias_tag(request.spelling),
     )
-    out: list[Resolution] = []
-    warnings: list[str] = []
+    out: list[PlatformOutcome] = []
     # Bundles are read through a scratch directory OUTSIDE the cache: a resolve
     # writes nothing there.
     with tempfile.TemporaryDirectory(prefix="resolve-scratch-") as scratch:
@@ -132,73 +191,119 @@ def _resolve_online(
             try:
                 desc = resolve_platform_manifest(index_doc, platform_key)
             except ArtifactUnpublishedError:
-                continue  # the index does not offer this platform
-            manifest_doc, _manifest_bytes = fetch_manifest_by_digest(
-                bases, desc.digest, policy=policy, retry=retry
+                out.append(PlatformOutcome(platform_key))  # the index does not offer it
+                continue
+            if raise_on_error:
+                resolution = _resolve_platform(
+                    request,
+                    options,
+                    roots,
+                    warnings,
+                    bases,
+                    policy,
+                    retry,
+                    index_doc,
+                    alias_absent,
+                    scratch,
+                    platform_key,
+                    desc,
+                )
+                out.append(PlatformOutcome(platform_key, resolution))
+                continue
+            try:
+                resolution = _resolve_platform(
+                    request,
+                    options,
+                    roots,
+                    warnings,
+                    bases,
+                    policy,
+                    retry,
+                    index_doc,
+                    alias_absent,
+                    scratch,
+                    platform_key,
+                    desc,
+                )
+            except TransportError as exc:
+                out.append(PlatformOutcome(platform_key, error=_translate_transport_error(exc)))
+            except FetchError as exc:
+                out.append(PlatformOutcome(platform_key, error=exc))
+            else:
+                out.append(PlatformOutcome(platform_key, resolution))
+    return out
+
+
+def _resolve_platform(
+    request: Request,
+    options: Options,
+    roots: list[Path] | tuple[Path, ...],
+    warnings: list[str],
+    bases: tuple[str, ...],
+    policy: FetchPolicy,
+    retry,  # noqa: ANN001
+    index_doc,  # noqa: ANN001
+    alias_absent,  # noqa: ANN001
+    scratch: str,
+    platform_key: str,
+    desc,  # noqa: ANN001
+) -> Resolution:
+    manifest_doc, _manifest_bytes = fetch_manifest_by_digest(
+        bases, desc.digest, policy=policy, retry=retry
+    )
+    layer_desc = manifest_layer_descriptor(manifest_doc)
+    found = _find_verified_signature(
+        bases,
+        desc.digest,
+        policy=policy,
+        retry=retry,
+        trusted_keys=options.resolved_trusted_keys(),
+        scratch_root=Path(scratch),
+    )
+    if found is None:
+        if not options.resolved_allow_unsigned():
+            raise ArtifactUntrustedError(
+                f"chtypes: no trusted signature for {request.spelling} ({platform_key})"
             )
-            layer_desc = manifest_layer_descriptor(manifest_doc)
-            found = _find_verified_signature(
+        warnings.append("CHTYPES_ALLOW_UNSIGNED: no trusted signature found; proceeding unsigned")
+        config_desc = manifest_config_descriptor(manifest_doc)
+        if config_desc is None:
+            raise ArtifactCorruptError(
+                "no trusted signature and no config blob to identify the library"
+            )
+        predicate = json.loads(
+            fetch_blob_bytes(
                 bases,
-                desc.digest,
+                config_desc.digest,
                 policy=policy,
                 retry=retry,
-                trusted_keys=options.resolved_trusted_keys(),
-                scratch_root=Path(scratch),
+                max_bytes=C.MANIFEST_MAX_BYTES,
             )
-            if found is None:
-                if not options.resolved_allow_unsigned():
-                    raise ArtifactUntrustedError(
-                        f"chtypes: no trusted signature for {request.spelling} ({platform_key})"
-                    )
-                warnings.append(
-                    "CHTYPES_ALLOW_UNSIGNED: no trusted signature found; proceeding unsigned"
-                )
-                config_desc = manifest_config_descriptor(manifest_doc)
-                if config_desc is None:
-                    raise ArtifactCorruptError(
-                        "no trusted signature and no config blob to identify the library"
-                    )
-                predicate = json.loads(
-                    fetch_blob_bytes(
-                        bases,
-                        config_desc.digest,
-                        policy=policy,
-                        retry=retry,
-                        max_bytes=C.MANIFEST_MAX_BYTES,
-                    )
-                )
-            else:
-                verified, _bundle_digest, _bundle_manifest_digest = found
-                statement = verified.statement
-                if statement.predicate_type != C.PREDICATE_TYPE_ARTIFACT:
-                    raise ArtifactCorruptError(
-                        f"signed predicateType was {statement.predicate_type!r}, want "
-                        f"{C.PREDICATE_TYPE_ARTIFACT!r}"
-                    )
-                if parse_digest(layer_desc.digest) not in statement.subject_sha256:
-                    raise ArtifactCorruptError(
-                        "signed subject digest did not match the manifest's layer"
-                    )
-                predicate = statement.predicate
-            _check_predicate_matches_request(predicate, platform_key, request.spelling)
-            if found is not None:
-                _channel.ahead_of_registry(
-                    alias_absent,
-                    predicate,
-                    cached_own_build=lambda key=platform_key: _cached_own_build(
-                        roots, key, request.spelling
-                    ),
-                )
-            out.append(
-                Resolution(
-                    platform=platform_key,
-                    version=str(predicate.get("clickhouse_version")),
-                    build=str(predicate.get("build")),
-                    manifest=desc.digest,
-                )
-            )
-    if not out:
-        raise ArtifactUnpublishedError(
-            f"chtypes: the index for {request.spelling} offers no platform this SDK knows"
         )
-    return out, warnings
+    else:
+        verified, _bundle_digest, _bundle_manifest_digest = found
+        statement = verified.statement
+        if statement.predicate_type != C.PREDICATE_TYPE_ARTIFACT:
+            raise ArtifactCorruptError(
+                f"signed predicateType was {statement.predicate_type!r}, want "
+                f"{C.PREDICATE_TYPE_ARTIFACT!r}"
+            )
+        if parse_digest(layer_desc.digest) not in statement.subject_sha256:
+            raise ArtifactCorruptError("signed subject digest did not match the manifest's layer")
+        predicate = statement.predicate
+    _check_predicate_matches_request(predicate, platform_key, request.spelling)
+    if found is not None:
+        _channel.ahead_of_registry(
+            alias_absent,
+            predicate,
+            cached_own_build=lambda key=platform_key: _cached_own_build(
+                roots, key, request.spelling
+            ),
+        )
+    return Resolution(
+        platform=platform_key,
+        version=str(predicate.get("clickhouse_version")),
+        build=str(predicate.get("build")),
+        manifest=desc.digest,
+        predicate=predicate,
+    )

@@ -33,10 +33,11 @@ from chtypes._ocifetch._ensure import (
 )
 from chtypes._ocifetch._hold import hold
 from chtypes._ocifetch._prune import Superseded, prune
-from chtypes._ocifetch._resolve import Resolution, resolve
+from chtypes._ocifetch._resolve import PlatformOutcome, Resolution, resolve, resolve_each
 
 __all__ = [
     "Options",
+    "PlatformOutcome",
     "Request",
     "Resolution",
     "Resolved",
@@ -48,6 +49,7 @@ __all__ = [
     "list_installed",
     "prune",
     "resolve",
+    "resolve_each",
     "resolve_installed",
     "verify_installed",
 ]
