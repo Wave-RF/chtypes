@@ -172,7 +172,7 @@ export interface FetchV1Options {
   readonly lockPath?: string;
   /** Write (or update) the lock after a successful `ensure`. */
   readonly lockWrite?: boolean;
-  /** Every platform the index offers, not only the host's — `lockWrite` only. */
+  /** Pin every platform the index offers, not only the host's (guide §6) — `lockWrite` only. On unless `false`. */
   readonly lockAllPlatforms?: boolean;
   /** Re-resolve every locked request and rewrite the lock, ignoring `frozen`. */
   readonly update?: boolean;

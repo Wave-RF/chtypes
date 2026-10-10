@@ -450,7 +450,6 @@ async function runEnsure(c: ConformanceCase, baseOptions: EnsureOptions, lockPat
       resolved = await ensure(c.request.spelling, {
         ...baseOptions,
         lockWrite: c.request.lock_write,
-        lockAllPlatforms: c.request.lock_write,
         update: c.request.update,
       });
     }

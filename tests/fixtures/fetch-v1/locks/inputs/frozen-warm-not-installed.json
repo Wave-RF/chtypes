@@ -1,0 +1,18 @@
+{
+  "schema": 3,
+  "abi": 1,
+  "platforms": [
+    "linux-arm64"
+  ],
+  "requests": {
+    "26.10.7.1": {
+      "linux-arm64": {
+        "version": "26.10.7.1",
+        "build": "20261010.000009",
+        "manifest": "sha256:14108a23b9a91189048fad94b2f8f3d3eaaee6b7e1900b1b84b6ce652ab2db72",
+        "layer": "sha256:dca6f53227aac23b6f9c2c970d9c8b5168bb1e0aa3528e1688dca92d7213793f",
+        "bundle": "sha256:c47bd3c98bb1b123a9f2f70572deabd71b27422830f762db4dac3c9a083e9084"
+      }
+    }
+  }
+}

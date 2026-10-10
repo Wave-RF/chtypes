@@ -22,17 +22,12 @@
  * (the string every `Error` has) is the one lossy display form.
  */
 
-import { ArtifactCorruptError, FetchV1Error } from '../ocifetch/index.js';
+import { ArtifactCorruptError, ChtypesError, FetchV1Error } from '../ocifetch/index.js';
 import { ABI_STABILITY } from './decls.gen.js';
 import { Status } from './vocab.gen.js';
 
-/** The base of every call error. The fetch and loader errors live under `ArtifactError` instead; `isChtypesError` is true for all of them. */
-export abstract class ChtypesError extends Error {
-  constructor(message: string, options?: { cause?: unknown }) {
-    super(message, options);
-    this.name = new.target.name;
-  }
-}
+/** The base of every error this package throws on purpose: the call errors (under `CallError`) and the fetch and loader errors (under `ArtifactError`), so one `catch` on it takes them all. */
+export { ChtypesError };
 
 /** The base of every fetch error and every loader refusal: the fetch layer's own base class, re-exported under the name the rest of the family uses. */
 export { FetchV1Error as ArtifactError };
@@ -41,8 +36,8 @@ export { FetchV1Error as ArtifactError };
 export { ArtifactCorruptError };
 
 /** True for any error this package throws on purpose: a call error, a fetch error or a loader refusal. */
-export function isChtypesError(err: unknown): err is ChtypesError | FetchV1Error {
-  return err instanceof ChtypesError || err instanceof FetchV1Error;
+export function isChtypesError(err: unknown): err is ChtypesError {
+  return err instanceof ChtypesError;
 }
 
 /** The five fields of a library error object, read verbatim. */
