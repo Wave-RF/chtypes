@@ -1094,9 +1094,14 @@ CHS_API chs_status chs_preview_batch(
  * and it is never in `schema_description`. A key in this build's honor set is applied to the WHERE;
  * a key passed through is accepted and ignored; and a key this build's filters do not honor is
  * reported at evaluation (`filter_result`'s `unsupported_settings`, every verdict `d`, and
- * `chs_preview_batch`'s), as a declined setting from an evaluation's own settings is. Every key
- * still meets the server's own SET check first, so a name the server does not know is
- * `CHS_REJECTED` with ch_code 115.
+ * `chs_preview_batch`'s). The WHERE runs under this call's layers only (the defaults, the server
+ * profile, the schema's own settings and this call's), as a subscriber's SELECT in its own session
+ * would. An evaluation's `settings` (`chs_filter_eval_body`, `chs_preview_batch` with a filter,
+ * `chs_block_create`) are the INSERT session's: they govern parsing the body and never reach the
+ * WHERE, so they are never named as WHERE settings. So a filter evaluated in the INSERT's own
+ * session, a materialized view's WHERE for example, is created with that session's WHERE-tier
+ * settings in its own `settings`. Every key still meets the server's own SET check first, so a name
+ * the server does not know is `CHS_REJECTED` with ch_code 115.
  *
  * A filter under a per-call `session_timezone` answers as the artifact producer has measured
  * against live servers, including how the zone in an evaluation's settings combines with the zone
