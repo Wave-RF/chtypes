@@ -89,7 +89,7 @@ Input values. A JSON input (`settings`, `query_params`, an input document) canno
 
 Input documents. A counted input whose content is `input:<name>` is a JSON object that the library validates against the document of that name (rule r1). A key the document does not define is `CHS_INVALID_ARGUMENT`, naming the key, and so is a document that is not a JSON object or a member of the wrong JSON type. Length 0 is `{}`, and a repeated member keeps its last value. The library never ignores a key, so a caller that sets an option a build does not implement is told so instead of silently getting the old behavior.
 
-Teardown. `chs_shutdown` stops what `chs_initialize` started. A loader never unloads a library: unloading or initializing an image again in one process is unsupported. Before `chs_initialize`, every call that returns a `chs_status`, other than `chs_initialize` and `chs_shutdown`, refuses with `CHS_INVALID_ARGUMENT` and ClickHouse code 0, naming the call, and leaves its out-parameters NULL; the handshake, `chs_abi_revision`, the buffer and error accessors and the frees answer at any time.
+Teardown. `chs_shutdown` stops what `chs_initialize` started. A loader never unloads a library: unloading or initializing an image again in one process is unsupported. Before `chs_initialize`, every call that returns a `chs_status`, other than `chs_initialize` itself, refuses with `CHS_INVALID_ARGUMENT` and ClickHouse code 0, naming the call, and leaves its out-parameters NULL. After `chs_shutdown` has run, every such call refuses the same way, its message saying that `chs_shutdown` has run. The handshake, `chs_abi_revision`, `chs_shutdown`, the buffer and error accessors and the frees answer at any time.
 
 ### chs_buf
 

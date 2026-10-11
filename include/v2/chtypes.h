@@ -126,10 +126,11 @@
  *
  * Teardown. `chs_shutdown` stops what `chs_initialize` started. A loader never unloads a library:
  * unloading or initializing an image again in one process is unsupported. Before `chs_initialize`,
- * every call that returns a `chs_status`, other than `chs_initialize` and `chs_shutdown`, refuses
- * with `CHS_INVALID_ARGUMENT` and ClickHouse code 0, naming the call, and leaves its out-parameters
- * NULL; the handshake, `chs_abi_revision`, the buffer and error accessors and the frees answer at
- * any time.
+ * every call that returns a `chs_status`, other than `chs_initialize` itself, refuses with
+ * `CHS_INVALID_ARGUMENT` and ClickHouse code 0, naming the call, and leaves its out-parameters
+ * NULL. After `chs_shutdown` has run, every such call refuses the same way, its message saying that
+ * `chs_shutdown` has run. The handshake, `chs_abi_revision`, `chs_shutdown`, the buffer and error
+ * accessors and the frees answer at any time.
  */
 #ifndef CHTYPES_V2_H
 #define CHTYPES_V2_H
