@@ -531,6 +531,15 @@ pub(crate) fn batch(bytes: &[u8], payload: Option<Vec<u8>>) -> Result<BatchResul
             v,
         )?)?);
     }
+    let export_declined = o.bytes("export_declined")?;
+    // A declined export has no payload and no spans, whatever buffer the call
+    // returned: the library may hand back a zero-length one, so the document's
+    // export_declined decides, never the buffer's length.
+    let (payload, row_spans) = if export_declined.as_bytes().is_empty() {
+        (payload, row_spans)
+    } else {
+        (None, None)
+    };
     Ok(BatchResult {
         outcome: Outcome::from_wire(&o.string("outcome")?),
         err_code: o.int32("code")?,
@@ -544,7 +553,7 @@ pub(crate) fn batch(bytes: &[u8], payload: Option<Vec<u8>>) -> Result<BatchResul
         at_merge,
         payload,
         spans: row_spans,
-        export_declined: o.bytes("export_declined")?,
+        export_declined,
         rows_passed: o.uint64("rows_passed")?,
         rows_cut: o.uint64("rows_cut")?,
         partition_count: o.opt_uint64("partition_count")?,
@@ -968,6 +977,36 @@ mod tests {
         let h = f.header.unwrap();
         assert!(h.consumed);
         assert_eq!(h.names[1].as_bytes(), &[0x00, 0xff]);
+    }
+
+    #[test]
+    fn a_declined_exports_payload_is_absent_whatever_the_buffer() {
+        // The library returns a non-NULL, zero-length buffer for a declined
+        // export: the document's export_declined decides, never the buffer.
+        for doc in [
+            &br#"{"outcome":"rejected","row_spans":[{"off":0,"len":1}],"export_declined":"only accepted batches export"}"#[..],
+            &br#"{"outcome":"rejected","row_spans":[{"off":0,"len":1}],"export_declined_b64":"/w=="}"#[..],
+        ] {
+            for buffer in [Vec::new(), b"x".to_vec()] {
+                let b = batch(doc, Some(buffer)).unwrap();
+                assert_eq!(b.payload, None);
+                assert_eq!(b.spans, None);
+                assert!(!b.export_declined.as_bytes().is_empty());
+            }
+        }
+        // An accepted zero-row export is present and empty.
+        let b = batch(
+            br#"{"outcome":"accepted","row_spans":[],"export_declined":""}"#,
+            Some(Vec::new()),
+        )
+        .unwrap();
+        assert_eq!(b.payload, Some(Vec::new()));
+        assert_eq!(b.spans, Some(Vec::new()));
+        // No export asked for.
+        assert_eq!(
+            batch(br#"{"outcome":"accepted"}"#, None).unwrap().payload,
+            None
+        );
     }
 
     #[test]

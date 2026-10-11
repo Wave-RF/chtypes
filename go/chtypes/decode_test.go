@@ -451,3 +451,45 @@ func TestDecodeBuildInfo(t *testing.T) {
 		t.Errorf("build info = %+v", bi)
 	}
 }
+
+// A declined export's payload is absent, decided from the document's
+// export_declined and never from the buffer: the library returns a non-NULL
+// zero-length buffer for a declined export, and an accepted zero-row export is
+// present and empty. Both decoders agree.
+func TestDeclinedExportPayloadIsAbsent(t *testing.T) {
+	decoders := map[string]func([]byte, []byte) (BatchResult, error){
+		"decodeBatch":        decodeBatch,
+		"decodeBatchGeneric": decodeBatchGeneric,
+	}
+	for name, decode := range decoders {
+		t.Run(name, func(t *testing.T) {
+			empty := []byte{} // the non-NULL, zero-length buffer
+			for _, doc := range []string{
+				`{"outcome":"rejected","row_spans":[{"off":0,"len":1}],"export_declined":"only accepted batches export"}`,
+				`{"outcome":"rejected","export_declined_b64":"/w=="}`,
+			} {
+				b, err := decode([]byte(doc), empty)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if b.Payload != nil || b.Spans != nil || b.ExportDeclined == "" {
+					t.Errorf("declined: Payload nil = %v, Spans = %v, ExportDeclined = %q", b.Payload == nil, b.Spans, b.ExportDeclined)
+				}
+				// Even a non-empty buffer: the document decides.
+				if b, _ = decode([]byte(doc), []byte("x")); b.Payload != nil {
+					t.Errorf("declined with a non-empty buffer: Payload = %q", b.Payload)
+				}
+			}
+			b, err := decode([]byte(`{"outcome":"accepted","row_spans":[],"export_declined":""}`), empty)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if b.Payload == nil || len(b.Payload) != 0 || b.Spans == nil || b.ExportDeclined != "" {
+				t.Errorf("accepted zero-row: Payload nil = %v, len = %d, Spans nil = %v", b.Payload == nil, len(b.Payload), b.Spans == nil)
+			}
+			if b, _ = decode([]byte(`{"outcome":"accepted"}`), nil); b.Payload != nil {
+				t.Errorf("no export asked for: Payload = %q, want nil", b.Payload)
+			}
+		})
+	}
+}

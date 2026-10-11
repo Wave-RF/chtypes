@@ -1084,10 +1084,15 @@ func decodeBatchFast(raw, payload []byte) (res BatchResult, ok bool) {
 	if res.Transformed, good = transformsOf(top.transformed, top.transformed != nil); !good {
 		return res, false
 	}
-	res.Payload = payload
-	res.Spans = top.rowSpans
 	if res.ExportDeclined, good = bytesOf(&top.exportDeclined, &top.exportDeclinedB64); !good {
 		return res, false
+	}
+	// A declined export has no payload and no spans, whatever buffer the call
+	// returned: the library may hand back a zero-length one, so the document's
+	// export_declined decides, never the buffer's length.
+	if res.ExportDeclined == "" {
+		res.Payload = payload
+		res.Spans = top.rowSpans
 	}
 	res.RowsPassed, res.RowsCut = top.rowsPassed.v, top.rowsCut.v
 	res.Unconsumed = top.unconsumed

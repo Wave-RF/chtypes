@@ -428,6 +428,12 @@ def decode_batch(raw: bytes, export: bytes | None) -> BatchResult:
     framing = obj.get("framing")
     engine_rows = None if obj.get("engine_rows") is None else _engine_rows(obj, where)
     spans = None if obj.get("row_spans") is None else _spans(obj, "row_spans", where)
+    export_declined = _bytes(obj, "export_declined", where)
+    if export_declined:
+        # A declined export has no payload and no spans, whatever buffer the call
+        # returned: the library may hand back a zero-length one, so the document's
+        # export_declined decides, never the buffer's length.
+        export, spans = None, None
     return BatchResult(
         outcome=Outcome.of(_text(obj, "outcome", where)),
         err_code=_int(obj, "code", where),
@@ -439,7 +445,7 @@ def decode_batch(raw: bytes, export: bytes | None) -> BatchResult:
         engine_rows=engine_rows,
         payload=export,
         spans=spans,
-        export_declined=_bytes(obj, "export_declined", where),
+        export_declined=export_declined,
         rows_passed=_u64(obj, "rows_passed", where),
         rows_cut=_u64(obj, "rows_cut", where),
         partition_count=_opt_u64(obj, "partition_count", where),

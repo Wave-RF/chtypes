@@ -226,7 +226,8 @@ pub struct BatchResult {
     /// a row both removed and reset lists only `ttl_delete` (ABI v2). Empty
     /// when the document carries none.
     pub at_merge: Vec<AtMergeEntry>,
-    /// The export bytes, present only when an export was asked for.
+    /// The export bytes: present only for an export that ran (possibly empty);
+    /// `None` when none was asked for or it was declined ([`BatchResult::export_declined`]).
     pub payload: Option<Vec<u8>>,
     /// Each exported row's place in [`BatchResult::payload`].
     pub spans: Option<Vec<Span>>,
