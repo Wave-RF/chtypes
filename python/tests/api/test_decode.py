@@ -177,6 +177,27 @@ BATCH = {
 }
 
 
+def test_a_declined_exports_payload_is_absent_whatever_the_buffer() -> None:
+    # The library returns a non-NULL, zero-length buffer for a declined export:
+    # the document's export_declined decides, never the buffer's length.
+    for member in (
+        {"export_declined": "only accepted batches export"},
+        {"export_declined_b64": b64(b"\xff")},
+    ):
+        doc = {"outcome": "rejected", "row_spans": [{"off": 0, "len": 1}], **member}
+        for buffer in (b"", b"x"):
+            batch = decode_batch(dumps(doc), buffer)
+            assert batch.payload is None and batch.spans is None and batch.export_declined
+
+
+def test_an_accepted_zero_row_export_is_present_and_empty() -> None:
+    batch = decode_batch(
+        dumps({"outcome": "accepted", "row_spans": [], "export_declined": ""}), b""
+    )
+    assert batch.payload == b"" and batch.spans == () and batch.export_declined == b""
+    assert decode_batch(dumps({"outcome": "accepted"}), None).payload is None
+
+
 def test_a_batch_decodes_rows_payload_framing_and_spans() -> None:
     batch = decode_batch(dumps(BATCH), b"export bytes")
     assert batch.outcome is Outcome.ACCEPTED_POISONED

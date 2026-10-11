@@ -151,9 +151,12 @@ type BatchResult struct {
 	// the document carries none (nothing would happen).
 	AtMerge []AtMergeEntry
 	// Payload is the export buffer: nil when no export was asked for or it was
-	// declined, non-nil and empty for an accepted batch with zero rows.
+	// declined (decided from ExportDeclined, never from the buffer's length: the
+	// library may return a zero-length buffer for a declined export), non-nil and
+	// empty for an accepted batch with zero rows.
 	Payload []byte
-	// Spans is each exported row's place in Payload; nil when absent.
+	// Spans is each exported row's place in Payload; nil when absent, and
+	// always nil when the export was declined.
 	Spans          []Span
 	ExportDeclined string
 	RowsPassed     uint64

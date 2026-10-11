@@ -90,5 +90,10 @@ func decodeBatchReference(raw []byte, payload []byte) (BatchResult, error) {
 			}
 		}
 	}
+	// The same declined-export rule as decodeBatchGeneric (the export_declined
+	// document member decides, never the buffer).
+	if res.ExportDeclined != "" {
+		res.Payload, res.Spans = nil, nil
+	}
 	return res, r.err
 }

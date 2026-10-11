@@ -48,6 +48,8 @@ var batchFixtures = map[string]string{
 	"framing known":       `{"outcome":"accepted","rows":[],"unconsumed":[],"framing":{"bom_skipped":false,"container":"array","header":{"consumed":true,"lines":1,"names":[{"name":"a"},{"name_b64":"/w=="}]}}}`,
 	"framing unknown":     `{"outcome":"accepted","rows":[],"framing":{"bom_skipped":null,"container":null,"header":null}}`,
 	"framing empty":       `{"outcome":"accepted","framing":{}}`,
+	"export declined":     `{"outcome":"rejected","row_spans":[{"off":0,"len":5}],"export_declined":"only accepted batches export"}`,
+	"export declined b64": `{"outcome":"rejected","row_spans":[],"export_declined_b64":"/w=="}`,
 	"rows empty and null": `{"outcome":"accepted","rows":null,"transformed":null,"unconsumed":[],"row_spans":null,"engine_rows":[null,[]]}`,
 	"every top-level field": `{
 	  "outcome": "accepted_poisoned", "code": 0, "err": "",
