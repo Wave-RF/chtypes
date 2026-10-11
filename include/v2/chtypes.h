@@ -125,7 +125,11 @@
  * so instead of silently getting the old behavior.
  *
  * Teardown. `chs_shutdown` stops what `chs_initialize` started. A loader never unloads a library:
- * unloading or initializing an image again in one process is unsupported.
+ * unloading or initializing an image again in one process is unsupported. Before `chs_initialize`,
+ * every call that returns a `chs_status`, other than `chs_initialize` and `chs_shutdown`, refuses
+ * with `CHS_INVALID_ARGUMENT` and ClickHouse code 0, naming the call, and leaves its out-parameters
+ * NULL; the handshake, `chs_abi_revision`, the buffer and error accessors and the frees answer at
+ * any time.
  */
 #ifndef CHTYPES_V2_H
 #define CHTYPES_V2_H
@@ -1010,9 +1014,12 @@ CHS_API chs_status chs_preview_row(
  * honor, from the filter's own `settings`, the name joins the batch document's top-level
  * `unsupported_settings` and the batch is `unsupported` by `batch_outcome`'s step 2: every row
  * `unsupported`, filter rows `d`, and no export. The same call without the filter is unchanged.
- * `export_format` is `CHS_EXPORT_NONE` or a `chs_format` the build can write; with an export,
- * `out_export` receives the accepted rows serialized once, and it may be NULL when no export is
- * asked for. `doc_flags` chooses which groups the per-row documents carry.
+ * `export_format` is `CHS_EXPORT_NONE` or a `chs_format` the build can write; with an export that
+ * runs, `out_export` receives the accepted rows serialized once, an empty buffer when the batch
+ * holds no row. When the export is declined (the document carries `export_declined`), `out_export`
+ * is NULL, as it may be when no export is asked for, so a caller tells a declined export from an
+ * empty one by `export_declined`, never by the buffer. `doc_flags` chooses which groups the per-row
+ * documents carry.
  *
  * Class: api. Thread: shared. Returns one of: CHS_OK, CHS_REJECTED, CHS_DECLINED,
  * CHS_INVALID_ARGUMENT, CHS_INTERNAL.
