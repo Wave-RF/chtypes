@@ -126,10 +126,11 @@
  *
  * Teardown. `chs_shutdown` stops what `chs_initialize` started. A loader never unloads a library:
  * unloading or initializing an image again in one process is unsupported. Before `chs_initialize`,
- * every call that returns a `chs_status`, other than `chs_initialize` and `chs_shutdown`, refuses
- * with `CHS_INVALID_ARGUMENT` and ClickHouse code 0, naming the call, and leaves its out-parameters
- * NULL; the handshake, `chs_abi_revision`, the buffer and error accessors and the frees answer at
- * any time.
+ * every call that returns a `chs_status`, other than `chs_initialize` itself, refuses with
+ * `CHS_INVALID_ARGUMENT` and ClickHouse code 0, naming the call, and leaves its out-parameters
+ * NULL. After `chs_shutdown` has run, every such call refuses the same way, its message saying that
+ * `chs_shutdown` has run. The handshake, `chs_abi_revision`, `chs_shutdown`, the buffer and error
+ * accessors and the frees answer at any time.
  */
 #ifndef CHTYPES_V2_H
 #define CHTYPES_V2_H
@@ -973,6 +974,13 @@ CHS_API chs_status chs_schema_describe(const chs_schema *schema, chs_buf **out, 
  * would, and returns the row's document. `columns` is the INSERT column list, a JSON array of name
  * objects (`{name}` or `{name_b64}`), and empty for none. `session_timezone` in `settings` is this
  * call's zone.
+ *
+ * `body` holds exactly one row, and the library reads all of it, with the same reader as
+ * `chs_preview_batch`. A malformed tail, or trailing content the format's reader does not itself
+ * skip, is rejected with the reader's own code, as a server's INSERT rejects it; what the reader
+ * skips, such as a trailing newline, is fine. A body holding no row, or more than one, is
+ * `CHS_INVALID_ARGUMENT`, naming the call: `chs_preview_batch` answers a body of many rows. The
+ * row's document equals the single row of `chs_preview_batch`'s document for the same body.
  *
  * An INSERT whose input block has no column at all (every insertable column EPHEMERAL, and no
  * column list) is declined: a server answers it (code 90, EMPTY_LIST_OF_COLUMNS_PASSED) from a
