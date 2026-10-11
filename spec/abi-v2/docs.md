@@ -480,6 +480,8 @@ A deep input the server's stack check refuses is `CHS_REJECTED` with ch_code 306
 
 Validates and coerces one row of `body` under the schema, as a server's INSERT would, and returns the row's document. `columns` is the INSERT column list, a JSON array of name objects (`{name}` or `{name_b64}`), and empty for none. `session_timezone` in `settings` is this call's zone.
 
+`body` holds exactly one row, and the library reads all of it, with the same reader as `chs_preview_batch`. A malformed tail, or trailing content the format's reader does not itself skip, is rejected with the reader's own code, as a server's INSERT rejects it; what the reader skips, such as a trailing newline, is fine. A body holding no row, or more than one, is `CHS_INVALID_ARGUMENT`, naming the call: `chs_preview_batch` answers a body of many rows. The row's document equals the single row of `chs_preview_batch`'s document for the same body.
+
 An INSERT whose input block has no column at all (every insertable column EPHEMERAL, and no column list) is declined: a server answers it (code 90, EMPTY_LIST_OF_COLUMNS_PASSED) from a statement inside its INSERT interpreter that the library cannot call, and a decline is never a wrong answer.
 
 ### chs_preview_batch
