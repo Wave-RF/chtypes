@@ -641,6 +641,11 @@ func decodeBatchGeneric(raw []byte, payload []byte) (BatchResult, error) {
 			}
 		}
 	}
+	// A declined export has no payload and no spans, whatever buffer the call
+	// returned (decode_batch.go does the same on the production path).
+	if res.ExportDeclined != "" {
+		res.Payload, res.Spans = nil, nil
+	}
 	return res, r.err
 }
 

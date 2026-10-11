@@ -453,6 +453,23 @@ describe('name lists and engine rows (rule 5)', () => {
     expect(decodeBatch(enc({ outcome: 'accepted' }), undefined).exportDeclined.length).toBe(0);
   });
 
+  it('a declined export has no payload and no spans, whatever the buffer; an accepted zero-row export is present and empty', () => {
+    // The library returns a non-NULL, zero-length buffer for a declined export: the document decides.
+    for (const member of [{ export_declined: 'only accepted batches export' }, { export_declined_b64: b64([0xff]) }]) {
+      for (const buffer of [Buffer.alloc(0), Buffer.from('x')]) {
+        const declined = decodeBatch(enc({ outcome: 'rejected', row_spans: [{ off: 0, len: 1 }], ...member }), buffer);
+        expect(declined.payload).toBeUndefined();
+        expect(declined.spans).toBeUndefined();
+        expect(declined.exportDeclined.length).toBeGreaterThan(0);
+      }
+    }
+    const empty = decodeBatch(enc({ outcome: 'accepted', row_spans: [], export_declined: '' }), Buffer.alloc(0));
+    expect(empty.payload).toBeDefined();
+    expect(empty.payload?.length).toBe(0);
+    expect(empty.spans).toEqual([]);
+    expect(decodeBatch(enc({ outcome: 'accepted' }), undefined).payload).toBeUndefined();
+  });
+
   it('refuses an export_declined given in both forms (InternalError)', () => {
     expect(() => decodeBatch(enc({ outcome: 'accepted', export_declined: 'x', export_declined_b64: b64([0x78]) }), undefined)).toThrow(InternalError);
   });

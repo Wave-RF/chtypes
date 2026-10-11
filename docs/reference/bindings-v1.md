@@ -409,7 +409,7 @@ The transform entry keeps v0's shape (`column`, `input`, `stored`, `reason`, `ro
 | `unsupported_settings`    | `unsupported_settings`, name objects (rule 5): the call's own settings the library declined (ABI v2)                     | list of bytes                                      |
 | `engine_rows`             | `engine_rows`: each stored row after the engine's insert-time merge, a list of cells                                     | optional list of rows, each a list of `EngineCell` |
 | `at_merge`                | `at_merge`: what an `OPTIMIZE TABLE ... FINAL` of the part would do to its rows (ABI v2)                                 | list of `AtMergeEntry`                             |
-| `payload`                 | the `out_export` buffer, present only when an export was asked for                                                       | optional payload                                   |
+| `payload`                 | the `out_export` buffer, present only for an export that ran (absent when `export_declined` is non-empty)                | optional payload                                   |
 | `spans`                   | `row_spans`: each exported row's place in `payload`                                                                      | optional list of `Span`                            |
 | `export_declined`         | `export_declined` (rule 5)                                                                                               | bytes                                              |
 | `rows_passed`, `rows_cut` | `rows_passed`, `rows_cut`, with an attached filter                                                                       | unsigned 64-bit                                    |

@@ -189,7 +189,7 @@ export interface BatchResult {
    * document carries none.
    */
   readonly atMerge: readonly AtMergeEntry[];
-  /** The export buffer, present only when an export was asked for. */
+  /** The export buffer: present only for an export that ran (possibly empty); absent when none was asked for or it was declined (`exportDeclined`). */
   readonly payload: Buffer | undefined;
   /** Each exported row's place in `payload`. */
   readonly spans: readonly Span[] | undefined;
@@ -574,6 +574,10 @@ export function decodeBatch(bytes: Uint8Array, payload: Buffer | undefined): Bat
   const outcome = batchOutcomeOf(strOr(doc, o, 'outcome', ''));
   const spansRaw = o.row_spans;
   const engineRaw = o.engine_rows;
+  const exportDeclined = bytesOr(doc, o, 'export_declined');
+  // A declined export has no payload and no spans, whatever buffer the call returned: the library
+  // may hand back a zero-length one, so the document's export_declined decides, never the buffer's length.
+  const declined = exportDeclined.length > 0;
   return {
     outcome,
     errCode: intOr(doc, o, 'code', 0),
@@ -587,9 +591,9 @@ export function decodeBatch(bytes: Uint8Array, payload: Buffer | undefined): Bat
       engineRaw === undefined
         ? undefined
         : asArray(doc, 'engine_rows', engineRaw).map((row) => asArray(doc, 'engine_rows[]', row).map((c) => engineCellOf(doc, c))),
-    payload,
-    spans: spansRaw === undefined ? undefined : asArray(doc, 'row_spans', spansRaw).map((s) => spanOf(doc, 'row_spans[]', s)),
-    exportDeclined: bytesOr(doc, o, 'export_declined'),
+    payload: declined ? undefined : payload,
+    spans: spansRaw === undefined || declined ? undefined : asArray(doc, 'row_spans', spansRaw).map((s) => spanOf(doc, 'row_spans[]', s)),
+    exportDeclined,
     rowsPassed: intOr(doc, o, 'rows_passed', 0),
     rowsCut: intOr(doc, o, 'rows_cut', 0),
     partitionCount: optInt(doc, o, 'partition_count'),
