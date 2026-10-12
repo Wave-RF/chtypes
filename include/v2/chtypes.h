@@ -83,16 +83,15 @@
  * `CAST` or a gated aggregate function in such an expression, with its gate only in the schema's
  * own settings, is refused as the server refuses it (455, 44 or 63); a caller whose real INSERT
  * session carries the gate passes it in the call's settings or the server profile, as that INSERT
- * does. Parsing a body keeps all five layers, unchanged, the expressions a `Values` body evaluates
- * while it is read included, and `session_timezone` keeps the zone path. Each setting that reaches
- * a WHERE is honored (applied to it), passed through (accepted and ignored), or declined
- * (`chs_filter_create` says how). A server resource limit (an `execution`-tier setting, e.g. a
- * small `max_columns_to_read`) can make the server refuse a query the library answers; that is
- * resource policy, not row access, and the library does not model it. A server's settings are the
- * ones its profile applies to every query, and they never change how a schema compiles. No call
- * reads a server's version or its changed settings itself: that discovery is a recorded gap in this
- * generation, so a caller that wants a server's settings passes them explicitly, in a server
- * profile, through `chs_set_defaults` or in each call's settings.
+ * does. Parsing a body keeps all five layers, unchanged, and `session_timezone` keeps the zone
+ * path. Each setting that reaches a WHERE is honored (applied to it), passed through (accepted and
+ * ignored), or declined (`chs_filter_create` says how). A server resource limit (an
+ * `execution`-tier setting, e.g. a small `max_columns_to_read`) can make the server refuse a query
+ * the library answers; that is resource policy, not row access, and the library does not model it.
+ * A server's settings are the ones its profile applies to every query, and they never change how a
+ * schema compiles. No call reads a server's version or its changed settings itself: that discovery
+ * is a recorded gap in this generation, so a caller that wants a server's settings passes them
+ * explicitly, in a server profile, through `chs_set_defaults` or in each call's settings.
  *
  * Documents. Every output document is valid JSON that a stock parser reads: every ClickHouse
  * rendering (a stored value, an input value, an engine's row) is a JSON string, a number written
