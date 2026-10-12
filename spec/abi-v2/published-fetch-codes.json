@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "comment": "The fetch layer's error codes as published: every release that carries a code (1.x and 2.0.0-dev.N alike) keeps its name and exit status (r4 in spec/abi-v2/docs.md). Measured from the release tags: 1.1.0 carried 11, 2.0.0-dev.4 added CHTYPES_SOURCE_RETIRED. gen.py reads this file, never git history. Append a code here when a release first carries it; never edit or remove a line.",
+  "codes": {
+    "CHTYPES_ARTIFACT_MISSING": 1,
+    "CHTYPES_ARTIFACT_UNTRUSTED": 1,
+    "CHTYPES_ARTIFACT_CORRUPT": 1,
+    "CHTYPES_ARTIFACT_PINNED": 1,
+    "CHTYPES_ARTIFACT_UNPUBLISHED": 4,
+    "CHTYPES_SOURCE_UNREACHABLE": 3,
+    "CHTYPES_SOURCE_UNAUTHORIZED": 5,
+    "CHTYPES_SOURCE_FORBIDDEN": 6,
+    "CHTYPES_SOURCE_INCOMPATIBLE": 7,
+    "CHTYPES_ARTIFACT_INCOMPATIBLE": 8,
+    "CHTYPES_CACHE_UNUSABLE": 9,
+    "CHTYPES_SOURCE_RETIRED": 10
+  }
+}

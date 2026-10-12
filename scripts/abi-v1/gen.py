@@ -901,7 +901,7 @@ def _selftest_v2() -> list[str]:
     go_major = binding_majors(ROOT)["go"]
     with tempfile.TemporaryDirectory(prefix="abi-v2-selftest-") as tmp:
         pristine = Path(tmp) / "pristine"
-        _copy_inputs(ROOT, pristine, outs1 + outs2, extra=(v2.dir,))
+        _copy_inputs(ROOT, pristine, outs1 + outs2, extra=(v2.dir, abimodel.FETCH_CONSTANTS_JSON))
 
         # The two majors share one tree and never touch each other's outputs.
         v1_before = _tree_digest(pristine, v1_paths)
@@ -1130,6 +1130,59 @@ def _selftest_v2() -> list[str]:
             "(r4) a published error code reused",
             lambda w: _json_edit(w / sdk, lambda d: d["errors"]["codes"].update(later="CHTYPES_ARTIFACT_CORRUPT")),
             "reuses the published code 'CHTYPES_ARTIFACT_CORRUPT'",
+        )
+        # (r4) the fetch table: listed in sdk.json, equal to the fetch constants,
+        # and held to the committed baseline of what releases published.
+        fetch_json = abimodel.FETCH_CONSTANTS_JSON
+        baseline = v2.published_fetch_codes_json
+        plant(
+            "(r4) a published fetch code dropped from both the fetch constants and sdk.json",
+            lambda w: (
+                _json_edit(w / sdk, lambda d: d["errors"]["fetch_codes"].pop("CHTYPES_SOURCE_RETIRED")),
+                _json_edit(w / fetch_json, lambda d: d["errors"].pop("CHTYPES_SOURCE_RETIRED")),
+            ),
+            "CHTYPES_SOURCE_RETIRED = 10 is published",
+        )
+        plant(
+            "(r4) a published fetch code's exit status renumbered in both files",
+            lambda w: (
+                _json_edit(w / sdk, lambda d: d["errors"]["fetch_codes"].update(CHTYPES_CACHE_UNUSABLE=11)),
+                _json_edit(w / fetch_json, lambda d: d["errors"].update(CHTYPES_CACHE_UNUSABLE=11)),
+            ),
+            "CHTYPES_CACHE_UNUSABLE = 9 is published",
+        )
+        plant(
+            "(r4) a new fetch code takes a published exit status",
+            lambda w: (
+                _json_edit(w / sdk, lambda d: d["errors"]["fetch_codes"].update(CHTYPES_BRAND_NEW=9)),
+                _json_edit(w / fetch_json, lambda d: d["errors"].update(CHTYPES_BRAND_NEW=9)),
+            ),
+            "CHTYPES_BRAND_NEW takes exit status 9, which a published code has",
+        )
+        plant(
+            "(r4) a fetch code in the fetch constants missing from sdk.json",
+            lambda w: _json_edit(w / sdk, lambda d: d["errors"]["fetch_codes"].pop("CHTYPES_SOURCE_FORBIDDEN")),
+            "errors.fetch_codes does not list CHTYPES_SOURCE_FORBIDDEN",
+        )
+        plant(
+            "(r4) a fetch code in sdk.json the fetch constants do not define",
+            lambda w: _json_edit(w / sdk, lambda d: d["errors"]["fetch_codes"].update(CHTYPES_INVENTED=12)),
+            "errors.fetch_codes lists CHTYPES_INVENTED",
+        )
+        plant(
+            "(r4) an exit status in sdk.json that differs from the fetch constants",
+            lambda w: _json_edit(w / sdk, lambda d: d["errors"]["fetch_codes"].update(CHTYPES_SOURCE_FORBIDDEN=7)),
+            "errors.fetch_codes CHTYPES_SOURCE_FORBIDDEN = 7",
+        )
+        plant(
+            "(r4) an errors.codes entry naming a code the fetch table lacks",
+            lambda w: _json_edit(w / sdk, lambda d: d["errors"]["codes"].update(later="CHTYPES_NOT_A_FETCH_CODE")),
+            "errors.codes later = 'CHTYPES_NOT_A_FETCH_CODE' is not in errors.fetch_codes",
+        )
+        plant(
+            "(r4) the published-codes baseline unreadable",
+            lambda w: (w / baseline).unlink(),
+            "(r4) compares the fetch table",
         )
         plant(
             "(r4) generation 1's description unreadable",

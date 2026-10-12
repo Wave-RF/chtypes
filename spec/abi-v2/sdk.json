@@ -8,6 +8,20 @@
       "artifact_incompatible": "CHTYPES_ARTIFACT_INCOMPATIBLE",
       "artifact_corrupt": "CHTYPES_ARTIFACT_CORRUPT"
     },
+    "fetch_codes": {
+      "CHTYPES_ARTIFACT_MISSING": 1,
+      "CHTYPES_ARTIFACT_UNTRUSTED": 1,
+      "CHTYPES_ARTIFACT_CORRUPT": 1,
+      "CHTYPES_ARTIFACT_PINNED": 1,
+      "CHTYPES_ARTIFACT_UNPUBLISHED": 4,
+      "CHTYPES_SOURCE_UNREACHABLE": 3,
+      "CHTYPES_SOURCE_UNAUTHORIZED": 5,
+      "CHTYPES_SOURCE_FORBIDDEN": 6,
+      "CHTYPES_SOURCE_INCOMPATIBLE": 7,
+      "CHTYPES_ARTIFACT_INCOMPATIBLE": 8,
+      "CHTYPES_CACHE_UNUSABLE": 9,
+      "CHTYPES_SOURCE_RETIRED": 10
+    },
     "classes": {
       "schema": {"go": "*SchemaError", "python": "SchemaError", "ts": "SchemaError", "rust": "Error::Schema", "new": false},
       "unsupported": {"go": "*UnsupportedError", "python": "UnsupportedError", "ts": "UnsupportedError", "rust": "Error::Unsupported", "new": false},
