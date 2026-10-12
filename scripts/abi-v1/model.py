@@ -58,6 +58,11 @@ import jcs
 # (generation 2's r4 check reads generation 1's description, never its outputs).
 MAJORS = (1, 2)
 
+# The fetch layer's shared constants: the error table of docs/guides/fetch-v1.md
+# section 8 is generated from this file, and generation 2's r4 check holds
+# errors.fetch_codes in sdk.json to it.
+FETCH_CONSTANTS_JSON = "spec/fetch-v1/constants.json"
+
 
 @dataclass(frozen=True)
 class Spec:
@@ -92,6 +97,10 @@ class Spec:
     @property
     def v0_json(self) -> str:
         return f"{self.dir}/v0-symbols.json"
+
+    @property
+    def published_fetch_codes_json(self) -> str:
+        return f"{self.dir}/published-fetch-codes.json"
 
 
 def spec(major: int) -> Spec:
@@ -1088,6 +1097,60 @@ def generation_rule_problems(root: Path, sp: Spec, raw: dict[str, Any], sdk: dic
             problems.append(
                 f"{sp.sdk_json}: errors.codes {key} reuses the published code {code!r} for another meaning (r4)"
             )
+
+    # (r4) the fetch layer's table. The shared fetch constants are the table
+    # (docs/guides/fetch-v1.md section 8); this description lists every code in
+    # it, with its exit status, and a committed baseline holds what releases
+    # have published. The check reads files, never git history.
+    fetch = _read_json(root, FETCH_CONSTANTS_JSON, read)
+    baseline = _read_json(root, sp.published_fetch_codes_json, read)
+    if fetch is None or baseline is None:
+        problems += [f"(r4) compares the fetch table, which cannot be read: {p}" for p in read]
+        return problems
+    table = {k: v for k, v in fetch["errors"].items()}
+    listed = sdk["errors"]["fetch_codes"]
+    published_fetch = baseline["codes"]
+    for code, status in table.items():
+        if code not in listed:
+            problems.append(
+                f"{sp.sdk_json}: errors.fetch_codes does not list {code}, which {FETCH_CONSTANTS_JSON} defines (r4)"
+            )
+        elif listed[code] != status:
+            problems.append(
+                f"{sp.sdk_json}: errors.fetch_codes {code} = {listed[code]}, but {FETCH_CONSTANTS_JSON} gives it exit "
+                f"status {status} (r4)"
+            )
+    for code in listed:
+        if code not in table:
+            problems.append(
+                f"{sp.sdk_json}: errors.fetch_codes lists {code}, which {FETCH_CONSTANTS_JSON} does not define (r4)"
+            )
+    for code, status in published_fetch.items():
+        if code not in listed:
+            problems.append(
+                f"{sp.sdk_json}: errors.fetch_codes {code} = {status} is published ({sp.published_fetch_codes_json}), "
+                "and (r4) keeps it; here it is missing"
+            )
+        elif listed[code] != status:
+            problems.append(
+                f"{sp.sdk_json}: errors.fetch_codes {code} = {status} is published ({sp.published_fetch_codes_json}), "
+                f"and (r4) keeps its exit status; here it is {listed[code]}"
+            )
+        if code not in table:
+            problems.append(
+                f"{FETCH_CONSTANTS_JSON}: {code} is published ({sp.published_fetch_codes_json}), and (r4) keeps it; "
+                "here it is missing"
+            )
+    taken = set(published_fetch.values())
+    for code, status in listed.items():
+        if code not in published_fetch and status in taken:
+            problems.append(
+                f"{sp.sdk_json}: errors.fetch_codes {code} takes exit status {status}, which a published code has; "
+                "(r4) gives a new code a status of its own"
+            )
+    for key, code in codes.items():
+        if code not in listed:
+            problems.append(f"{sp.sdk_json}: errors.codes {key} = {code!r} is not in errors.fetch_codes (r4)")
     return problems
 
 
