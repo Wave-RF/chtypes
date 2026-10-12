@@ -64,3 +64,41 @@ def test_text_inputs_are_utf8_and_bodies_never_accept_text() -> None:
     assert body_bytes(memoryview(b"ab")) == b"ab"
     with pytest.raises(TypeError):
         body_bytes("text")  # type: ignore[arg-type]
+
+
+_LONE = "\udcff"  # what surrogateescape makes of the byte 0xff
+
+
+@pytest.mark.parametrize(
+    ("call", "words"),
+    [
+        (lambda: settings_json({"k": _LONE}), ("settings", 'the value for key "k"')),
+        (lambda: settings_json({"k" + _LONE: "v"}), ("settings", 'the key "k\\udcff"')),
+        (lambda: settings_json({"k": _LONE}, "UTC"), ("settings", 'the value for key "k"')),
+        (lambda: settings_json(None, _LONE), ("the zone",)),
+        (
+            lambda: string_map_json({"p": _LONE}, "query parameters"),
+            ("query parameters", 'the value for key "p"'),
+        ),
+        (
+            lambda: string_map_json({_LONE: "v"}, "query parameters"),
+            ("query parameters", 'the key "\\udcff"'),
+        ),
+    ],
+)
+def test_a_non_utf8_key_or_value_is_a_usage_error_naming_the_input_and_the_key(call, words) -> None:
+    with pytest.raises(UsageError) as info:
+        call()
+    message = info.value.message.decode("utf-8")
+    for word in (*words, "not valid UTF-8", "unhex('<hex>')"):
+        assert word in message
+    assert info.value.status == 3 and info.value.ch_code == 0
+    assert message.isascii()  # the key is escaped, never raw
+
+
+def test_valid_non_ascii_serializes_byte_for_byte_as_before() -> None:
+    # Measured before the change on the same inputs: json.dumps, ASCII escapes.
+    assert string_map_json({"p": "é日本"}, "query parameters") == b'{"p":"\\u00e9\\u65e5\\u672c"}'
+    assert settings_json({"é": "\ufffd"}, "Asia/Tokyo") == (
+        b'{"\\u00e9":"\\ufffd","session_timezone":"Asia/Tokyo"}'
+    )

@@ -171,7 +171,7 @@ func (s *Schema) CompileFilter(expr string, opts ...FilterOption) (*Filter, erro
 	if err != nil {
 		return nil, err
 	}
-	params, err := stringMapJSON(c.params)
+	params, err := stringMapJSON("query parameters", c.params)
 	if err != nil {
 		return nil, err
 	}

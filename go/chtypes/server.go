@@ -8,6 +8,7 @@ package chtypes
 
 import (
 	"runtime"
+	"unicode/utf8"
 
 	"github.com/wave-rf/chtypes/go/v2/internal/abi2"
 )
@@ -48,6 +49,17 @@ type serverProfileDoc struct {
 // serverProfileJSON is the profile document, with the stock encoder settings
 // use (keys in sorted order, no HTML escaping, no value rewritten).
 func serverProfileJSON(p ServerProfile) ([]byte, error) {
+	// A non-UTF-8 string would be replaced with U+FFFD by the encoder, and the
+	// library would see a different profile: refuse it instead.
+	if !utf8.ValidString(p.Timezone) {
+		return nil, usageError("server profile: the timezone is not valid UTF-8, and %s", nonUTF8Hint)
+	}
+	if err := checkUTF8Map("server profile settings", p.Settings); err != nil {
+		return nil, err
+	}
+	if err := checkUTF8Map("server profile macros", p.Macros); err != nil {
+		return nil, err
+	}
 	return marshalNoEscape(serverProfileDoc(p))
 }
 

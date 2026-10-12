@@ -453,9 +453,10 @@ func TestDecodeBuildInfo(t *testing.T) {
 }
 
 // A declined export's payload is absent, decided from the document's
-// export_declined and never from the buffer: the library returns a non-NULL
-// zero-length buffer for a declined export, and an accepted zero-row export is
-// present and empty. Both decoders agree.
+// export_declined and never from the buffer: the library returns a NULL
+// out_export for a declined export (builds up to 20261011.105019 returned a
+// non-NULL zero-length buffer), and an accepted zero-row export is present and
+// empty. Both decoders agree.
 func TestDeclinedExportPayloadIsAbsent(t *testing.T) {
 	decoders := map[string]func([]byte, []byte) (BatchResult, error){
 		"decodeBatch":        decodeBatch,

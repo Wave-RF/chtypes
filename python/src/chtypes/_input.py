@@ -45,6 +45,31 @@ def body_bytes(value: bytes, what: str = "body") -> bytes:
     raise TypeError(f"{what} must be bytes, not {type(value).__name__}")
 
 
+_NON_UTF8_HINT = (
+    "this ABI generation cannot carry a non-UTF-8 value in a JSON input; "
+    "write the bytes as unhex('<hex>') in the expression instead"
+)
+
+
+def _is_utf8(text: str) -> bool:
+    """False for a `str` that cannot be UTF-8 encoded (a lone surrogate, as
+    `surrogateescape` makes of undecodable bytes)."""
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
+def _refuse_non_utf8(what: str, part: str, key: str) -> Exception:
+    # The key is shown escaped (ASCII only), never as the raw text.
+    return misuse(
+        f"{what}: the key {json.dumps(key)} is not valid UTF-8, and {_NON_UTF8_HINT}"
+        if part == "key"
+        else f"{what}: the value for key {json.dumps(key)} is not valid UTF-8, and {_NON_UTF8_HINT}"
+    )
+
+
 def _string_map(mapping: Mapping[str, str], what: str) -> dict[str, str]:
     out: dict[str, str] = {}
     for key, value in mapping.items():
@@ -53,6 +78,12 @@ def _string_map(mapping: Mapping[str, str], what: str) -> dict[str, str]:
                 f"{what} maps strings to strings only; got {type(key).__name__} -> "
                 f"{type(value).__name__} for {key!r} (a value is never rewritten)"
             )
+        # json.dumps would write a lone surrogate as a \udXXX escape, a value
+        # the library does not read as the bytes the caller meant: refuse.
+        if not _is_utf8(key):
+            raise _refuse_non_utf8(what, "key", key)
+        if not _is_utf8(value):
+            raise _refuse_non_utf8(what, "value", key)
         out[key] = value
     return out
 
@@ -75,6 +106,8 @@ def settings_json(
     if session_timezone is not None:
         if not isinstance(session_timezone, str):
             raise TypeError(f"session_timezone must be str, not {type(session_timezone).__name__}")
+        if not _is_utf8(session_timezone):
+            raise misuse(f"the zone: the value is not valid UTF-8, and {_NON_UTF8_HINT}")
         if _ZONE_KEY in merged:
             raise misuse(
                 f"the {_ZONE_KEY} option and a {_ZONE_KEY} settings key were both given; "
@@ -141,10 +174,12 @@ def server_profile_json(profile: ServerProfile) -> bytes:
     if profile.timezone is not None:
         if not isinstance(profile.timezone, str):
             raise TypeError(f"timezone must be str, not {type(profile.timezone).__name__}")
+        if not _is_utf8(profile.timezone):
+            raise misuse(f"server profile: the timezone is not valid UTF-8, and {_NON_UTF8_HINT}")
         if profile.timezone != "":
             doc["timezone"] = profile.timezone
     if profile.settings is not None:
-        doc["settings"] = _string_map(profile.settings, "settings")
+        doc["settings"] = _string_map(profile.settings, "server profile settings")
     if profile.macros is not None:
-        doc["macros"] = _string_map(profile.macros, "macros")
+        doc["macros"] = _string_map(profile.macros, "server profile macros")
     return _dump(doc)

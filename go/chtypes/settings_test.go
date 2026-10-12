@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestCallSettings(t *testing.T) {
@@ -37,6 +38,65 @@ func TestCallSettings(t *testing.T) {
 	in := map[string]string{"a": "1"}
 	if _, err := callSettings(in, &z); err != nil || len(in) != 1 {
 		t.Errorf("the caller's map was changed: %v", in)
+	}
+}
+
+// A non-UTF-8 key or value is refused before any call, naming the input and the
+// key in escaped form; stock encoding/json would have replaced it with U+FFFD.
+func TestNonUTF8InputIsRefused(t *testing.T) {
+	z := "UTC"
+	bad := "\xff"
+	cases := []struct {
+		name string
+		call func() ([]byte, error)
+		want []string
+	}{
+		{"settings value", func() ([]byte, error) { return callSettings(map[string]string{"k": bad}, nil) }, []string{"settings", `the value for key "k"`}},
+		{"settings key", func() ([]byte, error) { return callSettings(map[string]string{"k" + bad: "v"}, nil) }, []string{"settings", `the key "k\xff"`}},
+		{"settings value beside a zone", func() ([]byte, error) { return callSettings(map[string]string{"k": bad}, &z) }, []string{"settings", `the value for key "k"`}},
+		{"zone", func() ([]byte, error) { return callSettings(nil, &bad) }, []string{"the zone"}},
+		{"query parameters value", func() ([]byte, error) { return stringMapJSON("query parameters", map[string]string{"p": bad}) }, []string{"query parameters", `the value for key "p"`}},
+		{"query parameters key", func() ([]byte, error) { return stringMapJSON("query parameters", map[string]string{bad: "v"}) }, []string{"query parameters", `the key "\xff"`}},
+		{"default settings", func() ([]byte, error) { return stringMapJSON("default settings", map[string]string{"d": bad}) }, []string{"default settings", `"d"`}},
+		{"server profile macro", func() ([]byte, error) { return serverProfileJSON(ServerProfile{Macros: map[string]string{"m": bad}}) }, []string{"server profile macros", `"m"`}},
+		{"server profile settings key", func() ([]byte, error) { return serverProfileJSON(ServerProfile{Settings: map[string]string{bad: "1"}}) }, []string{"server profile settings", "key"}},
+		{"server profile zone", func() ([]byte, error) { return serverProfileJSON(ServerProfile{Timezone: bad}) }, []string{"timezone"}},
+	}
+	for _, c := range cases {
+		b, err := c.call()
+		var ue *UsageError
+		if !errors.As(err, &ue) || b != nil {
+			t.Errorf("%s: = %q, %v, want a *UsageError and no bytes", c.name, b, err)
+			continue
+		}
+		msg := err.Error()
+		for _, w := range append(c.want, "not valid UTF-8", "unhex('<hex>')") {
+			if !strings.Contains(msg, w) {
+				t.Errorf("%s: message %q lacks %q", c.name, msg, w)
+			}
+		}
+		if !utf8.ValidString(msg) {
+			t.Errorf("%s: message is not valid UTF-8: %q", c.name, msg)
+		}
+	}
+}
+
+// Valid UTF-8 serializes byte for byte as before: non-ASCII is written as
+// itself, in keys and values, and U+FFFD that the caller really wrote stays.
+func TestValidNonASCIIInputIsUnchanged(t *testing.T) {
+	z := "Asia/Tokyo"
+	b, err := callSettings(map[string]string{"é": "日本", "r": "\ufffd"}, &z)
+	want := "{\"r\":\"\ufffd\",\"session_timezone\":\"Asia/Tokyo\",\"é\":\"日本\"}"
+	if err != nil || string(b) != want {
+		t.Errorf("settings = %q, %v, want %q", b, err, want)
+	}
+	b, err = stringMapJSON("query parameters", map[string]string{"p": "é日本"})
+	if err != nil || string(b) != "{\"p\":\"é日本\"}" {
+		t.Errorf("params = %q, %v", b, err)
+	}
+	b, err = serverProfileJSON(ServerProfile{Timezone: "日本", Settings: map[string]string{"é": "日本"}})
+	if err != nil || !strings.Contains(string(b), "日本") {
+		t.Errorf("profile = %q, %v", b, err)
 	}
 }
 

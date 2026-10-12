@@ -576,7 +576,8 @@ export function decodeBatch(bytes: Uint8Array, payload: Buffer | undefined): Bat
   const engineRaw = o.engine_rows;
   const exportDeclined = bytesOr(doc, o, 'export_declined');
   // A declined export has no payload and no spans, whatever buffer the call returned: the library
-  // may hand back a zero-length one, so the document's export_declined decides, never the buffer's length.
+  // returns a NULL out_export for it (builds up to 20261011.105019 returned a zero-length buffer), and
+  // the document's export_declined decides, never the buffer.
   const declined = exportDeclined.length > 0;
   return {
     outcome,
