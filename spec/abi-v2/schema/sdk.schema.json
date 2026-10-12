@@ -20,12 +20,17 @@
     "errors": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["fields", "codes", "classes", "status"],
+      "required": ["fields", "codes", "fetch_codes", "classes", "status"],
       "properties": {
         "fields": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
         "codes": {
           "type": "object",
           "additionalProperties": {"type": "string", "pattern": "^CHTYPES_[A-Z_]+$"}
+        },
+        "fetch_codes": {
+          "type": "object",
+          "propertyNames": {"pattern": "^CHTYPES_[A-Z_]+$"},
+          "additionalProperties": {"type": "integer", "minimum": 1, "maximum": 255}
         },
         "classes": {
           "type": "object",
