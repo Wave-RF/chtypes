@@ -454,7 +454,8 @@ describe('name lists and engine rows (rule 5)', () => {
   });
 
   it('a declined export has no payload and no spans, whatever the buffer; an accepted zero-row export is present and empty', () => {
-    // The library returns a non-NULL, zero-length buffer for a declined export: the document decides.
+    // The library returns a NULL out_export for a declined export (builds up to 20261011.105019 returned a
+    // non-NULL, zero-length buffer): the document decides.
     for (const member of [{ export_declined: 'only accepted batches export' }, { export_declined_b64: b64([0xff]) }]) {
       for (const buffer of [Buffer.alloc(0), Buffer.from('x')]) {
         const declined = decodeBatch(enc({ outcome: 'rejected', row_spans: [{ off: 0, len: 1 }], ...member }), buffer);

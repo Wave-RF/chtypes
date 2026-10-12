@@ -1088,8 +1088,9 @@ func decodeBatchFast(raw, payload []byte) (res BatchResult, ok bool) {
 		return res, false
 	}
 	// A declined export has no payload and no spans, whatever buffer the call
-	// returned: the library may hand back a zero-length one, so the document's
-	// export_declined decides, never the buffer's length.
+	// returned: the library returns a NULL out_export for it (builds up to
+	// 20261011.105019 returned a zero-length buffer), and the document's
+	// export_declined decides, never the buffer.
 	if res.ExportDeclined == "" {
 		res.Payload = payload
 		res.Spans = top.rowSpans

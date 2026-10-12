@@ -296,7 +296,7 @@ class Schema(_Handle):
         zone is its own, fixed here: its WHERE runs in the session this call's
         `session_timezone` (or `settings`) names, on every evaluation."""
         expr_bytes = to_bytes(expr, "expr")
-        params_bytes = string_map_json(params, "params")
+        params_bytes = string_map_json(params, "query parameters")
         settings_bytes = settings_json(settings, session_timezone)
         with _hold(self._guard):
             handle = self._library._api.filter_create(

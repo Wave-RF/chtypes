@@ -533,8 +533,9 @@ pub(crate) fn batch(bytes: &[u8], payload: Option<Vec<u8>>) -> Result<BatchResul
     }
     let export_declined = o.bytes("export_declined")?;
     // A declined export has no payload and no spans, whatever buffer the call
-    // returned: the library may hand back a zero-length one, so the document's
-    // export_declined decides, never the buffer's length.
+    // returned: the library returns a NULL out_export for it (builds up to
+    // 20261011.105019 returned a zero-length buffer), and the document's
+    // export_declined decides, never the buffer.
     let (payload, row_spans) = if export_declined.as_bytes().is_empty() {
         (payload, row_spans)
     } else {
@@ -981,8 +982,9 @@ mod tests {
 
     #[test]
     fn a_declined_exports_payload_is_absent_whatever_the_buffer() {
-        // The library returns a non-NULL, zero-length buffer for a declined
-        // export: the document's export_declined decides, never the buffer.
+        // The library returns a NULL out_export for a declined export (builds up
+        // to 20261011.105019 returned a non-NULL, zero-length buffer): the
+        // document's export_declined decides, never the buffer.
         for doc in [
             &br#"{"outcome":"rejected","row_spans":[{"off":0,"len":1}],"export_declined":"only accepted batches export"}"#[..],
             &br#"{"outcome":"rejected","row_spans":[{"off":0,"len":1}],"export_declined_b64":"/w=="}"#[..],

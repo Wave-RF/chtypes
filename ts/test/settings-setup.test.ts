@@ -33,6 +33,42 @@ describe('settings values are strings, and only strings', () => {
   });
 });
 
+describe('a key or value that is not valid UTF-8 is refused, never replaced', () => {
+  // A lone surrogate is what a JavaScript string holds where the bytes were not UTF-8:
+  // JSON.stringify would write it as an escape and TextEncoder as U+FFFD.
+  const lone = '\udcff';
+
+  it('refuses a settings value, naming the input and the escaped key', () => {
+    let error: unknown;
+    try {
+      encodeSettings({ k: lone }, undefined);
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(UsageError);
+    const message = (error as UsageError).message;
+    expect(message).toContain('settings');
+    expect(message).toContain('the value for key "k"');
+    expect(message).toContain('not valid UTF-8');
+    expect(message).toContain("unhex('<hex>')");
+  });
+
+  it('refuses a settings key, a query-parameter key or value, and a zone, each naming its input', () => {
+    expect(() => encodeSettings({ [`k${lone}`]: 'v' }, undefined)).toThrow(/settings: the key "k\\udcff" is not valid UTF-8/);
+    expect(() => encodeSettings({ k: lone }, 'UTC')).toThrow(UsageError);
+    expect(() => encodeSettings(undefined, lone)).toThrow(/the zone: the value is not valid UTF-8/);
+    expect(() => encodeParams({ p: lone })).toThrow(/query parameters: the value for key "p" is not valid UTF-8/);
+    expect(() => encodeParams({ [lone]: 'v' })).toThrow(/query parameters: the key "\\udcff" is not valid UTF-8/);
+    expect(() => encodeParams({ p: lone })).toThrow(UsageError);
+  });
+
+  it('carries valid non-ASCII, including an astral pair and a real U+FFFD, unchanged', () => {
+    expect(encodeParams({ p: 'é日本' }).toString('utf8')).toBe('{"p":"é日本"}');
+    expect([...encodeParams({ p: 'é' })]).toEqual([...Buffer.from('{"p":"', 'utf8'), 0xc3, 0xa9, ...Buffer.from('"}', 'utf8')]);
+    expect(encodeSettings({ 'é': '😀\ufffd' }, 'Asia/Tokyo').toString('utf8')).toBe('{"é":"😀\ufffd","session_timezone":"Asia/Tokyo"}');
+  });
+});
+
 describe('the per-call zone is a settings key, verbatim', () => {
   it('writes the zone into the settings object as session_timezone with no validation or canonicalization', () => {
     expect(encodeSettings(undefined, 'Europe/Berlin').toString()).toBe('{"session_timezone":"Europe/Berlin"}');

@@ -53,7 +53,7 @@ func sameSetup(a, b SetupOptions) bool {
 }
 
 func describeSetup(o SetupOptions) string {
-	defaults, err := stringMapJSON(o.Defaults)
+	defaults, err := stringMapJSON("default settings", o.Defaults)
 	if err != nil || defaults == nil {
 		defaults = []byte("{}")
 	}
@@ -108,7 +108,7 @@ func commitSetup() (zone []byte, defaults []byte, err error) {
 	setup.mu.Lock()
 	defer setup.mu.Unlock()
 	setup.recorded, setup.replaceable = true, false
-	defaults, err = stringMapJSON(setup.opts.Defaults)
+	defaults, err = stringMapJSON("default settings", setup.opts.Defaults)
 	if err != nil {
 		return nil, nil, err
 	}

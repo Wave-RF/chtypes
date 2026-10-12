@@ -178,8 +178,9 @@ BATCH = {
 
 
 def test_a_declined_exports_payload_is_absent_whatever_the_buffer() -> None:
-    # The library returns a non-NULL, zero-length buffer for a declined export:
-    # the document's export_declined decides, never the buffer's length.
+    # The library returns a NULL out_export for a declined export (builds up to
+    # 20261011.105019 returned a non-NULL, zero-length buffer): the document's
+    # export_declined decides, never the buffer.
     for member in (
         {"export_declined": "only accepted batches export"},
         {"export_declined_b64": b64(b"\xff")},

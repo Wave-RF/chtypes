@@ -29,10 +29,25 @@ export function bytesIn(value: BytesIn): Buffer {
   return typeof value === 'string' ? Buffer.from(value, 'utf8') : asBuffer(value);
 }
 
+const NON_UTF8_HINT = 'this ABI generation cannot carry a non-UTF-8 value in a JSON input; write the bytes as unhex(\'<hex>\') in the expression instead';
+
+/** True for a string with a lone surrogate, which no UTF-8 encoding carries: `JSON.stringify` writes it as a `\udXXX` escape and `TextEncoder` as U+FFFD. */
+function hasLoneSurrogate(text: string): boolean {
+  return /\p{Surrogate}/u.test(text);
+}
+
 function checkStrings(what: string, map: Settings): void {
+  const shown = what === 'params' ? 'query parameters' : what;
   for (const [k, v] of Object.entries(map)) {
     if (typeof v !== 'string') throw new TypeError(`chtypes: ${what}[${JSON.stringify(k)}] must be a string, got ${typeof v}`);
+    // The key is shown through JSON.stringify, which escapes a lone surrogate: never raw.
+    if (hasLoneSurrogate(k)) throw usageError(`${shown}: the key ${JSON.stringify(k)} is not valid UTF-8, and ${NON_UTF8_HINT}`);
+    if (hasLoneSurrogate(v)) throw usageError(`${shown}: the value for key ${JSON.stringify(k)} is not valid UTF-8, and ${NON_UTF8_HINT}`);
   }
+}
+
+function checkZone(what: string, zone: string): void {
+  if (hasLoneSurrogate(zone)) throw usageError(`${what}: the value is not valid UTF-8, and ${NON_UTF8_HINT}`);
 }
 
 /**
@@ -52,6 +67,7 @@ export function encodeSettings(settings: Settings | undefined, sessionTimezone: 
   }
   if (sessionTimezone !== undefined) {
     if (typeof sessionTimezone !== 'string') throw new TypeError(`chtypes: sessionTimezone must be a string, got ${typeof sessionTimezone}`);
+    checkZone('the zone', sessionTimezone);
     out[ZONE_KEY] = sessionTimezone;
   }
   return Buffer.from(JSON.stringify(out), 'utf8');
@@ -115,6 +131,7 @@ export function encodeServerProfile(profile: ServerProfile): Buffer {
   const out: Record<string, unknown> = {};
   if (profile.timezone !== undefined && profile.timezone !== '') {
     if (typeof profile.timezone !== 'string') throw new TypeError(`chtypes: timezone must be a string, got ${typeof profile.timezone}`);
+    checkZone('server profile: the timezone', profile.timezone);
     out.timezone = profile.timezone;
   }
   if (profile.settings !== undefined) {
