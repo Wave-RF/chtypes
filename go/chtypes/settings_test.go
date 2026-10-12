@@ -51,12 +51,12 @@ func TestNonUTF8InputIsRefused(t *testing.T) {
 		call func() ([]byte, error)
 		want []string
 	}{
-		{"settings value", func() ([]byte, error) { return callSettings(map[string]string{"k": bad}, nil) }, []string{"settings", "value", `"k"`}},
-		{"settings key", func() ([]byte, error) { return callSettings(map[string]string{"k" + bad: "v"}, nil) }, []string{"settings", "key", `"k\xff"`}},
-		{"settings value beside a zone", func() ([]byte, error) { return callSettings(map[string]string{"k": bad}, &z) }, []string{"settings", "value", `"k"`}},
+		{"settings value", func() ([]byte, error) { return callSettings(map[string]string{"k": bad}, nil) }, []string{"settings", `the value for key "k"`}},
+		{"settings key", func() ([]byte, error) { return callSettings(map[string]string{"k" + bad: "v"}, nil) }, []string{"settings", `the key "k\xff"`}},
+		{"settings value beside a zone", func() ([]byte, error) { return callSettings(map[string]string{"k": bad}, &z) }, []string{"settings", `the value for key "k"`}},
 		{"zone", func() ([]byte, error) { return callSettings(nil, &bad) }, []string{"the zone"}},
-		{"query parameters value", func() ([]byte, error) { return stringMapJSON("query parameters", map[string]string{"p": bad}) }, []string{"query parameters", "value", `"p"`}},
-		{"query parameters key", func() ([]byte, error) { return stringMapJSON("query parameters", map[string]string{bad: "v"}) }, []string{"query parameters", "key", `"\xff"`}},
+		{"query parameters value", func() ([]byte, error) { return stringMapJSON("query parameters", map[string]string{"p": bad}) }, []string{"query parameters", `the value for key "p"`}},
+		{"query parameters key", func() ([]byte, error) { return stringMapJSON("query parameters", map[string]string{bad: "v"}) }, []string{"query parameters", `the key "\xff"`}},
 		{"default settings", func() ([]byte, error) { return stringMapJSON("default settings", map[string]string{"d": bad}) }, []string{"default settings", `"d"`}},
 		{"server profile macro", func() ([]byte, error) { return serverProfileJSON(ServerProfile{Macros: map[string]string{"m": bad}}) }, []string{"server profile macros", `"m"`}},
 		{"server profile settings key", func() ([]byte, error) { return serverProfileJSON(ServerProfile{Settings: map[string]string{bad: "1"}}) }, []string{"server profile settings", "key"}},

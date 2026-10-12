@@ -72,15 +72,18 @@ _LONE = "\udcff"  # what surrogateescape makes of the byte 0xff
 @pytest.mark.parametrize(
     ("call", "words"),
     [
-        (lambda: settings_json({"k": _LONE}), ("settings", "value", '"k"')),
-        (lambda: settings_json({"k" + _LONE: "v"}), ("settings", "key", '"k\\udcff"')),
-        (lambda: settings_json({"k": _LONE}, "UTC"), ("settings", "value", '"k"')),
+        (lambda: settings_json({"k": _LONE}), ("settings", 'the value for key "k"')),
+        (lambda: settings_json({"k" + _LONE: "v"}), ("settings", 'the key "k\\udcff"')),
+        (lambda: settings_json({"k": _LONE}, "UTC"), ("settings", 'the value for key "k"')),
         (lambda: settings_json(None, _LONE), ("the zone",)),
         (
             lambda: string_map_json({"p": _LONE}, "query parameters"),
-            ("query parameters", "value", '"p"'),
+            ("query parameters", 'the value for key "p"'),
         ),
-        (lambda: string_map_json({_LONE: "v"}, "query parameters"), ("query parameters", "key")),
+        (
+            lambda: string_map_json({_LONE: "v"}, "query parameters"),
+            ("query parameters", 'the key "\\udcff"'),
+        ),
     ],
 )
 def test_a_non_utf8_key_or_value_is_a_usage_error_naming_the_input_and_the_key(call, words) -> None:

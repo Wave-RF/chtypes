@@ -52,11 +52,10 @@ func checkUTF8Map(what string, m map[string]string) error {
 	}
 	sort.Strings(bad)
 	k := bad[0]
-	part := "value"
 	if !utf8.ValidString(k) {
-		part = "key"
+		return usageError("%s: the key %s is not valid UTF-8, and %s", what, strconv.QuoteToASCII(k), nonUTF8Hint)
 	}
-	return usageError("%s: the %s for key %s is not valid UTF-8, and %s", what, part, strconv.QuoteToASCII(k), nonUTF8Hint)
+	return usageError("%s: the value for key %s is not valid UTF-8, and %s", what, strconv.QuoteToASCII(k), nonUTF8Hint)
 }
 
 // jsonEncoder is a stock encoder with HTML escaping off, writing into its own

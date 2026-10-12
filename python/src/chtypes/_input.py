@@ -64,7 +64,9 @@ def _is_utf8(text: str) -> bool:
 def _refuse_non_utf8(what: str, part: str, key: str) -> Exception:
     # The key is shown escaped (ASCII only), never as the raw text.
     return misuse(
-        f"{what}: the {part} for key {json.dumps(key)} is not valid UTF-8, and {_NON_UTF8_HINT}"
+        f"{what}: the key {json.dumps(key)} is not valid UTF-8, and {_NON_UTF8_HINT}"
+        if part == "key"
+        else f"{what}: the value for key {json.dumps(key)} is not valid UTF-8, and {_NON_UTF8_HINT}"
     )
 
 
