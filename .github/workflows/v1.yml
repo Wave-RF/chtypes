@@ -181,7 +181,7 @@ jobs:
         with:
           go-version-file: go/go.mod
       - if: steps.runner_file.outputs.exists == 'true' && matrix.binding == 'python'
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           python-version: ${{ matrix.toolchain }}
       - if: steps.runner_file.outputs.exists == 'true' && matrix.binding == 'ts'
@@ -189,7 +189,7 @@ jobs:
         with:
           package_json_file: ts/package.json
       - if: steps.runner_file.outputs.exists == 'true' && matrix.binding == 'ts'
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ matrix.node_version }}
           cache: pnpm
@@ -270,7 +270,7 @@ jobs:
           chmod +x "$RUNNER_TEMP/run-conformance.sh"
           scripts/fetch-v1/sandbox.sh -- bash "$RUNNER_TEMP/run-conformance.sh"
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: report-${{ matrix.binding }}-${{ matrix.toolchain }}
@@ -318,7 +318,7 @@ jobs:
         with:
           go-version-file: go/go.mod
       - if: steps.runners.outputs.python == 'true'
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           python-version: "3.13"
       - if: steps.runners.outputs.ts == 'true'
@@ -326,7 +326,7 @@ jobs:
         with:
           package_json_file: ts/package.json
       - if: steps.runners.outputs.ts == 'true'
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24"
           cache: pnpm
@@ -626,7 +626,7 @@ jobs:
             run_one rust bash -c "cd rust && cargo test --locked --features fetch-v1 --test ocifetch_conformance"
           fi
           exit "$failed"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           # One artifact holding every binding's report-<binding>-registry.json;
@@ -667,7 +667,7 @@ jobs:
       - name: "selftest — the parity gate's own fixtures (missing, failed, extra, stale cases_sha256)"
         run: python3 scripts/fetch-v1/parity.py --selftest
       - name: download every conformance/network report (whether its job passed or failed)
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         continue-on-error: true # no artifacts exist at all while 0 bindings are enrolled
         with:
           pattern: "report-*"
@@ -708,13 +708,13 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go/go.mod
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           python-version: "3.13"
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           package_json_file: ts/package.json
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24"
           cache: pnpm
@@ -776,7 +776,7 @@ jobs:
           go-version-file: scripts/fetch-v1/genfixtures/go.mod
       - name: regenerate fixtures (refcheck reads tests/fixtures/fetch-v1/ directly)
         run: cd scripts/fetch-v1/genfixtures && go run . --write
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
       - name: "sigstore-go: does it accept our ed25519 key-only bundle? (report only)"
@@ -871,7 +871,7 @@ jobs:
           - regenerate: dispatch the \`v1\` workflow's \`v1-oras-preseed\` job, download its
             \`oras-preseed\` artifact, and replace this directory with its contents.
           EOF
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: oras-preseed
           path: /tmp/oras-preseed
@@ -939,7 +939,7 @@ jobs:
         with:
           go-version-file: go/go.mod
       - if: steps.gate.outputs.run == 'true' && matrix.binding == 'python'
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           python-version: ${{ matrix.toolchain }}
       - if: steps.gate.outputs.run == 'true' && matrix.binding == 'ts'
@@ -947,7 +947,7 @@ jobs:
         with:
           package_json_file: ts/package.json
       - if: steps.gate.outputs.run == 'true' && matrix.binding == 'ts'
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ matrix.node_version }}
           cache: pnpm
@@ -989,7 +989,7 @@ jobs:
           esac
       # `staging-report-*`, never `report-*`: v1-parity downloads `report-*`
       # and must never see a staging report.
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always() && steps.gate.outputs.run == 'true'
         with:
           name: staging-report-${{ matrix.binding }}
@@ -1007,7 +1007,7 @@ jobs:
       - name: "selftest — the case table's rules, the trust opt-in and the verdict's own failure modes"
         run: scripts/fetch-v1/staging.py --selftest
       - name: download every staging report
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         continue-on-error: true # none exist while no binding is enrolled
         with:
           pattern: "staging-report-*"
