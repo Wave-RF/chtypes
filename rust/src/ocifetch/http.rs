@@ -10,7 +10,7 @@
 //!
 //! No tokio: every call in this module blocks the calling thread.
 
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::constants;
 use super::error::{Error, Result};
@@ -40,6 +40,19 @@ impl Clock for RealClock {
             std::thread::sleep(Duration::from_secs_f64(seconds));
         }
     }
+}
+
+/// The budget of one request chain: the retry table (the default), or the
+/// installed-build revocation check's own (docs/guides/fetch-v1.md §7 and
+/// "Build-level revocation"): one attempt, no backoff and no sleep, and an
+/// optional deadline for the whole check.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Budget {
+    /// Make one attempt and never sleep.
+    pub single: bool,
+    /// The moment the whole check must be over: a request in flight is cut at
+    /// it, and none starts after it.
+    pub deadline: Option<Instant>,
 }
 
 /// One HTTP response, reduced to what this module acts on.
@@ -146,15 +159,33 @@ impl Client {
         auth: &AuthConfig,
         max_bytes: u64,
     ) -> Result<HttpResponse> {
+        self.get_with(url, extra_headers, auth, max_bytes, Budget::default())
+    }
+
+    /// [`Client::get`] under `budget`: with `budget.single`, one attempt and no
+    /// sleep, whatever the status or the transport said.
+    pub fn get_with(
+        &self,
+        url: &str,
+        extra_headers: &[(String, String)],
+        auth: &AuthConfig,
+        max_bytes: u64,
+        budget: Budget,
+    ) -> Result<HttpResponse> {
         let start_url = Url::parse(url)
             .map_err(|e| Error::SourceIncompatible(format!("bad URL {url}: {e}")))?;
+        let attempts = if budget.single {
+            1
+        } else {
+            constants::RETRY_ATTEMPTS
+        };
         let mut attempt = 0u32;
         loop {
             attempt += 1;
-            let outcome = self.one_attempt(&start_url, extra_headers, auth, max_bytes);
+            let outcome = self.one_attempt(&start_url, extra_headers, auth, max_bytes, budget);
             match outcome {
                 Ok(resp) => {
-                    if !is_retry_status(resp.status) || attempt >= constants::RETRY_ATTEMPTS {
+                    if !is_retry_status(resp.status) || attempt >= attempts {
                         return Ok(resp);
                     }
                     let wait = retry_after_wait(&resp, self.clock.now())?
@@ -162,7 +193,7 @@ impl Client {
                     self.clock.sleep(wait);
                 }
                 Err(TransportOutcome::Retryable(e)) => {
-                    if attempt >= constants::RETRY_ATTEMPTS {
+                    if attempt >= attempts {
                         return Err(e);
                     }
                     self.clock.sleep(backoff_wait(attempt));
@@ -182,6 +213,7 @@ impl Client {
         extra_headers: &[(String, String)],
         auth: &AuthConfig,
         max_bytes: u64,
+        budget: Budget,
     ) -> std::result::Result<HttpResponse, TransportOutcome> {
         let mut url = start.clone();
         let mut same_origin_as_start = true;
@@ -198,20 +230,24 @@ impl Client {
                 headers.retain(|(k, _)| !k.eq_ignore_ascii_case("authorization"));
                 headers.push(("Authorization".into(), format!("Bearer {b}")));
             }
-            let resp = self.raw_request(&url, &headers, max_bytes)?;
+            let resp = self.raw_request(&url, &headers, max_bytes, budget)?;
 
-            // A retired repository (docs/guides/fetch-v1.md §2): permanent, so
-            // Fatal, which `get` returns without a retry and every base loop
-            // returns at once.
+            // A 410 (docs/guides/fetch-v1.md §2): permanent, so Fatal, which
+            // `get` returns without a retry and every base loop returns at
+            // once. Under generation 2 one whose body says the tag is revoked
+            // is CHTYPES_ARTIFACT_REVOKED, else a retired repository's.
             if retired::is_retired_status(resp.status) {
-                return Err(TransportOutcome::Fatal(Error::SourceRetired(
-                    retired::retired_text(&url.to_string(), resp.status, &resp.body),
+                return Err(TransportOutcome::Fatal(super::revocation::gone_error(
+                    &url.to_string(),
+                    resp.status,
+                    &resp.body,
+                    super::channel::active().revocation,
                 )));
             }
 
             if resp.status == 401 && bearer.is_none() {
                 if let Some(challenge) = resp.header("WWW-Authenticate") {
-                    if let Some(token) = self.anonymous_token(challenge, max_bytes)? {
+                    if let Some(token) = self.anonymous_token(challenge, max_bytes, budget)? {
                         bearer = Some(token);
                         continue;
                     }
@@ -253,6 +289,7 @@ impl Client {
         &self,
         challenge: &str,
         max_bytes: u64,
+        budget: Budget,
     ) -> std::result::Result<Option<String>, TransportOutcome> {
         let Some(params) = parse_bearer_challenge(challenge) else {
             return Ok(None);
@@ -276,7 +313,7 @@ impl Client {
                 "WWW-Authenticate realm {realm:?}: {e}"
             )))
         })?;
-        let resp = self.raw_request(&parsed, &[], max_bytes)?;
+        let resp = self.raw_request(&parsed, &[], max_bytes, budget)?;
         if resp.status != 200 {
             return Ok(None);
         }
@@ -299,6 +336,7 @@ impl Client {
         url: &Url,
         headers: &[(String, String)],
         max_bytes: u64,
+        budget: Budget,
     ) -> std::result::Result<HttpResponse, TransportOutcome> {
         // The one place a request is built: manifests, blobs, referrers, tag
         // lists, token exchanges and every redirect hop all pass through
@@ -312,6 +350,17 @@ impl Client {
             builder = builder.header(k.as_str(), v.as_str());
         }
         builder = builder.header("User-Agent", user_agent());
+        // The installed-build revocation check's one deadline: no request starts
+        // after it, and one in flight is cut at it.
+        if let Some(deadline) = budget.deadline {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Err(TransportOutcome::Fatal(Error::SourceUnreachable(format!(
+                    "{url}: the deadline passed before the request was made"
+                ))));
+            }
+            builder = builder.config().timeout_global(Some(left)).build();
+        }
         match builder.call() {
             Ok(mut resp) => {
                 let status = resp.status().as_u16();

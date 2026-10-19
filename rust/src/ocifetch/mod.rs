@@ -58,6 +58,9 @@ pub mod referrers;
 // `chtypes resolve` (public issue #493).
 pub mod resolve;
 pub mod retired;
+// Build-level revocation (generation 2; docs/guides/fetch-v1.md, "Build-level
+// revocation"; public issue #625).
+pub mod revocation;
 pub mod tags;
 pub mod unpack;
 pub mod url;

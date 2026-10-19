@@ -8,7 +8,7 @@ use serde::Deserialize;
 
 use super::constants;
 use super::error::{Error, Result};
-use super::http::{AuthConfig, Client};
+use super::http::{AuthConfig, Budget, Client};
 use super::url::Url;
 
 /// One descriptor, as both the index's `manifests[]` and the referrers API's
@@ -76,6 +76,9 @@ pub struct Source<'a> {
     pub bases: &'a [String],
     pub client: &'a Client,
     pub auth: &'a AuthConfig,
+    /// The retry table, or the installed-build revocation check's own budget
+    /// (one attempt, no backoff, one deadline; [`Budget`]).
+    pub budget: Budget,
 }
 
 /// Build the real wire URL for `suffix` (e.g. `"manifests/26.8"`,
@@ -135,9 +138,10 @@ pub fn get_from_base(
             Err(e) => return Err(Error::SourceUnreachable(format!("{path}: {e}"))),
         });
     }
-    let resp = source
-        .client
-        .get(&url, extra_headers, source.auth, max_bytes)?;
+    let resp =
+        source
+            .client
+            .get_with(&url, extra_headers, source.auth, max_bytes, source.budget)?;
     Ok((resp.status, resp.body))
 }
 
@@ -182,7 +186,7 @@ pub fn fetch_by_tag(source: &Source<'_>, tag: &str) -> Result<Fetched> {
             }
             // A retired repository (a 410, §2) is permanent: never a reason to
             // try the next base.
-            Err(e @ Error::SourceRetired(_)) => return Err(e),
+            Err(e) if e.is_gone() => return Err(e),
             Err(e) => last_err = Some(e),
         }
     }
@@ -247,7 +251,7 @@ pub fn fetch_alias(source: &Source<'_>, alias: &str) -> Result<Option<Fetched>> 
             }
             // A retired repository (a 410, §2) is the answer: never the next
             // base, and never a fall back to the tag.
-            Err(e @ Error::SourceRetired(_)) => return Err(e),
+            Err(e) if e.is_gone() => return Err(e),
             Err(e) => failure = Some(e),
         }
     }
@@ -288,6 +292,11 @@ fn fetch_bytes_by_digest(
     max_bytes: u64,
 ) -> Result<Fetched> {
     let accept = manifest_accept_header();
+    let attempts = if source.budget.single {
+        1
+    } else {
+        constants::RETRY_ATTEMPTS
+    };
     let mut last_err: Option<Error> = None;
     for (i, base) in source.bases.iter().enumerate() {
         let is_last = i + 1 == source.bases.len();
@@ -306,7 +315,7 @@ fn fetch_bytes_by_digest(
                     last_err = Some(Error::SourceUnreachable(format!(
                         "{base}: {digest} answered 404 — a listed digest that 404s is a host fault"
                     )));
-                    if !is_last || attempt >= constants::RETRY_ATTEMPTS {
+                    if !is_last || attempt >= attempts {
                         break;
                     }
                     source.client.clock().sleep(
@@ -324,7 +333,7 @@ fn fetch_bytes_by_digest(
                 }
                 // A retired repository (a 410, §2) is permanent: never a
                 // reason to try the next base.
-                Err(e @ Error::SourceRetired(_)) => return Err(e),
+                Err(e) if e.is_gone() => return Err(e),
                 Err(e) => {
                     last_err = Some(e);
                     break;

@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 use super::constants;
 use super::constants::code;
+use super::revocation::Revocation;
 
 /// What a `CHTYPES_CACHE_UNUSABLE` names (docs/guides/fetch-v1.md §1, the
 /// cache faults; public issue #486): the exact path that failed, the reason,
@@ -71,6 +72,12 @@ pub enum Error {
     /// #571). The message names the URL that answered and carries the
     /// registry's own message, made safe to print (`retired.rs`).
     SourceRetired(String),
+    /// A build a verified, signed revocation refuses, or a `410 Gone` whose
+    /// body says the tag is revoked (`CHTYPES_ARTIFACT_REVOKED`; generation 2;
+    /// docs/guides/fetch-v1.md, "Build-level revocation"; public issue #625).
+    /// The [`Revocation`] carries the message and, for programs, the
+    /// advisories.
+    ArtifactRevoked(Revocation),
 }
 
 impl Error {
@@ -89,7 +96,16 @@ impl Error {
             Error::SourceIncompatible(_) | Error::InvalidInput(_) => code::SOURCE_INCOMPATIBLE,
             Error::CacheUnusable(_) => code::CACHE_UNUSABLE,
             Error::SourceRetired(_) => code::SOURCE_RETIRED,
+            Error::ArtifactRevoked(_) => code::ARTIFACT_REVOKED,
         }
+    }
+
+    /// Whether this is a `410`'s answer, `CHTYPES_SOURCE_RETIRED` or (under
+    /// generation 2) `CHTYPES_ARTIFACT_REVOKED`. Either is permanent, so every
+    /// loop over bases or candidates returns it at once instead of moving on
+    /// (docs/guides/fetch-v1.md §2).
+    pub fn is_gone(&self) -> bool {
+        matches!(self, Error::SourceRetired(_) | Error::ArtifactRevoked(_))
     }
 
     /// The process exit status `constants::ERROR_EXIT_CODES` assigns this
@@ -116,6 +132,7 @@ impl Error {
             | Error::InvalidInput(m)
             | Error::SourceRetired(m) => m,
             Error::CacheUnusable(f) => &f.message,
+            Error::ArtifactRevoked(r) => r.message(),
         }
     }
 

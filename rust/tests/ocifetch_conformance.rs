@@ -148,6 +148,24 @@ struct Req {
     own_fingerprint: Option<String>,
     /// A `prune-` case's prune.
     prune: Option<PruneRequest>,
+    /// The revocation check's per-call override and strict mode, and, when
+    /// set, the registry-open driver: that many opens in one process
+    /// (docs/guides/fetch-v1.md §10, "The registry-open driver"). Absent from
+    /// the v1 corpus.
+    #[serde(default)]
+    allow_revoked: bool,
+    #[serde(default)]
+    require_revocation_check: bool,
+    #[serde(default)]
+    opens: Option<u32>,
+}
+
+/// One `expect.stored_revocations` row: the build whose entry must hold a stored
+/// revocation, and the sha256 of its bundle.
+#[derive(Deserialize, Clone)]
+struct StoredRevocation {
+    manifest: String,
+    bundle: String,
 }
 
 #[derive(Deserialize, Clone)]
@@ -204,6 +222,12 @@ struct Expect {
     resolutions: Option<Vec<ResolutionExpect>>,
     /// A `prune-` case's report and what it leaves behind.
     prune: Option<PruneExpect>,
+    /// The most warnings the case may produce in all.
+    #[serde(default)]
+    warnings_max: Option<usize>,
+    /// Builds whose entry must hold the stored revocation afterwards.
+    #[serde(default)]
+    stored_revocations: Vec<StoredRevocation>,
 }
 
 /// `expect.code`, `expect.message_contains` and `expect.message_excludes`
@@ -434,6 +458,10 @@ fn execute_case(
     registry_base: Option<&str>,
     subroot: Option<&str>,
 ) -> Result<(), String> {
+    // Every case starts as a new process would: no kept revocation outcome (the
+    // cases reuse manifests across cache directories).
+    ensure::reset_revocation_memo_for_tests();
+
     // `{base}`/`{base2}`'s per-transport expansion (docs/guides/fetch-v1.md
     // §10, "{base2}" decided 2026-10-02 by lane 0B). `{base}` is the primary
     // origin; `{base2}` (http transport only) is server.py's SECOND origin,
@@ -648,6 +676,8 @@ fn execute_case(
             update: case.request.update,
             allow_unsigned: case.request.allow_unsigned,
             strict_cache: None,
+            allow_revoked: case.request.allow_revoked,
+            require_revocation_check: case.request.require_revocation_check,
             trusted_keys: case_trusted_keys(case),
             token: None,
             clock: Some(fake_clock()),
@@ -689,6 +719,8 @@ fn execute_case(
             update: case.request.update,
             allow_unsigned: case.request.allow_unsigned,
             strict_cache: None,
+            allow_revoked: case.request.allow_revoked,
+            require_revocation_check: case.request.require_revocation_check,
             trusted_keys: case_trusted_keys(case),
             token: None,
             clock: Some(fake_clock()),
@@ -697,11 +729,13 @@ fn execute_case(
         let result = run_generic_fetch(case, &bases, predicate_type, &mut options);
         check_generic_expectation(&case.expect, result)
     } else {
-        let options = Options {
+        // The options of one call: a case that opens a build more than once
+        // makes a call (a lookup, then a check) per open.
+        let build_options = |before_index_rename: Option<Box<dyn Fn()>>| Options {
             platform: Some(case.request.platform.clone()),
-            bases: Some(bases),
+            bases: Some(bases.clone()),
             cache_dir: Some(cache_dir.path().to_string_lossy().to_string()),
-            system_dirs,
+            system_dirs: system_dirs.clone(),
             offline: case.request.offline,
             frozen: case.request.frozen,
             lock_path: Some(lock_path.clone()),
@@ -709,12 +743,21 @@ fn execute_case(
             update: case.request.update,
             allow_unsigned: case.request.allow_unsigned,
             strict_cache: None,
+            allow_revoked: case.request.allow_revoked,
+            require_revocation_check: case.request.require_revocation_check,
             trusted_keys: case_trusted_keys(case),
             token: None,
             clock: Some(fake_clock()),
-            before_index_rename: before_index_rename.take(),
+            before_index_rename,
         };
-        if case.id.starts_with("list-tags-") {
+        let options = build_options(before_index_rename.take());
+        if let Some(opens) = case.request.opens {
+            // The registry-open driver (docs/guides/fetch-v1.md §10): the two
+            // calls a registry makes before it loads a build, N times in one
+            // process; the last open is judged and every open's warnings are
+            // counted.
+            check_expectation(&case.expect, run_opens(case, opens, &build_options))
+        } else if case.id.starts_with("list-tags-") {
             // The listing (docs/guides/fetch-v1.md §10): what `chtypes list`
             // names as published, from the registry's tags/list.
             check_listing(&case.expect, ocifetch::tags::published_versions(&options))
@@ -778,6 +821,32 @@ fn execute_case(
         }
     }
 
+    // expect.stored_revocations: each named build's entry holds the stored
+    // revocation, whose sha256 is the bundle digest named.
+    if outcome.is_ok() {
+        for stored in &case.expect.stored_revocations {
+            let hex = stored
+                .manifest
+                .strip_prefix("sha256:")
+                .unwrap_or(&stored.manifest);
+            let path = layout_dir
+                .join(ocifetch::constants::CACHE_UNPACKED_DIR)
+                .join(hex)
+                .join(ocifetch::constants::CACHE_REVOCATION_RECORD);
+            let got = std::fs::read(&path)
+                .map(|bytes| ocifetch::oci::sha256_hex(&bytes))
+                .unwrap_or_default();
+            if format!("sha256:{got}") != stored.bundle {
+                outcome = Err(format!(
+                    "stored_revocations: {} holds sha256 {got:?}, want {}",
+                    path.display(),
+                    stored.bundle
+                ));
+                break;
+            }
+        }
+    }
+
     if outcome.is_ok() {
         for (d, before) in &intact_before {
             if snapshot_install(&layout_dir, d) != *before {
@@ -788,6 +857,46 @@ fn execute_case(
     }
 
     outcome
+}
+
+/// The registry-open driver (docs/guides/fetch-v1.md §10): `opens` times,
+/// `resolve_installed` then `check_installed`, in one process. The last open is
+/// the answer, and its `warnings` are every open's, so `expect.warnings` and
+/// `expect.warnings_max` count them all.
+fn run_opens(
+    case: &Case,
+    opens: u32,
+    build_options: &dyn Fn(Option<Box<dyn Fn()>>) -> Options,
+) -> Result<ensure::Resolved, ocifetch::error::Error> {
+    let mut warnings: Vec<String> = Vec::new();
+    let mut last = Err(ocifetch::error::Error::ArtifactMissing(
+        "the case opens nothing".to_string(),
+    ));
+    for _ in 0..opens {
+        let found = ensure::resolve_installed(
+            &case.request.spelling,
+            &case.request.platform,
+            build_options(None),
+        )
+        .and_then(|found| {
+            found.ok_or_else(|| {
+                ocifetch::error::Error::ArtifactMissing(format!(
+                    "no installed artifact satisfies {}",
+                    case.request.spelling
+                ))
+            })
+        });
+        last = found.and_then(|resolved| {
+            warnings.extend(resolved.warnings.clone());
+            let checked = ensure::check_installed(&resolved, build_options(None))?;
+            warnings.extend(checked);
+            Ok(resolved)
+        });
+    }
+    last.map(|resolved| ensure::Resolved {
+        warnings,
+        ..resolved
+    })
 }
 
 /// The platform key `layout_dir`'s own `index.json` gives `digest`, if any.
@@ -1116,6 +1225,15 @@ fn check_expectation(
                 {
                     return Err(format!(
                         "warnings {:?} do not contain a warning matching {want:?}",
+                        resolved.warnings
+                    ));
+                }
+            }
+            if let Some(max) = expect.warnings_max {
+                if resolved.warnings.len() > max {
+                    return Err(format!(
+                        "{} warnings, want at most {max}: {:?}",
+                        resolved.warnings.len(),
                         resolved.warnings
                     ));
                 }
