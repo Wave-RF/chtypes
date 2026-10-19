@@ -135,7 +135,8 @@ type serverOpt struct{ s *Server }
 func (o serverOpt) applyCompile(c *callConfig) { c.server = o.s }
 
 // WithSettings sets the call's settings: a map of strings to strings,
-// serialized as a JSON object and passed verbatim. No value is ever rewritten.
+// serialized as a JSON object and passed verbatim. No value is ever rewritten:
+// a value that is not valid UTF-8 is sent as {"b64": ...}, the object form.
 // On a compile it is the profile; on a filter compile the filter's own profile;
 // on the calls that parse a body, the body's parse settings.
 func WithSettings(settings map[string]string) SettingsOption {
