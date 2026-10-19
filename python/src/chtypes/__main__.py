@@ -3,6 +3,7 @@
 
     chtypes fetch <spelling>... | --all  [--platform <os-arch>] [--cache <dir>] [--lock <file>]
                                          [--frozen] [--offline] [--update] [--strict]
+                                         [--allow-revoked] [--require-revocation-check]
     chtypes verify [--cache <dir>] [--strict]   re-verify every installed build
     chtypes list   [--cache <dir>] [--offline] [--strict]
     chtypes where  [--cache <dir>] [--strict] [--all]   the cache root; --all: every search dir
@@ -37,7 +38,7 @@ from collections.abc import Sequence
 
 from . import __version__ as chtypes_version
 from . import _ocifetch as fetch_layer
-from ._codes import CODE_ARTIFACT_CORRUPT
+from ._codes import CODE_ARTIFACT_CORRUPT, CODE_ARTIFACT_REVOKED
 from ._ocifetch import _channel
 from ._ocifetch import _constants as C
 from ._ocifetch._ensure import _translate_transport_error, detect_host_platform, missing_notes
@@ -148,6 +149,19 @@ def build_parser() -> argparse.ArgumentParser:
             "(or set CHTYPES_OFFLINE=1)"
         ),
     )
+    fetch.add_argument(
+        "--allow-revoked",
+        action="store_true",
+        help=(
+            "use a build a verified revocation refuses, with one warning "
+            "(this call only; never --lock or --update)"
+        ),
+    )
+    fetch.add_argument(
+        "--require-revocation-check",
+        action="store_true",
+        help="a revocation status that cannot be read is the transport's error, not a warning",
+    )
 
     verify = sub.add_parser(
         "verify",
@@ -249,6 +263,8 @@ def _options(args: argparse.Namespace, *, platform: str | None = None):
         lock_path=lock_path,
         lock_write=lock_write,
         update=getattr(args, "update", False),
+        allow_revoked=getattr(args, "allow_revoked", False),
+        require_revocation_check=getattr(args, "require_revocation_check", False),
     )
     return fetch._to_options(platform)
 
@@ -348,10 +364,23 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         return EXIT_OK
     _say_notes(options)
     failed = 0
+    revoked = 0
     for r in results:
-        if not r.ok:
+        if r.revocation is not None:
+            # A build a stored revocation refuses (docs/guides/fetch-v1.md,
+            # "Build-level revocation"); it is reported whatever its bytes say.
+            revoked += 1
+            _say(f"REVOKED {r.version} {r.platform} {r.dir}: {r.detail}")
+        elif not r.ok:
             failed += 1
             _say(f"chtypes: FAILED {r.version} {r.platform} {r.dir}: {r.detail}")
+    if revoked:
+        # Exit 11 wins over a mismatch's 1: a revocation is the more specific finding.
+        _say(
+            f"chtypes: {revoked} of {len(results)} installed build(s) are revoked "
+            f"[{CODE_ARTIFACT_REVOKED}]"
+        )
+        return C.ERROR_EXIT_CODES[CODE_ARTIFACT_REVOKED]
     if failed:
         _say(f"chtypes: {failed} of {len(results)} installed build(s) FAILED verification")
         return C.ERROR_EXIT_CODES[CODE_ARTIFACT_CORRUPT]
