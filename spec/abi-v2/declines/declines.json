@@ -151,6 +151,45 @@
    "description": "The filter compile needs the process context that initialization builds; without it the create is declined."
   },
   {
+   "id": "server-dependent-function",
+   "class": "create-decline",
+   "trigger": "a column's DEFAULT, MATERIALIZED, ALIAS or EPHEMERAL expression, or a CHECK refused by the access check, calling a function whose resolver needs a server: its settings, resources or environment",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "when the compile runs in a server's environment (its identity and a query context), for the functions that need only those",
+   "description": "A server resolves such a function with its own certificate, dictionaries, settings or environment, so whether it accepts the schema is its own to say; the schema is declined, naming the column and the function. serverUUID and the timeSeries functions, which a stock server accepts, are declined with them."
+  },
+  {
+   "id": "function-name-as-lambda",
+   "class": "create-decline",
+   "trigger": "a higher-order function whose lambda argument is written as a bare function name, such as arrayExists(isNull, arr)",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "when the new-analyzer filter path ships",
+   "description": "A server on these lines rewrites a function name passed where a higher-order function takes a lambda into that lambda, in its analyzer; the filter compile cannot run that step and would refuse the name, so the create is declined and names the function. Write the lambda, such as x -> isNull(x), to get an answer."
+  },
+  {
    "id": "string-reading",
    "class": "create-decline",
    "trigger": "a comparison of a non-String expression with a String constant or {p:String} parameter whose text the server's own index or analyzer reading reads differently from the comparison",
@@ -910,7 +949,7 @@
   {
    "id": "call-setting-session-timezone",
    "class": "call-decline",
-   "trigger": "a per-call session_timezone the call cannot attach or whose constant folds it moves",
+   "trigger": "a per-call session_timezone the call cannot attach",
    "code": {
     "chs": "-2",
     "ch": []
@@ -1058,6 +1097,28 @@
    ],
    "retirement": "none",
    "description": "A server stores none of a refused body's rows, an unsupported batch is not the server's answer, and a poisoned one stores a value no SELECT reads back; every row is declined and the document's outcome mirrors the batch's."
+  },
+  {
+   "id": "skipped-key-in-squashed-block",
+   "class": "batch-precedence",
+   "trigger": "a body refused on a row whose body view carries the LowCardinality key of a row the error budget skipped before it, read in chunks the INSERT's squashing step would group differently",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.7",
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "A server checks a body's MATERIALIZED and CHECK expressions over the blocks its squashing step forms, which drop a skipped row's LowCardinality key when its chunk joins a block, so its answer depends on how the body is cut into chunks; the batch is unsupported and every filter verdict over it is declined."
   },
   {
    "id": "row-not-storable",
