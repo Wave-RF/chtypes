@@ -504,7 +504,7 @@ func buildRevocationCases(fs *FileSet) []Case {
 	tag(tree, "26.13.6", art6["linux-amd64"], art6["linux-arm64"], art6["darwin-arm64"])
 
 	// A line tag that revocation emptied: tags/list omits it, and a direct
-	// fetch of it answers the revoked 410 (the third serving behaviour).
+	// fetch of it answers the revoked 410 (the third serving behavior).
 	listing := NewTree("revocation-listing")
 	buildFullIndex(listing, "26.13.9.1", "20261013.000009", "lts", []string{"26.13"})
 	buildFullIndex(listing, "26.15.1.1", "20261015.000001", "lts", []string{"26.15"})
