@@ -16,6 +16,7 @@ was a tag or a digest (layout-v2 spec §7.5/§10 A5).
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import ssl
@@ -231,7 +232,7 @@ def _single_request(
     timeout = policy.connect_timeout_s + policy.idle_timeout_s
     try:
         with _opener(url).open(req, timeout=timeout) as resp:
-            body = _read_capped(resp, max_bytes)
+            body = _read_capped(resp, max_bytes, url)
             return HttpResponse(
                 status=resp.status, headers=dict(resp.headers), body=body, url=resp.geturl()
             )
@@ -246,7 +247,7 @@ def _single_request(
                 except (OSError, ValueError, AttributeError):
                     body = b""
             else:
-                body = _read_capped(e, max_bytes) if e.code not in _REDIRECT_CODES else b""
+                body = _read_capped(e, max_bytes, url) if e.code not in _REDIRECT_CODES else b""
         finally:
             e.close()
         return HttpResponse(status=e.code, headers=dict(e.headers or {}), body=body, url=url)
@@ -267,12 +268,27 @@ def _single_request(
         raise UnreachableHttpError(f"{url}: {e}", retryable=retryable) from e
 
 
-def _read_capped(fp, max_bytes: int | None) -> bytes:  # noqa: ANN001
-    if max_bytes is None:
-        return fp.read()
-    chunk = fp.read(max_bytes + 1)
-    if len(chunk) > max_bytes:
+def _read_capped(fp, max_bytes: int | None, url: str = "") -> bytes:  # noqa: ANN001
+    """Read a body, at most `max_bytes` of it. Only an oversize body is
+    `OversizeHttpError`. A body that ends before its declared Content-Length
+    (CPython hands back the short bytes without raising when the peer closes
+    cleanly), or `IncompleteRead`, is a transport failure: a retryable
+    `UnreachableHttpError` (docs/guides/fetch-v1.md §7)."""
+    try:
+        chunk = fp.read() if max_bytes is None else fp.read(max_bytes + 1)
+    except http.client.IncompleteRead as e:
+        raise UnreachableHttpError(
+            f"{url}: response body cut off after {len(e.partial)} bytes", retryable=True
+        ) from e
+    if max_bytes is not None and len(chunk) > max_bytes:
         raise OversizeHttpError(f"response exceeded {max_bytes} bytes")
+    headers = getattr(fp, "headers", None)
+    declared = headers.get("Content-Length") if headers is not None else None
+    if declared is not None and declared.strip().isdigit() and len(chunk) < int(declared):
+        raise UnreachableHttpError(
+            f"{url}: response body cut off after {len(chunk)} of {int(declared)} bytes",
+            retryable=True,
+        )
     return chunk
 
 
