@@ -43,12 +43,6 @@
       "heading": "A date-time column compared with a string constant or a `{p:String}` parameter, in text the server converts differently",
       "note": "no machine check is expressible in this register's schema: the divergence is a filter verdict against a real server's SELECT … WHERE, which no check here drives. Retirement: on the artifact producer's measured re-run against a library build that ships the fix, with the new cases in its standing filter differential, never on CI. From build 20261010.180314 the shapes are declined (decline reasons string-reading and equals-fold) rather than answered, so a later check may assert the decline.",
       "checks": []
-    },
-    {
-      "id": "stored-table-flatten-nested-0-over-accept",
-      "heading": "A stored table created under `flatten_nested = 0`, compiled from its `create_table_query` without that setting, accepts a row the server rejects",
-      "note": "no machine check is expressible in this register's schema: the divergence is between a schema compiled without the settings a server-held table was created under and that server's INSERT, and its retirement signal must come from the artifact producer's re-run against a real server (the server half is measured on 26.8 linux-amd64 only). Measured: server half by the artifact producer on build 20261009.145808; library half on build 20261012.142240 by this repository (Python SDK, darwin-arm64, all four lines). Retirement: on the artifact producer's measured re-run against the build that ships a fix, never on CI.",
-      "checks": []
     }
   ]
 }

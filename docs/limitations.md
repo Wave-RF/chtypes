@@ -255,21 +255,6 @@ The decline catalog (`spec/abi-v2/declines/declines.json`) gives two reasons, an
 
 **Measured** by the artifact producer: direct server `SELECT`s against the library at artifact build `20261009.074908` for the divergence, and the producer's differential on build `20261010.180314` as published for the decline (zero over-accepts, zero over-rejects on every pair). **Safe forms**, which answer on every line: a typed `{p:DateTime}` parameter, and canonical `YYYY-MM-DD hh:mm:ss` text. On a build before `20261010.180314`, RFC 3339 spellings (`…T00:00:00Z`, or with an offset), compact forms and unix timestamps are not safe. The filter enforcement gate for the eleven covered pairs is lifted from build `20261010.180314`; on earlier builds the gate stays on.
 
-### A stored table created under `flatten_nested = 0`, compiled from its `create_table_query` without that setting, accepts a row the server rejects
-
-**Over-accept, through the row and batch previews of a schema compiled from a stored table's definition, measured against a server on 26.8.** The compile is a `CREATE` on the profile's settings. A table that a server already holds can have been created under settings that change what its `create_table_query` means. Compiled with the default `flatten_nested = 1`, a `Nested(a UInt8)` column that the server stores as one `Nested` column is flattened to `n.a Array(UInt8)`, so a row's `n` is an unknown field: it is skipped and never read into a typed column. For example, with `n Nested(a UInt8)` in a table created under `flatten_nested = 0`, the `JSONEachRow` row `{"n":[{"a":"x"}]}`:
-
-|                                                                    |                                                                              |
-| ------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| this library, `create_table_query` compiled at the default profile | accepts the row                                                              |
-| a real server                                                      | refuses the INSERT with error **27** (`CANNOT_PARSE_INPUT_ASSERTION_FAILED`) |
-
-At the default profile the library skips `n` in a valid row too: `{"n":[{"a":1}]}` is accepted with `n.a` stored as `[]`. Only a caller that compiles a server-held table's `create_table_query` without the settings the table was created under reaches this.
-
-**Measured**: the server half by the artifact producer, against build `20261009.145808` on 26.8 linux-amd64 with a 26.8 server, which refused the row with 27 while the library accepted it; the server's `create_table_query` was compiled with and without a server and with a table UUID, with the same result. The library half again on build `20261012.142240` (v2-dev.13) by this repository, through the Python SDK on darwin-arm64, on all four lines: at the default profile the column compiles as `n.a Array(UInt8)`, the response names `n` as an unknown field, and the row is accepted. The server half on 26.3, 26.7 and 26.9 is not measured. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the build that ships a fix, never on a CI result.
-
-**Workaround: carry the settings the table was created under.** Put `flatten_nested` (here `0`) in the compile profile. Measured on build `20261012.142240` on all four lines (darwin-arm64): the column then compiles as `n Nested(a UInt8)`, the row above is refused with 27, as the 26.8 server refuses it, and `{"n":[{"a":1}]}` is accepted with `n` stored.
-
 ## Known gaps in 1.0
 
 Each item is a place where 1.0 does less than you might expect, or answers differently from a server. None of them returns a wrong answer without saying so, and every one is planned. Each entry says what happens, what to do today, and that a fix is planned.
