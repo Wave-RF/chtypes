@@ -531,6 +531,10 @@ class DocFlags(IntFlag):
 # `chs_preview_batch`'s `export_format` for no export (`CHS_EXPORT_NONE`).
 EXPORT_NONE: Final = -1
 
+# The code a declined row, outcome or verdict carries (`CHS_CODE_DECLINED`), outside
+# ClickHouse's code table.
+CODE_DECLINED: Final = -2
+
 # Every enum the description defines, by its own name, and the Python type that
 # spells it: rule r3's tests reach every one from here, so a new enum is covered
 # without a hand-kept list.

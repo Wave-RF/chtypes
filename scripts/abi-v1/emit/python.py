@@ -1475,6 +1475,12 @@ def render_vocab_v2(model: Model) -> str:
         f"# `chs_preview_batch`'s `export_format` for no export (`CHS_EXPORT_NONE`).\nEXPORT_NONE: Final = {c['CHS_EXPORT_NONE'].value}"
     )
     parts.append("")
+    if "CHS_CODE_DECLINED" in c:
+        parts.append(
+            "# The code a declined row, outcome or verdict carries (`CHS_CODE_DECLINED`), outside\n"
+            f"# ClickHouse's code table.\nCODE_DECLINED: Final = {c['CHS_CODE_DECLINED'].value}"
+        )
+        parts.append("")
     parts.append("# Every enum the description defines, by its own name, and the Python type that")
     parts.append("# spells it: rule r3's tests reach every one from here, so a new enum is covered")
     parts.append("# without a hand-kept list.")

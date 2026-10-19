@@ -594,6 +594,9 @@ export type DocFlags = number;
 /** The `export_format` of a batch preview that exports nothing. */
 export const EXPORT_NONE = -1;
 
+/** The code a declined row, outcome or verdict carries (`CHS_CODE_DECLINED`), outside ClickHouse's code table. */
+export const CODE_DECLINED = -2;
+
 /** One described enum, as the rule r3 tests reach it: its listed values, `known` and `of`. */
 export type DescribedVocabulary =
   | { readonly repr: 'int32'; readonly listed: readonly number[]; readonly known: (value: number) => boolean; readonly of: (value: number) => number }

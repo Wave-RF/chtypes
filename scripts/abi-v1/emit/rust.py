@@ -1999,6 +1999,14 @@ def render_vocab_v2(model) -> str:
         f"pub(crate) const VALUE_BYTES: &str = {_rust_str_any(model.byte_strings['value'])};",
         "",
     ]
+    declined = model.constants.get("CHS_CODE_DECLINED")
+    if declined is not None:
+        out += [
+            "/// The code a declined row, outcome or verdict carries (`CHS_CODE_DECLINED`), outside",
+            "/// ClickHouse's code table.",
+            f"pub const CODE_DECLINED: i32 = {declined.value};",
+            "",
+        ]
     out += _vocab_v2_described(model)
     return "\n".join(out)
 

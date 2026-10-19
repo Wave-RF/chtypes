@@ -47,6 +47,7 @@ from importlib.metadata import PackageNotFoundError as _PackageNotFound
 from importlib.metadata import version as _package_version
 
 from ._abi2._vocab import (
+    CODE_DECLINED,
     EXPORT_NONE,
     DeclinedLayer,
     DeclinedTier,
@@ -149,6 +150,7 @@ __all__ = [
     "CODE_SOURCE_RETIRED",
     "CODE_SOURCE_UNAUTHORIZED",
     "CODE_SOURCE_UNREACHABLE",
+    "CODE_DECLINED",
     "EXPORT_NONE",
     "ArtifactCorruptError",
     "ArtifactError",

@@ -340,15 +340,6 @@
     },
     {
       "binding": "ts",
-      "kind": "missing",
-      "names": [
-        "CODE_DECLINED"
-      ],
-      "reason": "§3's 'the decline code' row names CHS_CODE_DECLINED (-2) as CODE_DECLINED in TypeScript. The description's constants are emitted into the vocabulary file by the generator, which does so for Go only (CodeDeclined), so TypeScript has no constant yet and a caller compares a result's errCode with -2. The fix is a generator change (scripts/abi-v1/emit), not a hand-written declaration, and this entry goes with it.",
-      "issue": 511
-    },
-    {
-      "binding": "ts",
       "kind": "extra",
       "names": [
         "EXPORT_NONE"

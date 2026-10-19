@@ -1279,6 +1279,10 @@ pub(crate) const BYTES_SUFFIX: &str = "_b64";
 /// value, beside its rendering.
 pub(crate) const VALUE_BYTES: &str = "value_b64";
 
+/// The code a declined row, outcome or verdict carries (`CHS_CODE_DECLINED`), outside
+/// ClickHouse's code table.
+pub const CODE_DECLINED: i32 = -2;
+
 /// Every enum the description defines, in its own order: rule r3's tests reach
 /// each one through [`described_vocabulary`], so a new enum is covered without
 /// a hand-kept list.
