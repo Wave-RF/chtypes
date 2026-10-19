@@ -19,7 +19,7 @@ import platform as _platform_module
 import re
 import shutil
 import tempfile
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -649,6 +649,7 @@ def _resolve_other_platform_pins(
     scratch_root: Path,
     rev_ctx: _rev.Context,
     warnings: list[str],
+    only: Collection[str] | None = None,
 ) -> dict[str, LockPin]:
     """docs/guides/fetch-v1.md §6: "Writing a lock for every platform the
     index offers... downloads and verifies every platform's bundle but
@@ -667,7 +668,7 @@ def _resolve_other_platform_pins(
             ),
             None,
         )
-        if key is None or key == host_platform_key:
+        if key is None or key == host_platform_key or (only is not None and key not in only):
             continue
         manifest_digest = m["digest"]
         other_manifest_doc, _raw = fetch_manifest_by_digest(
@@ -747,6 +748,32 @@ def _maybe_write_lock(
         return []
     extra_pins = None
     warnings: list[str] = []
+    if (
+        options.update
+        and not options.lock_write
+        and lock is not None
+        and _channel.active().revocation
+    ):
+        # `update` re-resolves the request's locked platforms too, and a revoked
+        # build on any of them refuses the call (docs/guides/fetch-v1.md,
+        # "Build-level revocation"); only the check, the lock itself is rewritten
+        # for the one platform, as before.
+        locked = set(lock.requests.get(request.spelling, {}))
+        if locked - {platform_key}:
+            _resolve_other_platform_pins(
+                index_doc=index_doc,
+                host_platform_key=platform_key,
+                request_spelling=request.spelling,
+                index_digest=index_digest,
+                bases=bases,
+                policy=policy,
+                retry=retry,
+                trusted_keys=options.resolved_trusted_keys(),
+                scratch_root=scratch_root,
+                rev_ctx=options.revocation_context(),
+                warnings=warnings,
+                only=locked,
+            )
     if options.lock_write:
         extra_pins = _resolve_other_platform_pins(
             index_doc=index_doc,

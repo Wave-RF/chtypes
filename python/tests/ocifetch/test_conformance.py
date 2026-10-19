@@ -643,11 +643,13 @@ def _run_case(
             # check_installed, N times in one process; the last open is judged and
             # every open's warnings are counted. A miss is CHTYPES_ARTIFACT_MISSING.
             for _ in range(opens):
-                resolved = resolve_installed(Request(req["spelling"]), req["platform"], options)
-                if resolved is None:
+                resolved = None  # each open is judged on its own
+                opened = resolve_installed(Request(req["spelling"]), req["platform"], options)
+                if opened is None:
                     raise ArtifactMissingError(f"no installed artifact satisfies {req['spelling']}")
-                open_warnings.extend(resolved.warnings)
-                open_warnings.extend(check_installed(resolved, options))
+                open_warnings.extend(opened.warnings)
+                open_warnings.extend(check_installed(opened, options))
+                resolved = opened
         elif case["id"].startswith("resolve-build-"):
             # What a request resolves to on every platform, never a layer
             # (docs/guides/fetch-v1.md §10).
