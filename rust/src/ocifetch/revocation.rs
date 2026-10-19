@@ -793,7 +793,33 @@ fn memo() -> MutexGuard<'static, BTreeMap<String, Arc<MemoEntry>>> {
 /// directories, which one process never sees in use.
 #[cfg(test)]
 pub fn reset_revocation_memo_for_tests() {
+    // Waits for a unit test that is holding the memo (`MEMO_TEST_LOCK`).
+    let _serial = MEMO_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     memo().clear();
+}
+
+/// Serialises the unit tests that read the memo against
+/// [`reset_revocation_memo_for_tests`]: the conformance suite resets it before
+/// every case, and libtest runs its tests in parallel.
+#[cfg(test)]
+static MEMO_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+#[cfg(test)]
+thread_local! {
+    static DEADLINE_FOR_TESTS: std::cell::Cell<Option<Duration>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// The installed-build check's one deadline: [`constants::REVOCATION_CHECK_S`],
+/// unless a unit test on this thread shortened it.
+fn check_deadline() -> Duration {
+    #[cfg(test)]
+    {
+        if let Some(shortened) = DEADLINE_FOR_TESTS.with(std::cell::Cell::get) {
+            return shortened;
+        }
+    }
+    Duration::from_secs_f64(constants::REVOCATION_CHECK_S)
 }
 
 /// The installed-build check: the stored record, then, unless offline, the kept
@@ -896,7 +922,8 @@ fn keep(manifest: &str, out: &Outcome) {
 /// One network check under the installed-build check's budget. Passing the
 /// deadline is an unread status.
 fn check_with_deadline(res: &Resources, sub: &Subject) -> Result<Outcome> {
-    let deadline = Instant::now() + Duration::from_secs_f64(constants::REVOCATION_CHECK_S);
+    let allowed = check_deadline();
+    let deadline = Instant::now() + allowed;
     let source = Source {
         bases: &res.bases,
         client: &res.client,
@@ -911,7 +938,7 @@ fn check_with_deadline(res: &Resources, sub: &Subject) -> Result<Outcome> {
         if let Some(unread) = &mut out.unread {
             unread.cause = format!(
                 "the check passed its {}s deadline: {}",
-                constants::REVOCATION_CHECK_S,
+                allowed.as_secs_f64(),
                 unread.cause
             );
         }
@@ -1059,5 +1086,240 @@ mod tests {
             revoked_410_text(&[]),
             "revoked, and the registry names no advisory"
         );
+    }
+
+    // ---- the installed-build check: the memo and the deadline ----------------
+    //
+    // What no conformance case reaches (docs/guides/fetch-v1.md, "Build-level
+    // revocation"): the in-process memo, and the 5 s deadline (shortened here).
+    // Each test checks a build of its own digest, so the process-wide memo never
+    // mixes two of them; the lock keeps the conformance suite's per-case reset
+    // out of the middle of one.
+
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    use super::super::http::{AuthConfig, Client, Clock};
+
+    /// A registry that answers every request 404, as a tree with no discovery,
+    /// and counts them. While `stall` is set it holds each request unanswered.
+    struct ListingServer {
+        port: u16,
+        requests: Arc<AtomicUsize>,
+        stall: Arc<AtomicBool>,
+    }
+
+    impl ListingServer {
+        fn start(stalled: bool) -> ListingServer {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let requests = Arc::new(AtomicUsize::new(0));
+            let stall = Arc::new(AtomicBool::new(stalled));
+            let (n, hold) = (requests.clone(), stall.clone());
+            std::thread::spawn(move || {
+                for stream in listener.incoming() {
+                    let Ok(mut sock) = stream else { continue };
+                    let (n, hold) = (n.clone(), hold.clone());
+                    std::thread::spawn(move || {
+                        let mut buf = [0u8; 4096];
+                        if sock.read(&mut buf).unwrap_or(0) == 0 {
+                            return;
+                        }
+                        n.fetch_add(1, Ordering::SeqCst);
+                        let started = Instant::now();
+                        while hold.load(Ordering::SeqCst) && started.elapsed().as_secs() < 10 {
+                            std::thread::sleep(Duration::from_millis(20));
+                        }
+                        let _ = sock.write_all(
+                            b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                        );
+                    });
+                }
+            });
+            ListingServer {
+                port,
+                requests,
+                stall,
+            }
+        }
+
+        fn base(&self, path: &str) -> String {
+            format!("http://127.0.0.1:{}{path}", self.port)
+        }
+
+        fn count(&self) -> usize {
+            self.requests.load(Ordering::SeqCst)
+        }
+    }
+
+    /// A clock that records every sleep instead of sleeping.
+    struct RecordingClock(Arc<Mutex<Vec<f64>>>);
+
+    impl Clock for RecordingClock {
+        fn now(&self) -> std::time::SystemTime {
+            std::time::SystemTime::now()
+        }
+
+        fn sleep(&self, seconds: f64) {
+            self.0.lock().unwrap().push(seconds);
+        }
+    }
+
+    fn resources_for(root: &Path, bases: Vec<String>, strict: bool, client: Client) -> Resources {
+        Resources {
+            root: root.to_path_buf(),
+            platform: "linux-arm64".to_string(),
+            bases,
+            system_dirs: Vec::new(),
+            strict: false,
+            client,
+            auth: AuthConfig::default(),
+            trust: Vec::new(),
+            offline: false,
+            allow_revoked: false,
+            require_revocation_check: strict,
+        }
+    }
+
+    /// A build "installed" in a directory of its own, whose manifest digest is
+    /// `serial` (so no two tests share a memo key).
+    fn installed_build(root: &Path, serial: u64) -> Resolved {
+        let manifest = format!("sha256:{serial:064x}");
+        let dir = root.join(format!("entry-{serial}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        Resolved {
+            abi_generation: 2,
+            platform: "linux-arm64".to_string(),
+            request: "26.13".to_string(),
+            version: "26.13.1.1".to_string(),
+            channel: None,
+            build: "20261013.000001".to_string(),
+            library_path: dir.join("libchtypes.so"),
+            dir,
+            digests: super::super::ensure::Digests {
+                index: None,
+                manifest,
+                layer: format!("sha256:{:064x}", serial + 1),
+                bundle: None,
+                bundle_manifest: None,
+            },
+            predicate: serde_json::json!({
+                "abi": 2, "os": "linux", "arch": "arm64",
+                "clickhouse_version": "26.13.1.1", "build": "20261013.000001",
+            }),
+            signed_by: String::new(),
+            source: String::new(),
+            already_installed: true,
+            warnings: Vec::new(),
+        }
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("chtypes-rev-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Two checks of one build make one listing and one warning; a strict call
+    /// never reuses the kept "not checked", checks for itself and fails; a later
+    /// call without strict mode is answered from what was kept.
+    #[test]
+    fn an_installed_build_is_checked_once_per_process() {
+        let _serial = MEMO_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let root = scratch("once");
+        let server = ListingServer::start(false);
+        let build = installed_build(&root, 0x1001);
+        let bases = vec![server.base("/chtypes/v2")];
+        let lenient = resources_for(&root, bases.clone(), false, Client::new());
+        let strict = resources_for(&root, bases, true, Client::new());
+
+        let first = check_installed_once(&lenient, &build).expect("a first check fails open");
+        assert_eq!(first.len(), 1, "one not-checked warning: {first:?}");
+        assert!(
+            first[0].contains(&format!(
+                "revocation status not checked for manifest {}",
+                build.digests.manifest
+            )),
+            "{first:?}"
+        );
+        assert_eq!(
+            server.count(),
+            2,
+            "one listing: the referrers API, then the fallback tag"
+        );
+
+        let second = check_installed_once(&lenient, &build).expect("a second check fails open");
+        assert!(
+            second.is_empty(),
+            "the second check says nothing: {second:?}"
+        );
+        assert_eq!(server.count(), 2, "the second check made no request");
+
+        let err = check_installed_once(&strict, &build)
+            .expect_err("a strict call never takes a kept \"not checked\"");
+        assert!(
+            matches!(&err, Error::SourceUnreachable(m) if m.contains("revocation status not checked")),
+            "want SourceUnreachable naming the unchecked status, got {err:?}"
+        );
+        assert_eq!(server.count(), 4, "the strict call checked for itself");
+
+        let after = check_installed_once(&lenient, &build).expect("a lenient call after");
+        assert!(after.is_empty(), "answered from what was kept: {after:?}");
+        assert_eq!(
+            server.count(),
+            4,
+            "the kept outcome survived the strict failure"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A registry that never answers costs the check its one deadline, not the
+    /// retry table's minutes; the call goes on with a warning that names the
+    /// deadline, and sleeps never. The deadline is shortened here; the
+    /// production one is `constants::REVOCATION_CHECK_S`.
+    #[test]
+    fn a_stalled_registry_costs_the_check_its_deadline() {
+        let _serial = MEMO_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        assert_eq!(constants::REVOCATION_CHECK_S, 5.0, "the record says 5 s");
+        assert_eq!(check_deadline(), Duration::from_secs(5));
+        DEADLINE_FOR_TESTS.with(|d| d.set(Some(Duration::from_millis(300))));
+        let root = scratch("deadline");
+        let server = ListingServer::start(true);
+        let build = installed_build(&root, 0x2001);
+        let sleeps = Arc::new(Mutex::new(Vec::new()));
+        let res = resources_for(
+            &root,
+            vec![
+                server.base("/chtypes/v2"),
+                server.base("/mirror/chtypes/v2"),
+            ],
+            false,
+            Client::with_clock(Box::new(RecordingClock(sleeps.clone()))),
+        );
+
+        let started = Instant::now();
+        let result = check_installed_once(&res, &build);
+        let elapsed = started.elapsed();
+        server.stall.store(false, Ordering::SeqCst);
+        DEADLINE_FOR_TESTS.with(|d| d.set(None));
+
+        let warnings = result.expect("a stalled registry fails open");
+        assert_eq!(warnings.len(), 1, "one warning: {warnings:?}");
+        assert!(
+            warnings[0].contains("passed its"),
+            "the warning names the deadline: {warnings:?}"
+        );
+        assert!(
+            elapsed < Duration::from_secs(3),
+            "the check took {elapsed:?}, far past its 300ms deadline"
+        );
+        assert!(
+            sleeps.lock().unwrap().is_empty(),
+            "the check slept {:?}: it has no backoff",
+            sleeps.lock().unwrap()
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
