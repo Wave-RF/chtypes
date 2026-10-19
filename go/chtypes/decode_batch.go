@@ -505,6 +505,7 @@ type colDoc struct {
 	RefTypeB64 fIgnore `json:"ref_type_b64"`
 	Wire       fIgnore `json:"wire"`
 	WireB64    fIgnore `json:"wire_b64"`
+	RefUnclass fIgnore `json:"ref_unclassified"`
 	Nullable   fIgnore `json:"nullable"`
 	Poison     fIgnore `json:"poison"`
 	NullInput  fIgnore `json:"null_input"`
@@ -532,7 +533,7 @@ type cellDoc struct {
 
 // atMergeDoc is one entry of at_merge (ABI v2).
 type atMergeDoc struct {
-	Row       fInt           `json:"row"`
+	PartRow   fInt           `json:"part_row"`
 	Reason    fWord          `json:"reason"`
 	Column    fWord          `json:"column"`
 	ColumnB64 fB64           `json:"column_b64"`
@@ -577,19 +578,26 @@ type framingDoc struct {
 // batchRowDoc is one entry of rows. The lists keep their backing arrays between
 // rows (reset), the scalars are cleared.
 type batchRowDoc struct {
-	Outcome            fWord               `json:"outcome"`
-	Code               fI32                `json:"code"`
-	Err                fString             `json:"err"`
-	ErrB64             fB64                `json:"err_b64"`
-	Verdict            fString             `json:"verdict"`
-	VerdictCode        fI32                `json:"verdict_code"`
-	VerdictErr         fString             `json:"verdict_err"`
-	VerdictErrB64      fB64                `json:"verdict_err_b64"`
-	PartitionID        fString             `json:"partition_id"`
-	PartitionIDB64     fB64                `json:"partition_id_b64"`
-	InputSpan          fObj[spanDoc]       `json:"input_span"`
-	UnknownFields      fList[nameDoc]      `json:"unknown_fields"`
-	UnsupportedSetting fList[nameDoc]      `json:"unsupported_settings"`
+	Outcome        fWord          `json:"outcome"`
+	Code           fI32           `json:"code"`
+	Err            fString        `json:"err"`
+	ErrB64         fB64           `json:"err_b64"`
+	Reason         fWord          `json:"reason"`
+	RefusedAt      fWord          `json:"refused_at"`
+	RefusedRow     fU64           `json:"refused_row"`
+	Verdict        fString        `json:"verdict"`
+	VerdictCode    fI32           `json:"verdict_code"`
+	VerdictReason  fWord          `json:"verdict_reason"`
+	VerdictErr     fString        `json:"verdict_err"`
+	VerdictErrB64  fB64           `json:"verdict_err_b64"`
+	PartitionID    fString        `json:"partition_id"`
+	PartitionIDB64 fB64           `json:"partition_id_b64"`
+	InputSpan      fObj[spanDoc]  `json:"input_span"`
+	UnknownFields  fList[nameDoc] `json:"unknown_fields"`
+	// unsupported_settings was removed from the row document (spec batch 2); a
+	// library that still writes it is read as the fast path always has, the
+	// member ignored (rule r2), rather than sent to the slower generic reader.
+	UnsupportedSetting fIgnore             `json:"unsupported_settings"`
 	Computed           fList[computedDoc]  `json:"computed"`
 	Cols               fList[colDoc]       `json:"cols"`
 	Transformed        fList[transformDoc] `json:"transformed"`
@@ -600,7 +608,6 @@ func newBatchRowDoc() *batchRowDoc {
 	r := &batchRowDoc{}
 	r.InputSpan.sub = sub
 	r.UnknownFields.sub = sub
-	r.UnsupportedSetting.sub = sub
 	r.Computed.sub = sub
 	r.Cols.sub = sub
 	r.Transformed.sub = sub
@@ -611,12 +618,13 @@ func newBatchRowDoc() *batchRowDoc {
 // emptied with its backing array kept.
 func (d *batchRowDoc) reset() {
 	d.Outcome, d.Code, d.Err, d.ErrB64 = fWord{}, fI32{}, fString{}, fB64{}
-	d.Verdict, d.VerdictCode = fString{}, fI32{}
+	d.Reason, d.RefusedAt, d.RefusedRow = fWord{}, fWord{}, fU64{}
+	d.Verdict, d.VerdictCode, d.VerdictReason = fString{}, fI32{}, fWord{}
 	d.VerdictErr, d.VerdictErrB64 = fString{}, fB64{}
 	d.PartitionID, d.PartitionIDB64 = fString{}, fB64{}
 	d.InputSpan.seen, d.InputSpan.null, d.InputSpan.v = false, false, spanDoc{}
+	d.UnsupportedSetting = fIgnore{}
 	d.UnknownFields.reset()
-	d.UnsupportedSetting.reset()
 	d.Computed.reset()
 	d.Cols.reset()
 	d.Transformed.reset()
@@ -733,7 +741,7 @@ func atMergeOf(list []atMergeDoc, present bool) ([]AtMergeEntry, bool) {
 	out := make([]AtMergeEntry, 0, len(list))
 	for i := range list {
 		a := &list[i]
-		e := AtMergeEntry{Row: a.Row.v, Reason: MergeReason(a.Reason.s)}
+		e := AtMergeEntry{PartRow: a.PartRow.v, Reason: MergeReason(a.Reason.s)}
 		column, present, ok := byteOf(&a.Column.fString, &a.ColumnB64)
 		if !ok {
 			return nil, false
@@ -793,6 +801,55 @@ func decodeSpanList(dec *json.Decoder, hint int) ([]Span, error) {
 	return list, nil
 }
 
+// decodeRowSpans reads row_spans as decodeSpanList reads a list of spans, but
+// a null element is a row not exported (a nil entry). The entries share chunks
+// of Span rather than allocating one each.
+func decodeRowSpans(dec *json.Decoder, hint int) ([]*Span, error) {
+	t, err := dec.Token()
+	if err != nil {
+		return nil, errDeclined
+	}
+	if t == nil {
+		return nil, nil
+	}
+	if t != json.Delim('[') {
+		return nil, errDeclined
+	}
+	list := make([]*Span, 0, hint)
+	var chunk []Span
+	slot := new(spanSlot)
+	for dec.More() {
+		*slot = spanSlot{}
+		if err := dec.Decode(slot); err != nil {
+			return nil, errDeclined
+		}
+		if slot.null {
+			list = append(list, nil)
+			continue
+		}
+		if len(chunk) == 0 {
+			chunk = make([]Span, slabChunk)
+		}
+		p := &chunk[0]
+		chunk = chunk[1:]
+		*p = Span{Off: slot.v.Off.v, Len: slot.v.Len.v}
+		list = append(list, p)
+	}
+	if t, err := dec.Token(); err != nil || t != json.Delim(']') {
+		return nil, errDeclined
+	}
+	return list, nil
+}
+
+// optU64Of is reader.optU64: nil when the member is absent or null.
+func optU64Of(f *fU64) *uint64 {
+	if !f.seen || f.null {
+		return nil
+	}
+	n := f.v
+	return &n
+}
+
 // spanHint is the count a document has already announced (one span per row),
 // or 0 when none was or it is not credible for a document of docLen bytes.
 func spanHint(n fU64, docLen int) int {
@@ -813,9 +870,9 @@ func (d *batchRowDoc) result(slabs *rowSlabs) (RowResult, bool) {
 	if res.Transformed, ok = transformsOf(d.Transformed.v, d.Transformed.present()); !ok {
 		return res, false
 	}
-	if res.UnsupportedSettings, ok = namesOf(&d.UnsupportedSetting); !ok {
-		return res, false
-	}
+	res.Reason, res.RefusedAt = d.Reason.s, RefusalSite(d.RefusedAt.s)
+	res.RefusedRow = optU64Of(&d.RefusedRow)
+	res.VerdictReason = d.VerdictReason.s
 	if res.UnknownFields, ok = namesOf(&d.UnknownFields); !ok {
 		return res, false
 	}
@@ -963,6 +1020,11 @@ const (
 	kStorageTransforms
 	kUnsupportedSettings
 	kAtMerge
+	kReason
+	kRefusedAt
+	kRefusedRow
+	kExportDeclinedReason
+	kExportColumns
 )
 
 // decodeBatchFast reads a batch document; ok is false when the generic reader
@@ -988,7 +1050,12 @@ func decodeBatchFast(raw, payload []byte) (res BatchResult, ok bool) {
 		exportDeclinedB64     fB64
 		partitionCount        fU64
 		transformed           []transformDoc
-		rowSpans, unconsumed  []Span
+		rowSpans              []*Span
+		unconsumed            []Span
+		reason, refusedAt     fWord
+		refusedRow            fU64
+		exportDeclinedReason  fWord
+		exportColumns         fList[nameDoc]
 		engineRows            [][]cellDoc
 		framing               *framingDoc
 		storageTransforms     fIgnore
@@ -1038,7 +1105,7 @@ func decodeBatchFast(raw, payload []byte) (res BatchResult, ok bool) {
 		case "row_spans":
 			// One span per row, so rows_read, when it came first, sizes the list.
 			bit = kRowSpans
-			top.rowSpans, err = decodeSpanList(dec, spanHint(top.rowsRead, len(raw)))
+			top.rowSpans, err = decodeRowSpans(dec, spanHint(top.rowsRead, len(raw)))
 		case "unconsumed":
 			bit = kUnconsumed
 			top.unconsumed, err = decodeSpanList(dec, 0)
@@ -1052,6 +1119,16 @@ func decodeBatchFast(raw, payload []byte) (res BatchResult, ok bool) {
 			bit, err = kUnsupportedSettings, dec.Decode(&top.unsupportedSettings)
 		case "at_merge":
 			bit, err = kAtMerge, dec.Decode(&top.atMerge)
+		case "reason":
+			bit, err = kReason, dec.Decode(&top.reason)
+		case "refused_at":
+			bit, err = kRefusedAt, dec.Decode(&top.refusedAt)
+		case "refused_row":
+			bit, err = kRefusedRow, dec.Decode(&top.refusedRow)
+		case "export_declined_reason":
+			bit, err = kExportDeclinedReason, dec.Decode(&top.exportDeclinedReason)
+		case "export_columns":
+			bit, err = kExportColumns, dec.Decode(&top.exportColumns)
 		case "rows":
 			bit = kRows
 			hint := 0
@@ -1080,6 +1157,9 @@ func decodeBatchFast(raw, payload []byte) (res BatchResult, ok bool) {
 	if res.ErrMsg, good = bytesOf(&top.errText, &top.errB64); !good {
 		return res, false
 	}
+	res.Reason, res.RefusedAt = top.reason.s, RefusalSite(top.refusedAt.s)
+	res.RefusedRow = optU64Of(&top.refusedRow)
+	res.ExportDeclinedReason = top.exportDeclinedReason.s
 	res.RowsRead, res.RowsSkipped = top.rowsRead.v, top.rowsSkipped.v
 	if res.Transformed, good = transformsOf(top.transformed, top.transformed != nil); !good {
 		return res, false
@@ -1094,6 +1174,9 @@ func decodeBatchFast(raw, payload []byte) (res BatchResult, ok bool) {
 	if res.ExportDeclined == "" {
 		res.Payload = payload
 		res.Spans = top.rowSpans
+	}
+	if res.ExportColumns, good = namesOf(&top.exportColumns); !good {
+		return res, false
 	}
 	res.RowsPassed, res.RowsCut = top.rowsPassed.v, top.rowsCut.v
 	res.Unconsumed = top.unconsumed

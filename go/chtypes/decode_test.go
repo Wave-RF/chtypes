@@ -212,13 +212,13 @@ const atMergeBatchDoc = `{
   "outcome": "accepted",
   "unsupported_settings": [{"name": "session_timezone"}, {"name_b64": "/w=="}],
   "at_merge": [
-    {"row": 0, "reason": "ttl_delete"},
-    {"row": 1, "reason": "ttl_column_reset", "column": "c", "stored": "0"},
-    {"row": 2, "reason": "ttl_column_reset", "column": "t"},
-    {"row": 3, "reason": "ttl_column_reset", "column_b64": "/wA=", "stored_b64": "/w=="},
-    {"row": 4, "reason": "ttl_delete", "input_rows": [4, 7]},
-    {"row": 5, "reason": "a_reason_nobody_listed"},
-    {"row": 6, "reason": "ttl_column_reset", "column": "e", "stored": "", "input_rows": []}
+    {"part_row": 0, "reason": "ttl_delete"},
+    {"part_row": 1, "reason": "ttl_column_reset", "column": "c", "stored": "0"},
+    {"part_row": 2, "reason": "ttl_column_reset", "column": "t"},
+    {"part_row": 3, "reason": "ttl_column_reset", "column_b64": "/wA=", "stored_b64": "/w=="},
+    {"part_row": 4, "reason": "ttl_delete", "input_rows": [4, 7]},
+    {"part_row": 5, "reason": "a_reason_nobody_listed"},
+    {"part_row": 6, "reason": "ttl_column_reset", "column": "e", "stored": "", "input_rows": []}
   ]
 }`
 
@@ -258,9 +258,9 @@ func TestDecodeBatchAtMerge(t *testing.T) {
 		{MergeTTLColumnReset, "e", "", []int{}, false, true, true}, // an empty stored is not an absent one
 	} {
 		e := b.AtMerge[i]
-		if e.Row != i || e.Reason != tc.reason || e.Reason.Known() != tc.known || str(e.Column) != tc.column || str(e.Stored) != tc.stored {
-			t.Errorf("entry %d = {Row %d Reason %q Known %v Column %q Stored %q}, want {%d %q %v %q %q}",
-				i, e.Row, e.Reason, e.Reason.Known(), str(e.Column), str(e.Stored), i, tc.reason, tc.known, tc.column, tc.stored)
+		if e.PartRow != i || e.Reason != tc.reason || e.Reason.Known() != tc.known || str(e.Column) != tc.column || str(e.Stored) != tc.stored {
+			t.Errorf("entry %d = {PartRow %d Reason %q Known %v Column %q Stored %q}, want {%d %q %v %q %q}",
+				i, e.PartRow, e.Reason, e.Reason.Known(), str(e.Column), str(e.Stored), i, tc.reason, tc.known, tc.column, tc.stored)
 		}
 		if (e.Column != nil) != tc.columnPresent {
 			t.Errorf("entry %d: Column present = %v, want %v", i, e.Column != nil, tc.columnPresent)
@@ -279,7 +279,7 @@ func TestDecodeBatchAtMerge(t *testing.T) {
 	}
 
 	// An unknown member, in an entry and beside the list, is ignored (r2).
-	b, err = decodeBatch([]byte(`{"outcome":"accepted","at_merge":[{"row":0,"reason":"ttl_delete","x_future":{"a":[1]},"x_future_b64":"/w=="}],"x_future_list":[1]}`), nil)
+	b, err = decodeBatch([]byte(`{"outcome":"accepted","at_merge":[{"part_row":0,"reason":"ttl_delete","x_future":{"a":[1]},"x_future_b64":"/w=="}],"x_future_list":[1]}`), nil)
 	if err != nil || len(b.AtMerge) != 1 || b.AtMerge[0].Reason != MergeTTLDelete || b.AtMerge[0].Column != nil {
 		t.Errorf("at_merge with unknown members = %+v, %v", b.AtMerge, err)
 	}
@@ -298,11 +298,11 @@ func TestDecodeBatchAtMerge(t *testing.T) {
 
 	// A document that breaks its schema is an InternalError naming the key.
 	for _, bad := range []string{
-		`{"at_merge":[{"row":0,"reason":"ttl_column_reset","column":"c","column_b64":"Yw=="}]}`,
-		`{"at_merge":[{"row":0,"reason":"ttl_column_reset","column":"c","stored_b64":"!!"}]}`,
-		`{"at_merge":[{"row":0,"reason":"ttl_delete","input_rows":["x"]}]}`,
-		`{"at_merge":[{"row":0,"reason":"ttl_delete","input_rows":[-1]}]}`,
-		`{"at_merge":[{"row":0,"reason":7}]}`,
+		`{"at_merge":[{"part_row":0,"reason":"ttl_column_reset","column":"c","column_b64":"Yw=="}]}`,
+		`{"at_merge":[{"part_row":0,"reason":"ttl_column_reset","column":"c","stored_b64":"!!"}]}`,
+		`{"at_merge":[{"part_row":0,"reason":"ttl_delete","input_rows":["x"]}]}`,
+		`{"at_merge":[{"part_row":0,"reason":"ttl_delete","input_rows":[-1]}]}`,
+		`{"at_merge":[{"part_row":0,"reason":7}]}`,
 		`{"at_merge":{"row":0}}`,
 		`{"unsupported_settings":["session_timezone"]}`,
 	} {
@@ -492,5 +492,106 @@ func TestDeclinedExportPayloadIsAbsent(t *testing.T) {
 				t.Errorf("no export asked for: Payload = %q, want nil", b.Payload)
 			}
 		})
+	}
+}
+
+// Spec batch 2: a refusal or decline names its code (CodeDeclined is -2), its
+// catalog id and where it sits; a batch fast path and the generic reader agree.
+func TestDecodeBatchRefusalMembers(t *testing.T) {
+	doc := `{"outcome":"unsupported","code":-2,"reason":"preview-batch-zone-mismatch","refused_at":"body_read","refused_row":3,"rows_read":0,"rows":[]}`
+	for name, dec := range map[string]func([]byte, []byte) (BatchResult, error){"production": decodeBatch, "generic": decodeBatchGeneric} {
+		b, err := dec([]byte(doc), nil)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if b.ErrCode != CodeDeclined || b.Reason != "preview-batch-zone-mismatch" || b.RefusedAt != RefusedAtBodyRead || !b.RefusedAt.Known() ||
+			b.RefusedRow == nil || *b.RefusedRow != 3 {
+			t.Errorf("%s: batch = %+v", name, b)
+		}
+		b, err = dec([]byte(`{"outcome":"accepted","code":0,"rows_read":1}`), nil)
+		if err != nil || b.Reason != "" || b.RefusedAt != "" || b.RefusedRow != nil {
+			t.Errorf("%s: an accepted batch carries no refusal members: %+v, %v", name, b, err)
+		}
+		// An unlisted site is its unknown(n): kept, never a failure (r3).
+		b, err = dec([]byte(`{"outcome":"rejected","refused_at":"a_site_nobody_listed"}`), nil)
+		if err != nil || b.RefusedAt != "a_site_nobody_listed" || b.RefusedAt.Known() {
+			t.Errorf("%s: unlisted site = %+v, %v", name, b.RefusedAt, err)
+		}
+	}
+}
+
+func TestDecodeBatchExportMembers(t *testing.T) {
+	doc := `{"outcome":"accepted","rows_read":3,"row_spans":[{"off":0,"len":5},null,{"off":5,"len":6}],"export_columns":[{"name":"a"},{"name_b64":"/w=="}]}`
+	for name, dec := range map[string]func([]byte, []byte) (BatchResult, error){"production": decodeBatch, "generic": decodeBatchGeneric} {
+		b, err := dec([]byte(doc), []byte("0123456789a"))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(b.Spans) != 3 || b.Spans[0] == nil || b.Spans[1] != nil || b.Spans[2] == nil || b.Spans[2].Off != 5 || b.Spans[2].Len != 6 {
+			t.Errorf("%s: spans = %v: a row not exported is a nil entry, aligned with Rows", name, b.Spans)
+		}
+		if len(b.ExportColumns) != 2 || b.ExportColumns[0] != "a" || b.ExportColumns[1] != "\xff" {
+			t.Errorf("%s: export_columns = %q", name, b.ExportColumns)
+		}
+		d, err := dec([]byte(`{"outcome":"unsupported","export_declined":"nope","export_declined_reason":"export-batch-not-accepted","row_spans":[null]}`), []byte("x"))
+		if err != nil || d.ExportDeclined != "nope" || d.ExportDeclinedReason != "export-batch-not-accepted" || d.Payload != nil || d.Spans != nil || d.ExportColumns != nil {
+			t.Errorf("%s: declined export = %+v, %v", name, d, err)
+		}
+	}
+}
+
+func TestDecodeRowRefusalMembers(t *testing.T) {
+	r, err := decodeRow([]byte(`{"outcome":"unsupported","code":-2,"reason":"drawn-value","refused_at":"row","refused_row":0,"verdict":"d","verdict_code":-2,"verdict_reason":"defer-defaults-reader"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.ErrCode != CodeDeclined || r.Reason != "drawn-value" || r.RefusedAt != RefusedAtRow || r.RefusedRow == nil || *r.RefusedRow != 0 ||
+		r.Verdict == nil || *r.Verdict != VerdictDecline || r.VerdictCode != CodeDeclined || r.VerdictReason != "defer-defaults-reader" {
+		t.Errorf("row = %+v", r)
+	}
+}
+
+func TestDecodeFilterResultRefusalMembers(t *testing.T) {
+	f, err := decodeFilterResult([]byte(`{"outcome":"unsupported","code":-2,"reason":"filter-zone","refused_at":"call","rows_read":0,"verdicts":"","errors":[{"row":0,"code":-2,"reason":"drawn-value","err":"x"}],"unsupported_settings":[]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.ErrCode != CodeDeclined || f.Reason != "filter-zone" || f.RefusedAt != RefusedAtCall || f.RefusedRow != nil ||
+		len(f.Errors) != 1 || f.Errors[0].Code != CodeDeclined || f.Errors[0].Reason != "drawn-value" {
+		t.Errorf("filter result = %+v", f)
+	}
+}
+
+func TestDecodeSchemaDescriptionBatch2(t *testing.T) {
+	d, err := decodeSchemaDescription([]byte(`{"columns":[
+	  {"name":"a","type":"Int32","default_kind":"","default_support":"deferred","default_support_reason":"r-x","reads":[{"name":"b"},{"name_b64":"/w=="}]},
+	  {"name":"b","type":"Int32","default_kind":"DEFAULT","default_support":"a_support_nobody_listed"}],
+	  "filter_declined_settings":[],"posture":"load",
+	  "server":{"timezone":"UTC","settings":{"s":"v","t":{"b64":"/w=="}}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Posture != PostureLoad || len(d.Columns) != 2 {
+		t.Fatalf("description = %+v", d)
+	}
+	if c := d.Columns[0]; c.DefaultSupport != DefaultSupportDeferred || c.DefaultSupportReason != "r-x" || len(c.Reads) != 2 || c.Reads[1] != "\xff" {
+		t.Errorf("column 0 = %+v", c)
+	}
+	if c := d.Columns[1]; c.DefaultSupport != "a_support_nobody_listed" || c.DefaultSupport.Known() || c.Reads != nil {
+		t.Errorf("column 1 = %+v: an unlisted support is its unknown(n), an absent reads is nil", c)
+	}
+	if d.Server == nil || d.Server.Settings["s"] != "v" || d.Server.Settings["t"] != "\xff" {
+		t.Errorf("server = %+v: a settings value in the b64 form is its bytes", d.Server)
+	}
+	// Absent members: a create-posture schema, and a build that reports no default_support.
+	d, err = decodeSchemaDescription([]byte(`{"columns":[{"name":"a","type":"Int32","default_kind":""}],"filter_declined_settings":[]}`))
+	if err != nil || d.Posture != "" || d.Columns[0].DefaultSupport != "" || d.Columns[0].Reads != nil {
+		t.Errorf("absent members = %+v, %v", d, err)
+	}
+	// A b64 settings value that is not the one-member object form is an InternalError.
+	_, err = decodeSchemaDescription([]byte(`{"columns":[],"server":{"settings":{"t":{"b64":"/w==","x":1}}}}`))
+	var ie *InternalError
+	if !errors.As(err, &ie) {
+		t.Errorf("a malformed b64 value = %v, want an *InternalError", err)
 	}
 }
