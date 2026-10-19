@@ -144,6 +144,8 @@ jobs:
       # drifting apart. No network, no artifact.
       - name: selftest — every policy-merge refusal fires, and an all-good pull request passes
         run: scripts/policy-merge-check.py --selftest
+      - name: selftest — the dependency-advisory issue sync (new, unchanged, changed, resolved, unlabelled look-alike; no network)
+        run: python3 -I scripts/audit-issues.py --selftest
       - name: the policy merge's pinned required checks are exactly this file's blocking jobs
         run: scripts/policy-merge-check.py --check-ci-names
       - name: the merge-bot token mint asks for exactly contents and pull-requests write, inside the merge-bot job
