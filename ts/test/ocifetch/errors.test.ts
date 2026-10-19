@@ -80,7 +80,8 @@ describe('the artifact error carries a loader refusal\'s fields, as in Go and Py
 
   it('exports one generated constant per code, and no exit status and no isChtypesError', () => {
     const codes = Object.entries(publicApi)
-      .filter(([name]) => name.startsWith('CODE_'))
+      // CODE_DECLINED is the ABI's numeric decline code, not a CHTYPES_* fetch code.
+      .filter(([name, value]) => name.startsWith('CODE_') && typeof value === 'string')
       .map(([, value]) => value)
       .sort();
     expect(codes).toEqual(Object.keys(ERROR_EXIT_CODES).sort());
