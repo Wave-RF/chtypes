@@ -290,6 +290,26 @@
       "binding": "ts",
       "kind": "extra",
       "names": [
+        "ArtifactRevokedError.revocation",
+        "Revocation",
+        "Revocation.signed",
+        "Revocation.manifest",
+        "Revocation.advisories",
+        "Advisory",
+        "Advisory.id",
+        "Advisory.url",
+        "Advisory.class",
+        "Advisory.summary",
+        "Advisory.build",
+        "Advisory.supersededBy",
+        "Advisory.revokedAt"
+      ],
+      "reason": "§4's 'a revocation' bullet: a CHTYPES_ARTIFACT_REVOKED (fetch-v1.md, Build-level revocation; public issue #625) carries whether it is signed, the manifest a signed one revokes, and each advisory's id, URL, class, summary, build, superseded_by and revoked_at, which the doc names in prose and does not spell per language. TypeScript's class carries them as its revocation field, an interface of readonly members spelled in camel case (supersededBy, revokedAt), and Advisory is the shape of each advisory."
+    },
+    {
+      "binding": "ts",
+      "kind": "extra",
+      "names": [
         "CacheUnusableError.path",
         "CacheUnusableError.reason",
         "CacheUnusableError.osError",
@@ -315,7 +335,9 @@
         "FetchOptions.lockPath",
         "FetchOptions.lockWrite",
         "FetchOptions.update",
-        "FetchOptions.strictCache"
+        "FetchOptions.strictCache",
+        "FetchOptions.allowRevoked",
+        "FetchOptions.requireRevocationCheck"
       ],
       "reason": "§6: the fetch options carry everything fetch-v1.md configures (bases, cache directory, system directories, trusted keys, token, allow-unsigned, offline, frozen, the lock path) 'under the fetch module's own names', which the doc names in prose and does not spell per language. lockWrite and update are the lock's write and update modes of fetch-v1.md §6. An interface since public issue #500, so the gate reads its fields as it reads the other bindings'."
     },

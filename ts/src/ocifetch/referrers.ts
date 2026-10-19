@@ -19,9 +19,10 @@
  */
 
 import { asString, field, items, type Json, parseJsonValue } from '../json.js';
-import { MANIFEST_MAX_BYTES, MAX_REFERRERS } from './constants.gen.js';
-import { ArtifactCorruptError, SourceRetiredError } from './errors.js';
+import { MANIFEST_MAX_BYTES, MAX_REFERRERS, MEDIA_TYPE_BUNDLE, REVOCATION_ARTIFACT_TYPE } from './constants.gen.js';
+import { ArtifactCorruptError, SourceForbiddenError, SourceUnauthorizedError, SourceUnreachableError } from './errors.js';
 import { type RequestOptions, readFileUrl, requestBuffered } from './http.js';
+import { isGone } from './retired.js';
 import { endpointUrl, MANIFEST_ACCEPT_HEADER } from './types.js';
 
 export interface ReferrerDescriptor {
@@ -59,13 +60,13 @@ async function getJson(
   return { status: res.status, json };
 }
 
-function descriptorsFromIndex(json: Json): ReferrerDescriptor[] {
+function descriptorsFromIndex(json: Json, cap = true): ReferrerDescriptor[] {
   // A host may omit the index's own `mediaType`; the `manifests` array is
   // read either way, so this is not itself a shape check (`oci.ts` checks
   // media types where their presence is load-bearing).
   const manifests = items(field(json, 'manifests'));
   const out: ReferrerDescriptor[] = [];
-  for (const m of manifests.slice(0, MAX_REFERRERS)) {
+  for (const m of cap ? manifests.slice(0, MAX_REFERRERS) : manifests) {
     const digest = asString(field(m, 'digest'));
     const descMediaType = asString(field(m, 'mediaType'));
     const artifactTypeField = field(m, 'artifactType');
@@ -114,7 +115,7 @@ export async function discoverReferrers(
   } catch (err) {
     // A retired repository (a 410, guide §2) is permanent: never read as "no
     // candidates here", and never a reason to try the fallback tag.
-    if (err instanceof SourceRetiredError) throw err;
+    if (isGone(err)) throw err;
     // The referrers API is not guaranteed on every host (mirrors) — read as
     // "no candidates here", exactly as an empty or goldens-only answer would.
   }
@@ -158,4 +159,99 @@ export async function discoverSignatureCandidates(
   const fromApi = await discoverReferrers(repositoryRoot, digest, artifactType, options);
   if (fromApi.length > 0) return fromApi;
   return discoverFallbackTag(repositoryRoot, digest, artifactType, options);
+}
+
+// ------------------------------------------------------------------ the listing
+
+/**
+ * One platform manifest's referrers listing (guide, "Build-level revocation",
+ * "The listing"): the first answer that names a signature referrer (the
+ * referrers API on the bases in order, then the fallback tag), its signature and
+ * revocation referrers, and, when no answer named a signature, the last failure
+ * that kept a base from answering (`undefined` when every base answered 404 or a
+ * listing without one).
+ */
+export interface ReferrerListing {
+  readonly found: boolean;
+  readonly signatures: readonly ReferrerDescriptor[];
+  readonly revocations: readonly ReferrerDescriptor[];
+  readonly failure: Error | undefined;
+}
+
+function capReferrers(d: readonly ReferrerDescriptor[]): readonly ReferrerDescriptor[] {
+  return d.length > MAX_REFERRERS ? d.slice(0, MAX_REFERRERS) : d;
+}
+
+/**
+ * `subject`'s listing exactly as the signature lookup reads it (guide §4): the
+ * referrers API, unfiltered (the artifactType filter is this function's own), on
+ * `bases` in order, and, when no answer of it names a signature referrer, the
+ * `sha256-<hex>` fallback tag on `bases` in order. The listing that names a
+ * signature referrer is the one read; one that names none is not a real listing
+ * of this manifest. `options.single` makes one attempt per request with no
+ * backoff: the installed-build check's budget. Its only error is a 410's.
+ */
+export async function readListing(bases: readonly string[], subject: string, options: RequestOptions): Promise<ReferrerListing> {
+  let failure: Error | undefined;
+  const steps: readonly { readonly suffix: string; readonly accept: string | undefined }[] = [
+    // The referrers API is not a manifests/<ref> GET, so it sends no Accept.
+    { suffix: `/referrers/${subject}`, accept: undefined },
+    { suffix: `/manifests/${fallbackTagFor(subject)}`, accept: MANIFEST_ACCEPT_HEADER },
+  ];
+  for (const step of steps) {
+    let json: Json | undefined;
+    for (const base of bases) {
+      let url: string;
+      try {
+        url = endpointUrl(base, step.suffix);
+      } catch {
+        continue;
+      }
+      let res: Awaited<ReturnType<typeof requestBuffered>>;
+      try {
+        res = url.startsWith('file:')
+          ? await readFileUrl(url, MANIFEST_MAX_BYTES)
+          : await requestBuffered(url, {
+              ...options,
+              maxBytes: MANIFEST_MAX_BYTES,
+              headers: { ...options.headers, ...(step.accept !== undefined ? { accept: step.accept } : {}) },
+            });
+      } catch (err) {
+        if (isGone(err)) throw err;
+        failure = err instanceof Error ? err : new SourceUnreachableError(`chtypes: ${url}: ${String(err)}`);
+        continue;
+      }
+      if (res.status === 404) continue;
+      if (res.status === 401) {
+        failure = new SourceUnauthorizedError(`chtypes: ${url} returned 401`);
+        continue;
+      }
+      if (res.status === 403) {
+        failure = new SourceForbiddenError(`chtypes: ${url} returned 403`);
+        continue;
+      }
+      if (res.status !== 200) {
+        failure = new SourceUnreachableError(`chtypes: ${url} returned unexpected status ${res.status}`);
+        continue;
+      }
+      const parsed = parseJsonValue(res.body);
+      if (parsed === null) {
+        failure = new SourceUnreachableError(`chtypes: ${url} is not a referrers listing`);
+        continue;
+      }
+      json = parsed;
+      break;
+    }
+    if (json === undefined) continue;
+    const all = descriptorsFromIndex(json, false);
+    const signatures = all.filter((d) => d.artifactType === MEDIA_TYPE_BUNDLE);
+    if (signatures.length === 0) continue; // not a listing of this manifest's signature: try the fallback tag
+    return {
+      found: true,
+      signatures: capReferrers(signatures),
+      revocations: capReferrers(all.filter((d) => d.artifactType === REVOCATION_ARTIFACT_TYPE)),
+      failure: undefined,
+    };
+  }
+  return { found: false, signatures: [], revocations: [], failure };
 }
