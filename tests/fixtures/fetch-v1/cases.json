@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "source": {
-    "generator_commit": "112805e59fa8f3cec6264bb1e225329d07682e12",
+    "generator_commit": "609df5a0c8703c4cec645304918c3854597d5872",
     "go_sum_sha256": "e998462ee1660f7d0b42c45fd0e16ddef8c688e81aaa22c466ada3c69565eec9"
   },
   "cases": [
@@ -34,7 +34,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -57,7 +60,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -88,7 +93,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -111,7 +119,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -143,7 +153,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -166,7 +179,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -197,7 +212,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -220,7 +238,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -251,7 +271,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -274,7 +297,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -305,7 +330,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -328,7 +356,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -359,7 +389,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -382,7 +415,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -413,7 +448,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -436,7 +474,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -467,7 +507,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -490,7 +533,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -521,7 +566,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -544,7 +592,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -575,7 +625,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -598,7 +651,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -629,7 +684,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -652,7 +710,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -682,7 +742,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -705,7 +768,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -735,7 +800,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -758,7 +826,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -789,7 +859,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -812,7 +885,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -843,7 +918,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -866,7 +944,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -897,7 +977,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -920,7 +1003,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -951,7 +1036,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -974,7 +1062,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -1005,7 +1095,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -1028,7 +1121,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -1059,7 +1154,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -1082,7 +1180,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -1113,7 +1213,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -1136,7 +1239,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -1167,7 +1272,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -1190,7 +1298,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -1221,7 +1331,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -1244,7 +1357,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -1275,7 +1390,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -1298,7 +1416,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -1329,7 +1449,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -1352,7 +1475,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -1383,7 +1508,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -1408,7 +1536,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -1440,7 +1570,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -1463,7 +1596,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -1494,7 +1629,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -1517,7 +1655,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -1548,7 +1688,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -1571,7 +1714,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -1602,7 +1747,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -1625,7 +1773,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -1656,7 +1806,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -1679,7 +1832,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -1710,7 +1865,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -1733,7 +1891,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -1764,7 +1924,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -1787,7 +1950,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -1818,7 +1983,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -1841,7 +2009,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -1872,7 +2042,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -1895,7 +2068,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -1926,7 +2101,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -1949,7 +2127,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -1980,7 +2160,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -2003,7 +2186,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -2034,7 +2219,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -2057,7 +2245,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -2088,7 +2278,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -2111,7 +2304,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -2142,7 +2337,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -2165,7 +2363,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -2196,7 +2396,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -2219,7 +2422,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -2250,7 +2455,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -2273,7 +2481,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -2304,7 +2514,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -2327,7 +2540,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -2358,7 +2573,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -2381,7 +2599,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -2412,7 +2632,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -2435,7 +2658,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -2466,7 +2691,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -2489,7 +2717,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -2520,7 +2750,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -2543,7 +2776,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -2574,7 +2809,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -2599,7 +2837,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -2630,7 +2870,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -2655,7 +2898,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -2688,7 +2933,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -2711,7 +2959,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -2742,7 +2992,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -2765,7 +3018,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -2796,7 +3051,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -2819,7 +3077,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -2850,7 +3110,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -2873,7 +3136,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -2904,7 +3169,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -2927,7 +3195,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -2958,7 +3228,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -2981,7 +3254,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -3012,7 +3287,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -3035,7 +3313,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -3066,7 +3346,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -3089,7 +3372,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -3120,7 +3405,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -3143,7 +3431,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -3174,7 +3464,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -3197,7 +3490,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -3228,7 +3523,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -3251,7 +3549,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -3282,7 +3582,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -3305,7 +3608,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -3336,7 +3641,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -3359,7 +3667,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -3390,7 +3700,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -3413,7 +3726,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -3444,7 +3759,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -3467,7 +3785,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -3498,7 +3818,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -3521,7 +3844,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -3552,7 +3877,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -3575,7 +3903,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -3606,7 +3936,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -3629,7 +3962,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -3660,7 +3995,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -3683,7 +4021,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -3714,7 +4054,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -3737,7 +4080,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -3768,7 +4113,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -3791,7 +4139,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -3822,7 +4172,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -3845,7 +4198,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -3876,7 +4231,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -3899,7 +4257,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -3930,7 +4290,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -3953,7 +4316,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -3984,7 +4349,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -4007,7 +4375,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -4038,7 +4408,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -4061,7 +4434,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -4092,7 +4467,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -4115,7 +4493,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -4146,7 +4526,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -4171,7 +4554,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -4202,7 +4587,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -4225,7 +4613,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -4256,7 +4646,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -4281,7 +4674,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -4312,7 +4707,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -4335,7 +4733,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -4366,7 +4766,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -4389,7 +4792,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -4420,7 +4825,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -4443,7 +4851,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -4474,7 +4884,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -4497,7 +4910,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -4528,7 +4943,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -4551,7 +4969,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -4582,7 +5002,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -4605,7 +5028,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -4636,7 +5061,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -4659,7 +5087,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -4690,7 +5120,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -4713,7 +5146,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -4744,7 +5179,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -4767,7 +5205,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -4798,7 +5238,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -4821,7 +5264,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -4852,7 +5297,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -4875,7 +5323,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -4906,7 +5356,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -4929,7 +5382,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -4960,7 +5415,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -4983,7 +5441,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -5014,7 +5474,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -5037,7 +5500,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -5068,7 +5533,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -5091,7 +5559,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -5122,7 +5592,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -5145,7 +5618,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -5178,7 +5653,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -5201,7 +5679,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -5234,7 +5714,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -5257,7 +5740,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -5290,7 +5775,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -5313,7 +5801,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -5346,7 +5836,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -5369,7 +5862,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -5401,7 +5896,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -5424,7 +5922,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -5455,7 +5955,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -5478,7 +5981,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -5509,7 +6014,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -5532,7 +6040,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -5563,7 +6073,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -5586,7 +6099,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -5618,7 +6133,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -5644,7 +6162,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -5675,7 +6195,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -5698,7 +6221,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -5730,7 +6255,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -5753,7 +6281,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -5784,7 +6314,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -5807,7 +6340,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -5838,7 +6373,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -5861,7 +6399,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -5892,7 +6432,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -5915,7 +6458,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -5946,7 +6491,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -5969,7 +6517,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -6000,7 +6550,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -6023,7 +6576,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -6053,7 +6608,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -6079,7 +6637,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -6109,7 +6669,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -6134,7 +6697,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -6164,7 +6729,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -6189,7 +6757,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -6219,7 +6789,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -6244,7 +6817,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -6274,7 +6849,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -6299,7 +6877,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -6329,7 +6909,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -6352,7 +6935,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -6382,7 +6967,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -6410,7 +6998,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -6440,7 +7030,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -6463,7 +7056,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -6493,7 +7088,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -6516,7 +7114,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -6546,7 +7146,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -6569,7 +7172,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -6599,7 +7204,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {
         "CHTYPES_DOWNLOAD_TOKEN": "test-static-token"
@@ -6624,7 +7232,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -6654,7 +7264,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {
         "CHTYPES_DOWNLOAD_TOKEN": "wrong-token"
@@ -6679,7 +7292,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -6709,7 +7324,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {
         "CHTYPES_DOWNLOAD_TOKEN": "forbidden-token"
@@ -6734,7 +7352,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -6764,7 +7384,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {
         "CHTYPES_DOWNLOAD_TOKEN": "test-static-token"
@@ -6789,7 +7412,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -6819,7 +7444,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -6842,7 +7470,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -6873,7 +7503,10 @@
           "{base2}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -6901,7 +7534,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -6932,7 +7567,10 @@
           "{base2}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -6955,7 +7593,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -6986,7 +7626,10 @@
           "{base}-never-contacted"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -7011,7 +7654,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -7042,7 +7687,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -7065,7 +7713,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -7095,7 +7745,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -7120,7 +7773,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -7150,7 +7805,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -7175,7 +7833,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -7205,7 +7865,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -7233,7 +7896,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -7263,7 +7928,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -7286,7 +7954,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -7317,7 +7987,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -7340,7 +8013,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -7371,7 +8046,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -7394,7 +8072,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -7425,7 +8105,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -7448,7 +8131,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -7479,7 +8164,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -7502,7 +8190,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -7533,7 +8223,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -7556,7 +8249,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -7587,7 +8282,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -7610,7 +8308,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -7641,7 +8341,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -7664,7 +8367,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -7695,7 +8400,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -7718,7 +8426,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -7749,7 +8459,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -7772,7 +8485,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -7803,7 +8518,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -7828,7 +8546,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -7859,7 +8579,10 @@
           "{base}"
         ],
         "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d",
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -7884,7 +8607,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -7915,7 +8640,10 @@
           "{base}"
         ],
         "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d",
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -7940,7 +8668,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -7971,7 +8701,10 @@
           "{base}"
         ],
         "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d",
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -8018,7 +8751,9 @@
             "manifest": "sha256:1bf35e0453cd2741dbbfb6f329dd6d4d5cf96045e5a0d261d8b0cb0c557c4780"
           }
         ],
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -8049,7 +8784,10 @@
           "{base}"
         ],
         "own_fingerprint": "b60d9a4c4b6577df1dbfe62cf497d7e7f16868fe1701b993a28a754af57b0886",
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -8072,7 +8810,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -8103,7 +8843,10 @@
           "{base}"
         ],
         "own_fingerprint": "6b9cf343c1a27657ae1abb846b206d5a4abcd0e220cf98cef2538cc09e7cc9df",
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -8128,7 +8871,9 @@
         "message_contains": "no published build for this SDK's fingerprint 6b9cf343c1a27657ae1abb846b206d5a4abcd0e220cf98cef2538cc09e7cc9df; newest published on this channel is b60d9a4c4b6577df1dbfe62cf497d7e7f16868fe1701b993a28a754af57b0886 (build 20261005.120000)",
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -8159,7 +8904,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -8184,7 +8932,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -8215,7 +8965,10 @@
           "{base}"
         ],
         "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d",
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -8240,7 +8993,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -8271,7 +9026,10 @@
           "{base}"
         ],
         "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d",
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -8296,7 +9054,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -8326,7 +9086,10 @@
           "{base}"
         ],
         "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d",
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -8356,7 +9119,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -8387,7 +9152,10 @@
           "{base2}"
         ],
         "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d",
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -8412,7 +9180,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -8443,7 +9213,10 @@
           "{base2}"
         ],
         "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d",
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -8473,7 +9246,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -8504,7 +9279,10 @@
           "{base}"
         ],
         "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d",
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -8531,7 +9309,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -8562,7 +9342,10 @@
           "{base}"
         ],
         "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d",
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -8587,7 +9370,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -8618,7 +9403,10 @@
           "{base}"
         ],
         "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d",
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -8643,7 +9431,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -8674,7 +9464,10 @@
           "{base}"
         ],
         "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d",
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -8699,7 +9492,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -8730,7 +9525,10 @@
           "{base}"
         ],
         "own_fingerprint": "6b9cf343c1a27657ae1abb846b206d5a4abcd0e220cf98cef2538cc09e7cc9df",
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -8757,7 +9555,9 @@
         "message_contains": "no published build for this SDK's fingerprint 6b9cf343c1a27657ae1abb846b206d5a4abcd0e220cf98cef2538cc09e7cc9df; newest published on this channel is b60d9a4c4b6577df1dbfe62cf497d7e7f16868fe1701b993a28a754af57b0886 (build 20261005.120000)",
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -8788,7 +9588,10 @@
           "{base}"
         ],
         "own_fingerprint": "6b9cf343c1a27657ae1abb846b206d5a4abcd0e220cf98cef2538cc09e7cc9df",
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -8815,7 +9618,9 @@
         "message_contains": "no published build for this SDK's fingerprint 6b9cf343c1a27657ae1abb846b206d5a4abcd0e220cf98cef2538cc09e7cc9df; newest published on this channel is b60d9a4c4b6577df1dbfe62cf497d7e7f16868fe1701b993a28a754af57b0886 (build 20261005.120000); a cached build for this fingerprint (build 20260910.120000) is still usable by open; upgrade the SDK to get newer builds",
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -8846,7 +9651,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -8869,7 +9677,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -8900,7 +9710,10 @@
           "{base}"
         ],
         "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d",
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -8926,7 +9739,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -8957,7 +9772,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -8984,7 +9802,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -9014,7 +9834,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -9037,7 +9860,9 @@
         "message_contains": "chtypes/v1 is retired: use chtypes/v2 (this registry no longer serves chtypes/v1)",
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -9068,7 +9893,10 @@
           "{base}/mirror"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -9093,7 +9921,9 @@
         "message_contains": "chtypes/v1 is retired: use chtypes/v2 (this registry no longer serves chtypes/v1)",
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -9123,7 +9953,10 @@
           "{base}"
         ],
         "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d",
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -9148,7 +9981,9 @@
         "message_contains": "chtypes/v1 is retired: use chtypes/v2 (this registry no longer serves chtypes/v1)",
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -9178,7 +10013,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -9201,7 +10039,9 @@
         "message_contains": "chtypes/v1 is retired: use chtypes/v2 (this registry no longer serves chtypes/v1)",
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -9231,7 +10071,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -9254,7 +10097,9 @@
         "message_contains": "chtypes/v1 is retired: use chtypes/v2 (this registry no longer serves chtypes/v1)",
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -9284,7 +10129,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -9307,7 +10155,9 @@
         "message_contains": "[1;31mchtypes/v1 is retired[0m: use chtypes/v2 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------…",
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -9337,7 +10187,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -9365,7 +10218,9 @@
           "\u003cnil\u003e"
         ],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -9396,7 +10251,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -9442,7 +10300,9 @@
             "manifest": "sha256:c11b0aa35d456259dfc05fd380707efbeb015b2268f52ad8551108c5ef00fb25"
           }
         ],
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -9473,7 +10333,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -9519,7 +10382,9 @@
             "manifest": "sha256:a63043223b2f26dd3af88f12337ab6f7832fc86c1710899e93c7364b8fad6463"
           }
         ],
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -9550,7 +10415,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -9589,7 +10457,9 @@
             "manifest": "sha256:274870f899c700e2df6595671ea0d111dbca7c028971a34547188f6a44693130"
           }
         ],
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -9620,7 +10490,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -9645,7 +10518,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -9676,7 +10551,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -9699,7 +10577,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -9730,7 +10610,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -9760,7 +10643,9 @@
             "manifest": "sha256:2d5e427648612cc61c606a5121631b51964188401cc30e01564326674f44144a"
           }
         ],
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -9791,7 +10676,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -9814,7 +10702,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -9848,7 +10738,10 @@
           "line": null,
           "keep": 1,
           "dry_run": false
-        }
+        },
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -9907,7 +10800,9 @@
             "sha256:b0567c6751ac234c838c4d0ce83c5da5e1c83498e95de91114d9089d2692a5c8",
             "sha256:49d08eae5d832fa035bda613c99912b9bf59f2809bc866bbbd242600f00eb6f8"
           ]
-        }
+        },
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -9941,7 +10836,10 @@
           "line": null,
           "keep": 2,
           "dry_run": false
-        }
+        },
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -9990,7 +10888,9 @@
             "sha256:8b491986b4e952afe79035f32ce6235b2921f2cfffbdb0ea4b9704c3b824c189",
             "sha256:49d08eae5d832fa035bda613c99912b9bf59f2809bc866bbbd242600f00eb6f8"
           ]
-        }
+        },
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -10024,7 +10924,10 @@
           "line": "26.9",
           "keep": 1,
           "dry_run": false
-        }
+        },
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -10073,7 +10976,9 @@
             "sha256:b0567c6751ac234c838c4d0ce83c5da5e1c83498e95de91114d9089d2692a5c8",
             "sha256:49d08eae5d832fa035bda613c99912b9bf59f2809bc866bbbd242600f00eb6f8"
           ]
-        }
+        },
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -10107,7 +11012,10 @@
           "line": null,
           "keep": 1,
           "dry_run": true
-        }
+        },
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -10153,7 +11061,9 @@
             "sha256:8b491986b4e952afe79035f32ce6235b2921f2cfffbdb0ea4b9704c3b824c189",
             "sha256:49d08eae5d832fa035bda613c99912b9bf59f2809bc866bbbd242600f00eb6f8"
           ]
-        }
+        },
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -10189,7 +11099,10 @@
           "line": null,
           "keep": 1,
           "dry_run": false
-        }
+        },
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -10245,7 +11158,9 @@
             "sha256:b0567c6751ac234c838c4d0ce83c5da5e1c83498e95de91114d9089d2692a5c8",
             "sha256:49d08eae5d832fa035bda613c99912b9bf59f2809bc866bbbd242600f00eb6f8"
           ]
-        }
+        },
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -10281,7 +11196,10 @@
           "line": null,
           "keep": 1,
           "dry_run": false
-        }
+        },
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -10309,7 +11227,9 @@
           "in_use": [],
           "gone": [],
           "index_after": []
-        }
+        },
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -10343,7 +11263,10 @@
           "line": null,
           "keep": 1,
           "dry_run": false
-        }
+        },
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -10386,7 +11309,9 @@
             "sha256:5f3b22599f7b86351c2c6d7c6a1b96de9747602037fb9545539fca2164f30245",
             "sha256:f7cfdf1219b6f7e42b740d910493acc2ef06aff2f5032e3da307fcb1074e7260"
           ]
-        }
+        },
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -10420,7 +11345,10 @@
           "line": null,
           "keep": 1,
           "dry_run": false
-        }
+        },
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -10468,7 +11396,9 @@
           "index_after": [
             "sha256:f7cfdf1219b6f7e42b740d910493acc2ef06aff2f5032e3da307fcb1074e7260"
           ]
-        }
+        },
+        "warnings_max": null,
+        "stored_revocations": []
       }
     }
   ]

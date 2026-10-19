@@ -22,7 +22,7 @@ func thisFile() string {
 // cases.go — assembles every tree, http-script, lock and case built by the
 // category files (resolve.go, trust.go, bytescases.go, cachecases.go,
 // lockcases.go, httpcases.go, genericcases.go, aliascases.go, retiredcases.go,
-// resolvebuildcases.go, prunecases.go) into the final FileSet and
+// resolvebuildcases.go, prunecases.go, revocationcases.go) into the final FileSet and
 // cases.json, per the v1 fetch-layer plan's §3.2/§3.3.
 
 // allCases accumulates across every category file via collectCases; each
@@ -45,6 +45,7 @@ func buildAll() *FileSet {
 	cases = append(cases, buildRetiredCases(fs)...)
 	cases = append(cases, buildResolveBuildCases(fs)...)
 	cases = append(cases, buildPruneCases(fs)...)
+	cases = append(cases, buildRevocationCases(fs)...)
 
 	checkUniqueIDs(cases)
 	checkOnlineTagsExist(cases)
@@ -99,6 +100,11 @@ var fullVersionSpellingRe = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*
 func checkOnlineTagsExist(cases []Case) {
 	for _, c := range cases {
 		if c.Request.Offline || c.Request.Frozen || !c.Expect.OK {
+			continue
+		}
+		// The registry-open driver (revocationcases.go) answers from the cache
+		// and reads only the build's referrers listing: it never requests a tag.
+		if c.Request.Opens != nil {
 			continue
 		}
 		if !fullVersionSpellingRe.MatchString(c.Request.Spelling) {

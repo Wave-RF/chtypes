@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "id": "open-warm-warns-once",
+  "tree": "revocation",
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/v2/chtypes/v1/referrers/sha256:b35b474ede433d3c2491d4c7eb86e63bc4b8fd0b046e62edf0a98913257c8b5d",
+      "responses": [
+        {
+          "status": 503
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v2/chtypes/v1/manifests/sha256-b35b474ede433d3c2491d4c7eb86e63bc4b8fd0b046e62edf0a98913257c8b5d",
+      "responses": [
+        {
+          "status": 503
+        }
+      ]
+    }
+  ],
+  "second_origin_routes": []
+}
