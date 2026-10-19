@@ -571,6 +571,7 @@ class Api:
             info.ch_name.decode("ascii", "replace") if info else "",
             message,
             info.column if info else b"",
+            reason=info.reason.decode("ascii", "replace") if info else "",
         )
 
     def live_handles(self) -> bytes:
@@ -1027,6 +1028,7 @@ class ErrorInfo:
     ch_name: bytes
     message: bytes
     column: bytes
+    reason: bytes = b""
 
 
 @dataclass
@@ -1088,6 +1090,7 @@ def _decode_error(api: Api, err_ptr: int) -> ErrorInfo:
     ch_name = _read_buf(api, api._raw["chs_error_ch_name"](err_ptr))
     message = _read_buf(api, api._raw["chs_error_message"](err_ptr))
     column = _read_buf(api, api._raw["chs_error_column"](err_ptr))
+    reason = _read_buf(api, api._raw["chs_error_reason"](err_ptr))
     api._raw["chs_error_free"](err_ptr)
     return ErrorInfo(
         status=STATUS_BY_VALUE.get(status_val, f"UNKNOWN:{status_val}"),
@@ -1095,6 +1098,7 @@ def _decode_error(api: Api, err_ptr: int) -> ErrorInfo:
         ch_name=ch_name,
         message=message,
         column=column,
+        reason=reason,
     )
 
 

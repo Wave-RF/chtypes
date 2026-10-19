@@ -292,7 +292,7 @@ func (t *Table) ResolveAll() string {
 }
 
 // CallError is D3's per-call error shape, read verbatim off a non-OK status:
-// the chs_status NAME (never the bare int), ch_code, ch_name, message and column.
+// the chs_status NAME (never the bare int), ch_code, ch_name, message and column and, from chs_error_reason, reason.
 // It carries no class of its own -- StatusClass(e.Status) is sdk.json's table,
 // generated into errmap_gen.go, and the public API (wave C) is what turns this
 // into an idiomatic *SchemaError/*UsageError/...
@@ -302,6 +302,7 @@ type CallError struct {
 	ChName  string
 	Message string
 	Column  string
+	Reason  string
 }
 
 func (e *CallError) Error() string {
@@ -379,6 +380,7 @@ func makeCallError(t *Table, status int32, err *ErrorHandle) *CallError {
 		ce.ChName = string(readAndFreeBuf(t, t.ErrorChName(err)))
 		ce.Message = string(readAndFreeBuf(t, t.ErrorMessage(err)))
 		ce.Column = string(readAndFreeBuf(t, t.ErrorColumn(err)))
+		ce.Reason = string(readAndFreeBuf(t, t.ErrorReason(err)))
 		err.Close()
 	}
 	return ce

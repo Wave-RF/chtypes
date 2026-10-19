@@ -326,6 +326,7 @@ mod tests {
             ch_name: "CANNOT_PARSE_INPUT_ASSERTION_FAILED".to_string(),
             message: b"boom".to_vec(),
             column: b"c".to_vec(),
+            reason: String::new(),
         }
     }
 
