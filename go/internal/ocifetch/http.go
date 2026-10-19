@@ -166,6 +166,10 @@ type client struct {
 	// redirects are followed) — test-only, for a conformance runner to
 	// count requests and inspect headers without a server-side log.
 	onRequest func(*http.Request)
+	// revocation reads a 410 whose body says the tag is revoked as
+	// CHTYPES_ARTIFACT_REVOKED (generation 2; revocation.go). Off, every 410
+	// is a retired repository.
+	revocation bool
 }
 
 func newClient(clock Clock, connectTimeout, idleReadTimeout time.Duration, token string, tokenHosts []string, onRequest func(*http.Request)) *client {
@@ -227,6 +231,9 @@ type requestOptions struct {
 	// host ignores it, but a mirror may need it for content negotiation
 	// (the delivery side's review).
 	accept string
+	// single makes one attempt and never sleeps: the installed-build
+	// revocation check's budget (revocation.go), never the retry table.
+	single bool
 }
 
 // manifestAccept is the Accept header every GET …/manifests/<ref> sends,
@@ -254,6 +261,9 @@ func isPermanentTransportError(err error) bool {
 
 func (c *client) doGet(ctx context.Context, rawURL string, opts requestOptions) (*httpResult, error) {
 	policy := defaultRetryPolicy()
+	if opts.single {
+		policy.attempts = 1
+	}
 	var lastErr error
 	triedAnonToken := false
 	for attempt := 0; attempt < policy.attempts; attempt++ {
@@ -278,10 +288,11 @@ func (c *client) doGet(ctx context.Context, rawURL string, opts requestOptions) 
 			return nil, newError(CodeSourceUnreachable, "", "", rawURL, err, "fetching %s: %v", rawURL, err)
 		}
 
-		// A retired repository (§2, RetiredStatuses) is permanent: never
-		// retried, and the error tells every base loop to stop here.
+		// A 410 (§2, RetiredStatuses) is permanent: never retried, and the
+		// error tells every base loop to stop here. Under generation 2 one whose
+		// body says the tag is revoked is CHTYPES_ARTIFACT_REVOKED.
 		if err == nil && isRetiredStatus(status) {
-			return nil, retiredError(result.url, status, result.body)
+			return nil, goneError(result.url, status, result.body, c.revocation)
 		}
 
 		// The anonymous Bearer-token flow (mirrors): a 401 with no static

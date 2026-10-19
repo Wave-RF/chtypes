@@ -35,6 +35,26 @@
       "binding": "go",
       "kind": "extra",
       "names": [
+        "ArtifactError.Revocation",
+        "Revocation",
+        "Revocation.Signed",
+        "Revocation.Manifest",
+        "Revocation.Advisories",
+        "Advisory",
+        "Advisory.ID",
+        "Advisory.URL",
+        "Advisory.Class",
+        "Advisory.Summary",
+        "Advisory.Build",
+        "Advisory.SupersededBy",
+        "Advisory.RevokedAt"
+      ],
+      "reason": "§4's 'a revocation' bullet: a CHTYPES_ARTIFACT_REVOKED (fetch-v1.md, Build-level revocation; public issue #625) carries whether it is signed, the manifest a signed one revokes, and each advisory's id, URL, class, summary, build, superseded_by and revoked_at, which the doc names in prose and does not spell per language. Go re-exports the fetch layer's Revocation and Advisory, as it does Resolved."
+    },
+    {
+      "binding": "go",
+      "kind": "extra",
+      "names": [
         "FetchOptions.Bases",
         "FetchOptions.CacheDir",
         "FetchOptions.SystemDirs",
@@ -46,7 +66,9 @@
         "FetchOptions.LockPath",
         "FetchOptions.LockWrite",
         "FetchOptions.Update",
-        "FetchOptions.StrictCache"
+        "FetchOptions.StrictCache",
+        "FetchOptions.AllowRevoked",
+        "FetchOptions.RequireRevocationCheck"
       ],
       "reason": "§6: the fetch options carry everything fetch-v1.md configures (bases, cache directory, system directories, trusted keys, token, allow-unsigned, offline, frozen, the lock path) 'under the fetch module's own names', which the doc names in prose and does not spell per language. LockWrite and Update are the lock's write and update modes of fetch-v1.md §6."
     },

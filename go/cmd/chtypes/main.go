@@ -3,6 +3,7 @@
 //
 //	chtypes fetch <spelling>... | --all [--platform <os-arch>] [--cache <dir>]
 //	                                    [--lock <file>] [--frozen] [--offline] [--update] [--strict]
+//	                                    [--allow-revoked] [--require-revocation-check]
 //	chtypes verify [--cache <dir>] [--strict]
 //	                                    re-verify the installed cache
 //	chtypes list   [--cache <dir>] [--offline] [--strict]
@@ -56,6 +57,7 @@ import (
 const usageText = `usage:
   chtypes fetch <spelling>... | --all [--platform <os-arch>] [--cache <dir>]
                                       [--lock <file>] [--frozen] [--offline] [--update] [--strict]
+                                      [--allow-revoked] [--require-revocation-check]
   chtypes verify [--cache <dir>] [--strict]
                                       re-verify the installed cache
   chtypes list   [--cache <dir>] [--offline] [--strict]
@@ -70,6 +72,8 @@ const usageText = `usage:
 
 --offline (or CHTYPES_OFFLINE=1): read the cache only, make no request
 --strict (or CHTYPES_CACHE_STRICT=1): a cache that cannot be read is CHTYPES_CACHE_UNUSABLE, never "not installed"
+--allow-revoked: use a revoked build anyway, with a warning (this call only; never a lock or an update)
+--require-revocation-check: a revocation status that cannot be read is an error, not a warning
 exit statuses: 0 ok, 2 usage, otherwise the failure's own status (docs/guides/fetch-v1.md section 8)
 
 2.0.0-dev: UNSTABLE, staging only, not for production. Fetches only from the staging dev channel and
@@ -263,12 +267,14 @@ func cmdFetch(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 	fs := newFlagSet("fetch", stderr)
 	var cf commonFlags
 	cf.bind(fs, true, true)
-	var all, frozen, update bool
+	var all, frozen, update, allowRevoked, requireRevocationCheck bool
 	var lock string
 	fs.BoolVar(&all, "all", false, "every line the registry publishes (or, with --frozen, every request the lock pins)")
 	fs.StringVar(&lock, "lock", "", "write the lock to this file after resolving (with --frozen: the lock to enforce; default chtypes.lock)")
 	fs.BoolVar(&update, "update", false, "re-resolve every locked request and rewrite the lock (requires --lock)")
 	fs.BoolVar(&frozen, "frozen", false, "fetch exactly what the lock pins, by digest, without resolving")
+	fs.BoolVar(&allowRevoked, "allow-revoked", false, "use a build a verified revocation refuses, with one warning (this call only; never --lock or --update)")
+	fs.BoolVar(&requireRevocationCheck, "require-revocation-check", false, "a revocation status that cannot be read is the transport's error, not a warning")
 	spellings, err := parseInterleaved(fs, args)
 	if err != nil {
 		return err
@@ -302,6 +308,7 @@ func cmdFetch(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 		opts.LockWrite = true
 	}
 	opts.Update = update
+	opts.AllowRevoked, opts.RequireRevocationCheck = allowRevoked, requireRevocationCheck
 	if update {
 		// An update's requests are the lock's own, whatever was named.
 		spellings, err = allSpellings(ctx, opts, true, lock)
@@ -402,12 +409,24 @@ func cmdVerify(args []string, stdout, stderr io.Writer) error {
 		return nil
 	}
 	printNotes(stderr, opts)
-	bad := 0
+	bad, revoked := 0, 0
 	for _, r := range results {
-		if !r.OK {
+		switch {
+		case r.Revocation != nil:
+			// A build a stored revocation refuses (docs/guides/fetch-v1.md,
+			// "Build-level revocation"); it is reported whatever its bytes say.
+			revoked++
+			fmt.Fprintf(stderr, "REVOKED %s %s %s: %s\n", r.Version, r.Platform, r.Dir, r.Detail)
+		case !r.OK:
 			bad++
 			fmt.Fprintf(stderr, "MISMATCH %-16s %-14s %s: %s\n", r.Version, r.Platform, r.Dir, r.Detail)
 		}
+	}
+	if revoked > 0 {
+		// Exit 11 wins over a mismatch's 1: a revocation is the more specific finding.
+		return &ocifetch.FetchError{Code: ocifetch.CodeArtifactRevoked,
+			Msg: fmt.Sprintf("chtypes: %d of %d installed build(s) under %s are revoked [%s]",
+				revoked, len(results), root, ocifetch.CodeArtifactRevoked)}
 	}
 	if bad > 0 {
 		return &ocifetch.FetchError{Code: ocifetch.CodeArtifactCorrupt,

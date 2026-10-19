@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"runtime"
 	"sync"
@@ -42,6 +43,14 @@ type FetchOptions struct {
 	// never a fall-through to a system dir. nil means CHTYPES_CACHE_STRICT
 	// ("1" is on), else off.
 	StrictCache *bool
+	// AllowRevoked lets a call use a build a verified revocation refuses,
+	// with one warning naming the advisory (docs/guides/fetch-v1.md,
+	// "Build-level revocation"). It is per call and has no environment
+	// variable, and it never lets a lock or an update pin a revoked build.
+	AllowRevoked bool
+	// RequireRevocationCheck makes a revocation status that cannot be read
+	// the transport's error rather than one warning.
+	RequireRevocationCheck bool
 }
 
 func (o FetchOptions) internal() *ocifetch.Options {
@@ -49,8 +58,21 @@ func (o FetchOptions) internal() *ocifetch.Options {
 		Bases: o.Bases, CacheDir: o.CacheDir, SystemDirs: o.SystemDirs, TrustedKeys: o.TrustedKeys,
 		Token: o.Token, AllowUnsigned: o.AllowUnsigned, Offline: o.Offline, Frozen: o.Frozen,
 		LockPath: o.LockPath, LockWrite: o.LockWrite, Update: o.Update, StrictCache: o.StrictCache,
+		AllowRevoked: o.AllowRevoked, RequireRevocationCheck: o.RequireRevocationCheck,
 	}
 }
+
+// Revocation is what a CodeArtifactRevoked ArtifactError carries, re-exported
+// unchanged: whether it is signed, the manifest a signed one revokes, and its
+// advisories.
+type Revocation = ocifetch.Revocation
+
+// Advisory is one advisory a Revocation names, every string made safe to print.
+type Advisory = ocifetch.Advisory
+
+// revocationWarnings is where an open prints its revocation check's warnings,
+// once per build per process; a test may redirect it.
+var revocationWarnings io.Writer = os.Stderr
 
 // CacheRoot is the cache root a fetch, list or `chtypes where` with o would
 // use: o.CacheDir, else CHTYPES_CACHE, each through the dev channel's v2-dev
@@ -100,7 +122,10 @@ func WithPreload(requests ...string) RegistryOption {
 //
 // Opens of different requests never wait for each other's fetch: the registry
 // holds no lock across network I/O, and an open of a request a build in the
-// cache answers needs no network at all (public issue #491). Concurrent opens
+// cache answers needs no fetch (public issue #491): under generation 2 it makes
+// only the build's revocation check, at most once per build per process and
+// within its own 5 s deadline (docs/guides/fetch-v1.md, "Build-level
+// revocation"). Concurrent opens
 // of one request share one attempt, and one fetch: each gets that attempt's
 // Library or its error, and a failed attempt is never remembered, so the next
 // open of the request starts a new one. A Fetch of the request shares that
@@ -261,6 +286,17 @@ func (r *Registry) lead(ctx context.Context, f *flight, request string, mayFetch
 		var spelling *ocifetch.SpellingError
 		r.land(f, request, nil, fetchError(err), !errors.As(err, &spelling))
 	case res != nil:
+		// The installed-build revocation check, before anything reads the
+		// library (check_installed; docs/guides/fetch-v1.md, "Build-level
+		// revocation").
+		warnings, err := ocifetch.CheckInstalled(ctx, res, opts)
+		for _, w := range warnings {
+			fmt.Fprintln(revocationWarnings, w)
+		}
+		if err != nil {
+			r.land(f, request, nil, fetchError(err), true)
+			break
+		}
 		l, err := r.load(request, res)
 		r.land(f, request, l, err, true)
 	case !mayFetch:

@@ -33,23 +33,25 @@ type Request struct {
 // and their variables are ignored with one warning each, and the four pinning
 // fields are refused (spec/abi-v2/docs.md, rule r6).
 type Options struct {
-	Bases                 []string // CHTYPES_ARTIFACTS_URL, comma-separated; ignored by the dev channel
-	CacheDir              string   // CHTYPES_CACHE; the dev channel uses <dir>/v2-dev (rule r5)
-	SystemDirs            []string // defaults to the contract's system dirs
-	TrustedKeys           []string // raw hex ed25519 public keys; CHTYPES_TRUSTED_KEYS; ignored by the dev channel
-	Token                 string   // CHTYPES_DOWNLOAD_TOKEN
-	AllowUnsigned         bool     // also set by CHTYPES_ALLOW_UNSIGNED=1; ignored by the dev channel
-	Offline               bool
-	Frozen                bool                // refused by the dev channel
-	LockPath              string              // defaults to LockDefaultFile; refused by the dev channel
-	LockWrite             bool                // refused by the dev channel
-	Update                bool                // refused by the dev channel
-	StrictCache           *bool               // nil means CHTYPES_CACHE_STRICT ("1" is on); see probeRoots
-	Clock                 *Clock              // nil means DefaultClock()
-	ConnectTimeout        time.Duration       // 0 means ConnectTimeoutSeconds
-	IdleReadTimeout       time.Duration       // 0 means IdleReadTimeoutSeconds
-	HookBeforeIndexRename func()              // test-only: simulates a concurrent cache writer
-	OnRequest             func(*http.Request) // test-only: observes every outgoing request
+	Bases                  []string // CHTYPES_ARTIFACTS_URL, comma-separated; ignored by the dev channel
+	CacheDir               string   // CHTYPES_CACHE; the dev channel uses <dir>/v2-dev (rule r5)
+	SystemDirs             []string // defaults to the contract's system dirs
+	TrustedKeys            []string // raw hex ed25519 public keys; CHTYPES_TRUSTED_KEYS; ignored by the dev channel
+	Token                  string   // CHTYPES_DOWNLOAD_TOKEN
+	AllowUnsigned          bool     // also set by CHTYPES_ALLOW_UNSIGNED=1; ignored by the dev channel
+	Offline                bool
+	Frozen                 bool                // refused by the dev channel
+	LockPath               string              // defaults to LockDefaultFile; refused by the dev channel
+	LockWrite              bool                // refused by the dev channel
+	Update                 bool                // refused by the dev channel
+	StrictCache            *bool               // nil means CHTYPES_CACHE_STRICT ("1" is on); see probeRoots
+	AllowRevoked           bool                // per call, never an environment variable; ignored with LockWrite or Update (revocation.go)
+	RequireRevocationCheck bool                // a revocation status that cannot be read is the transport's error, not a warning
+	Clock                  *Clock              // nil means DefaultClock()
+	ConnectTimeout         time.Duration       // 0 means ConnectTimeoutSeconds
+	IdleReadTimeout        time.Duration       // 0 means IdleReadTimeoutSeconds
+	HookBeforeIndexRename  func()              // test-only: simulates a concurrent cache writer
+	OnRequest              func(*http.Request) // test-only: observes every outgoing request
 }
 
 // Resolved is what every successful resolution returns (§1.3).
@@ -80,35 +82,41 @@ type SignedArtifact struct {
 	Warnings  []string
 }
 
-// VerifyResult is one installed entry's re-verification outcome.
+// VerifyResult is one installed entry's re-verification outcome. Revocation
+// is set, and Detail is its message, when the entry holds a stored revocation
+// that verifies (docs/guides/fetch-v1.md, "Build-level revocation"):
+// `chtypes verify` reports the build as revoked and exits 11.
 type VerifyResult struct {
-	Platform string
-	Version  string
-	Dir      string
-	OK       bool
-	Detail   string
+	Platform   string
+	Version    string
+	Dir        string
+	OK         bool
+	Detail     string
+	Revocation *Revocation
 }
 
 type resolvedOptions struct {
-	ch                    *channel
-	bases                 []string
-	cacheDir              string
-	systemDirs            []string
-	trustedKeys           []ed25519.PublicKey
-	token                 string
-	tokenHosts            []string
-	allowUnsigned         bool
-	offline               bool
-	frozen                bool
-	lockPath              string
-	lockWrite             bool
-	update                bool
-	strict                bool
-	clock                 Clock
-	connectTimeout        time.Duration
-	idleReadTimeout       time.Duration
-	hookBeforeIndexRename func()
-	onRequest             func(*http.Request)
+	ch                     *channel
+	bases                  []string
+	cacheDir               string
+	systemDirs             []string
+	trustedKeys            []ed25519.PublicKey
+	token                  string
+	tokenHosts             []string
+	allowUnsigned          bool
+	offline                bool
+	frozen                 bool
+	lockPath               string
+	lockWrite              bool
+	update                 bool
+	strict                 bool
+	allowRevoked           bool
+	requireRevocationCheck bool
+	clock                  Clock
+	connectTimeout         time.Duration
+	idleReadTimeout        time.Duration
+	hookBeforeIndexRename  func()
+	onRequest              func(*http.Request)
 }
 
 func resolveOptions(o *Options) (resolvedOptions, error) {
@@ -257,6 +265,11 @@ func resolveOptions(o *Options) (resolvedOptions, error) {
 	if ro.lockPath == "" {
 		ro.lockPath = LockDefaultFile
 	}
+	// The override is per call and forensic: it never lets a lock or an
+	// update pin a revoked build (docs/guides/fetch-v1.md, "Build-level
+	// revocation").
+	ro.allowRevoked = o.AllowRevoked && !o.LockWrite && !o.Update
+	ro.requireRevocationCheck = o.RequireRevocationCheck
 
 	if o.Clock != nil {
 		ro.clock = *o.Clock
@@ -353,8 +366,10 @@ type session struct {
 }
 
 func newSession(ro resolvedOptions) *session {
+	c := newClient(ro.clock, ro.connectTimeout, ro.idleReadTimeout, ro.token, ro.tokenHosts, ro.onRequest)
+	c.revocation = ro.ch.revocation
 	return &session{
-		client:                newClient(ro.clock, ro.connectTimeout, ro.idleReadTimeout, ro.token, ro.tokenHosts, ro.onRequest),
+		client:                c,
 		ch:                    ro.ch,
 		hookBeforeIndexRename: ro.hookBeforeIndexRename,
 	}
@@ -419,9 +434,11 @@ func ensure(ctx context.Context, ro resolvedOptions, req Request) (*Resolved, er
 		// `update` re-resolves every locked request and rewrites the lock
 		// from scratch — "it never merges a stale entry with a fresh one"
 		// (§6) — in addition to resolving the current request above.
-		if err := s.updateLock(ctx, ro); err != nil {
+		w, err := s.updateLock(ctx, ro)
+		if err != nil {
 			return nil, err
 		}
+		resolved.Warnings = append(resolved.Warnings, w...)
 	}
 	return resolved, nil
 }
@@ -436,6 +453,11 @@ func resolveOffline(ro resolvedOptions, req Request, platform Platform) (*Resolv
 		return nil, err
 	}
 	if res != nil {
+		// Offline makes no request, so only a stored revocation can refuse it
+		// (docs/guides/fetch-v1.md, "Build-level revocation").
+		if err := checkInstalledStored(ro, res); err != nil {
+			return nil, err
+		}
 		return res, nil
 	}
 	return nil, newError(CodeArtifactMissing, req.Spelling, platform.Key, "", nil,
@@ -501,6 +523,9 @@ func resolveFrozenOffline(ro resolvedOptions, req Request, platform Platform) (*
 		return nil, newError(CodeArtifactMissing, req.Spelling, platform.Key, "", nil,
 			"%s", WithNotes(fmt.Sprintf("the build the lock pins (%s) is not installed for %s/%s, and --frozen --offline forbids a network fetch", pin.Manifest, req.Spelling, platform.Key), missingNotes(ro)))
 	}
+	if err := checkInstalledStored(ro, res); err != nil {
+		return nil, err
+	}
 	return res, nil
 }
 
@@ -547,9 +572,11 @@ func (s *session) ensureOnline(ctx context.Context, ro resolvedOptions, l *layou
 	// found the build already installed: `fetch --lock` records what the
 	// registry resolves the request to, not whether this call downloaded it.
 	if ro.lockWrite {
-		if err := s.writeLockForRequest(ctx, ro, l, idx, req, platform, resolved); err != nil {
+		w, err := s.writeLockForRequest(ctx, ro, l, idx, req, platform, resolved)
+		if err != nil {
 			return nil, err
 		}
+		resolved.Warnings = append(resolved.Warnings, w...)
 	}
 	return resolved, nil
 }
@@ -592,14 +619,20 @@ func (s *session) resolveAndInstall(ctx context.Context, ro resolvedOptions, l *
 		if err := l.addIndexEntry(*desc, s.hookBeforeIndexRename); err != nil {
 			return nil, nil, err
 		}
+		res := recordToResolved(rec, dir, platform.Key, req.Spelling, indexDigest, true, base, nil)
 		if existing, found := newerAlreadyInstalled(l, ro.ch, platform.Key, req.Spelling, manifestDigest, rec.Version, rec.Build); found {
 			warnings := []string{monotonicWarning(existing, rec.Version, rec.Build)}
-			return recordToResolved(&existing.rec, existing.dir, platform.Key, req.Spelling, indexDigest, true, base, warnings), idx, nil
+			res = recordToResolved(&existing.rec, existing.dir, platform.Key, req.Spelling, indexDigest, true, base, warnings)
 		}
-		return recordToResolved(rec, dir, platform.Key, req.Spelling, indexDigest, true, base, nil), idx, nil
+		// A build used without a download is checked for a revocation, at most
+		// once per process (docs/guides/fetch-v1.md, "Build-level revocation").
+		if err := s.checkUsedInstalled(ctx, ro, res); err != nil {
+			return nil, nil, err
+		}
+		return res, idx, nil
 	}
 
-	stmt, warnings, err := s.verifyManifestTrust(ctx, ro.bases, manifestDigest, layerDesc.Digest, platform, req.Spelling, ro.trustedKeys, ro.allowUnsigned)
+	stmt, listing, warnings, err := s.verifyManifestTrustListing(ctx, ro.bases, manifestDigest, layerDesc.Digest, platform, req.Spelling, ro.trustedKeys, ro.allowUnsigned)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -612,6 +645,25 @@ func (s *session) resolveAndInstall(ctx context.Context, ro resolvedOptions, l *
 		if err := ro.ch.aheadOfRegistry(l, aliasAbsent, stmt.Statement.Predicate, req.Spelling, platform.Key); err != nil {
 			return nil, nil, err
 		}
+	}
+
+	// A revocation of the candidate, from the trust listing just read (no
+	// extra listing request), refuses it before the monotonic rule and before
+	// its layer is requested: a revoked build is never downloaded. With the
+	// override, it is installed, and its revocation stored beside it.
+	var pending *found
+	if ro.ch.revocation && stmt != nil {
+		sub := subjectOfStatement(stmt, manifestDigest, layerDesc.Digest, platform.Key, req.Spelling)
+		out, err := s.checkCandidates(ctx, ro.bases, listing.revocations, sub, ro.trustedKeys, false)
+		if err != nil {
+			return nil, nil, err
+		}
+		w, err := ro.settle(sub, out, base, false)
+		if err != nil {
+			return nil, nil, err
+		}
+		warnings = append(warnings, w...)
+		pending = out.verified
 	}
 
 	// Monotonicity (§6, "monotonic-warning"): "a HIGHER build is already
@@ -633,7 +685,11 @@ func (s *session) resolveAndInstall(ctx context.Context, ro resolvedOptions, l *
 			// blob and no index entry is written for it — only the
 			// already-installed (newer) entry's own index entry, which is
 			// already there, stays.
-			return recordToResolved(&existing.rec, existing.dir, platform.Key, req.Spelling, indexDigest, true, base, warnings), idx, nil
+			res := recordToResolved(&existing.rec, existing.dir, platform.Key, req.Spelling, indexDigest, true, base, warnings)
+			if err := s.checkUsedInstalled(ctx, ro, res); err != nil {
+				return nil, nil, err
+			}
+			return res, idx, nil
 		}
 	}
 
@@ -654,8 +710,24 @@ func (s *session) resolveAndInstall(ctx context.Context, ro resolvedOptions, l *
 	if err != nil {
 		return nil, nil, err
 	}
-
+	storePending(ro, resolved, pending)
 	return resolved, idx, nil
+}
+
+// checkUsedInstalled is the installed-build revocation check of a build an
+// ensure answers with no download; its warnings join res's.
+func (s *session) checkUsedInstalled(ctx context.Context, ro resolvedOptions, res *Resolved) error {
+	w, err := s.checkInstalledOnce(ctx, ro, res)
+	res.Warnings = append(res.Warnings, w...)
+	return err
+}
+
+// storePending stores the revocation an override let a call install past, in
+// the entry it installed.
+func storePending(ro resolvedOptions, res *Resolved, pending *found) {
+	if pending != nil && res != nil && underDir(ro.cacheDir, res.Dir) {
+		_ = writeRevocationRecord(res.Dir, pending.bundle)
+	}
 }
 
 // installManifest unpacks layerBody and installs it under l, returning the
@@ -1031,10 +1103,27 @@ func VerifyInstalled(opts *Options) ([]VerifyResult, error) {
 			continue
 		}
 		for _, e := range entries {
-			out = append(out, verifyOne(e))
+			r := verifyOne(e)
+			if ro.ch.revocation {
+				storedRevocation(ro, e, &r)
+			}
+			out = append(out, r)
 		}
 	}
 	return out, nil
+}
+
+// storedRevocation reports e's stored revocation on r, when it verifies.
+func storedRevocation(ro resolvedOptions, e installedEntry, r *VerifyResult) {
+	body, err := os.ReadFile(filepath.Join(e.dir, CacheRevocationRecord))
+	if err != nil {
+		return
+	}
+	sub := subjectOf(ro, recordToResolved(&e.rec, e.dir, e.rec.Platform, e.rec.Version, "", true, "", nil))
+	if rev, _ := verifyRevocation(body, ro.trustedKeys, sub); rev != nil {
+		r.Revocation = rev
+		r.Detail = revokedText(sub, rev)
+	}
 }
 
 func verifyOne(e installedEntry) VerifyResult {
@@ -1330,7 +1419,7 @@ func FetchSigned(ctx context.Context, repositorySuffix, ref, predicateType strin
 	}
 	for _, cand := range candidates {
 		body, bundleDigest, bundleManifestDigest, ferr := s.fetchReferrerContent(ctx, bases, cand)
-		if isRetired(ferr) {
+		if isGone(ferr) {
 			return nil, ferr
 		}
 		if ferr != nil {
@@ -1383,6 +1472,11 @@ func (s *session) ensureFrozen(ctx context.Context, ro resolvedOptions, l *layou
 	if res, err := installedByPin(ro, req, platform, pin); err != nil {
 		return nil, err
 	} else if res != nil {
+		// Under generation 2, the one listing a warm --frozen fetch makes
+		// (docs/guides/fetch-v1.md §6, "Build-level revocation").
+		if err := s.checkFrozenInstalled(ctx, ro, res); err != nil {
+			return nil, err
+		}
 		return res, nil
 	}
 
@@ -1402,14 +1496,8 @@ func (s *session) ensureFrozen(ctx context.Context, ro resolvedOptions, l *layou
 	}
 	desc := Descriptor{MediaType: MediaTypeManifest, Digest: pin.Manifest, Size: int64(len(manifestResult.body))}
 
-	layerResult, _, err := s.fetchAcrossBases(ctx, ro.bases, "blobs/"+string(pin.Layer), notFoundRetryOnLast, requestOptions{})
-	if err != nil {
-		return nil, err
-	}
-	if digestOf(layerResult.body) != pin.Layer {
-		return nil, newError(CodeArtifactCorrupt, req.Spelling, platform.Key, layerResult.url, nil, "layer does not match the locked digest %s", pin.Layer)
-	}
-
+	// The bundle, then (generation 2) the one revocation listing, and only
+	// then the layer, so a revoked pin is never downloaded.
 	bundleResult, _, err := s.fetchAcrossBases(ctx, ro.bases, "blobs/"+string(pin.Bundle), notFoundRetryOnLast, requestOptions{maxBytes: BundleMaxBytes})
 	if err != nil {
 		return nil, err
@@ -1436,23 +1524,52 @@ func (s *session) ensureFrozen(ctx context.Context, ro resolvedOptions, l *layou
 	} else {
 		warnings = []string{"chtypes: the locked bundle is unsigned or untrusted; CHTYPES_ALLOW_UNSIGNED is set, continuing unsigned"}
 	}
+	var pending *found
+	if ro.ch.revocation && stmt != nil {
+		sub := subjectOfStatement(stmt, pin.Manifest, pin.Layer, platform.Key, req.Spelling)
+		out, err := s.checkListing(ctx, ro, sub, false)
+		if err != nil {
+			return nil, err
+		}
+		w, err := ro.settle(sub, out, base, false)
+		if err != nil {
+			return nil, err
+		}
+		warnings = append(warnings, w...)
+		pending = out.verified
+	}
+
+	layerResult, _, err := s.fetchAcrossBases(ctx, ro.bases, "blobs/"+string(pin.Layer), notFoundRetryOnLast, requestOptions{})
+	if err != nil {
+		return nil, err
+	}
+	if digestOf(layerResult.body) != pin.Layer {
+		return nil, newError(CodeArtifactCorrupt, req.Spelling, platform.Key, layerResult.url, nil, "layer does not match the locked digest %s", pin.Layer)
+	}
+
 	libraryRelPath, unsignedConfig, lerr := s.libraryPathFor(ctx, ro.bases, &m, stmt)
 	if lerr != nil {
 		return nil, lerr
 	}
-	return s.installManifest(l, req, platform, pin.Manifest, desc, manifestResult.body, m.Layers[0], layerResult.body, stmt, libraryRelPath, unsignedConfig, pin.Index, base, warnings)
+	res, err := s.installManifest(l, req, platform, pin.Manifest, desc, manifestResult.body, m.Layers[0], layerResult.body, stmt, libraryRelPath, unsignedConfig, pin.Index, base, warnings)
+	if err != nil {
+		return nil, err
+	}
+	storePending(ro, res, pending)
+	return res, nil
 }
 
 // writeLockForRequest builds pins for every platform idx offers (downloading
 // each platform's manifest and verifying its trust, but fetching the LAYER
 // only for the host's own platform — "lock-write-all-platforms" asserts zero
 // layer GETs for the others) and merges them into the lock at ro.lockPath.
-func (s *session) writeLockForRequest(ctx context.Context, ro resolvedOptions, l *layout, idx *ImageIndex, req Request, hostPlatform Platform, hostResolved *Resolved) error {
+func (s *session) writeLockForRequest(ctx context.Context, ro resolvedOptions, l *layout, idx *ImageIndex, req Request, hostPlatform Platform, hostResolved *Resolved) ([]string, error) {
 	// The index digest is never recorded, even for the host platform: it is
 	// informational only (§6 of the guide — the index is computed by the
 	// host, not stored, so a by-digest GET of it is not guaranteed to be
 	// served), and the fixtures lane's own expected-lock fixtures never
 	// carry one.
+	var warnings []string
 	pins := map[string]LockPin{
 		hostPlatform.Key: {
 			Version:  hostResolved.Version,
@@ -1477,14 +1594,15 @@ func (s *session) writeLockForRequest(ctx context.Context, ro resolvedOptions, l
 		}
 		manifest, manifestBody, _, err := s.fetchManifestByDigest(ctx, ro.bases, d)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		manifestDigest := digestOf(manifestBody)
 		layerDesc := manifest.Layers[0]
-		stmt, _, err := s.verifyManifestTrust(ctx, ro.bases, manifestDigest, layerDesc.Digest, plat, req.Spelling, ro.trustedKeys, ro.allowUnsigned)
+		stmt, w, err := s.verifyLockedPlatform(ctx, ro, manifestDigest, layerDesc.Digest, plat, req.Spelling)
 		if err != nil {
-			return err
+			return nil, err
 		}
+		warnings = append(warnings, w...)
 		if stmt == nil {
 			continue
 		}
@@ -1498,7 +1616,25 @@ func (s *session) writeLockForRequest(ctx context.Context, ro resolvedOptions, l
 	}
 	existing, _ := readLock(ro.lockPath)
 	merged := mergeLockRequest(existing, req.Spelling, pins)
-	return writeLock(ro.lockPath, merged)
+	return warnings, writeLock(ro.lockPath, merged)
+}
+
+// verifyLockedPlatform is the trust check of one platform a lock or an update
+// pins, and under generation 2 its revocation check from the same listing: a
+// revoked build is refused, whatever AllowRevoked says (resolveOptions drops it
+// for a lock and an update).
+func (s *session) verifyLockedPlatform(ctx context.Context, ro resolvedOptions, manifestDigest, layerDigest Digest, plat Platform, spelling string) (*verifiedStatement, []string, error) {
+	stmt, listing, _, err := s.verifyManifestTrustListing(ctx, ro.bases, manifestDigest, layerDigest, plat, spelling, ro.trustedKeys, ro.allowUnsigned)
+	if err != nil || stmt == nil || !ro.ch.revocation {
+		return stmt, nil, err
+	}
+	sub := subjectOfStatement(stmt, manifestDigest, layerDigest, plat.Key, spelling)
+	out, err := s.checkCandidates(ctx, ro.bases, listing.revocations, sub, ro.trustedKeys, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	w, err := ro.settle(sub, out, "", false)
+	return stmt, w, err
 }
 
 // updateLock implements `update`: re-resolve every (spelling, platform) pair
@@ -1506,16 +1642,17 @@ func (s *session) writeLockForRequest(ctx context.Context, ro resolvedOptions, l
 // the lock from that fresh set alone (§6: "never merges a stale entry with
 // a fresh one"). A spelling whose re-resolution verifies no platform at all
 // is dropped rather than carried over stale.
-func (s *session) updateLock(ctx context.Context, ro resolvedOptions) error {
+func (s *session) updateLock(ctx context.Context, ro resolvedOptions) ([]string, error) {
 	existing, err := readLock(ro.lockPath)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	var warnings []string
 	fresh := make(map[string]map[string]LockPin, len(existing.Requests))
 	for spelling, byPlatform := range existing.Requests {
 		idx, _, _, _, err := s.resolveIndex(ctx, ro.bases, spelling)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		pins := make(map[string]LockPin, len(byPlatform))
 		for platformKey := range byPlatform {
@@ -1525,18 +1662,19 @@ func (s *session) updateLock(ctx context.Context, ro resolvedOptions) error {
 			}
 			desc, err := selectPlatformDescriptor(idx, plat.Key)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			manifest, manifestBody, _, err := s.fetchManifestByDigest(ctx, ro.bases, *desc)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			manifestDigest := digestOf(manifestBody)
 			layerDesc := manifest.Layers[0]
-			stmt, _, err := s.verifyManifestTrust(ctx, ro.bases, manifestDigest, layerDesc.Digest, plat, spelling, ro.trustedKeys, ro.allowUnsigned)
+			stmt, w, err := s.verifyLockedPlatform(ctx, ro, manifestDigest, layerDesc.Digest, plat, spelling)
 			if err != nil {
-				return err
+				return nil, err
 			}
+			warnings = append(warnings, w...)
 			if stmt == nil {
 				continue
 			}
@@ -1552,5 +1690,5 @@ func (s *session) updateLock(ctx context.Context, ro resolvedOptions) error {
 			fresh[spelling] = pins
 		}
 	}
-	return writeLock(ro.lockPath, rewriteLockForUpdate(fresh))
+	return warnings, writeLock(ro.lockPath, rewriteLockForUpdate(fresh))
 }

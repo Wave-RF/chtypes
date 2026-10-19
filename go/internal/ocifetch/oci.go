@@ -259,7 +259,7 @@ func (s *session) fetchAcrossBases(ctx context.Context, bases []string, suffix s
 			reqOpts.extraRetryStatuses = append(append([]int{}, opts.extraRetryStatuses...), http.StatusNotFound)
 		}
 		result, err := s.client.doGet(ctx, u, reqOpts)
-		if isRetired(err) {
+		if isGone(err) {
 			// A retired repository (§2) is permanent: it is the answer, never
 			// a reason to try the next base, and under the alias policy never
 			// a reason to fall back to the tag.

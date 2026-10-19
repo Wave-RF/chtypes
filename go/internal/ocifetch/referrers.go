@@ -49,7 +49,7 @@ func (s *session) fetchAuxIndex(ctx context.Context, bases []string, suffix, acc
 			continue
 		}
 		result, err := s.client.doGet(ctx, u, requestOptions{maxBytes: ManifestMaxBytes, accept: accept})
-		if isRetired(err) {
+		if isGone(err) {
 			return nil, false, err
 		}
 		if err != nil || result.status != http.StatusOK {
@@ -119,8 +119,14 @@ func (s *session) fetchReferrerContent(ctx context.Context, bases []string, desc
 // named by the caller: a signature bundle is small, a goldens document is
 // not (maxBytes 0 means the transport's default ceiling).
 func (s *session) fetchReferrerContentMax(ctx context.Context, bases []string, desc Descriptor, maxBytes int64) (body []byte, layerDigest, manifestDigest Digest, err error) {
+	return s.fetchReferrerContentWith(ctx, bases, desc, maxBytes, false)
+}
+
+// fetchReferrerContentWith is fetchReferrerContentMax with single, the
+// installed-build revocation check's one attempt per request.
+func (s *session) fetchReferrerContentWith(ctx context.Context, bases []string, desc Descriptor, maxBytes int64, single bool) (body []byte, layerDigest, manifestDigest Digest, err error) {
 	result, _, err := s.fetchAcrossBases(ctx, bases, "manifests/"+string(desc.Digest), notFoundRetryOnLast,
-		requestOptions{maxBytes: ManifestMaxBytes, accept: manifestAccept})
+		requestOptions{maxBytes: ManifestMaxBytes, accept: manifestAccept, single: single})
 	if err != nil {
 		return nil, "", "", err
 	}
@@ -137,7 +143,7 @@ func (s *session) fetchReferrerContentMax(ctx context.Context, bases []string, d
 	}
 	layerDesc := m.Layers[0]
 	blobResult, _, err := s.fetchAcrossBases(ctx, bases, "blobs/"+string(layerDesc.Digest), notFoundRetryOnLast,
-		requestOptions{maxBytes: maxBytes})
+		requestOptions{maxBytes: maxBytes, single: single})
 	if err != nil {
 		return nil, "", "", err
 	}
@@ -153,40 +159,48 @@ func (s *session) fetchReferrerContentMax(ctx context.Context, bases []string, d
 // returns the accepted statement, or warnings and a nil statement when
 // allowUnsigned let it through unsigned.
 func (s *session) verifyManifestTrust(ctx context.Context, bases []string, manifestDigest, layerDigest Digest, platform Platform, request string, trustedKeys []ed25519.PublicKey, allowUnsigned bool) (*verifiedStatement, []string, error) {
-	candidates, err := s.findReferrers(ctx, bases, manifestDigest, MediaTypeBundle)
+	stmt, _, warnings, err := s.verifyManifestTrustListing(ctx, bases, manifestDigest, layerDigest, platform, request, trustedKeys, allowUnsigned)
+	return stmt, warnings, err
+}
+
+// verifyManifestTrustListing is verifyManifestTrust that also returns the
+// listing it read, whose revocation candidates an install, a lock and an
+// update check at no extra listing request (revocation.go).
+func (s *session) verifyManifestTrustListing(ctx context.Context, bases []string, manifestDigest, layerDigest Digest, platform Platform, request string, trustedKeys []ed25519.PublicKey, allowUnsigned bool) (*verifiedStatement, *referrerListing, []string, error) {
+	listing, err := s.readListing(ctx, bases, manifestDigest, false)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
-	for _, cand := range candidates {
+	for _, cand := range listing.signatures {
 		body, bundleDigest, bundleManifestDigest, ferr := s.fetchReferrerContent(ctx, bases, cand)
-		if isRetired(ferr) {
-			return nil, nil, ferr
+		if isGone(ferr) {
+			return nil, nil, nil, ferr
 		}
 		if ferr != nil {
 			continue
 		}
 		vr, verr := verifyBundle(body, trustedKeys)
 		if verr != nil {
-			return nil, nil, newError(CodeArtifactCorrupt, request, platform.Key, "", verr, "signed statement is corrupt: %v", verr)
+			return nil, nil, nil, newError(CodeArtifactCorrupt, request, platform.Key, "", verr, "signed statement is corrupt: %v", verr)
 		}
 		if !vr.verified {
 			continue
 		}
 		if cerr := validateStatement(vr.statement, PredicateTypeArtifact, layerDigest, &platform, request); cerr != nil {
-			return nil, nil, newError(CodeArtifactCorrupt, request, platform.Key, "", cerr, "%v", cerr)
+			return nil, nil, nil, newError(CodeArtifactCorrupt, request, platform.Key, "", cerr, "%v", cerr)
 		}
 		return &verifiedStatement{
 			KeyID:                vr.keyID,
 			Statement:            *vr.statement,
 			BundleDigest:         bundleDigest,
 			BundleManifestDigest: bundleManifestDigest,
-		}, nil, nil
+		}, listing, nil, nil
 	}
 	if allowUnsigned {
-		return nil, []string{"chtypes: no referrer signature verified under a trusted key; CHTYPES_ALLOW_UNSIGNED is set, continuing unsigned"}, nil
+		return nil, listing, []string{"chtypes: no referrer signature verified under a trusted key; CHTYPES_ALLOW_UNSIGNED is set, continuing unsigned"}, nil
 	}
-	return nil, nil, newError(CodeArtifactUntrusted, request, platform.Key, "", nil,
+	return nil, nil, nil, newError(CodeArtifactUntrusted, request, platform.Key, "", nil,
 		"no referrer signature for manifest %s verifies under a trusted key", manifestDigest)
 }
 
