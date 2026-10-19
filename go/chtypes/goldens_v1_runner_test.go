@@ -428,7 +428,7 @@ func runGoldensCase(t *testing.T, lib *Library, c goldensCase, rec map[string]an
 		}
 		doc = tbl.Take(buf)
 	case "preview_row":
-		buf, ce := tbl.PreviewRow(sch, c.Body.Format, c.Body.Body, c.Body.Settings, c.Body.Columns)
+		buf, ce := tbl.PreviewRow(sch, c.Body.Format, c.Body.Body, c.Body.Settings, c.Body.Columns, nil)
 		if ce != nil {
 			stopAt(rec, "call", ce)
 			return
@@ -442,7 +442,7 @@ func runGoldensCase(t *testing.T, lib *Library, c goldensCase, rec map[string]an
 		if c.Body.DocFlags != nil {
 			df = *c.Body.DocFlags
 		}
-		dbuf, ebuf, ce := tbl.PreviewBatch(sch, c.Body.Format, c.Body.Body, c.Body.Settings, c.Body.Columns, nil, ef, uint32(df))
+		dbuf, ebuf, ce := tbl.PreviewBatch(sch, c.Body.Format, c.Body.Body, c.Body.Settings, c.Body.Columns, nil, ef, uint32(df), nil)
 		if ce != nil {
 			stopAt(rec, "call", ce)
 			return
@@ -455,13 +455,13 @@ func runGoldensCase(t *testing.T, lib *Library, c goldensCase, rec map[string]an
 			}
 		}
 	case "filter_eval_body":
-		f, ce := tbl.FilterCreate(sch, c.Filter.Expr, c.Filter.QueryParams, c.Filter.Settings)
+		f, ce := tbl.FilterCreate(sch, c.Filter.Expr, c.Filter.QueryParams, c.Filter.Settings, nil)
 		if ce != nil {
 			stopAt(rec, "filter_create", ce)
 			return
 		}
 		defer f.Close()
-		buf, ce := tbl.FilterEvalBody(f, c.Body.Format, c.Body.Body, c.Body.Settings)
+		buf, ce := tbl.FilterEvalBody(f, c.Body.Format, c.Body.Body, c.Body.Settings, c.Body.Columns, nil)
 		if ce != nil {
 			stopAt(rec, "call", ce)
 			return

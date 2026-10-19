@@ -112,7 +112,7 @@ func TestStubTakeIntoMatchesTake(t *testing.T) {
 	}
 	defer schema.Close()
 	call := func() *abi2.Buf {
-		doc, exp, cerr := lib.tbl.PreviewBatch(schema.h, int32(JSONEachRow), []byte(`{"x":1}`), nil, nil, nil, int32(ExportNone), 0)
+		doc, exp, cerr := lib.tbl.PreviewBatch(schema.h, int32(JSONEachRow), []byte(`{"x":1}`), nil, nil, nil, int32(ExportNone), 0, nil)
 		if cerr != nil {
 			t.Fatal(cerr)
 		}
