@@ -5,7 +5,7 @@ Scoped to `chtypes._ocifetch`: the stable, public exception types live in
 imports from or edits. A future switch lane decides how (or whether) these
 become public types; until then every name here is private.
 
-Every exception carries a `.code` string from one of the twelve codes
+Every exception carries a `.code` string from one of the thirteen codes
 `spec/fetch-v1/constants.json`'s `errors` map assigns an exit status to
 (the generated `ERROR_EXIT_CODES` table), so a CLI added later needs no
 second mapping — it is the same lookup v0's `__main__.py` does today.
@@ -19,12 +19,14 @@ it. An unrecognized manifest media type is a transport-side incompatibility
 
 from __future__ import annotations
 
+from chtypes._advisory import Revocation
 from chtypes._ocifetch._constants import ERROR_EXIT_CODES
 
 __all__ = [
     "CODE_ARTIFACT_CORRUPT",
     "CODE_ARTIFACT_MISSING",
     "CODE_ARTIFACT_PINNED",
+    "CODE_ARTIFACT_REVOKED",
     "CODE_ARTIFACT_UNPUBLISHED",
     "CODE_ARTIFACT_UNTRUSTED",
     "CODE_CACHE_UNUSABLE",
@@ -36,6 +38,7 @@ __all__ = [
     "ArtifactCorruptError",
     "ArtifactMissingError",
     "ArtifactPinnedError",
+    "ArtifactRevokedError",
     "ArtifactUnpublishedError",
     "ArtifactUntrustedError",
     "CacheUnusableError",
@@ -51,6 +54,7 @@ from chtypes._codes import (
     CODE_ARTIFACT_CORRUPT,
     CODE_ARTIFACT_MISSING,
     CODE_ARTIFACT_PINNED,
+    CODE_ARTIFACT_REVOKED,
     CODE_ARTIFACT_UNPUBLISHED,
     CODE_ARTIFACT_UNTRUSTED,
     CODE_CACHE_UNUSABLE,
@@ -73,6 +77,7 @@ _CODES_USED_HERE = (
     CODE_SOURCE_INCOMPATIBLE,
     CODE_CACHE_UNUSABLE,
     CODE_SOURCE_RETIRED,
+    CODE_ARTIFACT_REVOKED,
 )
 
 # A drift guard, cheaper than a test: every code this module raises must be
@@ -203,3 +208,20 @@ class SourceRetiredError(FetchError):
     message, made safe to print."""
 
     code = CODE_SOURCE_RETIRED
+
+
+class ArtifactRevokedError(FetchError):
+    """A build a verified revocation refuses, or a 410 whose body says the tag is
+    revoked (docs/guides/fetch-v1.md, "Build-level revocation"; public issue
+    #625).
+
+    Attributes:
+        revocation: for programs: whether it is signed, the manifest a signed
+            one revokes, and its advisories.
+    """
+
+    code = CODE_ARTIFACT_REVOKED
+
+    def __init__(self, message: str, *, revocation: Revocation | None = None) -> None:
+        super().__init__(message)
+        self.revocation = revocation
