@@ -295,6 +295,25 @@ func buildHTTPCases(fs *FileSet) []Case {
 	}, nil)
 	cases = append(cases, addCase("stall-timeout-retried", []float64{4}, true, ""))
 
+	// --- body-cut-off-then-ok / body-cut-off-exhausted: the LAYER BLOB GET
+	// declares its full Content-Length and sends only the first bytes before
+	// the connection closes (public issue #641). A transport failure while
+	// reading a body is retried like a 5xx (docs/guides/fetch-v1.md §7), and
+	// once the table is spent it is CHTYPES_SOURCE_UNREACHABLE, never
+	// CHTYPES_ARTIFACT_CORRUPT. The cut is well inside the layer, so a client
+	// that accepts the short body fails the digest check instead.
+	layerPath := "/v2/chtypes/v1/blobs/" + live.LayerDesc.Digest
+	cutOff := func() httpResponse { return httpResponse{FromTree: true, Truncate: intp(100)} }
+	putScript("body-cut-off-then-ok", []httpRoute{
+		{Method: "GET", Path: layerPath, Responses: []httpResponse{cutOff(), {FromTree: true}}},
+	}, nil)
+	cases = append(cases, addCase("body-cut-off-then-ok", []float64{4}, true, ""))
+
+	putScript("body-cut-off-exhausted", []httpRoute{
+		{Method: "GET", Path: layerPath, Responses: []httpResponse{cutOff(), cutOff(), cutOff(), cutOff(), cutOff()}},
+	}, nil)
+	cases = append(cases, addCase("body-cut-off-exhausted", []float64{4, 8, 16, 32}, false, "CHTYPES_SOURCE_UNREACHABLE"))
+
 	// --- manifest-accept-header: every manifest GET, by tag AND by digest,
 	// must carry `Accept: application/vnd.oci.image.index.v1+json,
 	// application/vnd.oci.image.manifest.v1+json` (the distribution spec's

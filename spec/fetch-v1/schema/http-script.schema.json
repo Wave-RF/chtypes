@@ -59,6 +59,16 @@
         {
           "type": "object",
           "additionalProperties": false,
+          "required": ["truncate", "from_tree"],
+          "properties": {
+            "truncate": {"type": "integer", "minimum": 0},
+            "from_tree": {"const": true}
+          },
+          "description": "Serve the named route tree's bytes for this path as a 200 that declares their full Content-Length, send only the first `truncate` bytes (fewer than the body's length), then close the connection: a body cut off part way."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
           "required": ["status"],
           "properties": {
             "status": {"type": "integer", "minimum": 100, "maximum": 599},

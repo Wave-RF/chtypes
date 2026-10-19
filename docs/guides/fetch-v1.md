@@ -254,6 +254,8 @@ Key id algorithm: `sha256-first16hex` — the first 16 hex characters of sha256 
 
 A digest 404: `next_base_then_retry_on_last`. A tag 404: `next_base_then_unpublished`.
 
+A transport failure while reading a response body (a body shorter than its Content-Length, a reset, a TLS close) is retried like a 5xx, and once the retry table is spent it is `CHTYPES_SOURCE_UNREACHABLE`. Only an oversize body is `CHTYPES_ARTIFACT_CORRUPT`, and it is never retried. The `body-cut-off-*` cases (§10) hold every binding to this.
+
 A 410, on any request: permanent, a retired repository. It is never retried and never a reason to try the next base, and it is `CHTYPES_SOURCE_RETIRED`, carrying the registry's own message from at most 65536 bytes of the body, cut to 256 code points (§2, "A retired repository").
 
 ## 8. Errors
@@ -423,6 +425,11 @@ A case id starting `list-tags-` exercises the binding's tag listing (what `chtyp
 - `retired-410-blob`: everything resolves and verifies, then the layer blob answers `410` once and would serve the bytes after, so a retry would succeed.
 - `retired-410-sanitized`: the message carries an escape sequence and a bidi override and runs past the cap: the error carries the sanitized, capped text.
 - `retired-410-no-body`: a `410` with no body. The error names the URL that answered and contains none of `null`, `undefined`, `None` or `<nil>`.
+
+**Cut-off body cases** (§7; public issue #641). An http-script response may be `{"truncate": N, "from_tree": true}`: a `200` that declares the route tree's full Content-Length for the path, sends only the first `N` bytes (fewer than the body's length) and closes the connection. Two cases script it on the layer blob GET, with the cut well inside the layer, so a client that accepts the short body fails its digest check instead of retrying:
+
+- `body-cut-off-then-ok`: the first attempt is cut off and the second is whole. The build installs, with one sleep of 4 seconds.
+- `body-cut-off-exhausted`: every attempt is cut off. The retry table is spent (sleeps 4, 8, 16 and 32 seconds) and the answer is `CHTYPES_SOURCE_UNREACHABLE`, never `CHTYPES_ARTIFACT_CORRUPT`.
 
 ### Cache fixtures and `installed.json`
 
