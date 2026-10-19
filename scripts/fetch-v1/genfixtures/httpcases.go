@@ -314,6 +314,23 @@ func buildHTTPCases(fs *FileSet) []Case {
 	}, nil)
 	cases = append(cases, addCase("body-cut-off-exhausted", []float64{4, 8, 16, 32}, false, "CHTYPES_SOURCE_UNREACHABLE"))
 
+	// --- body-cut-off-chunked-then-ok / body-cut-off-chunked-exhausted: the
+	// same layer blob GET, but the body is CHUNKED: no Content-Length, one
+	// complete chunk, then the connection closes without the terminating
+	// zero-length chunk (public issue #644). Each binding's HTTP stack reports
+	// that differently from a short Content-Length, and the rule is the same:
+	// retried like a 5xx, then CHTYPES_SOURCE_UNREACHABLE.
+	cutOffChunked := func() httpResponse { return httpResponse{FromTree: true, Truncate: intp(100), Chunked: true} }
+	putScript("body-cut-off-chunked-then-ok", []httpRoute{
+		{Method: "GET", Path: layerPath, Responses: []httpResponse{cutOffChunked(), {FromTree: true}}},
+	}, nil)
+	cases = append(cases, addCase("body-cut-off-chunked-then-ok", []float64{4}, true, ""))
+
+	putScript("body-cut-off-chunked-exhausted", []httpRoute{
+		{Method: "GET", Path: layerPath, Responses: []httpResponse{cutOffChunked(), cutOffChunked(), cutOffChunked(), cutOffChunked(), cutOffChunked()}},
+	}, nil)
+	cases = append(cases, addCase("body-cut-off-chunked-exhausted", []float64{4, 8, 16, 32}, false, "CHTYPES_SOURCE_UNREACHABLE"))
+
 	// --- manifest-accept-header: every manifest GET, by tag AND by digest,
 	// must carry `Accept: application/vnd.oci.image.index.v1+json,
 	// application/vnd.oci.image.manifest.v1+json` (the distribution spec's

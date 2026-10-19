@@ -1020,6 +1020,7 @@ def render_guide_block(data: dict[str, Any], sha: str) -> str:
     lines.append(
         "A transport failure while reading a response body (a body shorter than its Content-Length, a reset, "
         "a TLS close) is retried like a 5xx, and once the retry table is spent it is `CHTYPES_SOURCE_UNREACHABLE`. "
+        "A chunked body cut off before its terminating zero-length chunk is the same failure. "
         "Only an oversize body is `CHTYPES_ARTIFACT_CORRUPT`, and it is never retried. The `body-cut-off-*` cases "
         "(§10) hold every binding to this."
     )
