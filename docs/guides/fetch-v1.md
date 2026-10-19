@@ -252,9 +252,9 @@ Key id algorithm: `sha256-first16hex` — the first 16 hex characters of sha256 
 
 5 attempts, first wait 4s, ×2 each time; retry on 408, 429, 500, 502, 503, 504; honor `Retry-After` on 429, 503; a `Retry-After` past the remaining budget is refused rather than shortened, and the refusal names the value.
 
-A transport failure while reading a response body (a body shorter than its Content-Length, a reset, a TLS close) is retried like a 5xx, and once the retry table is spent it is `CHTYPES_SOURCE_UNREACHABLE`. Only an oversize body is `CHTYPES_ARTIFACT_CORRUPT`, and it is never retried. The `body-cut-off-*` cases (§10) hold every binding to this.
-
 A digest 404: `next_base_then_retry_on_last`. A tag 404: `next_base_then_unpublished`.
+
+A transport failure while reading a response body (a body shorter than its Content-Length, a reset, a TLS close) is retried like a 5xx, and once the retry table is spent it is `CHTYPES_SOURCE_UNREACHABLE`. Only an oversize body is `CHTYPES_ARTIFACT_CORRUPT`, and it is never retried. The `body-cut-off-*` cases (§10) hold every binding to this.
 
 A 410, on any request: permanent, a retired repository. It is never retried and never a reason to try the next base, and it is `CHTYPES_SOURCE_RETIRED`, carrying the registry's own message from at most 65536 bytes of the body, cut to 256 code points (§2, "A retired repository").
 
