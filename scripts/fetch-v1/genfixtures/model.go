@@ -63,6 +63,15 @@ type Request struct {
 	// Prune is a `prune-` case's prune (prunecases.go); nil for every other
 	// case.
 	Prune *PruneRequest `json:"prune"`
+	// AllowRevoked and RequireRevocationCheck are the revocation check's
+	// per-call override and strict mode (revocationcases.go); false in every
+	// other case.
+	AllowRevoked           bool `json:"allow_revoked"`
+	RequireRevocationCheck bool `json:"require_revocation_check"`
+	// Opens, when set, drives the registry open path that many times in one
+	// process (revocationcases.go, the `open-` cases); nil for every other
+	// case.
+	Opens *int `json:"opens"`
 }
 
 // PruneRequest is what a `prune-` case prunes: one line or every line (nil),
@@ -112,6 +121,21 @@ type Expect struct {
 	// Prune is what a `prune-` case's prune must report and leave behind
 	// (prunecases.go). nil for every other case.
 	Prune *PruneExpect `json:"prune"`
+	// WarningsMax is the most warnings the case may produce in all; with
+	// Warnings, an exact count (revocationcases.go). nil for every other case.
+	WarningsMax *int `json:"warnings_max"`
+	// StoredRevocations names installed builds whose cache entry must hold a
+	// stored revocation after the call, by the bundle's digest
+	// (revocationcases.go). Empty for every other case.
+	StoredRevocations []StoredRevocation `json:"stored_revocations"`
+}
+
+// StoredRevocation is one installed build's stored revocation record: the
+// build's platform manifest, and the digest of the bundle the record holds
+// byte for byte.
+type StoredRevocation struct {
+	Manifest string `json:"manifest"`
+	Bundle   string `json:"bundle"`
 }
 
 // Resolution is one platform's answer to a resolve: the signed version and
@@ -161,11 +185,12 @@ func newCase(id, tree string, transports ...string) Case {
 		},
 		Env: map[string]string{},
 		Expect: Expect{
-			OK:              true,
-			Sleeps:          []float64{},
-			Warnings:        []string{},
-			RecordsIntact:   []string{},
-			MessageExcludes: []string{},
+			OK:                true,
+			Sleeps:            []float64{},
+			Warnings:          []string{},
+			RecordsIntact:     []string{},
+			MessageExcludes:   []string{},
+			StoredRevocations: []StoredRevocation{},
 			Requests: ExpectRequests{
 				NoneMatching: []string{},
 			},

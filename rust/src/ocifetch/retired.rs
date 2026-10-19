@@ -47,6 +47,16 @@ pub fn retired_message(body: &[u8]) -> Option<String> {
         .as_object()?
         .get("message")?
         .as_str()?;
+    let out = sanitize(message);
+    if out.is_empty() { None } else { Some(out) }
+}
+
+/// `message` made safe to print: every code point in U+0000-U+001F,
+/// U+007F-U+009F, U+200E, U+200F, U+202A-U+202E and U+2066-U+2069 removed, the
+/// rest cut to `constants::RETIRED_MESSAGE_MAX_CODE_POINTS` code points, with
+/// U+2026 appended when it was cut. A revocation's advisory strings are made
+/// safe the same way (docs/guides/fetch-v1.md, "Build-level revocation").
+pub fn sanitize(message: &str) -> String {
     let max = constants::RETIRED_MESSAGE_MAX_CODE_POINTS as usize;
     let mut out = String::new();
     for (kept, c) in message.chars().filter(|c| !removed(*c)).enumerate() {
@@ -56,7 +66,7 @@ pub fn retired_message(body: &[u8]) -> Option<String> {
         }
         out.push(c);
     }
-    if out.is_empty() { None } else { Some(out) }
+    out
 }
 
 /// The error text for a retired repository's answer: the URL and status

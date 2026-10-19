@@ -20,10 +20,11 @@ import { createHash, createPublicKey, verify as cryptoVerify } from 'node:crypto
 import { items, type Json, parseJsonValue } from '../json.js';
 import { activeChannel } from './channel.js';
 import { DSSE_MAX_SIGNATURES, DSSE_PAYLOAD_TYPE, SPELLING_REGEX } from './constants.gen.js';
-import { ArtifactCorruptError, SourceRetiredError } from './errors.js';
+import { ArtifactCorruptError } from './errors.js';
 import { fetchBlobBytesByDigest, fetchManifestByDigest, type ManifestInfo } from './oci.js';
 import type { RequestOptions } from './http.js';
-import { discoverSignatureCandidates } from './referrers.js';
+import { discoverSignatureCandidates, type ReferrerDescriptor } from './referrers.js';
+import { isGone } from './retired.js';
 import type { ArtifactPredicate, Statement, TrustedKey } from './types.js';
 import { hexOfDigest } from './types.js';
 
@@ -356,6 +357,9 @@ export interface TrustResult {
  * aborting the whole search — a dangling or unreachable referrer on one
  * mirror should not prevent trying another.
  *
+ * `listed`, when given, is the candidate list already read (`readListing`'s
+ * signatures, so one listing serves the trust check and the revocation check).
+ *
  * Returns `undefined` when no candidate's signature verified under any
  * trusted key at all — the caller raises `ArtifactUntrustedError` (or
  * honors allow-unsigned).
@@ -367,8 +371,9 @@ export async function verifyAnyReferrerBundle(
   trustedKeys: readonly TrustedKey[],
   checkContent: (statement: Statement) => void,
   options: RequestOptions,
+  listed?: readonly ReferrerDescriptor[],
 ): Promise<TrustResult | undefined> {
-  const candidates = await discoverSignatureCandidates(repositoryRoot, subjectDigest, bundleArtifactType, options);
+  const candidates = listed ?? (await discoverSignatureCandidates(repositoryRoot, subjectDigest, bundleArtifactType, options));
   for (const candidate of candidates) {
     let bundleBytes: Buffer;
     let referrerManifest: ManifestInfo;
@@ -376,9 +381,8 @@ export async function verifyAnyReferrerBundle(
       referrerManifest = await fetchManifestByDigest([repositoryRoot], candidate.digest, options);
       bundleBytes = await fetchBlobBytesByDigest([repositoryRoot], referrerManifest.layer, options);
     } catch (err) {
-      // A retired repository (a 410, guide §2) is the answer, never a
-      // reason to try the next candidate.
-      if (err instanceof SourceRetiredError) throw err;
+      // A 410 (guide §2) is the answer, never a reason to try the next candidate.
+      if (isGone(err)) throw err;
       continue;
     }
     const verified = verifyBundleSignature(bundleBytes, trustedKeys);

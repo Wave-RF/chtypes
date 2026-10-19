@@ -66,7 +66,8 @@
           "type": "object",
           "additionalProperties": false,
           "required": ["spelling", "platform", "offline", "frozen", "lock_write", "update",
-                       "allow_unsigned", "trust", "bases", "own_fingerprint", "prune"],
+                       "allow_unsigned", "trust", "bases", "own_fingerprint", "prune",
+                       "allow_revoked", "require_revocation_check", "opens"],
           "properties": {
             "spelling": {"type": "string"},
             "platform": {"type": "string", "enum": ["linux-amd64", "linux-arm64", "darwin-arm64"]},
@@ -86,6 +87,19 @@
               "type": ["string", "null"],
               "pattern": "^[0-9a-f]{64}$",
               "description": "The dev channel's alias step (docs/guides/fetch-v1.md §3): a fixture ABI fingerprint, 64 lowercase hex, the runner hands its binding's alias seam, so a version request resolves `<tag>--fp-<this>` before `<tag>`. null runs the case with no alias step, as the v1 contract and every production channel do."
+            },
+            "allow_revoked": {
+              "type": "boolean",
+              "description": "The per-call override (docs/guides/fetch-v1.md, \"Build-level revocation\"): a verified revocation lets the call go on with one warning. False in every other case."
+            },
+            "require_revocation_check": {
+              "type": "boolean",
+              "description": "Strict mode for the revocation check (docs/guides/fetch-v1.md, \"Build-level revocation\"): a status that cannot be read is the transport's error, never a warning. False in every other case."
+            },
+            "opens": {
+              "type": ["integer", "null"],
+              "minimum": 1,
+              "description": "The registry-open driver (docs/guides/fetch-v1.md §10, \"The runner contract\"): the runner makes this many opens of the request in one process, each resolve_installed then check_installed, and judges the last. null for every other case, which makes one call of its own kind."
             },
             "prune": {
               "type": ["object", "null"],
@@ -110,7 +124,8 @@
           "additionalProperties": false,
           "required": ["ok", "version", "build", "manifest", "library_sha256", "code", "sleeps",
                        "warnings", "requests", "lock_after", "tags", "records_intact",
-                       "message_contains", "message_excludes", "resolutions", "prune"],
+                       "message_contains", "message_excludes", "resolutions", "prune",
+                       "warnings_max", "stored_revocations"],
           "properties": {
             "ok": {"type": "boolean"},
             "version": {"type": ["string", "null"]},
@@ -124,14 +139,37 @@
                        "CHTYPES_ARTIFACT_UNPUBLISHED", "CHTYPES_SOURCE_UNREACHABLE",
                        "CHTYPES_SOURCE_UNAUTHORIZED", "CHTYPES_SOURCE_FORBIDDEN",
                        "CHTYPES_SOURCE_INCOMPATIBLE", "CHTYPES_ARTIFACT_INCOMPATIBLE",
-                       "CHTYPES_SOURCE_RETIRED"]
+                       "CHTYPES_SOURCE_RETIRED", "CHTYPES_ARTIFACT_REVOKED"]
             },
             "sleeps": {
               "type": "array",
               "items": {"type": "number", "minimum": 0},
               "description": "The exact sequence of injected sleep(seconds) calls a retrying fetch must make."
             },
-            "warnings": {"type": "array", "items": {"type": "string"}},
+            "warnings": {
+              "type": "array",
+              "items": {"type": "string"},
+              "description": "Text each of which some warning of the case must contain (a call's own warnings; for the registry-open driver, every open's)."
+            },
+            "warnings_max": {
+              "type": ["integer", "null"],
+              "minimum": 0,
+              "description": "The most warnings the case may produce in all (every open's, for the registry-open driver): with `warnings`, an exact count, such as the revocation check's one warning per process. null in every case that does not count them."
+            },
+            "stored_revocations": {
+              "type": "array",
+              "uniqueItems": true,
+              "description": "Installed builds whose cache entry must hold a stored revocation after the call (docs/guides/fetch-v1.md, \"Build-level revocation\", the stored record): <layout>/unpacked/sha256/<manifest hex>/<cache.revocation_record> exists, and its sha256 is the bundle digest named. Empty in every other case.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["manifest", "bundle"],
+                "properties": {
+                  "manifest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+                  "bundle": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+                }
+              }
+            },
             "requests": {
               "type": "object",
               "additionalProperties": false,

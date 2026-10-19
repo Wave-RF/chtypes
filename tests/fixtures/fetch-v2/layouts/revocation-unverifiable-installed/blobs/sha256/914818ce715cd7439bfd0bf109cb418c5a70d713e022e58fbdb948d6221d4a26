@@ -1,0 +1,17 @@
+{
+  "mediaType": "application/vnd.dev.sigstore.bundle.v0.3+json",
+  "verificationMaterial": {
+    "publicKey": {
+      "hint": "6c3468e4ec653ac0"
+    }
+  },
+  "dsseEnvelope": {
+    "payload": "eyJfdHlwZSI6ICJodHRwczovL2luLXRvdG8uaW8vU3RhdGVtZW50L3YxIiwgInN1YmplY3QiOiBb",
+    "payloadType": "application/vnd.in-toto+json",
+    "signatures": [
+      {
+        "sig": "d+LDWvlxzt0ju0koda7fYZbneVCcIdOjtqkSWxT5sxtL9F9kxQj1PdgGmrmDYia5nu0RMO0sh85FYkwvuTYkBA=="
+      }
+    ]
+  }
+}

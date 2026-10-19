@@ -9,6 +9,7 @@ import {
   CODE_ARTIFACT_CORRUPT,
   CODE_ARTIFACT_MISSING,
   CODE_ARTIFACT_PINNED,
+  CODE_ARTIFACT_REVOKED,
   CODE_ARTIFACT_UNPUBLISHED,
   CODE_ARTIFACT_UNTRUSTED,
   CODE_CACHE_UNUSABLE,
@@ -27,13 +28,16 @@ import {
  * `CODE_ARTIFACT_INCOMPATIBLE` is the loader's: the fetch layer never raises
  * it. `CODE_CACHE_UNUSABLE` is a cache fault (guide §1; public issue #486), and
  * `CODE_SOURCE_RETIRED` a source that answered 410 Gone, never retried and
- * never sent to the next base (guide §2; public issue #571).
+ * never sent to the next base (guide §2; public issue #571). `CODE_ARTIFACT_REVOKED`
+ * is a build a verified revocation refuses, or a 410 whose body says the tag is
+ * revoked (guide, "Build-level revocation"; public issue #625).
  */
 export {
   CODE_ARTIFACT_CORRUPT,
   CODE_ARTIFACT_INCOMPATIBLE,
   CODE_ARTIFACT_MISSING,
   CODE_ARTIFACT_PINNED,
+  CODE_ARTIFACT_REVOKED,
   CODE_ARTIFACT_UNPUBLISHED,
   CODE_ARTIFACT_UNTRUSTED,
   CODE_CACHE_UNUSABLE,
@@ -177,6 +181,48 @@ export class SourceIncompatibleError extends FetchV1Error {
 export class SourceRetiredError extends FetchV1Error {
   constructor(message: string, options?: { cause?: unknown }) {
     super(CODE_SOURCE_RETIRED, message, options);
+  }
+}
+
+/**
+ * One advisory a revocation names, every string made safe to print (the
+ * retired message's rule, guide §2). A signed revocation's carries its
+ * `revokedAt`; a 410's carries the `build` it names, newest first. A field the
+ * source did not carry is `''`.
+ */
+export interface Advisory {
+  readonly id: string;
+  readonly url: string;
+  readonly class: string;
+  readonly summary: string;
+  readonly build: string;
+  readonly supersededBy: string;
+  readonly revokedAt: string;
+}
+
+/**
+ * What an `ArtifactRevokedError` carries for programs: whether the revocation
+ * is signed, the manifest a signed one revokes (`''` for a 410's body, which
+ * is unsigned and names no manifest), and its advisories. A signed revocation
+ * carries exactly one; a 410's one per revoked build.
+ */
+export interface Revocation {
+  readonly signed: boolean;
+  readonly manifest: string;
+  readonly advisories: readonly Advisory[];
+}
+
+/**
+ * A build a verified revocation refuses, or a 410 whose body says the tag is
+ * revoked (guide, "Build-level revocation"; public issue #625). The message
+ * names the build and the advisory; `revocation` is the same for programs.
+ */
+export class ArtifactRevokedError extends FetchV1Error {
+  readonly revocation: Revocation;
+
+  constructor(message: string, revocation: Revocation, options?: { cause?: unknown }) {
+    super(CODE_ARTIFACT_REVOKED, message, options);
+    this.revocation = revocation;
   }
 }
 

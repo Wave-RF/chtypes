@@ -85,6 +85,7 @@ func TestExitStatusIsTheGeneratedTable(t *testing.T) {
 		ocifetch.CodeArtifactPinned: 1, ocifetch.CodeArtifactUnpublished: 4, ocifetch.CodeSourceUnreachable: 3,
 		ocifetch.CodeSourceUnauthorized: 5, ocifetch.CodeSourceForbidden: 6, ocifetch.CodeSourceIncompatible: 7,
 		ocifetch.CodeArtifactIncompatible: 8, ocifetch.CodeCacheUnusable: 9, ocifetch.CodeSourceRetired: 10,
+		ocifetch.CodeArtifactRevoked: 11,
 	}
 	if len(want) != len(ocifetch.ErrorExitCodes) {
 		t.Fatalf("the generated table has %d codes, this test %d", len(ocifetch.ErrorExitCodes), len(want))
@@ -350,4 +351,59 @@ func TestStrictFlag(t *testing.T) {
 	if code, _, errText = runCLI(t, nil, "list", "--offline", "--strict", "--cache", locked); code != 9 || !strings.Contains(errText, locked+" is unusable as a cache: unreadable_root (EACCES)") {
 		t.Errorf("list --offline --strict of an unreadable cache = %d %q", code, errText)
 	}
+}
+
+// A build whose cache entry holds a stored revocation that verifies is
+// reported by `verify`, which exits 11, and refused by an offline fetch, which
+// exits 11 too; --allow-revoked lets that one fetch use it, with the warning
+// (docs/guides/fetch-v1.md, "Build-level revocation"). The production
+// generation-2 contract, over the fetch-v2 corpus's stored-record layout and
+// its test key.
+func TestRevokedBuildExitsEleven(t *testing.T) {
+	fixtures := filepath.Join("..", "..", "..", "tests", "fixtures", "fetch-v2")
+	layout := filepath.Join(fixtures, "layouts", "revocation-stored")
+	key, err := os.ReadFile(filepath.Join(fixtures, "test-key", "public.hex"))
+	if err != nil {
+		t.Skipf("SKIPPED: the fetch-v2 fixtures are not beside this checkout (%v)", err)
+	}
+	defer ocifetch.UseProdV2ForTests()()
+	cache := t.TempDir()
+	if err := copyTree(layout, filepath.Join(cache, ocifetch.ProdV2CacheDir)); err != nil {
+		t.Fatalf("seeding the cache from %s: %v", layout, err)
+	}
+	env := map[string]string{"CHTYPES_TRUSTED_KEYS": strings.TrimSpace(string(key))}
+
+	code, _, errText := runCLI(t, env, "verify", "--cache", cache)
+	if code != 11 || !strings.Contains(errText, "REVOKED 26.13.2.1 linux-arm64 ") || !strings.Contains(errText, "GHSA-fx01-test-0102") {
+		t.Fatalf("verify = %d, stderr %q; want 11, a REVOKED line naming the advisory", code, errText)
+	}
+	code, out, errText := runCLI(t, env, "fetch", "26.13.2.1", "--offline", "--platform", "linux-arm64", "--cache", cache)
+	if code != 11 || out != "" || !strings.Contains(errText, "is revoked: GHSA-fx01-test-0102") || !strings.Contains(errText, "[CHTYPES_ARTIFACT_REVOKED]") {
+		t.Fatalf("fetch --offline = %d, stdout %q, stderr %q; want 11 naming the advisory", code, out, errText)
+	}
+	code, out, errText = runCLI(t, env, "fetch", "26.13.2.1", "--offline", "--allow-revoked", "--platform", "linux-arm64", "--cache", cache)
+	if code != 0 || strings.TrimSpace(out) == "" || !strings.Contains(errText, "allowing a revoked build: 26.13.2.1 linux-arm64") {
+		t.Fatalf("fetch --offline --allow-revoked = %d, stdout %q, stderr %q; want 0 and the warning", code, out, errText)
+	}
+}
+
+func copyTree(src, dst string) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if info.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, b, 0o644)
+	})
 }

@@ -128,7 +128,7 @@ func (s *session) fetchGoldens(ctx context.Context, ro resolvedOptions, bases []
 		}
 		seen[cand.Digest] = true
 		body, blobDigest, manifestDigest, ferr := s.fetchReferrerContentMax(ctx, bases, cand, 0)
-		if isRetired(ferr) {
+		if isGone(ferr) {
 			return nil, ferr
 		}
 		if ferr != nil {
@@ -144,7 +144,7 @@ func (s *session) fetchGoldens(ctx context.Context, ro resolvedOptions, bases []
 		}
 		for _, sigDesc := range sigDescs {
 			bundleBody, bundleDigest, bundleManifestDigest, berr := s.fetchReferrerContent(ctx, bases, sigDesc)
-			if isRetired(berr) {
+			if isGone(berr) {
 				return nil, berr
 			}
 			if berr != nil {

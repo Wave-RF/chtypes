@@ -69,7 +69,7 @@
       "additionalProperties": false,
       "required": ["index", "manifest", "empty_config", "config", "layer", "bundle",
                    "artifact_type", "goldens_artifact_type", "fixtures_artifact_type",
-                   "channel_artifact_type"],
+                   "channel_artifact_type", "revocation_artifact_type"],
       "properties": {
         "index": {"type": "string"},
         "manifest": {"type": "string"},
@@ -80,7 +80,11 @@
         "artifact_type": {"type": "string"},
         "goldens_artifact_type": {"type": "string"},
         "fixtures_artifact_type": {"type": "string"},
-        "channel_artifact_type": {"type": "string"}
+        "channel_artifact_type": {"type": "string"},
+        "revocation_artifact_type": {
+          "type": "string",
+          "description": "The artifactType of a revocation referrer of a platform manifest (docs/guides/fetch-v1.md, \"Build-level revocation\")."
+        }
       }
     },
     "dsse": {
@@ -96,12 +100,13 @@
     "predicate_types": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["artifact", "goldens", "fixtures", "channel"],
+      "required": ["artifact", "goldens", "fixtures", "channel", "revocation"],
       "properties": {
         "artifact": {"type": "string", "format": "uri"},
         "goldens": {"type": "string", "format": "uri"},
         "fixtures": {"type": "string", "format": "uri"},
-        "channel": {"type": "string", "format": "uri"}
+        "channel": {"type": "string", "format": "uri"},
+        "revocation": {"type": "string", "format": "uri"}
       }
     },
     "trust": {
@@ -164,10 +169,15 @@
     "timeouts": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["connect_s", "idle_read_s"],
+      "required": ["connect_s", "idle_read_s", "revocation_check_s"],
       "properties": {
         "connect_s": {"type": "number", "exclusiveMinimum": 0},
-        "idle_read_s": {"type": "number", "exclusiveMinimum": 0}
+        "idle_read_s": {"type": "number", "exclusiveMinimum": 0},
+        "revocation_check_s": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "The one deadline for the whole revocation check of a build already installed (docs/guides/fetch-v1.md, \"Build-level revocation\"): one attempt per base, no backoff, and never the retry table."
+        }
       }
     },
     "limits": {
@@ -200,12 +210,16 @@
     "cache": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["root_template", "system_dirs", "unpacked_dir", "verified_record", "annotation_prefix"],
+      "required": ["root_template", "system_dirs", "unpacked_dir", "verified_record", "revocation_record", "annotation_prefix"],
       "properties": {
         "root_template": {"type": "string"},
         "system_dirs": {"type": "array", "items": {"type": "string", "pattern": "^/"}},
         "unpacked_dir": {"type": "string"},
         "verified_record": {"type": "string"},
+        "revocation_record": {
+          "type": "string",
+          "description": "The file in an installed build's unpacked/sha256/<manifest-hex>/ entry that holds a verified revocation's Sigstore bundle, verbatim (docs/guides/fetch-v1.md, \"Build-level revocation\")."
+        },
         "annotation_prefix": {"type": "string"}
       }
     },
@@ -247,7 +261,7 @@
         "CHTYPES_ARTIFACT_PINNED", "CHTYPES_ARTIFACT_UNPUBLISHED", "CHTYPES_SOURCE_UNREACHABLE",
         "CHTYPES_SOURCE_UNAUTHORIZED", "CHTYPES_SOURCE_FORBIDDEN", "CHTYPES_SOURCE_INCOMPATIBLE",
         "CHTYPES_ARTIFACT_INCOMPATIBLE",
-        "CHTYPES_CACHE_UNUSABLE", "CHTYPES_SOURCE_RETIRED"
+        "CHTYPES_CACHE_UNUSABLE", "CHTYPES_SOURCE_RETIRED", "CHTYPES_ARTIFACT_REVOKED"
       ],
       "properties": {
         "CHTYPES_ARTIFACT_MISSING": {"type": "integer", "minimum": 1, "maximum": 255},
@@ -261,7 +275,8 @@
         "CHTYPES_SOURCE_INCOMPATIBLE": {"type": "integer", "minimum": 1, "maximum": 255},
         "CHTYPES_ARTIFACT_INCOMPATIBLE": {"type": "integer", "minimum": 1, "maximum": 255},
         "CHTYPES_CACHE_UNUSABLE": {"type": "integer", "minimum": 1, "maximum": 255},
-        "CHTYPES_SOURCE_RETIRED": {"type": "integer", "minimum": 1, "maximum": 255}
+        "CHTYPES_SOURCE_RETIRED": {"type": "integer", "minimum": 1, "maximum": 255},
+        "CHTYPES_ARTIFACT_REVOKED": {"type": "integer", "minimum": 1, "maximum": 255}
       }
     }
   }

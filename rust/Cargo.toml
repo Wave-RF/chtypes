@@ -21,8 +21,10 @@ serde = { version = "1", features = ["derive"] }
 # serde_json is the stock JSON parser every result document, `build_info` and the
 # settings object goes through. `arbitrary_precision` is not enabled: documents
 # carry integers beyond 2^53 as strings, so no number is ever routed through a
-# float.
-serde_json = "1"
+# float. `raw_value` is on for the fetch layer's 410 reader: a field whose raw
+# token holds a lone surrogate escape counts as absent, the rest of the body
+# still read (docs/guides/fetch-v1.md, "Build-level revocation").
+serde_json = { version = "1", features = ["raw_value"] }
 thiserror = "2"
 # sha2 hashes the fetch layer's digests.
 sha2 = { version = "0.11", default-features = false }

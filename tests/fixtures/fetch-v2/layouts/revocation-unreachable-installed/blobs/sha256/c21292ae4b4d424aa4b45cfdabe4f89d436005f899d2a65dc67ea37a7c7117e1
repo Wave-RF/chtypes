@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 2,
+  "mediaType": "application/vnd.oci.image.manifest.v1+json",
+  "artifactType": "application/vnd.wavehouse.chtypes.revocation.v1",
+  "config": {
+    "mediaType": "application/vnd.oci.empty.v1+json",
+    "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "size": 2,
+    "data": "e30="
+  },
+  "layers": [
+    {
+      "mediaType": "application/vnd.dev.sigstore.bundle.v0.3+json",
+      "digest": "sha256:62c0b6ca46b3e86c09cf7576fb8bcbf45c2e540be37379fe5057e5a3b84f2f9f",
+      "size": 1525
+    }
+  ],
+  "subject": {
+    "mediaType": "application/vnd.oci.image.manifest.v1+json",
+    "digest": "sha256:b12716082e380a2d15fc175fde58a846cd7580c4c1a1ed69a2a59aa64c3129ce",
+    "size": 552
+  }
+}

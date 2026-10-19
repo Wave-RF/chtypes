@@ -1,0 +1,288 @@
+{
+  "_comment": "The one table every binding's test of its 410 classification reads (docs/guides/fetch-v1.md, \"Build-level revocation\", A 410 on a tag; public issue #625). Each case is one 410 body, as the bytes the fetch layer read (body_text encoded as UTF-8, or body_hex), the code it maps to, and for CHTYPES_ARTIFACT_REVOKED the text that follows \"<url> answered 410 Gone: \" and the advisories the typed error carries (each of the six fields a string, \"\" where absent). The rule: the body must be UTF-8 JSON whose errors[0].detail.revoked is an object to be CHTYPES_ARTIFACT_REVOKED; anything else is CHTYPES_SOURCE_RETIRED, whose message is tests/fixtures/retired-message's. A repeated key reads as its last value. Each advisory string is made safe as the retired message is (control and bidirectional-formatting code points removed, cut to 256 code points with U+2026), and one that is not a string, is empty once made safe, or whose raw token holds a lone surrogate escape is absent.",
+  "cases": [
+    {
+      "name": "contract-revoked",
+      "why": "the agreed body (public issue #625): errors[0].detail.revoked an object, two advisories, newest build first",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"this tag's every build is revoked\",\"detail\":{\"revoked\":{\"repository\":\"chtypes/v2\",\"reference\":\"26.13.6.1\",\"advisories\":[{\"id\":\"GHSA-fx01-test-0001\",\"url\":\"https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0001\",\"class\":\"over-accept\",\"summary\":\"filter over-accept in fixture advisory 1\",\"build\":\"20261012.000002\",\"superseded_by\":\"20261019.000001\"},{\"id\":\"GHSA-fx01-test-0002\",\"url\":\"https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0002\",\"class\":\"crash\",\"summary\":\"a crash on a malformed DateTime64 in fixture advisory 2\",\"build\":\"20261001.000001\",\"superseded_by\":\"20261019.000001\"}]}}}]}",
+      "code": "CHTYPES_ARTIFACT_REVOKED",
+      "revoked": {
+        "text": "revoked: GHSA-fx01-test-0001 https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0001 (over-accept) build 20261012.000002, superseded by build 20261019.000001: filter over-accept in fixture advisory 1; GHSA-fx01-test-0002 https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0002 (crash) build 20261001.000001, superseded by build 20261019.000001: a crash on a malformed DateTime64 in fixture advisory 2",
+        "advisories": [
+          {
+            "id": "GHSA-fx01-test-0001",
+            "url": "https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0001",
+            "class": "over-accept",
+            "summary": "filter over-accept in fixture advisory 1",
+            "build": "20261012.000002",
+            "superseded_by": "20261019.000001"
+          },
+          {
+            "id": "GHSA-fx01-test-0002",
+            "url": "https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0002",
+            "class": "crash",
+            "summary": "a crash on a malformed DateTime64 in fixture advisory 2",
+            "build": "20261001.000001",
+            "superseded_by": "20261019.000001"
+          }
+        ]
+      }
+    },
+    {
+      "name": "retired-not-revoked",
+      "why": "the retired body as served: detail.retired is the repository's name, with detail.successor; no detail.revoked",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"chtypes/v1 is retired: use chtypes/v2 (this registry no longer serves chtypes/v1)\",\"detail\":{\"retired\":\"chtypes/v1\",\"successor\":\"chtypes/v2\"}}]}",
+      "code": "CHTYPES_SOURCE_RETIRED",
+      "revoked": null
+    },
+    {
+      "name": "neither",
+      "why": "a 410 whose errors[0] has no detail at all",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"gone\"}]}",
+      "code": "CHTYPES_SOURCE_RETIRED",
+      "revoked": null
+    },
+    {
+      "name": "revoked-not-object-string",
+      "why": "detail.revoked is a string, not an object",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"this tag's every build is revoked\",\"detail\":{\"revoked\":\"26.13.6.1\"}}]}",
+      "code": "CHTYPES_SOURCE_RETIRED",
+      "revoked": null
+    },
+    {
+      "name": "revoked-not-object-array",
+      "why": "detail.revoked is an array, not an object",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"this tag's every build is revoked\",\"detail\":{\"revoked\":[]}}]}",
+      "code": "CHTYPES_SOURCE_RETIRED",
+      "revoked": null
+    },
+    {
+      "name": "revoked-not-object-null",
+      "why": "detail.revoked is null",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"this tag's every build is revoked\",\"detail\":{\"revoked\":null}}]}",
+      "code": "CHTYPES_SOURCE_RETIRED",
+      "revoked": null
+    },
+    {
+      "name": "revoked-beside-retired",
+      "why": "detail.revoked is an object and detail.retired is present too: revoked alone decides",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"this tag's every build is revoked\",\"detail\":{\"retired\":\"chtypes/v1\",\"successor\":\"chtypes/v2\",\"revoked\":{\"repository\":\"chtypes/v2\",\"reference\":\"26.13.6.1\",\"advisories\":[{\"id\":\"GHSA-fx01-test-0003\",\"url\":\"https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0003\",\"class\":\"over-accept\",\"summary\":\"filter over-accept in fixture advisory 3\",\"build\":\"20261012.000003\",\"superseded_by\":\"20261019.000003\"}]}}}]}",
+      "code": "CHTYPES_ARTIFACT_REVOKED",
+      "revoked": {
+        "text": "revoked: GHSA-fx01-test-0003 https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0003 (over-accept) build 20261012.000003, superseded by build 20261019.000003: filter over-accept in fixture advisory 3",
+        "advisories": [
+          {
+            "id": "GHSA-fx01-test-0003",
+            "url": "https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0003",
+            "class": "over-accept",
+            "summary": "filter over-accept in fixture advisory 3",
+            "build": "20261012.000003",
+            "superseded_by": "20261019.000003"
+          }
+        ]
+      }
+    },
+    {
+      "name": "revoked-empty-object",
+      "why": "detail.revoked is an empty object: revoked, and no advisory",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"this tag's every build is revoked\",\"detail\":{\"revoked\":{}}}]}",
+      "code": "CHTYPES_ARTIFACT_REVOKED",
+      "revoked": {
+        "text": "revoked, and the registry names no advisory",
+        "advisories": []
+      }
+    },
+    {
+      "name": "advisories-not-array",
+      "why": "detail.revoked.advisories is a string: revoked, and no advisory",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"this tag's every build is revoked\",\"detail\":{\"revoked\":{\"repository\":\"chtypes/v2\",\"reference\":\"26.13\",\"advisories\":\"GHSA-fx01-test-0004\"}}}]}",
+      "code": "CHTYPES_ARTIFACT_REVOKED",
+      "revoked": {
+        "text": "revoked, and the registry names no advisory",
+        "advisories": []
+      }
+    },
+    {
+      "name": "advisory-id-and-url-only",
+      "why": "an advisory with only its id and URL: the other parts and their separators are left out",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"this tag's every build is revoked\",\"detail\":{\"revoked\":{\"repository\":\"chtypes/v2\",\"reference\":\"26.13.6.1\",\"advisories\":[{\"id\":\"GHSA-fx01-test-0005\",\"url\":\"https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0005\"}]}}}]}",
+      "code": "CHTYPES_ARTIFACT_REVOKED",
+      "revoked": {
+        "text": "revoked: GHSA-fx01-test-0005 https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0005",
+        "advisories": [
+          {
+            "id": "GHSA-fx01-test-0005",
+            "url": "https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0005",
+            "class": "",
+            "summary": "",
+            "build": "",
+            "superseded_by": ""
+          }
+        ]
+      }
+    },
+    {
+      "name": "advisory-fields-not-strings",
+      "why": "a field that is not a string counts as absent",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"this tag's every build is revoked\",\"detail\":{\"revoked\":{\"repository\":\"chtypes/v2\",\"reference\":\"26.13.6.1\",\"advisories\":[{\"id\":\"GHSA-fx01-test-0006\",\"url\":\"https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0006\",\"class\":5,\"summary\":\"the class and the build are not strings\",\"build\":null,\"superseded_by\":\"20261019.000006\"}]}}}]}",
+      "code": "CHTYPES_ARTIFACT_REVOKED",
+      "revoked": {
+        "text": "revoked: GHSA-fx01-test-0006 https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0006, superseded by build 20261019.000006: the class and the build are not strings",
+        "advisories": [
+          {
+            "id": "GHSA-fx01-test-0006",
+            "url": "https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0006",
+            "class": "",
+            "summary": "the class and the build are not strings",
+            "build": "",
+            "superseded_by": "20261019.000006"
+          }
+        ]
+      }
+    },
+    {
+      "name": "advisory-summary-only",
+      "why": "the first part present takes no separator",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"this tag's every build is revoked\",\"detail\":{\"revoked\":{\"repository\":\"chtypes/v2\",\"reference\":\"26.13.6.1\",\"advisories\":[{\"summary\":\"an advisory naming nothing but its summary\"}]}}}]}",
+      "code": "CHTYPES_ARTIFACT_REVOKED",
+      "revoked": {
+        "text": "revoked: an advisory naming nothing but its summary",
+        "advisories": [
+          {
+            "id": "",
+            "url": "",
+            "class": "",
+            "summary": "an advisory naming nothing but its summary",
+            "build": "",
+            "superseded_by": ""
+          }
+        ]
+      }
+    },
+    {
+      "name": "advisory-entries-not-objects",
+      "why": "entries that are not objects, or name none of the six fields, are skipped",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"this tag's every build is revoked\",\"detail\":{\"revoked\":{\"repository\":\"chtypes/v2\",\"reference\":\"26.13.6.1\",\"advisories\":[1,\"GHSA-fx01-test-0007\",null,{},{\"class\":7},{\"id\":\"GHSA-fx01-test-0008\",\"url\":\"https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0008\",\"class\":\"over-accept\",\"summary\":\"filter over-accept in fixture advisory 8\",\"build\":\"20261012.000008\",\"superseded_by\":\"20261019.000008\"}]}}}]}",
+      "code": "CHTYPES_ARTIFACT_REVOKED",
+      "revoked": {
+        "text": "revoked: GHSA-fx01-test-0008 https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0008 (over-accept) build 20261012.000008, superseded by build 20261019.000008: filter over-accept in fixture advisory 8",
+        "advisories": [
+          {
+            "id": "GHSA-fx01-test-0008",
+            "url": "https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0008",
+            "class": "over-accept",
+            "summary": "filter over-accept in fixture advisory 8",
+            "build": "20261012.000008",
+            "superseded_by": "20261019.000008"
+          }
+        ]
+      }
+    },
+    {
+      "name": "advisory-sanitized-and-capped",
+      "why": "each string is made safe on its own: control and bidirectional-formatting code points removed, then cut to 256 code points with U+2026",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"this tag's every build is revoked\",\"detail\":{\"revoked\":{\"repository\":\"chtypes/v2\",\"reference\":\"26.13.6.1\",\"advisories\":[{\"id\":\"GHSA-fx01-test-0009\",\"url\":\"https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0009\",\"class\":\"\\u001b[31mover-accept\\u001b[0m\",\"summary\":\"\u202eevil\u202c xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"build\":\"2026\u200f1012.000009\",\"superseded_by\":\"20261019.000009\"}]}}}]}",
+      "code": "CHTYPES_ARTIFACT_REVOKED",
+      "revoked": {
+        "text": "revoked: GHSA-fx01-test-0009 https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0009 ([31mover-accept[0m) build 20261012.000009, superseded by build 20261019.000009: evil xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\u2026",
+        "advisories": [
+          {
+            "id": "GHSA-fx01-test-0009",
+            "url": "https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0009",
+            "class": "[31mover-accept[0m",
+            "summary": "evil xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\u2026",
+            "build": "20261012.000009",
+            "superseded_by": "20261019.000009"
+          }
+        ]
+      }
+    },
+    {
+      "name": "advisory-lone-surrogate",
+      "why": "a field whose raw JSON token holds a lone surrogate escape counts as absent",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"detail\":{\"revoked\":{\"advisories\":[{\"id\":\"GHSA-fx01-test-0010\",\"url\":\"https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0010\",\"summary\":\"a lone \\ud800 surrogate\"}]}}}]}",
+      "code": "CHTYPES_ARTIFACT_REVOKED",
+      "revoked": {
+        "text": "revoked: GHSA-fx01-test-0010 https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0010",
+        "advisories": [
+          {
+            "id": "GHSA-fx01-test-0010",
+            "url": "https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0010",
+            "class": "",
+            "summary": "",
+            "build": "",
+            "superseded_by": ""
+          }
+        ]
+      }
+    },
+    {
+      "name": "duplicate-key-last-object",
+      "why": "a repeated key reads as its last value: here, an object",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"detail\":{\"revoked\":\"26.13\",\"revoked\":{\"advisories\":[{\"id\":\"GHSA-fx01-test-0011\",\"url\":\"https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0011\"}]}}}]}",
+      "code": "CHTYPES_ARTIFACT_REVOKED",
+      "revoked": {
+        "text": "revoked: GHSA-fx01-test-0011 https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0011",
+        "advisories": [
+          {
+            "id": "GHSA-fx01-test-0011",
+            "url": "https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0011",
+            "class": "",
+            "summary": "",
+            "build": "",
+            "superseded_by": ""
+          }
+        ]
+      }
+    },
+    {
+      "name": "duplicate-key-last-string",
+      "why": "a repeated key reads as its last value: here, a string",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"detail\":{\"revoked\":{\"advisories\":[]},\"revoked\":\"26.13\"}}]}",
+      "code": "CHTYPES_SOURCE_RETIRED",
+      "revoked": null
+    },
+    {
+      "name": "revoked-in-second-error",
+      "why": "only errors[0] is read",
+      "body_text": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"x\"},{\"code\":\"DENIED\",\"detail\":{\"revoked\":{\"repository\":\"chtypes/v2\",\"reference\":\"26.13.6.1\",\"advisories\":[{\"id\":\"GHSA-fx01-test-0003\",\"url\":\"https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0003\",\"class\":\"over-accept\",\"summary\":\"filter over-accept in fixture advisory 3\",\"build\":\"20261012.000003\",\"superseded_by\":\"20261019.000003\"}]}}}]}",
+      "code": "CHTYPES_SOURCE_RETIRED",
+      "revoked": null
+    },
+    {
+      "name": "errors-empty",
+      "why": "an empty errors array",
+      "body_text": "{\"errors\":[]}",
+      "code": "CHTYPES_SOURCE_RETIRED",
+      "revoked": null
+    },
+    {
+      "name": "not-json",
+      "why": "a body that is not JSON",
+      "body_text": "<html>410 Gone</html>",
+      "code": "CHTYPES_SOURCE_RETIRED",
+      "revoked": null
+    },
+    {
+      "name": "empty-body",
+      "why": "no body at all",
+      "body_text": "",
+      "code": "CHTYPES_SOURCE_RETIRED",
+      "revoked": null
+    },
+    {
+      "name": "not-utf8",
+      "why": "a body that is not UTF-8",
+      "body_hex": "7b226572726f7273223a5b7b22636f6465223a2244454e494544222c2264657461696c223a7b227265766f6b6564223a7b2261647669736f72696573223a5b7b2273756d6d617279223a22ff227d5d7d7d7d5d7d",
+      "code": "CHTYPES_SOURCE_RETIRED",
+      "revoked": null
+    },
+    {
+      "name": "bom",
+      "why": "a byte order mark before the JSON is not JSON",
+      "body_text": "\ufeff{\"errors\":[{\"code\":\"DENIED\",\"message\":\"this tag's every build is revoked\",\"detail\":{\"revoked\":{\"repository\":\"chtypes/v2\",\"reference\":\"26.13.6.1\",\"advisories\":[{\"id\":\"GHSA-fx01-test-0003\",\"url\":\"https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0003\",\"class\":\"over-accept\",\"summary\":\"filter over-accept in fixture advisory 3\",\"build\":\"20261012.000003\",\"superseded_by\":\"20261019.000003\"}]}}}]}",
+      "code": "CHTYPES_SOURCE_RETIRED",
+      "revoked": null
+    }
+  ]
+}

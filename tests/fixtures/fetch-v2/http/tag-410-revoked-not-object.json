@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "id": "tag-410-revoked-not-object",
+  "tree": "revocation",
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/v2/chtypes/v1/manifests/26.13.6.1",
+      "responses": [
+        {
+          "status": 410,
+          "headers": {
+            "Cache-Control": "no-store",
+            "Content-Type": "application/json"
+          },
+          "body": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"this tag's every build is revoked\",\"detail\":{\"revoked\":\"26.13.6.1\"}}]}"
+        },
+        {
+          "from_tree": true
+        }
+      ]
+    }
+  ],
+  "second_origin_routes": []
+}

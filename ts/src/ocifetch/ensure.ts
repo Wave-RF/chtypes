@@ -35,7 +35,6 @@ import {
   ArtifactUnpublishedError,
   ArtifactUntrustedError,
   FetchV1Error,
-  SourceRetiredError,
   SourceUnreachableError,
 } from './errors.js';
 import { readFileUrl, type RequestOptions, requestBuffered } from './http.js';
@@ -59,7 +58,22 @@ import {
   zeroXHint,
 } from './layout.js';
 import { type GoldensCandidate, selectGoldens, statementRevision } from './goldens.js';
-import { discoverSignatureCandidates } from './referrers.js';
+import { discoverSignatureCandidates, readListing, type ReferrerListing } from './referrers.js';
+import { isGone } from './retired.js';
+import {
+  checkCandidates,
+  checkFrozenInstalled,
+  checkInstalledOnce,
+  checkInstalledStored,
+  checkListing,
+  type FoundRevocation,
+  type RevocationContext,
+  revocationOn,
+  settle,
+  storedRevocation,
+  storePending,
+  subjectOfStatement,
+} from './revocation.js';
 import { probeRoots, strictMode, unwritable } from './faults.js';
 import { verifyAndInstallFromLocalBlobs } from './localverify.js';
 import { type Descriptor, fetchBlobBytesByDigest, fetchManifestByDigest, type ManifestInfo, resolveTag } from './oci.js';
@@ -124,6 +138,53 @@ export function requestOptionsFor(options: FetchV1Options, bases: readonly strin
     ...(options.token !== undefined ? { token: options.token } : {}),
     tokenHosts: tokenHostsFor(bases),
   };
+}
+
+/**
+ * What one revocation check reads from `options` (`revocation.ts`). The override
+ * is per call and forensic: it never lets a lock or an update pin a revoked build.
+ */
+export function revocationContext(options: FetchV1Options): RevocationContext {
+  const bases = resolveBases(options);
+  return {
+    bases,
+    trustedKeys: defaultTrustedKeys(options),
+    request: requestOptionsFor(options, bases),
+    cacheRoot: cacheRoot(options.cacheDir),
+    offline: offlineMode(options.offline),
+    allowRevoked: options.allowRevoked === true && options.lockWrite !== true && options.update !== true,
+    requireRevocationCheck: options.requireRevocationCheck === true,
+  };
+}
+
+/** `res` with `warnings` added to its own. */
+function withWarnings(res: Resolved, warnings: readonly string[]): Resolved {
+  return warnings.length === 0 ? res : { ...res, warnings: [...res.warnings, ...warnings] };
+}
+
+/** What `checkInstalled` answers: the warnings an open prints, and the refusal, if any. */
+export interface InstalledCheck {
+  readonly warnings: readonly string[];
+  /** `ArtifactRevokedError`, or in strict mode the transport's error; `undefined` when the build may be used. */
+  readonly error: FetchV1Error | undefined;
+}
+
+/**
+ * The installed-build revocation check a registry makes after `resolveInstalled`
+ * answers and before it loads the build (guide §9, `check_installed`): the stored
+ * record, then, unless offline, at most one check per build per process. The
+ * warnings the open prints are returned even when the build is refused, as Go
+ * returns them beside the error. Under the v1 contract it does nothing.
+ */
+export async function checkInstalled(res: Resolved, options: FetchV1Options = {}): Promise<InstalledCheck> {
+  const warnings: string[] = [];
+  try {
+    await checkInstalledOnce(revocationContext(options), res, warnings);
+  } catch (err) {
+    if (err instanceof FetchV1Error) return { warnings, error: err };
+    throw err;
+  }
+  return { warnings, error: undefined };
 }
 
 /** Builds the `Resolved` the seam promises, from a `verified.json` record plus where it came from. */
@@ -404,16 +465,21 @@ export async function listInstalled(options: FetchV1Options = {}): Promise<reado
 export async function verifyInstalled(options: FetchV1Options = {}): Promise<readonly VerifyResult[]> {
   noteIgnoredOverrides(options);
   await probeCache(options);
+  const rctx = revocationContext(options);
   const out: VerifyResult[] = [];
   for (const r of searchRoots(options)) {
     for (const { dir, record } of await listVerified(r.root)) {
       const platform = record.platform as PlatformKey;
+      let result: VerifyResult;
       try {
         await verifyInstalledLibrary(path.join(dir, record.library), record.librarySha256, record.libraryBytes);
-        out.push({ platform, dir, ok: true, detail: '' });
+        result = { platform, version: record.version, dir, ok: true, detail: '' };
       } catch (err) {
-        out.push({ platform, dir, ok: false, detail: err instanceof Error ? err.message : String(err) });
+        result = { platform, version: record.version, dir, ok: false, detail: err instanceof Error ? err.message : String(err) };
       }
+      // A build a stored revocation refuses is reported as revoked, whatever its bytes say.
+      const stored = revocationOn() ? await storedRevocation(rctx, resolvedFromRecord(record, platform, record.version, dir, r.source, true, [])) : undefined;
+      out.push(stored === undefined ? result : { ...result, detail: stored.text, revocation: stored.revocation });
     }
   }
   return out;
@@ -448,14 +514,19 @@ async function ensureIn(request: string, options: FetchV1Options): Promise<Resol
   // An offline lookup is read-only: it creates nothing, so a read-only mount
   // reads cleanly (guide §6; public issue #486). Only a fetch makes the layout.
   if (offlineMode(options.offline)) {
-    if (options.frozen === true) return resolveFrozenOffline(request, platform, options);
+    // Offline makes no request, so only a stored revocation can refuse it (guide,
+    // "Build-level revocation").
+    if (options.frozen === true) {
+      const frozenHit = await resolveFrozenOffline(request, platform, options);
+      return withWarnings(frozenHit, await checkInstalledStored(revocationContext(options), frozenHit));
+    }
     const hit = await resolveInstalled(request, platform, options);
     if (hit === undefined) {
       throw new ArtifactMissingError(
         withNotes(`chtypes: ${request} (${platform}) is not installed, and --offline forbids fetching it`, await missingNotes(options)),
       );
     }
-    return hit;
+    return withWarnings(hit, await checkInstalledStored(revocationContext(options), hit));
   }
   if (strictMode(options.strictCache)) {
     // Strict: the cache is checked before anything is fetched into it.
@@ -470,6 +541,7 @@ async function ensureIn(request: string, options: FetchV1Options): Promise<Resol
   const bases = resolveBases(options);
   const baseReqOptions = requestOptionsFor(options, bases);
   const trustedKeys = defaultTrustedKeys(options);
+  const rctx = revocationContext(options);
 
   const resolveResult = await resolveTag(bases, request, platform, { ...baseReqOptions, maxBytes: 0 });
   const manifestHex = hexOfDigest(resolveResult.manifest.digest);
@@ -480,6 +552,11 @@ async function ensureIn(request: string, options: FetchV1Options): Promise<Resol
   let recordDir = finalDir;
   let warnings: string[] = [];
   let alreadyInstalled: boolean;
+  // The build is answered from the cache with no download, so it gets the
+  // installed-build revocation check (guide, "Build-level revocation").
+  let usedInstalled = false;
+  // The revocation an override let this call install past, stored beside it.
+  let pending: FoundRevocation | undefined;
 
   if (existing !== undefined) {
     // An install of another fingerprint's build, reached through the tag
@@ -500,6 +577,7 @@ async function ensureIn(request: string, options: FetchV1Options): Promise<Resol
       recordDir = monotonic.dir;
       warnings = [...warnings, monotonic.warning];
     }
+    usedInstalled = true;
   } else {
     const verified = await verifyManifestTrust(
       resolveResult.repositoryRoot,
@@ -513,6 +591,17 @@ async function ensureIn(request: string, options: FetchV1Options): Promise<Resol
     const { trust, predicate, signedBy } = verified;
     warnings = [...warnings, ...verified.warnings];
 
+    // A revocation of the candidate, from the trust listing just read (no extra
+    // listing request), refuses it before the monotonic rule and before its layer
+    // is requested: a revoked build is never downloaded. With the override, it is
+    // installed, and its revocation stored beside it.
+    if (revocationOn() && trust !== undefined) {
+      const sub = subjectOfStatement(trust.statement, resolveResult.manifest.digest, resolveResult.manifest.layer.digest, platform, request);
+      const out = await checkCandidates(rctx, [resolveResult.repositoryRoot], verified.listing.revocations, sub, false);
+      await settle(rctx, sub, out, false, warnings);
+      pending = out.verified;
+    }
+
     const monotonic = await checkMonotonic(root, platform, request, predicate);
     if (monotonic !== undefined) {
       // The registry is offering something OLDER than what is already
@@ -524,6 +613,7 @@ async function ensureIn(request: string, options: FetchV1Options): Promise<Resol
       recordDir = monotonic.dir;
       alreadyInstalled = true;
       warnings = [...warnings, monotonic.warning];
+      usedInstalled = true;
     } else {
       const staging = await freshStagingDir(root);
       const tempLayerPath = path.join(root, `.tmp-layer-${process.pid}-${randomBytes(6).toString('hex')}`);
@@ -573,17 +663,26 @@ async function ensureIn(request: string, options: FetchV1Options): Promise<Resol
         options.beforeIndexRename,
       );
       alreadyInstalled = lostRace;
+      await storePending(rctx, finalDir, pending);
     }
   }
 
+  if (usedInstalled && revocationOn()) {
+    const used = resolvedFromRecord(record, platform, request, recordDir, resolveResult.repositoryRoot, true, []);
+    await checkInstalledOnce(rctx, used, warnings);
+  }
+
   if (options.lockWrite === true) {
-    await writeLockEntry(request, platform, record, options, resolveResult.repositoryRoot, resolveResult.indexBytes, baseReqOptions);
+    warnings = [
+      ...warnings,
+      ...(await writeLockEntry(request, platform, record, options, resolveResult.repositoryRoot, resolveResult.indexBytes, baseReqOptions, rctx)),
+    ];
   }
   if (options.update === true) {
     // `update` re-resolves every locked request and rewrites the lock from
     // scratch (guide §6: it never merges a stale entry with a fresh one), in
     // addition to resolving the request above.
-    await updateLock(options, bases, baseReqOptions, trustedKeys);
+    warnings = [...warnings, ...(await updateLock(options, bases, baseReqOptions, trustedKeys, rctx))];
   }
 
   return resolvedFromRecord(record, platform, request, recordDir, resolveResult.repositoryRoot, alreadyInstalled, warnings);
@@ -598,6 +697,8 @@ export interface ManifestTrust {
   /** The key id that verified the signature, `''` when unsigned. */
   readonly signedBy: string;
   readonly warnings: readonly string[];
+  /** The referrers listing the trust step read, whose revocation candidates an install, a lock and an update check at no extra listing request. */
+  readonly listing: ReferrerListing;
 }
 
 /**
@@ -622,6 +723,7 @@ export async function verifyManifestTrust(
   baseReqOptions: Omit<RequestOptions, 'maxBytes'>,
 ): Promise<ManifestTrust> {
   const info = platformInfo(platform);
+  const listing = await readListing([repositoryRoot], manifest.digest, { ...baseReqOptions, maxBytes: 0 });
   const trust = await verifyAnyReferrerBundle(
     repositoryRoot,
     manifest.digest,
@@ -634,6 +736,7 @@ export async function verifyManifestTrust(
         requestedSpelling: request,
       }),
     { ...baseReqOptions, maxBytes: 0 },
+    listing.signatures,
   );
   if (trust === undefined) {
     if (!allowUnsigned(options)) {
@@ -644,11 +747,11 @@ export async function verifyManifestTrust(
       );
     }
     const predicate = await unsignedPredicateFallback(repositoryRoot, manifest, request, info, baseReqOptions);
-    return { trust, predicate, signedBy: '', warnings: ['chtypes: proceeding with an unsigned artifact (CHTYPES_ALLOW_UNSIGNED)'] };
+    return { trust, predicate, signedBy: '', warnings: ['chtypes: proceeding with an unsigned artifact (CHTYPES_ALLOW_UNSIGNED)'], listing };
   }
   const predicate = trust.statement.predicate as unknown as ArtifactPredicate;
   await aheadOfRegistry(aliasAbsent, predicate, () => cachedOwnBuild(options, platform, request));
-  return { trust, predicate, signedBy: trust.signedBy, warnings: [] };
+  return { trust, predicate, signedBy: trust.signedBy, warnings: [], listing };
 }
 
 /**
@@ -699,8 +802,8 @@ async function unsignedPredicateFallback(
       library_bytes: Number(asString(field(json, 'library_bytes'))) || 0,
     };
   } catch (err) {
-    // A retired repository (a 410, guide §2) is the answer, never a fallback.
-    if (err instanceof SourceRetiredError) throw err;
+    // A 410 (guide §2) is the answer, never a fallback.
+    if (isGone(err)) throw err;
     return fallback;
   }
 }
@@ -786,7 +889,10 @@ async function ensureFrozen(request: string, platform: PlatformKey, options: Fet
   // A build already installed under exactly the pinned digests is used as it
   // is: zero requests (guide §6; public issues #414 and #487).
   const installed = await installedByPin(request, platform, options, pin);
-  if (installed !== undefined) return installed;
+  const rctx = revocationContext(options);
+  // Under generation 2, the one listing a warm --frozen fetch makes (guide §6,
+  // "Build-level revocation").
+  if (installed !== undefined) return withWarnings(installed, await checkFrozenInstalled(rctx, installed));
   const bases = resolveBases(options);
   const baseReqOptions = requestOptionsFor(options, bases);
   const trustedKeys = defaultTrustedKeys(options);
@@ -803,14 +909,18 @@ async function ensureFrozen(request: string, platform: PlatformKey, options: Fet
   const finalDir = unpackedDir(root, manifestHex);
   const existing = await readVerifiedRecord(finalDir);
   if (existing !== undefined) {
-    return resolvedFromRecord(existing, platform, request, finalDir, 'cache', true, []);
+    const usedFrozen = resolvedFromRecord(existing, platform, request, finalDir, 'cache', true, []);
+    return withWarnings(usedFrozen, await checkFrozenInstalled(rctx, usedFrozen));
   }
 
+  // The bundle, then (generation 2) the one revocation listing, and only then the
+  // layer, so a revoked pin is never downloaded.
   const bundleBytes = await fetchBlobBytesByDigest(bases, { mediaType: MEDIA_TYPE_BUNDLE, digest: pin.bundle }, { ...baseReqOptions, maxBytes: 0 });
   const verified = verifyBundleSignature(bundleBytes, trustedKeys);
   let predicate: ArtifactPredicate;
   let signedBy: string;
   let warnings: string[] = [];
+  let pending: FoundRevocation | undefined;
   if (verified === undefined) {
     if (!allowUnsigned(options)) {
       throw new ArtifactUntrustedError(`chtypes: the locked bundle ${pin.bundle} does not verify under a trusted key`);
@@ -819,12 +929,19 @@ async function ensureFrozen(request: string, platform: PlatformKey, options: Fet
     signedBy = '';
     warnings = ['chtypes: proceeding with an unsigned artifact (CHTYPES_ALLOW_UNSIGNED)'];
   } else {
-    predicate = checkArtifactStatement(parseStatement(verified.payload), PREDICATE_TYPE_ARTIFACT, manifest.layer.digest, {
+    const statement = parseStatement(verified.payload);
+    predicate = checkArtifactStatement(statement, PREDICATE_TYPE_ARTIFACT, manifest.layer.digest, {
       os: info.os,
       arch: info.architecture,
       requestedSpelling: request,
     });
     signedBy = verified.signedBy;
+    if (revocationOn()) {
+      const sub = subjectOfStatement(statement, pin.manifest, manifest.layer.digest, platform, request);
+      const out = await checkListing(rctx, sub, false);
+      await settle(rctx, sub, out, false, warnings);
+      pending = out.verified;
+    }
   }
 
   const staging = await freshStagingDir(root);
@@ -850,6 +967,7 @@ async function ensureFrozen(request: string, platform: PlatformKey, options: Fet
     });
     await writeVerifiedRecord(staging, record);
     const lostRace = await commitStaging(staging, finalDir);
+    await storePending(rctx, finalDir, pending);
     return resolvedFromRecord(record, platform, request, finalDir, bases[0]!, lostRace, warnings);
   } catch (err) {
     await removeStaging(staging);
@@ -870,16 +988,19 @@ async function updateLock(
   bases: readonly string[],
   baseReqOptions: Omit<RequestOptions, 'maxBytes'>,
   trustedKeys: readonly TrustedKey[],
-): Promise<void> {
+  rctx: RevocationContext,
+): Promise<string[]> {
   const lockPath = options.lockPath ?? path.join(process.cwd(), 'chtypes.lock');
   const existing = await readLock(lockPath);
   if (existing === undefined) throw new ArtifactPinnedError(`chtypes: update with no lock file at ${lockPath}`);
   let fresh: LockFile = emptyLock();
+  const warnings: string[] = [];
   for (const [spelling, byPlatform] of Object.entries(existing.requests)) {
     for (const key of Object.keys(byPlatform)) {
       const platformKey = key as PlatformKey;
       const info = platformInfo(platformKey);
       const resolved = await resolveTag(bases, spelling, platformKey, { ...baseReqOptions, maxBytes: 0 });
+      const listing = await readListing([resolved.repositoryRoot], resolved.manifest.digest, { ...baseReqOptions, maxBytes: 0 });
       const trust = await verifyAnyReferrerBundle(
         resolved.repositoryRoot,
         resolved.manifest.digest,
@@ -892,8 +1013,15 @@ async function updateLock(
             requestedSpelling: spelling,
           }),
         { ...baseReqOptions, maxBytes: 0 },
+        listing.signatures,
       );
       if (trust === undefined) continue;
+      // A revoked build on any platform the update would pin refuses it.
+      if (revocationOn()) {
+        const sub = subjectOfStatement(trust.statement, resolved.manifest.digest, resolved.manifest.layer.digest, platformKey, spelling);
+        const out = await checkCandidates(rctx, [resolved.repositoryRoot], listing.revocations, sub, false);
+        await settle(rctx, sub, out, false, warnings);
+      }
       const predicate = trust.statement.predicate as unknown as ArtifactPredicate;
       fresh = withPin(fresh, spelling, platformKey, {
         version: predicate.clickhouse_version,
@@ -905,6 +1033,7 @@ async function updateLock(
     }
   }
   await writeLock(lockPath, fresh);
+  return warnings;
 }
 
 async function writeLockEntry(
@@ -915,7 +1044,9 @@ async function writeLockEntry(
   repositoryRoot: string,
   indexBytes: Buffer,
   baseReqOptions: Omit<RequestOptions, 'maxBytes'>,
-): Promise<void> {
+  rctx: RevocationContext,
+): Promise<string[]> {
+  const warnings: string[] = [];
   const lockPath = options.lockPath ?? path.join(process.cwd(), 'chtypes.lock');
   let lock: LockFile = (await readLock(lockPath)) ?? emptyLock();
   lock = withPin(lock, request, platform, {
@@ -937,42 +1068,57 @@ async function writeLockEntry(
       if (!isLikelyPlatformKey(key)) continue;
       const digest = asString(field(m, 'digest'));
       if (digest === '') continue;
+      let otherManifest: Awaited<ReturnType<typeof fetchManifestByDigest>> | undefined;
+      let listing: ReferrerListing | undefined;
+      let trust: TrustResult | undefined;
       try {
-        const otherManifest = await fetchManifestByDigest([repositoryRoot], digest, { ...baseReqOptions, maxBytes: 0 });
+        otherManifest = await fetchManifestByDigest([repositoryRoot], digest, { ...baseReqOptions, maxBytes: 0 });
         const otherInfo = platformInfo(key as PlatformKey);
-        const trust = await verifyAnyReferrerBundle(
+        const layerDigest = otherManifest.layer.digest;
+        listing = await readListing([repositoryRoot], otherManifest.digest, { ...baseReqOptions, maxBytes: 0 });
+        trust = await verifyAnyReferrerBundle(
           repositoryRoot,
           otherManifest.digest,
           MEDIA_TYPE_BUNDLE,
           trustedKeys,
           (statement) =>
-            checkArtifactStatement(statement, PREDICATE_TYPE_ARTIFACT, otherManifest.layer.digest, {
+            checkArtifactStatement(statement, PREDICATE_TYPE_ARTIFACT, layerDigest, {
               os: otherInfo.os,
               arch: otherInfo.architecture,
               requestedSpelling: request,
             }),
           { ...baseReqOptions, maxBytes: 0 },
+          listing.signatures,
         );
-        if (trust === undefined) continue;
-        const otherPredicate = trust.statement.predicate as unknown as ArtifactPredicate;
-        lock = withPin(lock, request, key as PlatformKey, {
-          version: otherPredicate.clickhouse_version,
-          build: otherPredicate.build,
-          manifest: otherManifest.digest,
-          layer: otherManifest.layer.digest,
-          bundle: trust.bundleDigest,
-        });
       } catch (err) {
-        // A retired repository (a 410, guide §2) fails the write: it is
-        // permanent, never a platform to leave out.
-        if (err instanceof SourceRetiredError) throw err;
+        // A 410 (guide §2) fails the write: it is permanent, never a platform to
+        // leave out.
+        if (isGone(err)) throw err;
         // Best-effort: a platform whose bundle cannot be fetched/verified is
         // left out of the lock rather than failing the whole write.
+        continue;
       }
+      if (trust === undefined || otherManifest === undefined || listing === undefined) continue;
+      // A revoked build on any platform the lock would pin refuses the write,
+      // whatever the override says (`revocationContext` drops it for a lock).
+      if (revocationOn()) {
+        const sub = subjectOfStatement(trust.statement, otherManifest.digest, otherManifest.layer.digest, key, request);
+        const out = await checkCandidates(rctx, [repositoryRoot], listing.revocations, sub, false);
+        await settle(rctx, sub, out, false, warnings);
+      }
+      const otherPredicate = trust.statement.predicate as unknown as ArtifactPredicate;
+      lock = withPin(lock, request, key as PlatformKey, {
+        version: otherPredicate.clickhouse_version,
+        build: otherPredicate.build,
+        manifest: otherManifest.digest,
+        layer: otherManifest.layer.digest,
+        bundle: trust.bundleDigest,
+      });
     }
   }
 
   await writeLock(lockPath, lock);
+  return warnings;
 }
 
 function isLikelyPlatformKey(key: string): boolean {
@@ -1102,9 +1248,8 @@ async function fetchGoldens(
       blobDigest = manifest.layer.digest;
       blob = await fetchBlobBytesByDigest([repository], manifest.layer, reqOptions);
     } catch (err) {
-      // A retired repository (a 410, guide §2) is the answer, never a
-      // candidate to pass over.
-      if (!(err instanceof FetchV1Error) || err instanceof SourceRetiredError) throw err;
+      // A 410 (guide §2) is the answer, never a candidate to pass over.
+      if (!(err instanceof FetchV1Error) || isGone(err)) throw err;
       note(err);
       continue;
     }
@@ -1120,7 +1265,7 @@ async function fetchGoldens(
         bundleDigest = bundleManifest.layer.digest;
         bundleBytes = await fetchBlobBytesByDigest([repository], bundleManifest.layer, reqOptions);
       } catch (err) {
-        if (err instanceof SourceRetiredError) throw err;
+        if (isGone(err)) throw err;
         continue;
       }
       const signed = verifyBundleSignature(bundleBytes, trustedKeys);

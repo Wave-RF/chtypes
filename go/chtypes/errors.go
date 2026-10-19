@@ -172,6 +172,7 @@ var (
 	ErrArtifactIncompatible = errors.New(string(CodeArtifactIncompatible))
 	ErrCacheUnusable        = ocifetch.ErrCacheUnusable
 	ErrSourceRetired        = ocifetch.ErrSourceRetired
+	ErrArtifactRevoked      = ocifetch.ErrArtifactRevoked
 )
 
 func sentinel(c ErrorCode) error {
@@ -202,6 +203,11 @@ type ArtifactError struct {
 	Want    string
 	Got     string
 	OSError string
+	// Revocation is a CodeArtifactRevoked's, for programs: whether it is
+	// signed, the manifest a signed one revokes, and each advisory's id, URL,
+	// class, summary, build, superseded_by and revoked_at. nil for every other
+	// code.
+	Revocation *Revocation
 
 	msg   string // the complete message
 	cause error  // the underlying cause, when there is one
@@ -226,7 +232,8 @@ func fetchError(err error) error {
 	var fe *ocifetch.FetchError
 	if errors.As(err, &fe) {
 		return &ArtifactError{
-			Code: ErrorCode(fe.Code), Path: fe.Path, Reason: fe.Reason, OSError: fe.OSError, msg: fe.Msg, cause: fe,
+			Code: ErrorCode(fe.Code), Path: fe.Path, Reason: fe.Reason, OSError: fe.OSError, Revocation: fe.Revocation,
+			msg: fe.Msg, cause: fe,
 		}
 	}
 	return usageError("%s", err.Error())

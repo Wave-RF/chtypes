@@ -4,7 +4,7 @@ Not part of this package's public API: every name here is subject to change
 without notice until the v1 switch. `_constants` is generated; the fetch
 logic lives in sibling modules. The seam (docs/guides/fetch-v1.md "The seam")
 is the only surface anything outside this package may use: `ensure`,
-`resolve_installed`, `list_installed`, `verify_installed` and
+`resolve_installed`, `check_installed`, `list_installed`, `verify_installed` and
 `fetch_signed`, plus the `Request`/`Options`/`Resolved`/
 `VerifyResult` shapes they take and return; and beside it the CLI's `resolve`
 and `prune` and the registry's in-use `hold` (§1, "In use"). Every other module here
@@ -25,9 +25,11 @@ from chtypes._ocifetch._ensure import (
     Request,
     Resolved,
     VerifyResult,
+    check_installed,
     ensure,
     fetch_signed,
     list_installed,
+    reset_revocation_memo_for_tests,
     resolve_installed,
     verify_installed,
 )
@@ -43,11 +45,13 @@ __all__ = [
     "Resolved",
     "Superseded",
     "VerifyResult",
+    "check_installed",
     "ensure",
     "fetch_signed",
     "hold",
     "list_installed",
     "prune",
+    "reset_revocation_memo_for_tests",
     "resolve",
     "resolve_each",
     "resolve_installed",

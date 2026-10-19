@@ -74,6 +74,14 @@ func buildLockCases(fs *FileSet) []Case {
 	frozenNoDiscovery.Expect.Build = strp(ndArt.Predicate.Build)
 	frozenNoDiscovery.Expect.Manifest = strp(ndArt.ManifestDesc.Digest)
 	frozenNoDiscovery.Expect.LibrarySHA256 = strp(ndArt.Predicate.LibrarySHA256)
+	if revocationCorpus() {
+		// Generation 2 reads one referrers listing for a revocation, and a tree
+		// with no discovery names no signature: the status cannot be read, so
+		// the call succeeds with the one warning (docs/guides/fetch-v1.md,
+		// "Build-level revocation"). The v1 contract makes no such request.
+		frozenNoDiscovery.Expect.Warnings = []string{notCheckedWarning(ndArt.ManifestDesc.Digest)}
+		frozenNoDiscovery.Expect.WarningsMax = intp(1)
+	}
 	cases = append(cases, frozenNoDiscovery)
 
 	// --- frozen-unpinned: a lock exists but names no entry for this
@@ -279,6 +287,14 @@ func buildLockCases(fs *FileSet) []Case {
 		c.Setup.Lock = strp(w.lock)
 		c.Expect.OK = w.ok
 		c.Expect.Requests.Max = intp(0)
+		if !w.offline && revocationCorpus() {
+			// A warm --frozen fetch under generation 2 makes exactly one request,
+			// the revocation listing (docs/guides/fetch-v1.md §6 and "Build-level
+			// revocation"); --frozen --offline stays at zero. The id is kept: it
+			// names the v1 contract's case, whose meaning is unchanged.
+			c.Expect.Requests.Max = intp(1)
+			c.Expect.Requests.NoneMatching = []string{"GET .*/blobs/" + warmArt.LayerDesc.Digest}
+		}
 		if w.ok {
 			c.Expect.Version = strp(warmArt.Predicate.ClickHouseVersion)
 			c.Expect.Build = strp(warmArt.Predicate.Build)

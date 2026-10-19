@@ -5,6 +5,7 @@
  */
 
 import { MEDIA_TYPE_INDEX, MEDIA_TYPE_MANIFEST, PLATFORMS } from './constants.gen.js';
+import type { Revocation } from './errors.js';
 
 /**
  * Every `GET …/manifests/<ref>` — by tag or by digest — sends this `Accept`
@@ -117,9 +118,16 @@ export interface Resolved {
 /** One `verify_installed` row. */
 export interface VerifyResult {
   readonly platform: PlatformKey;
+  readonly version: string;
   readonly dir: string;
   readonly ok: boolean;
   readonly detail: string;
+  /**
+   * Set, and `detail` its message, when the entry holds a stored revocation that
+   * verifies (guide, "Build-level revocation"): `chtypes verify` reports the
+   * build as revoked and exits 11.
+   */
+  readonly revocation?: Revocation | undefined;
 }
 
 /**
@@ -185,6 +193,14 @@ export interface FetchV1Options {
    * `CHTYPES_CACHE_STRICT` (`1` is on), else off.
    */
   readonly strictCache?: boolean;
+  /**
+   * Use a build a verified revocation refuses, with one warning naming the
+   * advisory (guide, "Build-level revocation"). Per call and never an environment
+   * variable; ignored with `lockWrite` or `update`, and never applies to a 410.
+   */
+  readonly allowRevoked?: boolean;
+  /** A revocation status that cannot be read is the transport's error rather than one warning. */
+  readonly requireRevocationCheck?: boolean;
   readonly clock?: Clock;
   /** Test-only: runs after the index's temp-write, before its atomic rename. */
   readonly beforeIndexRename?: () => Promise<void> | void;

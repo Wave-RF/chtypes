@@ -21,6 +21,7 @@ use crate::ocifetch::constants::code;
 use crate::raw::RawText;
 
 pub use crate::abi2::loader::Refusal;
+pub use crate::ocifetch::revocation::{Advisory, Revocation};
 
 /// What a [`Error::CacheUnusable`] names: a cache directory or entry the
 /// fetch layer could not read or write, or one strict mode refuses
@@ -171,6 +172,12 @@ pub enum Error {
     /// never sent to the next source; the message names the URL that
     /// answered and carries the registry's own message, made safe to print.
     SourceRetired(String),
+    /// `CHTYPES_ARTIFACT_REVOKED` (generation 2): a build a verified, signed
+    /// revocation refuses, whether found in its referrers listing or stored in
+    /// its cache entry, or a `410 Gone` whose body says the tag is revoked. The
+    /// message names the advisory, made safe to print; the [`Revocation`]
+    /// carries it for programs.
+    ArtifactRevoked(Revocation),
 }
 
 /// A `Result` whose error is this crate's [`Error`].
@@ -210,6 +217,7 @@ impl Error {
             Error::SourceIncompatible(_) => code::SOURCE_INCOMPATIBLE,
             Error::CacheUnusable(_) => code::CACHE_UNUSABLE,
             Error::SourceRetired(_) => code::SOURCE_RETIRED,
+            Error::ArtifactRevoked(_) => code::ARTIFACT_REVOKED,
             _ => return None,
         })
     }
@@ -280,6 +288,7 @@ impl fmt::Display for Error {
                 write!(f, "{}: {m}", self.code().unwrap_or_default())
             }
             Error::CacheUnusable(c) => write!(f, "{}: {c}", self.code().unwrap_or_default()),
+            Error::ArtifactRevoked(r) => write!(f, "{}: {r}", self.code().unwrap_or_default()),
         }
     }
 }
@@ -302,6 +311,7 @@ impl From<crate::ocifetch::error::Error> for Error {
             F::SourceForbidden(m) => Error::SourceForbidden(m),
             F::SourceIncompatible(m) => Error::SourceIncompatible(m),
             F::SourceRetired(m) => Error::SourceRetired(m),
+            F::ArtifactRevoked(r) => Error::ArtifactRevoked(r),
             // A refused version spelling, an unreadable cache or lock file:
             // misuse, which carries no fetch code of its own.
             F::InvalidInput(m) => Error::usage(m),

@@ -91,8 +91,10 @@ export {
 } from './documents.js';
 export { Library, openUnverified } from './library.js';
 export {
+  type Advisory,
   ArtifactMissingError,
   ArtifactPinnedError,
+  ArtifactRevokedError,
   ArtifactUnpublishedError,
   ArtifactUntrustedError,
   type CacheFault,
@@ -101,6 +103,7 @@ export {
   CODE_ARTIFACT_INCOMPATIBLE,
   CODE_ARTIFACT_MISSING,
   CODE_ARTIFACT_PINNED,
+  CODE_ARTIFACT_REVOKED,
   CODE_ARTIFACT_UNPUBLISHED,
   CODE_ARTIFACT_UNTRUSTED,
   CODE_CACHE_UNUSABLE,
@@ -111,6 +114,7 @@ export {
   CODE_SOURCE_UNREACHABLE,
   type ErrorCode,
   type Resolved,
+  type Revocation,
   SourceForbiddenError,
   SourceIncompatibleError,
   SourceRetiredError,
