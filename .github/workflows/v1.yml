@@ -352,6 +352,8 @@ jobs:
     # registry.test (127.0.0.1) and the loopback fixture server.
     env:
       ORAS_VERSION: "1.3.4" # layout-v2 spec §0: ORAS 1.3.4 is the measured --platform-compatible version
+      # registry:2, the multi-platform index, by digest: the same bytes from either mirror the pull step tries.
+      REGISTRY_IMAGE: registry@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # Which bindings' conformance runners exist on this branch yet? The same
@@ -446,6 +448,23 @@ jobs:
           openssl verify -x509_strict -purpose sslserver -CAfile ca.crt registry.test.crt
           openssl x509 -in ca.crt -noout -ext keyUsage,basicConstraints
           openssl x509 -in registry.test.crt -noout -ext keyUsage,extendedKeyUsage,subjectAltName
+      - name: pull registry:2 by digest (retried, then from a second mirror)
+        run: |
+          # Anonymous pulls are rate limited per source address, and hosted
+          # runners share addresses: ECR Public has answered "toomanyrequests:
+          # Data limit exceeded" here. Both mirrors serve Docker's official image
+          # unchanged, so the digest names the same bytes from either.
+          for src in public.ecr.aws/docker/library mirror.gcr.io/library; do
+            for attempt in 1 2 3; do
+              if docker pull --quiet "$src/$REGISTRY_IMAGE"; then
+                docker tag "$src/$REGISTRY_IMAGE" fixture-registry:pinned
+                exit 0
+              fi
+              sleep $((attempt * 5))
+            done
+          done
+          echo "registry:2 ($REGISTRY_IMAGE) could not be pulled from either mirror" >&2
+          exit 1
       - name: start registry:2 with TLS
         run: |
           docker run -d --name v1-fixture-registry \
@@ -454,7 +473,7 @@ jobs:
             -e REGISTRY_HTTP_ADDR=0.0.0.0:5443 \
             -e REGISTRY_HTTP_TLS_CERTIFICATE=/certs/registry.test.crt \
             -e REGISTRY_HTTP_TLS_KEY=/certs/registry.test.key \
-            public.ecr.aws/docker/library/registry:2
+            fixture-registry:pinned
           ok=
           for _ in $(seq 1 30); do
             if curl -fsS https://registry.test:5443/v2/ >/dev/null 2>&1; then ok=1; break; fi
@@ -1253,6 +1272,8 @@ jobs:
     timeout-minutes: 15
     env:
       ORAS_VERSION: "1.3.4" # layout-v2 spec §0: ORAS 1.3.4 is the measured --platform-compatible version
+      # registry:2, the multi-platform index, by digest: the same bytes from either mirror the pull step tries.
+      REGISTRY_IMAGE: registry@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: install oras (pinned)
@@ -1263,9 +1284,26 @@ jobs:
           tar -xzf /tmp/oras.tar.gz -C /tmp/oras-install oras
           sudo mv /tmp/oras-install/oras /usr/local/bin/oras
           oras version
+      - name: pull registry:2 by digest (retried, then from a second mirror)
+        run: |
+          # Anonymous pulls are rate limited per source address, and hosted
+          # runners share addresses: ECR Public has answered "toomanyrequests:
+          # Data limit exceeded" here. Both mirrors serve Docker's official image
+          # unchanged, so the digest names the same bytes from either.
+          for src in public.ecr.aws/docker/library mirror.gcr.io/library; do
+            for attempt in 1 2 3; do
+              if docker pull --quiet "$src/$REGISTRY_IMAGE"; then
+                docker tag "$src/$REGISTRY_IMAGE" fixture-registry:pinned
+                exit 0
+              fi
+              sleep $((attempt * 5))
+            done
+          done
+          echo "registry:2 ($REGISTRY_IMAGE) could not be pulled from either mirror" >&2
+          exit 1
       - name: start a plain-HTTP registry:2 (no TLS/proxy needed for this job)
         run: |
-          docker run -d --name v1-preseed-registry -p 5000:5000 public.ecr.aws/docker/library/registry:2
+          docker run -d --name v1-preseed-registry -p 5000:5000 fixture-registry:pinned
           ok=
           for _ in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:5000/v2/ >/dev/null 2>&1; then ok=1; break; fi
