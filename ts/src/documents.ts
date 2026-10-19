@@ -18,7 +18,7 @@
  *      `<key>_b64` (standard base64 of the raw bytes, otherwise), and the
  *      decoder surfaces a `Buffer` either way. Both present is an
  *      `InternalError`; for a name, neither present is too. A list of names
- *      (`unknown_fields`, `unsupported_settings`, header names) holds `{name}`
+ *      (`unknown_fields`, a batch's `unsupported_settings`, `export_columns`, header names) holds `{name}`
  *      or `{name_b64}` objects, never a bare string. `value_b64` is a scalar
  *      String or FixedString value's raw bytes (rule 6), surfaced as `value`.
  *   4. A vocabulary fact (`Transform.lossy`, `Value.isStored`, a verdict's
@@ -40,15 +40,21 @@ import {
   declinedTierOf,
   type DefaultKind,
   defaultKindOf,
+  type DefaultSupport,
+  defaultSupportOf,
   filterOutcomeOf,
   type FilterOutcome,
   type MergeReason,
   mergeReasonOf,
   type Outcome,
   outcomeOf,
+  type Posture,
+  postureOf,
   type Reason,
   reasonLossy,
   reasonOf,
+  type RefusalSite,
+  refusalSiteOf,
   type Source,
   sourceIsStored,
   sourceOf,
@@ -98,8 +104,8 @@ export interface EngineCell {
  * INSERT writer produces, so the two never contradict each other.
  */
 export interface AtMergeEntry {
-  /** Indexes `engineRows`: the part's row, not the input body's. */
-  readonly row: number;
+  /** Indexes `engineRows`: the part's row, not the input body's (the document's `part_row`). */
+  readonly partRow: number;
   /** A `MergeReason` value; one the description does not list is its unknown(n), kept verbatim (rule r3). */
   readonly reason: MergeReason;
   /** The column a `ttl_column_reset` resets, as bytes (`column` or `column_b64`); `undefined` when the entry names none. */
@@ -137,19 +143,27 @@ export interface Computed {
 
 export interface RowResult {
   readonly outcome: Outcome;
+  /** The document's `code`: ClickHouse's own error code, 0 only on a success, and -2 (`CHS_CODE_DECLINED`) where this build declined the row. */
   readonly errCode: number;
   readonly errMsg: Buffer;
+  /** The decline's catalog id (`spec/abi-v2/declines/declines.json`), from `reason`; `undefined` when the document carries none, which it does exactly where `errCode` is -2. Key on it, never on `errMsg`. */
+  readonly reason: string | undefined;
+  /** Where a single-row result's refusal sits, from `refused_at`; `undefined` for an accepted or skipped row. The rows of a batch carry neither this nor `refusedRow`: the batch's own say where. */
+  readonly refusedAt: RefusalSite | undefined;
+  /** The row index of a `row` refusal, from `refused_row`; `undefined` when the document carries none. */
+  readonly refusedRow: number | undefined;
   /** Every entry of `cols`, in document order. */
   readonly columns: readonly Value[];
   /** The entries of `columns` whose source is stored, in order. */
   readonly values: readonly Value[];
   readonly transformed: readonly Transform[];
   readonly unknownFields: readonly Buffer[];
-  readonly unsupportedSettings: readonly Buffer[];
   readonly computed: readonly Computed[];
   /** Present only with an attached filter. */
   readonly verdict: Verdict | undefined;
   readonly verdictCode: number;
+  /** The catalog id of a declined verdict (`verdictCode` is -2), from `verdict_reason`; `undefined` when the document carries none. */
+  readonly verdictReason: string | undefined;
   readonly verdictErr: Buffer;
   readonly partitionId: Buffer | undefined;
   /** The bytes the reader consumed for this record. */
@@ -172,8 +186,14 @@ export interface Framing {
 
 export interface BatchResult {
   readonly outcome: Outcome;
+  /** The document's `code`, as `RowResult.errCode`. */
   readonly errCode: number;
   readonly errMsg: Buffer;
+  /** The catalog id of a declined batch (`errCode` is -2), from `reason`; `undefined` when the document carries none. */
+  readonly reason: string | undefined;
+  /** Where a refusal or decline sits, from `refused_at`; `undefined` for an accepted batch. A `row` one names its row in `refusedRow` (below `rowsRead`). */
+  readonly refusedAt: RefusalSite | undefined;
+  readonly refusedRow: number | undefined;
   readonly rows: readonly RowResult[];
   readonly rowsRead: number;
   readonly rowsSkipped: number;
@@ -191,10 +211,14 @@ export interface BatchResult {
   readonly atMerge: readonly AtMergeEntry[];
   /** The export buffer: present only for an export that ran (possibly empty); absent when none was asked for or it was declined (`exportDeclined`). */
   readonly payload: Buffer | undefined;
-  /** Each exported row's place in `payload`. */
-  readonly spans: readonly Span[] | undefined;
+  /** Each row's place in `payload`, from `row_spans`: one entry per `rows` entry, index-aligned, `null` for a row not exported (a skipped row, or a row a filter cut). `undefined` when absent, and always `undefined` when the export was declined. */
+  readonly spans: readonly (Span | null)[] | undefined;
+  /** The export's one column list, in the order every line carries its columns, from `export_columns` (name objects); `undefined` when the document carries none (no export ran). */
+  readonly exportColumns: readonly Buffer[] | undefined;
   /** Why an asked-for export was declined, as bytes (`export_declined` or `export_declined_b64`); empty when none was. */
   readonly exportDeclined: Buffer;
+  /** The catalog id of a declined export, from `export_declined_reason`; `undefined` when the export ran or none was asked for. */
+  readonly exportDeclinedReason: string | undefined;
   readonly rowsPassed: number;
   readonly rowsCut: number;
   readonly partitionCount: number | undefined;
@@ -206,13 +230,20 @@ export interface BatchResult {
 export interface FilterRowError {
   readonly row: number;
   readonly code: number;
+  /** The catalog id where `code` is -2, from `reason`; `undefined` when the entry carries none. */
+  readonly reason: string | undefined;
   readonly msg: Buffer;
 }
 
 export interface FilterResult {
   readonly outcome: FilterOutcome;
+  /** The document's `code`, as `RowResult.errCode`. */
   readonly errCode: number;
   readonly errMsg: Buffer;
+  /** `reason`, `refusedAt` and `refusedRow` are the batch's (see `BatchResult`): where a refused or declined evaluation sits, and its catalog id. */
+  readonly reason: string | undefined;
+  readonly refusedAt: RefusalSite | undefined;
+  readonly refusedRow: number | undefined;
   readonly rowsRead: number;
   readonly unsupportedSettings: readonly Buffer[];
   /** One verdict per row, each read through the generated table. A verdict counts only when `outcome` is `ok`; otherwise treat every verdict as `decline`, whatever the verdict string holds. Under `ok`, `error` and `decline` are never answers. */
@@ -226,6 +257,12 @@ export interface Column {
   readonly type: Buffer;
   readonly defaultKind: DefaultKind;
   readonly defaultExpr: Buffer;
+  /** What this build does with the column's DEFAULT, from `default_support` (reserved: `undefined` when the build reports none). */
+  readonly defaultSupport: DefaultSupport | undefined;
+  /** The catalog id behind a `declined` `defaultSupport`, from `default_support_reason`; `undefined` when absent. */
+  readonly defaultSupportReason: string | undefined;
+  /** The columns the column's expression reads, from `reads` (name objects; reserved: `undefined` when the build reports none). */
+  readonly reads: readonly Buffer[] | undefined;
 }
 
 /** One setting the schema compiles under that this build's filters do not honor in a WHERE: an entry of the schema description's `filter_declined_settings` (ABI v2). */
@@ -245,8 +282,8 @@ export interface DeclinedSetting {
 export interface SchemaServer {
   /** The zone the schema's types bind: the profile's, else the image zone. */
   readonly timezone: string;
-  /** The server's settings as the profile gave them; `{}` when it gave none. */
-  readonly settings: Readonly<Record<string, string>> | undefined;
+  /** The server's settings as the profile gave them; `{}` when it gave none. A value the document carries as `{"b64": ...}` (bytes that are not UTF-8) is a `Buffer` of those bytes; any other is its text. */
+  readonly settings: Readonly<Record<string, string | Buffer>> | undefined;
   /** The server's macro set: `undefined` exactly when the profile carried no macros (unknown); present, even `{}`, is the complete set. */
   readonly macros: Readonly<Record<string, string>> | undefined;
 }
@@ -259,6 +296,8 @@ export interface SchemaReplicated {
 
 export interface SchemaDescription {
   readonly columns: readonly Column[];
+  /** How the schema's statement was compiled, from `posture`, which the document carries only for `load`: `undefined` is `create`. */
+  readonly posture: Posture | undefined;
   /** The settings the schema compiles under that this build's filters do not honor in a WHERE, over every layer known at schema compile (the defaults `setup` set, the server profile and the schema's own settings); empty when it lists none. One entry per name, at the highest layer that sets it, ordered by layer and then by name bytes, as the library wrote it. A schema that lists any is one `compileFilter` declines (`UnsupportedError`), and a consumer that streams rows refuses such a tenant (`spec/abi-v2/where-settings/README.md`). */
   readonly filterDeclinedSettings: readonly DeclinedSetting[];
   /** The server the schema was compiled on: `undefined` exactly when it was compiled without one. */
@@ -446,13 +485,19 @@ function engineCellOf(doc: string, v: unknown): EngineCell {
   return { column: nameOf(doc, o, 'name'), text: bytesOr(doc, o, 'stored'), null: nullFlag, value: bytesField(doc, o, 'value') };
 }
 
+/** The refusal members a row, a batch and a filter result share: `reason`, `refused_at` and `refused_row`. An unlisted site is its unknown(n): kept, never a failure (r3). */
+function refusalOf(doc: string, o: Obj): { reason: string | undefined; refusedAt: RefusalSite | undefined; refusedRow: number | undefined } {
+  const site = optStr(doc, o, 'refused_at');
+  return { reason: optStr(doc, o, 'reason'), refusedAt: site === undefined ? undefined : refusalSiteOf(site), refusedRow: optInt(doc, o, 'refused_row') };
+}
+
 /** One entry of `at_merge`. An unlisted reason is its unknown(n): kept, never a failure (r3). */
 function atMergeOf(doc: string, v: unknown): AtMergeEntry {
   const o = asObject(doc, 'at_merge[]', v);
   const reason: MergeReason = mergeReasonOf(strOr(doc, o, 'reason', ''));
   const rowsRaw = o.input_rows;
   return {
-    row: intOr(doc, o, 'row', 0),
+    partRow: intOr(doc, o, 'part_row', 0),
     reason,
     column: bytesField(doc, o, 'column'),
     stored: bytesField(doc, o, 'stored'),
@@ -525,14 +570,15 @@ function rowOf(doc: string, o: Obj): RowResult {
     outcome,
     errCode: intOr(doc, o, 'code', 0),
     errMsg: bytesOr(doc, o, 'err'),
+    ...refusalOf(doc, o),
     columns,
     values: columns.filter((c) => c.isStored),
     transformed: listOf(doc, o, 'transformed').map((t) => transformOf(doc, t)),
     unknownFields: bytesListOf(doc, o, 'unknown_fields'),
-    unsupportedSettings: bytesListOf(doc, o, 'unsupported_settings'),
     computed: listOf(doc, o, 'computed').map((c) => computedOf(doc, c)),
     verdict,
     verdictCode: intOr(doc, o, 'verdict_code', 0),
+    verdictReason: optStr(doc, o, 'verdict_reason'),
     verdictErr: bytesOr(doc, o, 'verdict_err'),
     partitionId,
     inputSpan: spanRaw === undefined ? undefined : spanOf(doc, 'input_span', spanRaw),
@@ -575,6 +621,7 @@ export function decodeBatch(bytes: Uint8Array, payload: Buffer | undefined): Bat
   const spansRaw = o.row_spans;
   const engineRaw = o.engine_rows;
   const exportDeclined = bytesOr(doc, o, 'export_declined');
+  const exportColumnsRaw = o.export_columns;
   // A declined export has no payload and no spans, whatever buffer the call returned: the library
   // returns a NULL out_export for it (builds up to 20261011.105019 returned a zero-length buffer), and
   // the document's export_declined decides, never the buffer.
@@ -583,6 +630,7 @@ export function decodeBatch(bytes: Uint8Array, payload: Buffer | undefined): Bat
     outcome,
     errCode: intOr(doc, o, 'code', 0),
     errMsg: bytesOr(doc, o, 'err'),
+    ...refusalOf(doc, o),
     rows: listOf(doc, o, 'rows').map((r) => rowOf(doc, asObject(doc, 'rows[]', r))),
     rowsRead: intOr(doc, o, 'rows_read', 0),
     rowsSkipped: intOr(doc, o, 'rows_skipped', 0),
@@ -593,8 +641,13 @@ export function decodeBatch(bytes: Uint8Array, payload: Buffer | undefined): Bat
         ? undefined
         : asArray(doc, 'engine_rows', engineRaw).map((row) => asArray(doc, 'engine_rows[]', row).map((c) => engineCellOf(doc, c))),
     payload: declined ? undefined : payload,
-    spans: spansRaw === undefined || declined ? undefined : asArray(doc, 'row_spans', spansRaw).map((s) => spanOf(doc, 'row_spans[]', s)),
+    spans:
+      spansRaw === undefined || declined
+        ? undefined
+        : asArray(doc, 'row_spans', spansRaw).map((s) => (s === null ? null : spanOf(doc, 'row_spans[]', s))),
+    exportColumns: exportColumnsRaw === undefined || declined ? undefined : bytesListOf(doc, o, 'export_columns'),
     exportDeclined,
+    exportDeclinedReason: optStr(doc, o, 'export_declined_reason'),
     rowsPassed: intOr(doc, o, 'rows_passed', 0),
     rowsCut: intOr(doc, o, 'rows_cut', 0),
     partitionCount: optInt(doc, o, 'partition_count'),
@@ -618,12 +671,13 @@ export function decodeFilterResult(bytes: Uint8Array): FilterResult {
     outcome,
     errCode: intOr(doc, o, 'code', 0),
     errMsg: bytesOr(doc, o, 'err'),
+    ...refusalOf(doc, o),
     rowsRead: intOr(doc, o, 'rows_read', 0),
     unsupportedSettings: bytesListOf(doc, o, 'unsupported_settings'),
     verdicts,
     errors: listOf(doc, o, 'errors').map((e) => {
       const eo = asObject(doc, 'errors[]', e);
-      return { row: intOr(doc, eo, 'row', 0), code: intOr(doc, eo, 'code', 0), msg: bytesOr(doc, eo, 'err') };
+      return { row: intOr(doc, eo, 'row', 0), code: intOr(doc, eo, 'code', 0), reason: optStr(doc, eo, 'reason'), msg: bytesOr(doc, eo, 'err') };
     }),
   };
 }
@@ -641,7 +695,7 @@ export function decodeSchemaDescription(bytes: Uint8Array): SchemaDescription {
     const so = asObject(doc, '$.server', serverValue);
     server = {
       timezone: strOr(doc, so, 'timezone', ''),
-      settings: stringMapOf(doc, so, 'settings', '$.server'),
+      settings: byteValueMapOf(doc, so, 'settings', '$.server'),
       macros: stringMapOf(doc, so, 'macros', '$.server'),
     };
   }
@@ -650,7 +704,9 @@ export function decodeSchemaDescription(bytes: Uint8Array): SchemaDescription {
     const ro = asObject(doc, '$.replicated', replicatedValue);
     replicated = { zookeeperPath: bytesOr(doc, ro, 'zookeeper_path'), replicaName: bytesOr(doc, ro, 'replica_name') };
   }
+  const posture = optStr(doc, o, 'posture');
   return {
+    posture: posture === undefined ? undefined : postureOf(posture),
     server,
     replicated,
     // Over every layer known at schema compile, with or without a server.
@@ -659,7 +715,17 @@ export function decodeSchemaDescription(bytes: Uint8Array): SchemaDescription {
       const co = asObject(doc, 'columns[]', c);
       // An unlisted default_kind is its unknown(n): kept, never a failure (r3).
       const defaultKind = defaultKindOf(strOr(doc, co, 'default_kind', ''));
-      return { name: nameOf(doc, co, 'name'), type: bytesOr(doc, co, 'type'), defaultKind, defaultExpr: bytesOr(doc, co, 'default_expression') };
+      // default_support is reserved: absent is not reported, and an unlisted value is its unknown(n) (r3).
+      const support = optStr(doc, co, 'default_support');
+      return {
+        name: nameOf(doc, co, 'name'),
+        type: bytesOr(doc, co, 'type'),
+        defaultKind,
+        defaultExpr: bytesOr(doc, co, 'default_expression'),
+        defaultSupport: support === undefined ? undefined : defaultSupportOf(support),
+        defaultSupportReason: optStr(doc, co, 'default_support_reason'),
+        reads: co.reads === undefined || co.reads === null ? undefined : bytesListOf(doc, co, 'reads'),
+      };
     }),
   };
 }
@@ -687,6 +753,31 @@ function stringMapOf(doc: string, o: Obj, key: string, path: string): Readonly<R
   for (const [k, e] of Object.entries(m)) {
     if (typeof e !== 'string') bad(doc, `${path}.${key}.${k}`, 'a JSON string', e);
     Object.defineProperty(out, k, { value: e, enumerable: true, writable: true, configurable: true });
+  }
+  return out;
+}
+
+/**
+ * An object whose values are bytes: a plain JSON string is its text, and the object form `{"b64": "<standard base64>"}`
+ * (`json_object_byte_values`) is a `Buffer` of the decoded bytes. `undefined` when absent, an object (even an empty one)
+ * when present. The object form carries the `b64` member and nothing else.
+ */
+function byteValueMapOf(doc: string, o: Obj, key: string, path: string): Readonly<Record<string, string | Buffer>> | undefined {
+  const v = o[key];
+  if (v === undefined || v === null) return undefined;
+  const m = asObject(doc, `${path}.${key}`, v);
+  const out: Record<string, string | Buffer> = {};
+  for (const [k, e] of Object.entries(m)) {
+    let value: string | Buffer;
+    if (typeof e === 'string') {
+      value = e;
+    } else {
+      const eo = asObject(doc, `${path}.${key}.${k}`, e);
+      const b64 = eo.b64;
+      if (typeof b64 !== 'string' || Object.keys(eo).length !== 1) bad(doc, `${path}.${key}.${k}`, 'a JSON string or an object with one member, b64', e);
+      value = decodeB64(doc, `${path}.${key}.${k}.b64`, b64);
+    }
+    Object.defineProperty(out, k, { value, enumerable: true, writable: true, configurable: true });
   }
   return out;
 }

@@ -10,10 +10,19 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { UsageError } from '../src/abi2/errors.js';
 import { ArtifactMissingError } from '../src/ocifetch/errors.js';
 import { Registry } from '../src/registry.js';
-import { bytesIn, encodeColumns, encodeParams, encodeSettings } from '../src/settings.js';
+import {
+  bytesIn,
+  encodeColumns,
+  encodeFilterOptions,
+  encodeInsertOptions,
+  encodeParams,
+  encodeSchemaOptions,
+  encodeServerProfile,
+  encodeSettings,
+} from '../src/settings.js';
 import { commitSetup, latchSetup, resetSetupForTests, settleFailedOpen, setup, setupGeneration } from '../src/setup.js';
 
-describe('settings values are strings, and only strings', () => {
+describe('settings values are strings or bytes, and nothing else', () => {
   it('serializes a map of strings with the stock encoder, verbatim', () => {
     expect(encodeSettings({ input_format_defaults_for_omitted_fields: '1', a: 'x' }, undefined).toString()).toBe(
       '{"input_format_defaults_for_omitted_fields":"1","a":"x"}',
@@ -30,6 +39,102 @@ describe('settings values are strings, and only strings', () => {
     expect(() => encodeSettings({ a: true as unknown as string }, undefined)).toThrow(TypeError);
     expect(() => encodeSettings({ a: 1 as unknown as string }, undefined)).toThrow(TypeError);
     expect(() => encodeParams({ p: 1 as unknown as string })).toThrow(TypeError);
+    expect(() => encodeServerProfile({ settings: { a: 1 as unknown as string } })).toThrow(TypeError);
+  });
+});
+
+describe('a value that is not valid UTF-8 is the {"b64": ...} object form (ABI v2, json_object_byte_values)', () => {
+  const bad = new Uint8Array([0xff, 0xfe, 0x00]);
+  const b64 = Buffer.from(bad).toString('base64');
+
+  it('writes a Uint8Array that is not UTF-8 as {"b64": standard padded base64}, and one that is UTF-8 as a plain string', () => {
+    expect(JSON.parse(encodeSettings({ a: bad, b: new Uint8Array([0x78, 0x79]), c: 'z' }, undefined).toString())).toEqual({ a: { b64 }, b: 'xy', c: 'z' });
+    expect(JSON.parse(encodeParams({ p: bad }).toString())).toEqual({ p: { b64 } });
+    expect(JSON.parse(encodeSettings({ a: new Uint8Array([0x61, 0x62, 0x63]) }, undefined).toString())).toEqual({ a: 'abc' });
+  });
+
+  it('keeps a leading U+FEFF (EF BB BF) in a valid-UTF-8 value: the decoder never drops a byte order mark', () => {
+    expect(JSON.parse(encodeSettings({ a: new Uint8Array([0xef, 0xbb, 0xbf, 0x78]) }, undefined).toString())).toEqual({ a: '\ufeffx' });
+  });
+
+  it('carries a per-call zone that is not UTF-8 in the object form too, and the library validates it', () => {
+    expect(JSON.parse(encodeSettings(undefined, bad).toString())).toEqual({ session_timezone: { b64 } });
+    expect(() => encodeSettings({ session_timezone: 'UTC' }, bad)).toThrow(UsageError);
+  });
+
+  it('writes a server profile setting value in the object form, and still refuses a non-UTF-8 key, macro or zone', () => {
+    expect(JSON.parse(encodeServerProfile({ timezone: 'UTC', settings: { s: bad, t: 'v' }, macros: { shard: '01' } }).toString())).toEqual({
+      timezone: 'UTC',
+      settings: { s: { b64 }, t: 'v' },
+      macros: { shard: '01' },
+    });
+    expect(() => encodeServerProfile({ settings: { ['\udcff']: 'v' } })).toThrow(/settings: the key "\\udcff" is not valid UTF-8/);
+    expect(() => encodeServerProfile({ macros: { m: '\udcff' } })).toThrow(UsageError);
+    expect(() => encodeServerProfile({ timezone: '\udcff' })).toThrow(UsageError);
+  });
+
+  it('the process defaults take the same form', () => {
+    resetSetupForTests();
+    setup({ defaults: { a: bad, b: '1' } });
+    expect(commitSetup().defaults).toEqual({ a: { b64 }, b: '1' });
+    expect(() => setup({ defaults: { b: '1', a: bad } })).not.toThrow(); // the same bytes, in any order
+    expect(() => setup({ defaults: { a: new Uint8Array([0xff]), b: '1' } })).toThrow(UsageError);
+    resetSetupForTests();
+  });
+});
+
+describe('the options documents (rule r1)', () => {
+  const doc = (b: Buffer) => JSON.parse(b.toString());
+
+  it('sends nothing at all (length 0) when no member is set', () => {
+    expect(encodeInsertOptions({})).toHaveLength(0);
+    expect(encodeFilterOptions({})).toHaveLength(0);
+    expect(encodeSchemaOptions({})).toHaveLength(0);
+  });
+
+  it('builds insert_options from the members set: name objects, column defaults in both forms, the two enums', () => {
+    expect(
+      doc(
+        encodeInsertOptions({
+          insertableColumns: ['a', new Uint8Array([0xff])],
+          columnDefaults: [
+            { name: 'a', value: '7' },
+            { name: new Uint8Array([0xfe]), value: new Uint8Array([0xff, 0x00]) },
+          ],
+          verdictBasis: 'export',
+          deferDefaults: 'server',
+        }),
+      ),
+    ).toEqual({
+      insertable_columns: [{ name: 'a' }, { name_b64: '/w==' }],
+      column_defaults: [
+        { name: 'a', value: '7' },
+        { name_b64: '/g==', value_b64: '/wA=' },
+      ],
+      verdict_basis: 'export',
+      defer_defaults: 'server',
+    });
+  });
+
+  it('an absent list leaves the member out, and a present empty list is sent as []', () => {
+    expect(doc(encodeInsertOptions({ insertableColumns: [], columnDefaults: [] }))).toEqual({ insertable_columns: [], column_defaults: [] });
+    expect(encodeInsertOptions({ insertableColumns: undefined })).toHaveLength(0);
+  });
+
+  it('passes a member it has no name for through verbatim as JSON text, and a repeated key keeps the last value', () => {
+    expect(encodeInsertOptions({ insertOptionsExtra: { x_future: '{"a":[1,2]}' } }).toString()).toBe('{"x_future":{"a":[1,2]}}');
+    expect(doc(encodeInsertOptions({ verdictBasis: 'input', insertOptionsExtra: { verdict_basis: '"export"' } }))).toEqual({ verdict_basis: 'export' });
+    expect(() => encodeInsertOptions({ insertOptionsExtra: { x: '{not json' } })).toThrow(UsageError);
+    expect(() => encodeFilterOptions({ filterOptionsExtra: { x: '' } })).toThrow(UsageError);
+  });
+
+  it('builds filter_options and schema_options from their members', () => {
+    expect(doc(encodeFilterOptions({ paramEncoding: 'raw', filterOptionsExtra: { y: '1' } }))).toEqual({ param_encoding: 'raw', y: 1 });
+    expect(doc(encodeSchemaOptions({ posture: 'load', schemaOptionsExtra: { z: 'null' } }))).toEqual({ posture: 'load', z: null });
+  });
+
+  it('validates no member: an unlisted value goes to the library, which refuses it', () => {
+    expect(doc(encodeInsertOptions({ verdictBasis: 'sideways' as never }))).toEqual({ verdict_basis: 'sideways' });
   });
 });
 
@@ -50,7 +155,7 @@ describe('a key or value that is not valid UTF-8 is refused, never replaced', ()
     expect(message).toContain('settings');
     expect(message).toContain('the value for key "k"');
     expect(message).toContain('not valid UTF-8');
-    expect(message).toContain("unhex('<hex>')");
+    expect(message).toContain('Uint8Array');
   });
 
   it('refuses a settings key, a query-parameter key or value, and a zone, each naming its input', () => {

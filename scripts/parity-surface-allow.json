@@ -306,9 +306,40 @@
         "CallErrorFields.chCode",
         "CallErrorFields.chName",
         "CallErrorFields.messageBytes",
-        "CallErrorFields.column"
+        "CallErrorFields.column",
+        "CallErrorFields.reason"
       ],
-      "reason": "The interface of §4's five call-error fields, which CallError implements and its constructors take: a type-level name for the same fields, so it adds no field. The other bindings spell the fields once, on CallError (Go's struct, Python's class, Rust's struct)."
+      "reason": "The interface of §4's six call-error fields, which CallError implements and its constructors take: a type-level name for the same fields, so it adds no field. The other bindings spell the fields once, on CallError (Go's struct, Python's class, Rust's struct)."
+    },
+    {
+      "binding": "ts",
+      "kind": "extra",
+      "names": [
+        "VerdictBasis",
+        "VerdictBasis.Input",
+        "VerdictBasis.Export",
+        "DeferDefaults",
+        "DeferDefaults.None",
+        "DeferDefaults.Server",
+        "ParamEncoding",
+        "ParamEncoding.Escaped",
+        "ParamEncoding.Raw",
+        "ColumnDefault",
+        "ColumnDefault.name",
+        "ColumnDefault.value",
+        "SettingValue"
+      ],
+      "reason": "§2's options-documents table names the three option fields that take a closed set (verdictBasis, deferDefaults, paramEncoding) and the column_defaults entry, and Go gives each set a named type (VerdictBasis, DeferDefaults, ParamEncoding, ColumnDefault), which the doc's TypeScript column does not spell. TypeScript spells the three sets as const objects with a type of the same name (the language's idiom for a vocabulary, as Format is), ColumnDefault as the interface of an entry, and SettingValue as the type of one settings or query-parameter value (a string, or the bytes of a value that is not UTF-8, which is sent in the {\"b64\": ...} object form). The ABI v2 dev surface document lands with the other dev bindings (public issue #511), and this entry goes with it.",
+      "issue": 511
+    },
+    {
+      "binding": "ts",
+      "kind": "missing",
+      "names": [
+        "CODE_DECLINED"
+      ],
+      "reason": "§3's 'the decline code' row names CHS_CODE_DECLINED (-2) as CODE_DECLINED in TypeScript. The description's constants are emitted into the vocabulary file by the generator, which does so for Go only (CodeDeclined), so TypeScript has no constant yet and a caller compares a result's errCode with -2. The fix is a generator change (scripts/abi-v1/emit), not a hand-written declaration, and this entry goes with it.",
+      "issue": 511
     },
     {
       "binding": "ts",
@@ -387,6 +418,9 @@
         "declinedTierKnown",
         "declinedLayerKnown",
         "discoverQueryParamKnown",
+        "refusalSiteKnown",
+        "postureKnown",
+        "defaultSupportKnown",
         "Unknown"
       ],
       "issue": 511,
