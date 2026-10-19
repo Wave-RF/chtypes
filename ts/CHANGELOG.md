@@ -71,6 +71,7 @@ The four bindings in this repository are released together and give one answer, 
 - **Enforcement gate lifted** for `26.7` on `darwin-arm64`.
 - **Enforcement gate lifted** for `26.8` on `darwin-arm64`.
 - **Enforcement gate lifted** for `26.9` on `darwin-arm64`.
+- `docs/limitations.md` is re-checked against artifact build `20261012.142240` (v2-dev.13), the library half measured on that build: functions that need a server, in a column expression, and a body the server may read serially or in parallel under a non-zero error budget are listed under "Declined by design"; a stored table created under `flatten_nested = 0` and compiled without that setting is a new known divergence, with its register twin in `docs/divergences.json`; the known divergence for a column expression that calls a function needing a server is retired, since that build declines those schemas (on 26.8 and 26.9 the `AI*` and `ai*` functions compile, as the page says); and the `lossy` raw-NUL TSV gap is marked fixed on that build and still present in the 1.0 libraries. `docs/guides/filters.md` gains a section on subcolumn filters and a JSON value typed by its batch.
 
 ### Removed
 

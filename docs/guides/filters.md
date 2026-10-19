@@ -128,6 +128,12 @@ The call itself has its own outcome, separate from the per-row verdicts. On anyt
 
 Clock reads are refused at **compile** time, as a decline: a predicate whose truth depends on when you ask it is not a predicate this surface will answer.
 
+## Subcolumns, and a JSON value typed by its batch
+
+A filter can read a subcolumn: a `JSON` path such as `j.a`, a `Dynamic` or `Variant` subcolumn, a `Tuple` element, `n.a` of an `Array(Tuple(…))`, a `Map`'s `keys`, `values` or `size0`, `x.null`, or `arr.size0`. On build `20261012.142240` (v2-dev.13) each of these answers `t` or `f` per row, through `rows` and through a parsed block, on all four lines (measured by this repository through the Python SDK on darwin-arm64); the artifact producer measured these shapes agreeing with a server on a pre-release build of the change. One differs only in its code: `n.a.size0` of an `Array(Tuple(…))` is refused when the filter is created, with 47 (`UNKNOWN_IDENTIFIER`), where a server resolves it and refuses every row with 10 (`NOT_FOUND_COLUMN_IN_BLOCK`). Both refuse; treat the refusal as a refusal.
+
+A `JSON` value is read as the batch stores it, and the rows before it can type it. With the rows `{"a":[[1]]}` then `{"a":[null]}` in a `JSON` column `j`, the second row's `dynamicType(j.a)` is `Array(Array(Nullable(Int64)))` inside that batch and `Array(Nullable(String))` when the row is evaluated alone (measured on the same build, lines and platform). The artifact producer measured the batch answer agreeing with a server's `WHERE` over the inserted table. So a verdict for one row alone can differ from its verdict inside a batch.
+
 ## Query parameters — the only safe way to put a value in an expression
 
 An expression may carry `{name:Type}` query parameters, bound as a map (a slice of pairs in Rust) of **string** values, exactly as the server's own parameter channels carry them.

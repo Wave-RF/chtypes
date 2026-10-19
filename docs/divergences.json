@@ -45,9 +45,9 @@
       "checks": []
     },
     {
-      "id": "create-default-needs-server-function-over-accept",
-      "heading": "A column default expression that calls a function needing a server compiles here; a stock server refuses the CREATE",
-      "note": "no machine check is expressible in this register's schema: the case is decided at schema creation, and a check asserts the outcome of a payload driven through a schema that compiled, not the schema-create call's own verdict. Measured by the artifact producer on builds 20261009.145808 and 20261010.180314. Retirement: on the artifact producer's measured re-run against the build that ships the fix, never on CI.",
+      "id": "stored-table-flatten-nested-0-over-accept",
+      "heading": "A stored table created under `flatten_nested = 0`, compiled from its `create_table_query` without that setting, accepts a row the server rejects",
+      "note": "no machine check is expressible in this register's schema: the divergence is between a schema compiled without the settings a server-held table was created under and that server's INSERT, and its retirement signal must come from the artifact producer's re-run against a real server (the server half is measured on 26.8 linux-amd64 only). Measured: server half by the artifact producer on build 20261009.145808; library half on build 20261012.142240 by this repository (Python SDK, darwin-arm64, all four lines). Retirement: on the artifact producer's measured re-run against the build that ships a fix, never on CI.",
       "checks": []
     }
   ]
