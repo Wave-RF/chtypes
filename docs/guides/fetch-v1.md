@@ -121,6 +121,7 @@ The registry's operator answers every route of a retired repository with `410 Go
 - **Scope.** A `410` to ANY request the fetch layer makes to a registry: `tags/list`, a manifest by tag, by the dev channel's alias (§3) or by digest, a blob, the referrers API and its fallback tag (§4), including a `410` reached after a redirect.
 - **Permanent.** It is never retried and never a reason to try the next base, the referrers fallback tag, the next signature candidate, or the plain tag after an alias. One request, then stop.
 - **The code** is `CHTYPES_SOURCE_RETIRED` (exit status 10, §8): Go `CodeSourceRetired` and `ErrSourceRetired`, Python and TypeScript `SourceRetiredError`, Rust `Error::SourceRetired`. Every CLI prints it as it prints every other code and exits 10.
+- **A revoked tag.** Under generation 2, a `410` whose body's `errors[0].detail.revoked` is an object is `CHTYPES_ARTIFACT_REVOKED` (exit status 11) instead, just as permanent, and every other `410` is a retired repository as above ("Generation 2 after the lock", [Build-level revocation](#build-level-revocation)). The v1 contract reads every `410` as retired.
 - **The message** names the URL that answered and carries the registry's own message, made safe to print: `<url> answered 410 Gone: the repository is retired; the registry says: <message>`, or without the last clause when there is no message. Nothing stands in for a missing one.
 - **The registry's message.** At most `limits.retired_body_bytes` of the body are read; a body that fails part way is no body. When what was read is UTF-8 JSON and `errors[0].message` is a string, that string is the message: every code point in U+0000-U+001F, U+007F-U+009F, U+200E, U+200F, U+202A-U+202E and U+2066-U+2069 is removed, then the rest is cut to `limits.retired_message_code_points` code points (code points, never UTF-16 units or bytes), with `…` (U+2026) appended when it was cut. Nothing else is changed: no trimming, rewording, translation or quoting. Anything else (no body, a body that is not UTF-8 or not JSON, a byte order mark, `NaN`, a lone surrogate escape, a `message` that is not a string or is empty once sanitized) is no message, and the error is still `CHTYPES_SOURCE_RETIRED`. A repeated key reads as its last value. One function per binding does this, and `tests/fixtures/retired-message/cases.json` is the table every binding's unit test reads, so the four give one answer.
 - **Tests.** The `retired-410-*` and `list-tags-retired-410` cases (§10) pin it in every binding against the fixture server, and the `v1-staging` job's retired table (§10, "The staging run") against a real retired repository.
@@ -137,7 +138,7 @@ An index, manifest or layer whose media type the fetch layer does not recognize 
 
 **The dev channel's alias step.** A 2.0.0-dev SDK (the ABI v2 dev channel, `spec/abi-v2/docs.md` rules r5 and r6), and no other channel, resolves a version request (a two-, three- or four-part spelling; an arbitrary tag has no alias) through an alias first. Beside every tag a dev publish writes, the dev registry serves `<tag>--fp-<hex>`, where `<hex>` is an ABI fingerprint as 64 lowercase hex characters without its `sha256:` prefix, and the alias names the newest build of that tag whose `abi_fingerprint` is that fingerprint. The SDK `GET`s `manifests/<tag>--fp-<hex>` with its OWN fingerprint, the binding's generated `CHS_ABI_FINGERPRINT` (for `26.9`, a 73-character tag), before `manifests/<tag>`:
 
-- **a 404 on every base** (the registry's `MANIFEST_UNKNOWN`, for a fingerprint it has no build of) falls back to `manifests/<tag>`, exactly as if there were no alias step, except that a tag naming a build of another fingerprint is refused (below);
+- **a 404 on every base** (the registry's `MANIFEST_UNKNOWN`, for a fingerprint it has no build of, or none that is not revoked: [Build-level revocation](#build-level-revocation)) falls back to `manifests/<tag>`, exactly as if there were no alias step, except that a tag naming a build of another fingerprint is refused (below);
 - **any other failure** of the alias request, on any base (a 5xx or a transport error once the retry table is spent, a timeout, a 401 or a 403), is that request's error, with the code the tag would get for it, and the tag is NOT requested: a transient fault must never route a request to the tag, which may name a build of a newer fingerprint. Bases are tried in order as for any tag (§2), so an alias that one base answers 404 and another 200 is that 200. An alias that answers `410` is a retired repository (§2): `CHTYPES_SOURCE_RETIRED` at once, with no other base and never a fallback to the tag;
 - **a 200** is the answer, even when its index has no manifest for the requested platform: that is `CHTYPES_ARTIFACT_UNPUBLISHED`, as from the tag, and the tag is not tried, because it names another fingerprint, which this SDK would refuse at load.
 
@@ -156,7 +157,8 @@ Each platform manifest's signature is one or more **Sigstore bundle v0.3** refer
 **A manifest can carry several referrers of the signature artifactType at once** — a key rotation adds a **second** bundle rather than a second signature inside one envelope (§0 of the delivery side's design) — and a manifest also carries a separate goldens referrer (one per platform manifest, D7) with its own artifactType. The fetch layer therefore:
 
 - always filters referrers by `artifactType` itself, never assuming a referrers listing holds only one kind of object;
-- accepts the manifest's signature as soon as **any** referrer of the signature artifactType verifies under a trusted key — it does not require every bundle present to verify, and it does not stop at the first bundle that fails to.
+- accepts the manifest's signature as soon as **any** referrer of the signature artifactType verifies under a trusted key — it does not require every bundle present to verify, and it does not stop at the first bundle that fails to;
+- never takes a revocation referrer (its own artifactType) for a signature. Under generation 2 the listing that names the signature is also where a build's revocations are read, at no extra listing request ([Build-level revocation](#build-level-revocation)).
 
 Verifying one bundle:
 
@@ -194,9 +196,9 @@ Every one of the checks above runs **in this order**, and a failure at any step 
 `chtypes.lock`, schema 3 (`spec/fetch-v1/schema/lock3.schema.json`), replaces v0's schema 1 and 2 outright — **a v0 lock is refused** (`CHTYPES_ARTIFACT_PINNED`, naming re-lock), never silently reinterpreted. Per declared platform, it records the request, the exact resolved version and build, and the **platform manifest, layer and bundle digests** — never a hostname, so a lock is mirror-portable. The **index digest is informational only**: under option (a) of the delivery side's design the index is computed by the Worker, not stored, so a by-digest GET of it is not guaranteed to be served, and `--frozen` never fetches it.
 
 - `fetch --lock` resolves normally (§3–§4) and then writes the lock.
-- `--frozen` **skips resolution entirely**: it fetches the platform manifest, bundle and layer by digest from any configured base, verifies them exactly as a normal fetch would (§4–§5), and refuses (`CHTYPES_ARTIFACT_PINNED`) if the lock names no entry for the requested platform, or the lock itself fails schema validation. A tree with **no tags, no referrers API and no `tags/list`** still succeeds under `--frozen` — every request it makes is by digest (the `frozen-no-discovery` case).
-- **A build already installed under exactly the pin is used as it is, with zero requests** (public issues #414 and #487). Before any request, `--frozen` looks for `unpacked/sha256/<pinned manifest>/verified.json`, in the cache and then each system directory, and answers from it when the record is for the requested platform and records exactly the pinned manifest, layer and bundle digests. A missing record, or one that differs in any of the three, falls through to the by-digest fetch and verification above. The `frozen-warm-cache-zero-requests` case asserts `requests.max: 0`.
-- **`--frozen --offline` verifies the installed build against the lock with zero network.** It makes the same lookup and never falls through to a fetch. It never answers with a different installed build that merely satisfies the request. The outcomes:
+- `--frozen` **skips resolution entirely**: it fetches the platform manifest, bundle and layer by digest from any configured base, verifies them exactly as a normal fetch would (§4–§5), under generation 2 reads one referrers listing for a revocation before the layer ([Build-level revocation](#build-level-revocation)), and refuses (`CHTYPES_ARTIFACT_PINNED`) if the lock names no entry for the requested platform, or the lock itself fails schema validation. A tree with **no tags, no referrers API and no `tags/list`** still succeeds under `--frozen` — every request it makes is by digest (the `frozen-no-discovery` case).
+- **A build already installed under exactly the pin is used as it is, with zero requests** (public issues #414 and #487) under the v1 contract, and **with exactly one request, the revocation listing,** under generation 2 ([Build-level revocation](#build-level-revocation)): the deployments that pin are the ones a revocation exists for, and they mostly start warm. Before any other request, `--frozen` looks for `unpacked/sha256/<pinned manifest>/verified.json`, in the cache and then each system directory, and answers from it when the record is for the requested platform and records exactly the pinned manifest, layer and bundle digests. A missing record, or one that differs in any of the three, falls through to the by-digest fetch and verification above. The `frozen-warm-cache-zero-requests` case asserts `requests.max: 0` in the fetch-v1 corpus and `requests.max: 1` in the fetch-v2 one; zero network keeps its own spelling, `--frozen --offline`, below.
+- **`--frozen --offline` verifies the installed build against the lock with zero network.** It makes the same lookup and never falls through to a fetch. Under generation 2 a revocation stored in the pinned build's entry still refuses it (`CHTYPES_ARTIFACT_REVOKED`). It never answers with a different installed build that merely satisfies the request. The outcomes:
 
   | situation                                                                                                                      | code                       |
   | ------------------------------------------------------------------------------------------------------------------------------ | -------------------------- |
@@ -213,7 +215,7 @@ Every one of the checks above runs **in this order**, and a failure at any step 
 
 <!-- BEGIN GENERATED: fetch-v1 constants -->
 
-Generated from `spec/fetch-v1/constants.json` (sha256:`82afa8d6cba96c10b5945c6f7c1c8360a504cc8ac6231e74017cc6c20b908df6`) by `scripts/fetch-v1/gen-constants.py`; do not hand-edit between the markers. Covers this guide's §7 and §8, plus a quick reference for the media types, predicate types and default trust key introduced in earlier sections.
+Generated from `spec/fetch-v1/constants.json` (sha256:`5aa3d14a5d8b60399040a8242f003135fa5f6c2c402de7d4e2db4c768a3366ae`) by `scripts/fetch-v1/gen-constants.py`; do not hand-edit between the markers. Covers this guide's §7 and §8, plus a quick reference for the media types, predicate types and default trust key introduced in earlier sections.
 
 ## Reference
 
@@ -222,18 +224,19 @@ Generated from `spec/fetch-v1/constants.json` (sha256:`82afa8d6cba96c10b5945c6f7
 - production generation-2 channel `v2`: ABI `2`, record schema `2`, cache leaf `v2`, base(s) `https://registry.wavehouse.dev/chtypes/v2`, system dirs `/usr/local/share/chtypes/v2`, `/opt/chtypes/v2`, trusting the release key above
 - platforms: `linux-amd64`, `linux-arm64`, `darwin-arm64`
 
-| media type / artifactType | value                                                     |
-| ------------------------- | --------------------------------------------------------- |
-| `index`                   | `application/vnd.oci.image.index.v1+json`                 |
-| `manifest`                | `application/vnd.oci.image.manifest.v1+json`              |
-| `empty_config`            | `application/vnd.oci.empty.v1+json`                       |
-| `config`                  | `application/vnd.wavehouse.chtypes.config.v1+json`        |
-| `layer`                   | `application/vnd.oci.image.layer.v1.tar+zstd`             |
-| `bundle`                  | `application/vnd.dev.sigstore.bundle.v0.3+json`           |
-| `artifact_type`           | `application/vnd.wavehouse.chtypes.artifact.v1`           |
-| `goldens_artifact_type`   | `application/vnd.wavehouse.chtypes.goldens.v1`            |
-| `fixtures_artifact_type`  | `application/vnd.wavehouse.chtypes.sdk-fetch-fixtures.v1` |
-| `channel_artifact_type`   | `application/vnd.wavehouse.chtypes.channel.v1`            |
+| media type / artifactType  | value                                                     |
+| -------------------------- | --------------------------------------------------------- |
+| `index`                    | `application/vnd.oci.image.index.v1+json`                 |
+| `manifest`                 | `application/vnd.oci.image.manifest.v1+json`              |
+| `empty_config`             | `application/vnd.oci.empty.v1+json`                       |
+| `config`                   | `application/vnd.wavehouse.chtypes.config.v1+json`        |
+| `layer`                    | `application/vnd.oci.image.layer.v1.tar+zstd`             |
+| `bundle`                   | `application/vnd.dev.sigstore.bundle.v0.3+json`           |
+| `artifact_type`            | `application/vnd.wavehouse.chtypes.artifact.v1`           |
+| `goldens_artifact_type`    | `application/vnd.wavehouse.chtypes.goldens.v1`            |
+| `fixtures_artifact_type`   | `application/vnd.wavehouse.chtypes.sdk-fetch-fixtures.v1` |
+| `channel_artifact_type`    | `application/vnd.wavehouse.chtypes.channel.v1`            |
+| `revocation_artifact_type` | `application/vnd.wavehouse.chtypes.revocation.v1`         |
 
 | predicateType | value                                                        |
 | ------------- | ------------------------------------------------------------ |
@@ -241,6 +244,7 @@ Generated from `spec/fetch-v1/constants.json` (sha256:`82afa8d6cba96c10b5945c6f7
 | `goldens`     | `https://artifacts.wavehouse.dev/spec/goldens/v1`            |
 | `fixtures`    | `https://artifacts.wavehouse.dev/spec/sdk-fetch-fixtures/v1` |
 | `channel`     | `https://artifacts.wavehouse.dev/spec/channel/v1`            |
+| `revocation`  | `https://artifacts.wavehouse.dev/spec/revocation/v1`         |
 
 | default trust (release key)                                        | key id             |
 | ------------------------------------------------------------------ | ------------------ |
@@ -256,7 +260,9 @@ A digest 404: `next_base_then_retry_on_last`. A tag 404: `next_base_then_unpubli
 
 A transport failure while reading a response body (a body shorter than its Content-Length, a reset, a TLS close) is retried like a 5xx, and once the retry table is spent it is `CHTYPES_SOURCE_UNREACHABLE`. Only an oversize body is `CHTYPES_ARTIFACT_CORRUPT`, and it is never retried. The `body-cut-off-*` cases (§10) hold every binding to this.
 
-A 410, on any request: permanent, a retired repository. It is never retried and never a reason to try the next base, and it is `CHTYPES_SOURCE_RETIRED`, carrying the registry's own message from at most 65536 bytes of the body, cut to 256 code points (§2, "A retired repository").
+A 410, on any request: permanent, a retired repository. It is never retried and never a reason to try the next base, and it is `CHTYPES_SOURCE_RETIRED`, carrying the registry's own message from at most 65536 bytes of the body, cut to 256 code points (§2, "A retired repository"). Under generation 2, one whose body's `errors[0].detail.revoked` is an object is `CHTYPES_ARTIFACT_REVOKED` instead, and just as permanent ("Build-level revocation").
+
+The revocation check of a build that is already installed ("Build-level revocation") never uses this table: it makes one attempt per base, with no backoff, and the whole check has one deadline of 5 seconds.
 
 ## 8. Errors
 
@@ -274,14 +280,16 @@ A 410, on any request: permanent, a retired repository. It is never retried and 
 | `CHTYPES_ARTIFACT_INCOMPATIBLE` | 8           |
 | `CHTYPES_CACHE_UNUSABLE`        | 9           |
 | `CHTYPES_SOURCE_RETIRED`        | 10          |
+| `CHTYPES_ARTIFACT_REVOKED`      | 11          |
 
-The six codes above the line in `spec/fetch-v1/constants.json` carry v0's own real, measured exit status (every binding's CLI agreed on 2026-10-01: the four "verification failed" codes all exit 1, `CHTYPES_ARTIFACT_UNPUBLISHED` exits 4, `CHTYPES_SOURCE_UNREACHABLE` exits 3). The new v1-only codes have no v0 precedent and are assigned here: the first four by lane 0A, `CHTYPES_CACHE_UNUSABLE` by public issue #486 and `CHTYPES_SOURCE_RETIRED` by public issue #571:
+The six codes above the line in `spec/fetch-v1/constants.json` carry v0's own real, measured exit status (every binding's CLI agreed on 2026-10-01: the four "verification failed" codes all exit 1, `CHTYPES_ARTIFACT_UNPUBLISHED` exits 4, `CHTYPES_SOURCE_UNREACHABLE` exits 3). The new v1-only codes have no v0 precedent and are assigned here: the first four by lane 0A, `CHTYPES_CACHE_UNUSABLE` by public issue #486, `CHTYPES_SOURCE_RETIRED` by public issue #571 and `CHTYPES_ARTIFACT_REVOKED` by public issue #625:
 
 - `CHTYPES_SOURCE_UNAUTHORIZED` and `CHTYPES_SOURCE_FORBIDDEN` — the fetch layer, a 401 or 403 from a source (§2, §5.1 of this guide).
 - `CHTYPES_SOURCE_INCOMPATIBLE` — the fetch layer, an unrecognized manifest or layer media type during resolve (§3).
 - `CHTYPES_ARTIFACT_INCOMPATIBLE` — the **FFI/loader layer**, never the fetch layer: a wrong `chs_abi_version`, an `abi_fingerprint` mismatch against the loaded library, a described symbol the library does not export, or a glibc floor the host does not meet (§9, the seam). It is reserved here, ahead of that lane landing, so the shared error vocabulary and exit-code table stay in one place while the ABI v1 design is still in flux. No v1 fetch-layer conformance case raises it — the fetch layer "never dlopens, checks glibc, or reads `chs_*` symbols" (§1.3 of the v1 fetch-layer plan).
 - `CHTYPES_CACHE_UNUSABLE` — the fetch layer, a cache directory or entry it could not read or write, or that strict mode refuses: it names the path and a reason (§1, the cache faults). It is the one code for the local filesystem, never the network's `CHTYPES_SOURCE_UNREACHABLE`, so a retry loop never retries a permission error.
 - `CHTYPES_SOURCE_RETIRED` — the fetch layer, a `410 Gone` from a source: a retired repository, which is permanent, so the request is never retried and never sent to the next base (§2, "A retired repository"; §7). Its message names the URL that answered and carries the registry's own message, made safe to print. Assigned by public issue #571.
+- `CHTYPES_ARTIFACT_REVOKED` — the fetch layer, generation 2 only: a build that a verified, signed revocation refuses, whether found in its referrers listing or stored in its cache entry, or a `410 Gone` whose body says the tag is revoked ("Build-level revocation"). Its message names the advisory, made safe to print. Never `CHTYPES_ARTIFACT_PINNED`, `CHTYPES_ARTIFACT_UNTRUSTED` or `CHTYPES_SOURCE_RETIRED`. Assigned by public issue #625.
 
 <!-- END GENERATED: fetch-v1 constants -->
 
@@ -294,7 +302,7 @@ The fetch layer is a module with exactly four entry points, identical across all
 - `list_installed(options) -> [Resolved]`, `verify_installed(options) -> [VerifyResult]`.
 - `fetch_signed(repository, ref, predicate_type, options) -> {path, statement, digests}` — the generic signed-artifact fetch goldens and fixtures reuse, so neither needs its own trust logic.
 
-Beside the seam, the module has three entry points of its own, also identical across the bindings: `resolve(request, options) -> [resolution]` and `prune(options, line, keep, dry_run) -> [superseded]`, behind `chtypes resolve` and `chtypes prune` (§3, "What a request resolves to"; §1, "Pruning"), and `hold(dir)`, the registry's in-use hold (§1, "In use"). None of them dlopens anything.
+Beside the seam, the module has three entry points of its own, also identical across the bindings: `resolve(request, options) -> [resolution]` and `prune(options, line, keep, dry_run) -> [superseded]`, behind `chtypes resolve` and `chtypes prune` (§3, "What a request resolves to"; §1, "Pruning"), and `hold(dir)`, the registry's in-use hold (§1, "In use"). Under generation 2 there is a fourth, `check_installed(resolved, options) -> warnings`: the installed-build revocation check a registry makes after `resolve_installed` answers and before it loads the build (Go `CheckInstalled`, Python `check_installed`, TypeScript `checkInstalled`, Rust `check_installed`; [Build-level revocation](#build-level-revocation)). None of them dlopens anything.
 
 **Goldens: `fetch_signed` with the goldens predicate type selects a revision.** The registry is append-only, so a corrected goldens set for the same build is published as a SECOND goldens referrer of the same platform manifest, and the first can never be deleted. The artifact producer therefore puts an integer `revision` in the goldens predicate and never reuses one for a different document. For `predicate_type = goldens`, `ref` is a **platform manifest digest** (not the goldens object's own), and `fetch_signed` itself, never a caller or a test runner:
 
@@ -335,10 +343,89 @@ A 2.0.0-dev SDK keeps rule r6 of `spec/abi-v2/docs.md`: it speaks only the dev c
 | overrides                      | `CHTYPES_ARTIFACTS_URL` and `Bases`, `CHTYPES_TRUSTED_KEYS` and `TrustedKeys`, `CHTYPES_ALLOW_UNSIGNED`                                             |
 | pinning                        | `--lock`, `--frozen`, `--update` and their API forms, exactly as §6                                                                                 |
 | alias step, fingerprint filter | none: one fingerprint after the lock, so a version request fetches its tag and nothing else, and the library load still refuses another fingerprint |
+| revocation                     | every rule of "Build-level revocation" below, which the v1 contract has none of                                                                     |
 
 Tags are the v1 spellings (`26.9`, `26.9.8`, `26.9.8.3`), with no `latest` and no `--fp-` alias. A repository that exists and holds nothing answers `tags/list` with `{"tags":[]}` and every manifest `404`: a fetch is `CHTYPES_ARTIFACT_UNPUBLISHED`, the code a line the registry has never published gets, never a transport error, and a listing is empty (the `unpublished-empty-repository` and `list-tags-empty-repository` cases).
 
 The conformance cases run under this channel from their own corpus, `tests/fixtures/fetch-v2/`, which `scripts/fetch-v1/genfixtures` writes with `--abi=2` from the same case builders as the v1 corpus: every case keeps its id and its meaning, and what changes is each value a case encodes (ABI 2 predicates and locks, schema-2 records, the other generation's record as the "foreign" one, a seeded layout under the `v2` subroot). Each runner takes `CHTYPES_V2_CONFORMANCE=<abs path to tests/fixtures/fetch-v2>` beside `CHTYPES_V1_CONFORMANCE` (Go: `TestConformanceProdV2`), skips loudly when it is unset, and fails a run that executed no case.
+
+### Build-level revocation
+
+A fix to a library arrives as a newer `build` under the same version tag, and a `--frozen` lock pins the old build's manifest forever (§6). A revocation is how a build with a security defect, such as a filter over-accept or a crash, is refused on every path that would use it, a pin and a warm cache included (public issue #625 is the decision record). This section is normative for generation 2: the production channel and its staging rehearsal in full, and the 2.0.0-dev channel for every rule that needs no pin ("Scope", below). The v1 contract has none of it.
+
+**The signal.** A revocation is an OCI referrer of the revoked **platform manifest**:
+
+- its `artifactType` is `media_types.revocation_artifact_type` (the reference table above §7), never the signature's, so the trust lookup (§4) never mistakes one for the other;
+- its one layer is a Sigstore bundle v0.3 (`media_types.bundle`): a DSSE envelope over an in-toto Statement v1 whose `predicateType` is `predicate_types.revocation` and whose subject is the revoked build's **layer** digest, the artifact statement's own convention;
+- its predicate carries `manifest` (the revoked platform manifest's digest), `abi`, `abi_fingerprint`, `os`, `arch`, `clickhouse_version`, `build`, `advisory` (`id`, `url`), `class` (`over-accept`, `crash` or `other`), `summary`, `superseded_by` and `revoked_at`;
+- it is signed by exactly the key that signs artifacts in that repository: no new key and no new trust setting.
+
+An advisory is a GitHub security advisory on this repository, published before its revocation is pushed (a draft advisory's URL is not readable), and its id is its GHSA id. Who authorizes a production revocation changes nothing in the client.
+
+**The listing.** Every check reads one referrers listing of the build's platform manifest, the lookup its signature uses (§4): the referrers API, unfiltered (a binding filters by `artifactType` itself), on the configured bases in order; then, when no answer of the API names a signature referrer, the `sha256-<hex>` fallback tag on the bases in order. The listing that names a signature referrer is the one read. Its referrers of the signature `artifactType` are the trust candidates, and its referrers of the revocation `artifactType` are the revocation candidates, at most `limits.max_referrers` of each. A listing that names no signature referrer is not a real listing of that manifest (a mirror that dropped its referrers, or a tree with no discovery at all), so it cannot show a revocation either.
+
+**Which calls check, what each requests, and its budget.**
+
+| call                                                                                                                                                                                                                                      | what it requests                                                                                                  | budget                                                                                                                 |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| an install: an `ensure` that downloads the build                                                                                                                                                                                          | no extra listing: the revocation candidates come from the trust listing it already reads                          | the retry table (§7)                                                                                                   |
+| `--frozen`, warm or cold                                                                                                                                                                                                                  | exactly one listing per pinned platform; a warm frozen fetch makes that one listing instead of zero requests (§6) | the retry table (§7)                                                                                                   |
+| a build already installed and used without a download: a registry open answered from the cache (an exact version or a line), `preload`, and an `ensure` that finds the build installed, a newer install the monotonic rule keeps included | one listing: 1 request on a registry with the referrers API, 2 without                                            | its own: one attempt per base, no backoff, and one deadline of `timeouts.revocation_check_s` (5 s) for the whole check |
+| `--lock` and `update`                                                                                                                                                                                                                     | no extra listing: each platform's revocation candidates come from the trust listing the lock already reads for it | the retry table (§7); a revoked build on any platform the lock would pin refuses the call                              |
+
+Every listed revocation candidate also costs its own referrer manifest and its bundle blob. `--frozen` checks once, and its warm path is not the installed-build check twice. The installed-build check sits in the open and fetch layers, above `resolve_installed`, which stays request-free (§9), as do `list_installed`, `verify_installed` and `chtypes list`.
+
+**At most once per installed build per process.** The installed-build check's outcome is kept in-process, keyed by the build's platform manifest digest: not revoked, revoked (the verified revocation), or not checked (the warning below). A later use of that build in the same process makes zero requests and prints no second warning; concurrent uses share one check. A kept "not checked" answers only a call without strict mode: a strict call checks again. Nothing is persisted. The listing is edge-cached for up to 300 s (60 s on the dev channel), so a client time-to-live inside that window buys no freshness, a longer one would let a restarted service load a revoked build for its length, and writing a "checked at" time on every open would break an open from a read-only cache.
+
+**Verifying a revocation.** A candidate is fetched as any referrer is (§4: its manifest by digest, checked against the listing's descriptor, then its one layer, at most `limits.bundle_bytes`), and it is a **verified revocation** only when all of these hold:
+
+1. the bundle's signature verifies under the trust list the build itself is checked under (the call's, §4);
+2. the statement's `_type` is `statement_type` and its `predicateType` is exactly `predicate_types.revocation`;
+3. a subject's `digest.sha256` is the build's layer digest, and `predicate.manifest` is the build's platform manifest digest;
+4. `predicate.abi`, `abi_fingerprint`, `os`, `arch`, `clickhouse_version` and `build` each equal the build's own signed predicate's (`abi` as a number, the rest as strings);
+5. `predicate.advisory` is an object whose `id` and `url` are non-empty strings, and `class`, `summary`, `superseded_by` and `revoked_at` are strings.
+
+A candidate that fails any of them (a wrong key, a malformed bundle or statement, any field disagreeing) is **ignored**, with one warning naming it, because an unsigned or foreign statement must never be able to block a build: `chtypes: revocation <referrer manifest digest> for manifest <manifest digest> does not verify and is ignored: <reason>`. Any one verified revocation refuses the build.
+
+**The code and the message.** A verified revocation is `CHTYPES_ARTIFACT_REVOKED`, exit status 11 (§8). Under r4 a new failure gets a new code, so it is never `CHTYPES_ARTIFACT_PINNED`, `_UNTRUSTED` or `CHTYPES_SOURCE_RETIRED`. Its message is
+
+`<version> <platform> build <build> (manifest <manifest digest>) is revoked: <advisory id> <advisory url> (<class>); superseded by build <superseded_by>: <summary>`
+
+where `<version>`, `<platform>` and `<build>` are the build's own record's, `; superseded by build <superseded_by>` is left out when that field is empty, and so is `: <summary>`. Every served string in it (the advisory id and URL, the class, `superseded_by` and the summary) is made safe to print exactly as the retired repository's message is (§2: the control and bidirectional-formatting code points removed, then cut to `limits.retired_message_code_points` code points with `…`). The typed error carries, for programs, whether the revocation was signed, and for each advisory its id and URL, `class`, `summary`, `build`, `superseded_by` and `revoked_at`: Go `ArtifactError.Revocation` (`*Revocation`, with `Signed`, `Manifest` and `Advisories`), Python `ArtifactRevokedError.revocation`, TypeScript `ArtifactRevokedError.revocation`, Rust `Error::ArtifactRevoked(Revocation)`. A signed revocation carries exactly one advisory.
+
+**The stored record.** A call that finds a verified revocation for a build that is **installed** writes that revocation's bundle, byte for byte, as `cache.revocation_record` (`revocation.json`) in the build's entry, `unpacked/sha256/<manifest-hex>/`, by a temporary file and a rename, in the user cache only: never in a system directory. A write that fails (a read-only cache) is not an error: the refusal still holds for that call, and for the rest of the process through the kept outcome. From then on, every call that would answer with that build reads the record first, re-verifies it exactly as above against the entry's own `verified.json`, and refuses with zero requests: an open, an `ensure`, `--offline`, `--frozen` and `--frozen --offline` alike. A record that does not verify is ignored, with the warning above naming `record <path>` in place of a referrer digest. `chtypes verify` reports a build with a verified record as revoked, printing `REVOKED <version> <platform> <dir>: <message>` on stderr, and exits 11, which wins over a mismatch's 1. `chtypes list` and `list_installed` list it as installed, unchanged: it is. A prune removes the record with its entry.
+
+**When the status cannot be read, the call fails open, loudly.** A registry outage must not become an outage of every pinned deployment. The call proceeds with exactly one warning,
+
+`chtypes: revocation status not checked for manifest <manifest digest> (bases: <base>, <base>): <cause>`
+
+when no base answers the listing with one that names a signature referrer (a transport failure, a 5xx once the budget is spent, a 401 or 403, or every listing a 404 or without a signature referrer), when a listed revocation's bytes cannot be fetched, or when the installed-build check passes its deadline. The bases are the configured ones, any password redacted, and the cause is the binding's own text. So `frozen-no-discovery` succeeds AND warns. An open prints its warning on stderr, once; a fetch returns it in `Resolved.warnings`.
+
+**Strict mode** is the opt-in: Go `FetchOptions.RequireRevocationCheck`, Python `FetchOptions(require_revocation_check=)`, TypeScript `FetchOptions.requireRevocationCheck`, Rust `FetchOptions::require_revocation_check`, and `--require-revocation-check` on `chtypes fetch`. It turns that warning into the error the transport raised, with the warning's text as its message: `CHTYPES_SOURCE_UNAUTHORIZED` or `CHTYPES_SOURCE_FORBIDDEN` for a 401 or a 403, and `CHTYPES_SOURCE_UNREACHABLE` for everything else (a transport failure, a 5xx, the deadline, no listing naming a signature). No environment variable sets it. A `410` is never failed open: it is the call's error in every mode (§2, and below).
+
+**`--offline`.** Offline (the option, or `CHTYPES_OFFLINE=1`) makes no request, so it skips every network check, and with no stored record it cannot know a build is revoked: it answers as it always has. That is a limit of offline mode, documented here rather than hidden. A stored record still refuses.
+
+**A `410` on a tag.** A `410 Gone` whose body's `errors[0].detail.revoked` is a JSON **object** is `CHTYPES_ARTIFACT_REVOKED`. Every other `410` stays `CHTYPES_SOURCE_RETIRED` (§2): `detail.retired` present (on the wire, the retired repository's name, sent with `detail.successor`), no `detail` at all, a `detail.revoked` that is not an object, or a body that is not JSON. A binding never matches on `detail.retired`'s value, and never on `errors[0].code`, which stays `DENIED`. Either way the `410` is permanent, exactly as §2 says: never retried, never a reason to try the next base, the referrers fallback tag or the plain tag after an alias, and at most `limits.retired_body_bytes` of the body are read. The revoked body, agreed with the delivery side and mirroring the retired one:
+
+```json
+{"errors":[{"code":"DENIED","message":"…","detail":{"revoked":{"repository":"chtypes/v2","reference":"26.9.8.3","advisories":[{"id":"GHSA-…","url":"https://github.com/…","class":"over-accept","summary":"…","build":"20261001.183455","superseded_by":"20261012.090000"}]}}}]}
+```
+
+`advisories` has one entry per revoked build, deduplicated by (`id`, `build`), newest build first, each copied from that build's signed revocation. An exact-version tag answers it when every build of the version is revoked, and a line or patch tag when every build of every version it covers is; otherwise a tag resolves to the newest complete build that is not revoked, and a computed tag never points at a revoked build. **The complete-set rule:** one revoked platform takes its build out of the computed tags on every platform, so an exact tag can answer the revoked `410` to a platform whose own manifest is not revoked; the client maps it to `CHTYPES_ARTIFACT_REVOKED` all the same and prints its advisories, while a `--frozen` pin of that platform's manifest keeps verifying, because the revocation referrer is per platform manifest. A fingerprint alias (`<tag>--fp-<hex>`, §3) whose builds are all revoked answers the ordinary `404` (`MANIFEST_UNKNOWN`), never the `410`, and the client handles it exactly as a missing alias. `tags/list` omits a tag that revocation emptied, and a direct fetch of that tag still answers the `410`.
+
+The body is unsigned, so it only refuses: its details are printed, made safe as the retired message is, and trusted no further. The message is `<url> answered 410 Gone: revoked: <advisory>; <advisory>; …`, each advisory `<id> <url> (<class>) build <build>, superseded by build <superseded_by>: <summary>`, with each part whose field is absent or not a string left out (the class's `(<class>)`, the build's `build <build>`, `, superseded by build <superseded_by>` and `: <summary>`, each part after the first preceded by its one space or punctuation as shown; the id and the URL joined by one space) and an entry that is not an object, or names none of the six, skipped; with no advisory left it is `<url> answered 410 Gone: revoked, and the registry names no advisory`. Each string is made safe on its own, and one whose raw JSON token holds a lone surrogate escape counts as absent. The typed error carries the advisories, not signed. `tests/fixtures/revoked-410/cases.json` is the table all four bindings' unit tests read, so the four give one answer.
+
+**The override.** `AllowRevoked`: Go `FetchOptions.AllowRevoked`, Python `FetchOptions(allow_revoked=)`, TypeScript `FetchOptions.allowRevoked`, Rust `FetchOptions::allow_revoked`, and `--allow-revoked` on `chtypes fetch`. It is per call and deliberately not an environment variable, so a deployment cannot switch revocation off for every process it starts. With it, a verified revocation, found or stored, lets the call go on with exactly one warning per call naming the advisory: `chtypes: allowing a revoked build: <the message above>`. The revocation is still stored. It never applies to `--lock` or `update`, which refuse a revoked build whatever it says, and never to a `410`, which names no build to allow (a `--frozen` pin of the manifest reaches one).
+
+**Order inside a call.** For an installed build: the stored record, then the kept outcome (the installed-build check only), then the listing. For an install: the signature (§4), then the trust listing's revocation candidates, before the monotonic rule (§9) and before the layer is requested, so a revoked build is never downloaded and nothing is installed or stored. A cold `--frozen` fetch reads the manifest, then the bundle, verifies it, reads the listing, and only then requests the layer.
+
+**Scope.**
+
+- **Production generation 2**, and the staging rehearsal of it: everything above, in all four bindings in one cycle.
+- **The 2.0.0-dev channel** refuses `--lock` and `--frozen` (r6), so the rules for those never arise. Everything else applies: the install's check, the installed-build check (it needs no pin, and a dev consumer opens cached builds the same way), the stored record, the code and message, the `410`, offline mode, strict mode and the override.
+- **The v1 contract** (1.x, and the fetch-v1 conformance corpus) has none of it: every `410` is `CHTYPES_SOURCE_RETIRED`, `CHTYPES_ARTIFACT_REVOKED` is never raised, and a warm `--frozen` fetch still makes zero requests.
+
+**Cost** (`measured` 2026-10-19, one developer machine against the staging dev channel, 10 cold requests each including DNS, TCP and TLS): a referrers listing took a median of 132 ms (124–165 ms) and answered `200` with `cache-control: public, max-age=60`. So a healthy registry adds about 130 ms once per installed build per process start; an unreachable one adds at most the 5 s deadline (`inferred` from the budget, not measured); `offline`, a stored record and every later use of the same build in the process add nothing. The `revocation-*`, `*-revoked*`, `open-*` and `tag-410-*` cases (§10, "Revocation cases") hold every binding to this section.
 
 ## The fetch-only call
 

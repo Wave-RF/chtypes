@@ -228,6 +228,18 @@ def render_go(data: dict[str, Any], sha: str) -> str:
     lines.append(f"\tPredicateTypeFixtures = {_go_string(pt['fixtures'])}")
     lines.append(f"\tPredicateTypeChannel  = {_go_string(pt['channel'])}")
     lines.append("")
+    # The build-level revocation values (docs/guides/fetch-v1.md, "Build-level
+    # revocation"), one gofmt alignment group of their own.
+    rev_consts = [
+        ("RevocationArtifactType", _go_string(mt["revocation_artifact_type"])),
+        ("PredicateTypeRevocation", _go_string(pt["revocation"])),
+        ("RevocationCheckSeconds", str(float(timeouts["revocation_check_s"]))),
+        ("CacheRevocationRecord", _go_string(cache["revocation_record"])),
+    ]
+    rev_w = max(len(n) for n, _ in rev_consts)
+    for n, v in rev_consts:
+        lines.append(f"\t{n.ljust(rev_w)} = {v}")
+    lines.append("")
     lines.append(f"\tKeyIDAlgorithm = {_go_string(trust['keyid_algorithm'])}")
     lines.append("")
     lines.append(f"\tRetryAttempts         = {retry['attempts']}")
@@ -468,6 +480,7 @@ def render_python(data: dict[str, Any], sha: str) -> str:
     lines.append(f"GOLDENS_ARTIFACT_TYPE: Final[str] = {_py_str(mt['goldens_artifact_type'])}")
     lines.append(f"FIXTURES_ARTIFACT_TYPE: Final[str] = {_py_str(mt['fixtures_artifact_type'])}")
     lines.append(f"CHANNEL_ARTIFACT_TYPE: Final[str] = {_py_str(mt['channel_artifact_type'])}")
+    lines.append(f"REVOCATION_ARTIFACT_TYPE: Final[str] = {_py_str(mt['revocation_artifact_type'])}")
     lines.append("")
     lines.append(f"DSSE_PAYLOAD_TYPE: Final[str] = {_py_str(dsse['payload_type'])}")
     lines.append(f"DSSE_MAX_SIGNATURES: Final[int] = {dsse['max_signatures']}")
@@ -478,6 +491,7 @@ def render_python(data: dict[str, Any], sha: str) -> str:
     lines.append(f"PREDICATE_TYPE_GOLDENS: Final[str] = {_py_str(pt['goldens'])}")
     lines.append(f"PREDICATE_TYPE_FIXTURES: Final[str] = {_py_str(pt['fixtures'])}")
     lines.append(f"PREDICATE_TYPE_CHANNEL: Final[str] = {_py_str(pt['channel'])}")
+    lines.append(f"PREDICATE_TYPE_REVOCATION: Final[str] = {_py_str(pt['revocation'])}")
     lines.append("")
     lines.append(f"KEYID_ALGORITHM: Final[str] = {_py_str(trust['keyid_algorithm'])}")
     lines.append("RELEASE_KEYS: Final[tuple[dict[str, str], ...]] = (")
@@ -514,6 +528,7 @@ def render_python(data: dict[str, Any], sha: str) -> str:
     lines.append("")
     lines.append(f"CONNECT_TIMEOUT_S: Final[float] = {float(timeouts['connect_s'])}")
     lines.append(f"IDLE_READ_TIMEOUT_S: Final[float] = {float(timeouts['idle_read_s'])}")
+    lines.append(f"REVOCATION_CHECK_S: Final[float] = {float(timeouts['revocation_check_s'])}")
     lines.append("")
     lines.append(f"MANIFEST_MAX_BYTES: Final[int] = {limits['manifest_bytes']}")
     lines.append(f"BUNDLE_MAX_BYTES: Final[int] = {limits['bundle_bytes']}")
@@ -538,6 +553,7 @@ def render_python(data: dict[str, Any], sha: str) -> str:
     lines.append(f"PROD_V2_SYSTEM_DIRS: Final[tuple[str, ...]] = {_py_tuple([_py_str(v) for v in pv2['system_dirs']])}")
     lines.append(f"CACHE_UNPACKED_DIR: Final[str] = {_py_str(cache['unpacked_dir'])}")
     lines.append(f"CACHE_VERIFIED_RECORD: Final[str] = {_py_str(cache['verified_record'])}")
+    lines.append(f"CACHE_REVOCATION_RECORD: Final[str] = {_py_str(cache['revocation_record'])}")
     lines.append(f"CACHE_ANNOTATION_PREFIX: Final[str] = {_py_str(cache['annotation_prefix'])}")
     lines.append("")
     lines.append(f"LOCK_SCHEMA: Final[int] = {lock['schema']}")
@@ -649,6 +665,7 @@ def render_ts(data: dict[str, Any], sha: str) -> str:
     lines.append(f"export const GOLDENS_ARTIFACT_TYPE = {json.dumps(mt['goldens_artifact_type'])} as const;")
     lines.append(f"export const FIXTURES_ARTIFACT_TYPE = {json.dumps(mt['fixtures_artifact_type'])} as const;")
     lines.append(f"export const CHANNEL_ARTIFACT_TYPE = {json.dumps(mt['channel_artifact_type'])} as const;")
+    lines.append(f"export const REVOCATION_ARTIFACT_TYPE = {json.dumps(mt['revocation_artifact_type'])} as const;")
     lines.append("")
     lines.append(f"export const DSSE_PAYLOAD_TYPE = {json.dumps(dsse['payload_type'])} as const;")
     lines.append(f"export const DSSE_MAX_SIGNATURES = {dsse['max_signatures']} as const;")
@@ -659,6 +676,7 @@ def render_ts(data: dict[str, Any], sha: str) -> str:
     lines.append(f"export const PREDICATE_TYPE_GOLDENS = {json.dumps(pt['goldens'])} as const;")
     lines.append(f"export const PREDICATE_TYPE_FIXTURES = {json.dumps(pt['fixtures'])} as const;")
     lines.append(f"export const PREDICATE_TYPE_CHANNEL = {json.dumps(pt['channel'])} as const;")
+    lines.append(f"export const PREDICATE_TYPE_REVOCATION = {json.dumps(pt['revocation'])} as const;")
     lines.append("")
     lines.append(f"export const KEYID_ALGORITHM = {json.dumps(trust['keyid_algorithm'])} as const;")
     lines.append("export const RELEASE_KEYS = [")
@@ -694,6 +712,7 @@ def render_ts(data: dict[str, Any], sha: str) -> str:
     lines.append("")
     lines.append(f"export const CONNECT_TIMEOUT_S = {float(timeouts['connect_s'])} as const;")
     lines.append(f"export const IDLE_READ_TIMEOUT_S = {float(timeouts['idle_read_s'])} as const;")
+    lines.append(f"export const REVOCATION_CHECK_S = {float(timeouts['revocation_check_s'])} as const;")
     lines.append("")
     lines.append(f"export const MANIFEST_MAX_BYTES = {limits['manifest_bytes']} as const;")
     lines.append(f"export const BUNDLE_MAX_BYTES = {limits['bundle_bytes']} as const;")
@@ -723,6 +742,7 @@ def render_ts(data: dict[str, Any], sha: str) -> str:
     lines.append(f"export const PROD_V2_SYSTEM_DIRS = {arr(pv2['system_dirs'])} as const;")
     lines.append(f"export const CACHE_UNPACKED_DIR = {json.dumps(cache['unpacked_dir'])} as const;")
     lines.append(f"export const CACHE_VERIFIED_RECORD = {json.dumps(cache['verified_record'])} as const;")
+    lines.append(f"export const CACHE_REVOCATION_RECORD = {json.dumps(cache['revocation_record'])} as const;")
     lines.append(f"export const CACHE_ANNOTATION_PREFIX = {json.dumps(cache['annotation_prefix'])} as const;")
     lines.append("")
     lines.append(f"export const LOCK_SCHEMA = {lock['schema']} as const;")
@@ -823,6 +843,7 @@ def render_rust(data: dict[str, Any], sha: str) -> str:
     lines.append(f"pub const GOLDENS_ARTIFACT_TYPE: &str = {rs_str(mt['goldens_artifact_type'])};")
     lines.append(f"pub const FIXTURES_ARTIFACT_TYPE: &str = {rs_str(mt['fixtures_artifact_type'])};")
     lines.append(f"pub const CHANNEL_ARTIFACT_TYPE: &str = {rs_str(mt['channel_artifact_type'])};")
+    lines.append(f"pub const REVOCATION_ARTIFACT_TYPE: &str = {rs_str(mt['revocation_artifact_type'])};")
     lines.append("")
     lines.append(f"pub const DSSE_PAYLOAD_TYPE: &str = {rs_str(dsse['payload_type'])};")
     lines.append(f"pub const DSSE_MAX_SIGNATURES: u32 = {dsse['max_signatures']};")
@@ -833,6 +854,7 @@ def render_rust(data: dict[str, Any], sha: str) -> str:
     lines.append(f"pub const PREDICATE_TYPE_GOLDENS: &str = {rs_str(pt['goldens'])};")
     lines.append(f"pub const PREDICATE_TYPE_FIXTURES: &str =\n    {rs_str(pt['fixtures'])};")
     lines.append(f"pub const PREDICATE_TYPE_CHANNEL: &str = {rs_str(pt['channel'])};")
+    lines.append(f"pub const PREDICATE_TYPE_REVOCATION: &str = {rs_str(pt['revocation'])};")
     lines.append("")
     lines.append(f"pub const KEYID_ALGORITHM: &str = {rs_str(trust['keyid_algorithm'])};")
     lines.append("")
@@ -881,6 +903,7 @@ def render_rust(data: dict[str, Any], sha: str) -> str:
     lines.append("")
     lines.append(f"pub const CONNECT_TIMEOUT_S: f64 = {float(timeouts['connect_s'])};")
     lines.append(f"pub const IDLE_READ_TIMEOUT_S: f64 = {float(timeouts['idle_read_s'])};")
+    lines.append(f"pub const REVOCATION_CHECK_S: f64 = {float(timeouts['revocation_check_s'])};")
     lines.append("")
     lines.append(f"pub const MANIFEST_MAX_BYTES: u64 = {limits['manifest_bytes']};")
     lines.append(f"pub const BUNDLE_MAX_BYTES: u64 = {limits['bundle_bytes']};")
@@ -904,6 +927,7 @@ def render_rust(data: dict[str, Any], sha: str) -> str:
     lines.append(f"pub const PROD_V2_SYSTEM_DIRS: &[&str] = {rs_arr(pv2['system_dirs'])};")
     lines.append(f"pub const CACHE_UNPACKED_DIR: &str = {rs_str(cache['unpacked_dir'])};")
     lines.append(f"pub const CACHE_VERIFIED_RECORD: &str = {rs_str(cache['verified_record'])};")
+    lines.append(f"pub const CACHE_REVOCATION_RECORD: &str = {rs_str(cache['revocation_record'])};")
     lines.append(f"pub const CACHE_ANNOTATION_PREFIX: &str = {rs_str(cache['annotation_prefix'])};")
     lines.append("")
     lines.append(f"pub const LOCK_SCHEMA: u32 = {lock['schema']};")
@@ -1029,7 +1053,15 @@ def render_guide_block(data: dict[str, Any], sha: str) -> str:
         f"A {retired}, on any request: permanent, a retired repository. It is never retried and never a reason "
         "to try the next base, and it is `CHTYPES_SOURCE_RETIRED`, carrying the registry's own message from at "
         f"most {data['limits']['retired_body_bytes']} bytes of the body, cut to "
-        f"{data['limits']['retired_message_code_points']} code points (§2, \"A retired repository\")."
+        f"{data['limits']['retired_message_code_points']} code points (§2, \"A retired repository\"). Under "
+        "generation 2, one whose body's `errors[0].detail.revoked` is an object is `CHTYPES_ARTIFACT_REVOKED` "
+        "instead, and just as permanent (\"Build-level revocation\")."
+    )
+    lines.append("")
+    lines.append(
+        "The revocation check of a build that is already installed (\"Build-level revocation\") never uses this "
+        "table: it makes one attempt per base, with no backoff, and the whole check has one deadline of "
+        f"{data['timeouts']['revocation_check_s']} seconds."
     )
     lines.append("")
     lines.append("## 8. Errors")
@@ -1046,7 +1078,8 @@ def render_guide_block(data: dict[str, Any], sha: str) -> str:
         "status (every binding's CLI agreed on 2026-10-01: the four \"verification failed\" codes all exit "
         "1, `CHTYPES_ARTIFACT_UNPUBLISHED` exits 4, `CHTYPES_SOURCE_UNREACHABLE` exits 3). The new v1-only "
         "codes have no v0 precedent and are assigned here: the first four by lane 0A, "
-        "`CHTYPES_CACHE_UNUSABLE` by public issue #486 and `CHTYPES_SOURCE_RETIRED` by public issue #571:"
+        "`CHTYPES_CACHE_UNUSABLE` by public issue #486, `CHTYPES_SOURCE_RETIRED` by public issue #571 and "
+        "`CHTYPES_ARTIFACT_REVOKED` by public issue #625:"
     )
     lines.append("")
     lines.append(
@@ -1077,6 +1110,13 @@ def render_guide_block(data: dict[str, Any], sha: str) -> str:
         "which is permanent, so the request is never retried and never sent to the next base (§2, \"A "
         "retired repository\"; §7). Its message names the URL that answered and carries the registry's own "
         "message, made safe to print. Assigned by public issue #571."
+    )
+    lines.append(
+        "- `CHTYPES_ARTIFACT_REVOKED` — the fetch layer, generation 2 only: a build that a verified, signed "
+        "revocation refuses, whether found in its referrers listing or stored in its cache entry, or a `410 "
+        "Gone` whose body says the tag is revoked (\"Build-level revocation\"). Its message names the advisory, "
+        "made safe to print. Never `CHTYPES_ARTIFACT_PINNED`, `CHTYPES_ARTIFACT_UNTRUSTED` or "
+        "`CHTYPES_SOURCE_RETIRED`. Assigned by public issue #625."
     )
     lines.append("")
     lines.append(GUIDE_END)

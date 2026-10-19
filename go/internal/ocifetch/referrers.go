@@ -16,12 +16,15 @@ package ocifetch
 // artifactType being searched for — an empty list, or a list that holds only
 // (for example) the goldens referrer — is treated exactly like the API not
 // being served at all: the fallback tag is tried too, before concluding
-// nothing exists. The host's referrers endpoint is served no-store, so this
-// is not about a cache lagging a just-pushed manifest on our own host — it
-// is for mirrors, which may serve only the fallback tag and never the
-// referrers API at all (§4 of the guide: "both are implemented in every
-// binding — never only one, because which a given host serves is a property
-// of that host, not of this fetcher").
+// nothing exists. On our own host only an EMPTY listing is served no-store;
+// a non-empty one is edge-cached (`public, max-age=300`, 60 s on the dev
+// channel; measured by the delivery side on production chtypes/v1, public
+// issue #625), and a signed build's listing is never empty. So this is not
+// about a cache lagging a just-pushed manifest on our own host — it is for
+// mirrors, which may serve only the fallback tag and never the referrers API
+// at all (§4 of the guide: "both are implemented in every binding — never
+// only one, because which a given host serves is a property of that host, not
+// of this fetcher").
 
 import (
 	"context"
