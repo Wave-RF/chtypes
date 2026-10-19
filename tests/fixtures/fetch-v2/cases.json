@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "source": {
-    "generator_commit": "112805e59fa8f3cec6264bb1e225329d07682e12",
+    "generator_commit": "81b7ece73eb367675d027c1c20c4ef1745a02ab6",
     "go_sum_sha256": "e998462ee1660f7d0b42c45fd0e16ddef8c688e81aaa22c466ada3c69565eec9"
   },
   "cases": [
@@ -7185,6 +7185,119 @@
         "http"
       ],
       "http_script": "body-cut-off-exhausted",
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "26.12",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_SOURCE_UNREACHABLE",
+        "sleeps": [
+          4,
+          8,
+          16,
+          32
+        ],
+        "warnings": [],
+        "requests": {
+          "max": null,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null
+      }
+    },
+    {
+      "id": "body-cut-off-chunked-then-ok",
+      "tree": "http-basic",
+      "transports": [
+        "http"
+      ],
+      "http_script": "body-cut-off-chunked-then-ok",
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "26.12",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null
+      },
+      "env": {},
+      "expect": {
+        "ok": true,
+        "version": "26.12.1.1",
+        "build": "20261201.000001",
+        "manifest": "sha256:280dd1ee6a6f928b43cd3199979da6c84efd88e273ed3e89cd510d3ca6458b21",
+        "library_sha256": "0c36252b2f024a3e2ff282efe3f57ce6ed17c7720b42ad82f96b51aca12a19fc",
+        "code": null,
+        "sleeps": [
+          4
+        ],
+        "warnings": [],
+        "requests": {
+          "max": null,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null
+      }
+    },
+    {
+      "id": "body-cut-off-chunked-exhausted",
+      "tree": "http-basic",
+      "transports": [
+        "http"
+      ],
+      "http_script": "body-cut-off-chunked-exhausted",
       "setup": {
         "cache": "empty",
         "system_dirs": [],

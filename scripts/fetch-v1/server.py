@@ -20,7 +20,10 @@ fetch-v1.md §10). Python stdlib only.
         order and the request log shows both attempts; `close` resets the
         connection with no response; `truncate` declares a body's full
         Content-Length, sends only its first N bytes and closes (the client
-        sees fewer bytes than declared, or a read error); a cross-origin redirect is followed
+        sees fewer bytes than declared, or a read error); `truncate` with
+        `chunked` sends Transfer-Encoding: chunked, no Content-Length, one
+        complete chunk and no terminating zero-length chunk (the client's
+        read fails with IncompleteRead); a cross-origin redirect is followed
         to the second origin; and the request log at `/_log/s-<id>` is
         per-case (two different case ids never see each other's requests);
         and a request whose User-Agent is not `chtypes-<binding>/<version>`
@@ -417,7 +420,7 @@ class Handler(BaseHTTPRequestHandler):
             self.close_connection = True
             return
         if "truncate" in resp:
-            self._serve_truncated(resp["truncate"])
+            self._serve_truncated(resp["truncate"], chunked=bool(resp.get("chunked")))
             return
         if resp.get("from_tree"):
             self._serve_from_tree(case, self.path.split("/", 4)[-1] if False else None, raw_path=self.path)
@@ -443,10 +446,13 @@ class Handler(BaseHTTPRequestHandler):
         if self.command != "HEAD" and body:
             self.wfile.write(body)
 
-    def _serve_truncated(self, sent: int) -> None:
+    def _serve_truncated(self, sent: int, chunked: bool = False) -> None:
         """A body cut off part way: the route tree's bytes for this path, a
         200 declaring their FULL Content-Length, then only the first `sent`
-        bytes and a closed socket (docs/guides/fetch-v1.md §7)."""
+        bytes and a closed socket (docs/guides/fetch-v1.md §7). With
+        `chunked`, the head is `Transfer-Encoding: chunked` with NO
+        Content-Length, the first `sent` bytes go out as one complete chunk,
+        and the socket closes without the terminating `0\\r\\n\\r\\n`."""
         body = self._tree_bytes_for_request()
         if sent >= len(body):
             # A truncate that cuts nothing would be a whole body, and the case
@@ -455,10 +461,19 @@ class Handler(BaseHTTPRequestHandler):
             return
         self.send_response(200)
         self.send_header("Content-Type", "application/octet-stream")
-        self.send_header("Content-Length", str(len(body)))
+        if chunked:
+            self.send_header("Transfer-Encoding", "chunked")
+        else:
+            self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         if self.command != "HEAD":
-            self.wfile.write(body[:sent])
+            if chunked:
+                # At least one complete chunk (size line, data, CRLF), and
+                # never the zero-length chunk that ends the body.
+                if sent > 0:
+                    self.wfile.write(b"%x\r\n" % sent + body[:sent] + b"\r\n")
+            else:
+                self.wfile.write(body[:sent])
             self.wfile.flush()
         try:
             self.connection.shutdown(socket.SHUT_RDWR)
@@ -765,6 +780,28 @@ def _run_selftest(tmp: Path) -> None:
         )
     )
 
+    (http_dir / "truncated-chunked.json").write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "id": "truncated-chunked",
+                "tree": "basic",
+                "routes": [
+                    {
+                        "method": "GET",
+                        "path": "/v2/chtypes/v1/manifests/26.8",
+                        "responses": [
+                            {"truncate": 5, "chunked": True, "from_tree": True},
+                            {"truncate": 99, "chunked": True, "from_tree": True},
+                            {"from_tree": True},
+                        ],
+                    }
+                ],
+                "second_origin_routes": [],
+            }
+        )
+    )
+
     (tmp / "cases.json").write_text(
         json.dumps(
             {
@@ -802,7 +839,7 @@ def _run_selftest(tmp: Path) -> None:
                             "lock_after": None,
                         },
                     }
-                    for cid in ("retry-then-ok", "redirect-case", "closer", "no-script", "gone", "gated", "truncated")
+                    for cid in ("retry-then-ok", "redirect-case", "closer", "no-script", "gone", "gated", "truncated", "truncated-chunked")
                 ],
             }
         )
@@ -872,6 +909,35 @@ def _run_selftest(tmp: Path) -> None:
         assert data == b'{"ok"', f"truncate sent {data!r}, not the first 5 bytes"
         declared, data = read_declared(trunc_path)
         assert len(data) == declared == len(b'{"ok":true}'), "the second answer of a truncate script was not whole"
+
+        # 4c. truncated, chunked: the head is chunked with no Content-Length,
+        # one complete chunk arrives, and the terminating zero-length chunk
+        # never does, so the client's read fails (IncompleteRead) rather than
+        # ending cleanly. A chunk size that cuts nothing answers 500; the
+        # third answer is whole.
+        def read_chunked(path: str) -> tuple[http.client.HTTPResponse, bytes | None, bytes]:
+            conn = http.client.HTTPConnection("127.0.0.1", port1, timeout=5)
+            conn.request("GET", path, headers={"User-Agent": "chtypes-go/1.0.0"})
+            resp = conn.getresponse()
+            partial: bytes | None = None
+            try:
+                data = resp.read()
+            except http.client.IncompleteRead as e:
+                partial = data = e.partial
+            conn.close()
+            return resp, partial, data
+
+        tc_path = "/v2/s-truncated-chunked/chtypes/v1/manifests/26.8"
+        resp, partial, data = read_chunked(tc_path)
+        assert resp.status == 200, f"chunked truncate answered {resp.status}, not 200"
+        assert resp.getheader("Transfer-Encoding") == "chunked", "chunked truncate did not send Transfer-Encoding: chunked"
+        assert resp.getheader("Content-Length") is None, "chunked truncate sent a Content-Length"
+        assert partial is not None, "chunked truncate ended cleanly: the terminating chunk was sent, so nothing was cut off"
+        assert data == b'{"ok"', f"chunked truncate sent {data!r}, not one complete 5-byte chunk"
+        resp, _, _ = read_chunked(tc_path)
+        assert resp.status == 500, f"a chunked truncate that cuts nothing answered {resp.status}, not 500"
+        resp, partial, data = read_chunked(tc_path)
+        assert partial is None and data == b'{"ok":true}', "the third answer of a chunked truncate script was not whole"
 
         # 5. per-case logs never cross-contaminate.
         log_closer = json.loads(get(f"http://127.0.0.1:{port1}/_log/s-closer").read())

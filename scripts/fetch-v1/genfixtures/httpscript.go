@@ -22,7 +22,7 @@ type httpRoute struct {
 }
 
 // httpResponse is exactly one oneOf variant, selected by which field is
-// set: FromTree, Stall, Close, Truncate (with FromTree), or Status (with optional Headers /
+// set: FromTree, Stall, Close, Truncate (with FromTree, and optionally Chunked), or Status (with optional Headers /
 // BodyFromTree). server.py documents the two header-value placeholders it
 // substitutes at serve time: `{origin}`/`{second-origin}` in a Location
 // header (the actual ephemeral port is not known until the server binds
@@ -34,7 +34,11 @@ type httpResponse struct {
 	Close    bool `json:"close,omitempty"`
 	// Truncate, with FromTree, is a body cut off part way: the full
 	// Content-Length is declared and only the first *Truncate bytes sent.
+	// With Chunked, the head is Transfer-Encoding: chunked with no
+	// Content-Length, the first *Truncate bytes go out as one complete chunk,
+	// and the connection closes without the terminating zero-length chunk.
 	Truncate     *int              `json:"truncate,omitempty"`
+	Chunked      bool              `json:"chunked,omitempty"`
 	Status       *int              `json:"status,omitempty"`
 	Headers      map[string]string `json:"headers,omitempty"`
 	BodyFromTree bool              `json:"body_from_tree,omitempty"`
