@@ -12,17 +12,21 @@ version: 2
 # so adding one means adding its directory to the github-actions job below.
 
 updates:
-  # Go — the module is stdlib-only (no require block), so this tracks the
-  # `go` directive and nothing else. It stays because that directive is a
-  # dependency like any other, and go/go.mod is what CI reads its version from.
+  # Go — the module (go/go.mod requires klauspost/compress) and the examples'
+  # tour, which replaces the module with ../../go and so carries the same
+  # requirement in its own go.mod and go.sum. CI runs the tour with its module
+  # files as committed, so a bump to /go alone fails it. `group-by:
+  # dependency-name` puts one dependency's bump in both directories into ONE
+  # pull request; without it Dependabot opens one per directory.
   - package-ecosystem: gomod
-    directory: /go
+    directories: ["/go", "/examples/go"]
     schedule:
       interval: weekly
       day: monday
     groups:
       go-deps:
         patterns: ["*"]
+        group-by: dependency-name
     commit-message:
       prefix: deps
 
