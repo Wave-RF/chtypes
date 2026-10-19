@@ -258,7 +258,7 @@ Key id algorithm: `sha256-first16hex` — the first 16 hex characters of sha256 
 
 A digest 404: `next_base_then_retry_on_last`. A tag 404: `next_base_then_unpublished`.
 
-A transport failure while reading a response body (a body shorter than its Content-Length, a reset, a TLS close) is retried like a 5xx, and once the retry table is spent it is `CHTYPES_SOURCE_UNREACHABLE`. Only an oversize body is `CHTYPES_ARTIFACT_CORRUPT`, and it is never retried. The `body-cut-off-*` cases (§10) hold every binding to this.
+A transport failure while reading a response body (a body shorter than its Content-Length, a reset, a TLS close) is retried like a 5xx, and once the retry table is spent it is `CHTYPES_SOURCE_UNREACHABLE`. A chunked body cut off before its terminating zero-length chunk is the same failure. Only an oversize body is `CHTYPES_ARTIFACT_CORRUPT`, and it is never retried. The `body-cut-off-*` cases (§10) hold every binding to this.
 
 A 410, on any request: permanent, a retired repository. It is never retried and never a reason to try the next base, and it is `CHTYPES_SOURCE_RETIRED`, carrying the registry's own message from at most 65536 bytes of the body, cut to 256 code points (§2, "A retired repository"). Under generation 2, one whose body's `errors[0].detail.revoked` is an object is `CHTYPES_ARTIFACT_REVOKED` instead, and just as permanent ("Build-level revocation").
 
@@ -517,10 +517,12 @@ A case id starting `list-tags-` exercises the binding's tag listing (what `chtyp
 - `retired-410-sanitized`: the message carries an escape sequence and a bidi override and runs past the cap: the error carries the sanitized, capped text.
 - `retired-410-no-body`: a `410` with no body. The error names the URL that answered and contains none of `null`, `undefined`, `None` or `<nil>`.
 
-**Cut-off body cases** (§7; public issue #641). An http-script response may be `{"truncate": N, "from_tree": true}`: a `200` that declares the route tree's full Content-Length for the path, sends only the first `N` bytes (fewer than the body's length) and closes the connection. Two cases script it on the layer blob GET, with the cut well inside the layer, so a client that accepts the short body fails its digest check instead of retrying:
+**Cut-off body cases** (§7; public issue #641). An http-script response may be `{"truncate": N, "from_tree": true}`: a `200` that declares the route tree's full Content-Length for the path, sends only the first `N` bytes (fewer than the body's length) and closes the connection. Two cases script it on the layer blob GET, with the cut well inside the layer, so a client that accepts the short body fails its digest check instead of retrying. Adding `"chunked": true` sends `Transfer-Encoding: chunked` and no Content-Length instead, the first `N` bytes as one complete chunk, then closes without the terminating zero-length chunk (public issue #644); two more cases script that form the same way:
 
 - `body-cut-off-then-ok`: the first attempt is cut off and the second is whole. The build installs, with one sleep of 4 seconds.
 - `body-cut-off-exhausted`: every attempt is cut off. The retry table is spent (sleeps 4, 8, 16 and 32 seconds) and the answer is `CHTYPES_SOURCE_UNREACHABLE`, never `CHTYPES_ARTIFACT_CORRUPT`.
+- `body-cut-off-chunked-then-ok`: the same as `body-cut-off-then-ok`, with a chunked body cut off before its last chunk.
+- `body-cut-off-chunked-exhausted`: the same as `body-cut-off-exhausted`, with a chunked body cut off before its last chunk.
 
 **Revocation cases** ("Build-level revocation"; public issue #625). They are in `tests/fixtures/fetch-v2/` only, because the v1 contract has none of it. Each revocation is signed with the test key over the `revocation` tree's builds, and each expected message is the guide's, built from the fixture's own advisory (the `410` ones from `tests/fixtures/revoked-410/cases.json`, the table the unit tests read):
 
