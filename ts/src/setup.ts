@@ -27,7 +27,7 @@
  */
 
 import { usageError } from './abi2/index.js';
-import { type Settings, validateDefaults } from './settings.js';
+import { type Settings, validateDefaults, type WireValue } from './settings.js';
 
 /** What `setup` takes: the image zone (an IANA name) and the default settings every call starts from. */
 export interface SetupOptions {
@@ -38,7 +38,8 @@ export interface SetupOptions {
 /** The setup in effect, as step 7 applies it. */
 export interface ProcessSetup {
   readonly timezone: string;
-  readonly defaults: Readonly<Record<string, string>>;
+  /** Each default as the library takes it: a JSON string, or `{"b64": ...}` for a value that is not valid UTF-8. */
+  readonly defaults: Readonly<Record<string, WireValue>>;
 }
 
 let recorded: ProcessSetup | undefined;
@@ -59,15 +60,14 @@ function same(a: ProcessSetup, b: ProcessSetup): boolean {
   if (a.timezone !== b.timezone) return false;
   const ak = Object.keys(a.defaults);
   const bk = Object.keys(b.defaults);
-  return ak.length === bk.length && ak.every((k) => Object.hasOwn(b.defaults, k) && a.defaults[k] === b.defaults[k]);
+  return ak.length === bk.length && ak.every((k) => Object.hasOwn(b.defaults, k) && JSON.stringify(a.defaults[k]) === JSON.stringify(b.defaults[k]));
 }
 
 /** Record the process setup, once. Call it before the first open; see this module's header for the rule. */
 export function setup(options: SetupOptions = {}): void {
   const timezone = options.timezone ?? '';
   if (typeof timezone !== 'string') throw new TypeError(`chtypes: setup timezone must be a string, got ${typeof timezone}`);
-  const defaults = options.defaults ?? {};
-  validateDefaults(defaults);
+  const defaults = validateDefaults(options.defaults ?? {});
   const next: ProcessSetup = { timezone, defaults: { ...defaults } };
   if (recorded !== undefined && same(recorded, next)) return;
   if (recorded !== undefined && (latched || !replaceable)) {

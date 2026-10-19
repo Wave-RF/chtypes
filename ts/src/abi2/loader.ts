@@ -67,8 +67,8 @@ export interface Predicate {
 export interface ImageSetup {
   /** The image zone `chs_initialize` is given (an IANA name); absent or empty means UTC. */
   readonly timezone?: string;
-  /** Seeded once with `chs_set_defaults` when there are any. */
-  readonly defaults?: Readonly<Record<string, string>>;
+  /** Seeded once with `chs_set_defaults` when there are any: each value a JSON string, or `{"b64": ...}` for one that is not valid UTF-8. */
+  readonly defaults?: Readonly<Record<string, string | { readonly b64: string }>>;
 }
 
 /** The loader's own input, decoupled from the fetch layer's `Resolved` type: the adapter in `../registry.ts` joins them and passes the predicate verbatim. */

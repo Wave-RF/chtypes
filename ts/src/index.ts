@@ -27,6 +27,8 @@ export {
   declinedTierKnown,
   DefaultKind,
   defaultKindKnown,
+  DefaultSupport,
+  defaultSupportKnown,
   DiscoverQueryParam,
   discoverQueryParamKnown,
   DocFlags,
@@ -40,9 +42,13 @@ export {
   mergeReasonKnown,
   Outcome,
   outcomeKnown,
+  Posture,
+  postureKnown,
   Reason,
   reasonKnown,
   reasonLossy,
+  RefusalSite,
+  refusalSiteKnown,
   Source,
   sourceIsStored,
   sourceKnown,
@@ -129,5 +135,6 @@ export {
   Schema,
 } from './schema.js';
 export { Server } from './server.js';
-export type { BytesIn, ServerProfile, Settings } from './settings.js';
+export { DeferDefaults, ParamEncoding, VerdictBasis } from './settings.js';
+export type { BytesIn, ColumnDefault, ServerProfile, SettingValue, Settings } from './settings.js';
 export { setup, type SetupOptions } from './setup.js';
