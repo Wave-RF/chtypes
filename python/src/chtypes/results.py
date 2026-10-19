@@ -18,9 +18,12 @@ from ._abi2._vocab import (
     DeclinedLayer,
     DeclinedTier,
     DefaultKind,
+    DefaultSupport,
     FilterOutcome,
     MergeReason,
     Outcome,
+    Posture,
+    RefusalSite,
     Verdict,
 )
 
@@ -125,7 +128,7 @@ class AtMergeEntry:
     `at_merge` list (ABI v2). `engine_rows` stays exactly what the INSERT writer
     produces, so the two never contradict each other.
 
-    `row` indexes `engine_rows`: the part's row, not the input body's. `reason` is
+    `part_row` indexes `engine_rows`: the part's row, not the input body's. `reason` is
     a `MergeReason`; one the description does not list is its unknown(n) member
     (rule r3). `column` is the column a `ttl_column_reset` resets (from `column`
     or `column_b64`), None when the entry names none. `stored` is the column's
@@ -136,7 +139,7 @@ class AtMergeEntry:
     the document carries none.
     """
 
-    row: int
+    part_row: int
     reason: MergeReason
     column: bytes | None = None
     stored: bytes | None = None
@@ -146,19 +149,32 @@ class AtMergeEntry:
 @dataclass(frozen=True, slots=True)
 class RowResult:
     """The `row` document. `columns` is every `cols` entry in document order;
-    `values` is the subset whose `is_stored` is true, in order."""
+    `values` is the subset whose `is_stored` is true, in order.
+
+    `err_code` is the document's `code`: ClickHouse's own code, 0 only on a
+    success, and -2 (`CHS_CODE_DECLINED`) where this build declined the row.
+    `reason` is the decline's catalog id (ASCII), present exactly where `err_code`
+    is -2, else None; key on it, never on `err_msg`. `refused_at` is where a
+    single-row result's refusal sits (the rows of a batch carry neither this nor
+    `refused_row`: the batch's own say where), None for an accepted or skipped
+    row. `refused_row` is the row index of a `RefusalSite.ROW` refusal, else None.
+    `verdict_reason` is the catalog id of a declined verdict (`verdict_code` is
+    -2), else None."""
 
     outcome: Outcome
     err_code: int
     err_msg: bytes
+    reason: str | None
+    refused_at: RefusalSite | None
+    refused_row: int | None
     columns: tuple[Value, ...]
     values: tuple[Value, ...]
     transformed: tuple[Transform, ...]
     unknown_fields: tuple[bytes, ...]
-    unsupported_settings: tuple[bytes, ...]
     computed: tuple[Computed, ...]
     verdict: Verdict | None
     verdict_code: int
+    verdict_reason: str | None
     verdict_err: bytes
     partition_id: bytes | None
     input_span: Span | None
@@ -196,6 +212,16 @@ class BatchResult:
     a body with any skipped row or any `unconsumed` range
     (docs/guides/batches.md).
 
+    `reason`, `refused_at` and `refused_row` are the row's (see `RowResult`) for the
+    batch: the catalog id of a declined batch, and where a refusal or decline
+    sits, None when the document carries none. `spans` is `row_spans`: one entry
+    per `rows` entry, index-aligned, None for a row not exported (a skipped row, or
+    a row a filter cut); the tuple itself is None when absent, and always None when
+    the export was declined. `export_columns` is the export's one column list, in
+    the order every line carries its columns (None when no export ran), and
+    `export_declined_reason` the catalog id of a declined export (None when the
+    export ran or none was asked for); `export_declined` stays the cause text.
+
     `unsupported_settings` is the call's own settings the library declined, from
     the batch's top-level list (ABI v2). `at_merge` is what an `OPTIMIZE TABLE ...
     FINAL` of the part would do to its rows, at least: a later background merge
@@ -206,14 +232,19 @@ class BatchResult:
     outcome: Outcome
     err_code: int
     err_msg: bytes
+    reason: str | None
+    refused_at: RefusalSite | None
+    refused_row: int | None
     rows: tuple[RowResult, ...]
     rows_read: int
     rows_skipped: int
     transformed: tuple[Transform, ...]
     engine_rows: tuple[tuple[EngineCell, ...], ...] | None
     payload: bytes | None
-    spans: tuple[Span, ...] | None
+    spans: tuple[Span | None, ...] | None
+    export_columns: tuple[bytes, ...] | None
     export_declined: bytes
+    export_declined_reason: str | None
     rows_passed: int
     rows_cut: int
     partition_count: int | None
@@ -225,21 +256,30 @@ class BatchResult:
 
 @dataclass(frozen=True, slots=True)
 class FilterRowError:
+    """One entry of a filter result's `errors`. `reason` is the catalog id where
+    `code` is -2 (`CHS_CODE_DECLINED`), else None."""
+
     row: int
     code: int
+    reason: str | None
     msg: bytes
 
 
 @dataclass(frozen=True, slots=True)
 class FilterResult:
     """The `filter_result` document. A verdict counts only when `outcome` is `ok`;
-    otherwise treat every verdict as `d`, whatever the verdict string holds. Under
+    otherwise treat every verdict as `d`, whatever the verdict string holds.
+    `reason`, `refused_at` and `refused_row` are the batch's (see `BatchResult`):
+    where a refused or declined evaluation sits, and its catalog id. Under
     `ok`, `e` and `d` are never answers, and a caller enforcing visibility fails
     closed on both; `Verdict.answered` says which."""
 
     outcome: FilterOutcome
     err_code: int
     err_msg: bytes
+    reason: str | None
+    refused_at: RefusalSite | None
+    refused_row: int | None
     rows_read: int
     unsupported_settings: tuple[bytes, ...]
     verdicts: tuple[Verdict, ...]
@@ -250,12 +290,20 @@ class FilterResult:
 class Column:
     """One column of a compiled schema. `type` is the canonical type; it can
     differ between ClickHouse lines, so a cross-line hash is taken over the
-    caller's own statement, never over `columns`."""
+    caller's own statement, never over `columns`.
+
+    `default_support` is what this build does with the column's DEFAULT and
+    `default_support_reason` the catalog id behind a `DECLINED` one; `reads` is
+    the columns the column's expression reads. All three are reserved: None when
+    the build reports none."""
 
     name: bytes
     type: bytes
     default_kind: DefaultKind
     default_expr: bytes
+    default_support: DefaultSupport | None = None
+    default_support_reason: str | None = None
+    reads: tuple[bytes, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -280,7 +328,9 @@ class SchemaServer:
     data-derived. `timezone` is the zone the schema's types bind: the profile's,
     or else the image zone. `settings` is the profile's settings (`{}` when it
     gave none). `macros` is None exactly when the profile carried no macros
-    (unknown), and a mapping, even an empty one, when it did (the complete set)."""
+    (unknown), and a mapping, even an empty one, when it did (the complete set). A
+    setting value that was not UTF-8 comes back as its bytes decoded with
+    `surrogateescape`, the spelling that goes back in unchanged."""
 
     timezone: str
     settings: Mapping[str, str]
@@ -308,12 +358,16 @@ class SchemaDescription:
     the highest layer that sets it, ordered by layer and then by name bytes, as
     the library wrote it. A schema that lists any is one `compile_filter`
     declines (`UnsupportedError`), and a consumer that streams rows refuses
-    such a tenant (spec/abi-v2/where-settings/README.md)."""
+    such a tenant (spec/abi-v2/where-settings/README.md).
+
+    `posture` is how the statement was compiled, which the document carries only
+    for `Posture.LOAD`: None is `Posture.CREATE`."""
 
     columns: tuple[Column, ...]
     server: SchemaServer | None = None
     replicated: SchemaReplicated | None = None
     filter_declined_settings: tuple[DeclinedSetting, ...] = ()
+    posture: Posture | None = None
 
 
 @dataclass(frozen=True, slots=True)

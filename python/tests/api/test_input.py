@@ -7,8 +7,18 @@ import json
 
 import pytest
 
-from chtypes import UsageError
-from chtypes._input import body_bytes, columns_json, settings_json, string_map_json, to_bytes
+from chtypes import ColumnDefault, ParamEncoding, Posture, ServerProfile, UsageError, VerdictBasis
+from chtypes._input import (
+    body_bytes,
+    columns_json,
+    filter_options_json,
+    insert_options_json,
+    schema_options_json,
+    server_profile_json,
+    settings_json,
+    string_map_json,
+    to_bytes,
+)
 
 
 def test_settings_are_a_json_object_of_string_values_written_verbatim() -> None:
@@ -69,31 +79,132 @@ def test_text_inputs_are_utf8_and_bodies_never_accept_text() -> None:
 _LONE = "\udcff"  # what surrogateescape makes of the byte 0xff
 
 
+def test_a_non_utf8_value_travels_as_the_b64_object_form() -> None:
+    # ABI v2 json_object_byte_values: the bytes are exact; a UTF-8 value stays a string.
+    got = json.loads(settings_json({"k": _LONE, "ok": "é"}) or b"")
+    assert got == {"k": {"b64": "/w=="}, "ok": "é"}
+    assert json.loads(settings_json({"k": _LONE}, "UTC") or b"") == {
+        "k": {"b64": "/w=="},
+        "session_timezone": "UTC",
+    }
+    # the zone is a settings value too
+    assert json.loads(settings_json(None, _LONE) or b"") == {"session_timezone": {"b64": "/w=="}}
+    assert json.loads(string_map_json({"p": _LONE + "a"}, "query parameters") or b"") == {
+        "p": {"b64": base64.b64encode(b"\xffa").decode()}
+    }
+
+
 @pytest.mark.parametrize(
     ("call", "words"),
     [
-        (lambda: settings_json({"k": _LONE}), ("settings", 'the value for key "k"')),
         (lambda: settings_json({"k" + _LONE: "v"}), ("settings", 'the key "k\\udcff"')),
-        (lambda: settings_json({"k": _LONE}, "UTC"), ("settings", 'the value for key "k"')),
-        (lambda: settings_json(None, _LONE), ("the zone",)),
-        (
-            lambda: string_map_json({"p": _LONE}, "query parameters"),
-            ("query parameters", 'the value for key "p"'),
-        ),
         (
             lambda: string_map_json({_LONE: "v"}, "query parameters"),
             ("query parameters", 'the key "\\udcff"'),
         ),
+        # a surrogate that is not a surrogateescape byte has no bytes to carry
+        (lambda: settings_json({"k": "\ud800"}), ("settings", 'the value for key "k"')),
+        # a macro (name or value) and a server timezone have no object form
+        (
+            lambda: server_profile_json(ServerProfile(macros={"m": _LONE})),
+            ("macros", 'the value for key "m"'),
+        ),
+        (
+            lambda: server_profile_json(ServerProfile(macros={_LONE: "v"})),
+            ("macros", 'the key "\\udcff"'),
+        ),
+        (lambda: server_profile_json(ServerProfile(timezone=_LONE)), ("timezone",)),
     ],
 )
-def test_a_non_utf8_key_or_value_is_a_usage_error_naming_the_input_and_the_key(call, words) -> None:
+def test_a_key_or_value_with_no_byte_form_is_a_usage_error_naming_the_input_and_the_key(
+    call, words
+) -> None:
     with pytest.raises(UsageError) as info:
         call()
     message = info.value.message.decode("utf-8")
-    for word in (*words, "not valid UTF-8", "unhex('<hex>')"):
+    for word in (*words, "not valid UTF-8", "cannot carry these bytes"):
         assert word in message
     assert info.value.status == 3 and info.value.ch_code == 0
     assert message.isascii()  # the key is escaped, never raw
+
+
+def test_server_profile_settings_take_the_b64_form_too() -> None:
+    doc = json.loads(server_profile_json(ServerProfile(settings={"k": _LONE, "j": "v"})))
+    assert doc == {"settings": {"k": {"b64": "/w=="}, "j": "v"}}
+
+
+def test_no_option_set_sends_no_document() -> None:
+    assert insert_options_json() is None
+    assert filter_options_json() is None
+    assert schema_options_json() is None
+
+
+def test_insert_options_are_the_members_set_and_nothing_else() -> None:
+    raw = insert_options_json(
+        insertable_columns=["a", b"\xff"],
+        column_defaults=[ColumnDefault("a", "1"), ColumnDefault(b"\xfe", b"\xfd")],
+        verdict_basis=VerdictBasis.EXPORT,
+        defer_defaults="server",
+    )
+    assert json.loads(raw or b"") == {
+        "insertable_columns": [{"name": "a"}, {"name_b64": "/w=="}],
+        "column_defaults": [
+            {"name": "a", "value": "1"},
+            {"name_b64": "/g==", "value_b64": "/Q=="},
+        ],
+        "verdict_basis": "export",
+        "defer_defaults": "server",
+    }
+
+
+def test_an_absent_list_is_left_out_and_a_present_empty_one_is_sent() -> None:
+    assert json.loads(insert_options_json(insertable_columns=[]) or b"") == {
+        "insertable_columns": []
+    }
+    assert json.loads(insert_options_json(column_defaults=[]) or b"") == {"column_defaults": []}
+    assert insert_options_json(insertable_columns=None, column_defaults=None) is None
+
+
+def test_an_unnamed_member_is_passed_through_as_json_text_verbatim() -> None:
+    raw = insert_options_json(
+        verdict_basis="input", insert_options_extra={"future": '{"a": [1, 2.50]}', "n": "7"}
+    )
+    # the JSON text is spliced as given (no re-serialization), after the named members
+    assert raw == b'{"verdict_basis":"input","future":{"a": [1, 2.50]},"n":7}'
+    # a key set twice keeps the last value: the extra member wins
+    assert json.loads(
+        insert_options_json(
+            verdict_basis="input", insert_options_extra={"verdict_basis": '"export"'}
+        )
+        or b""
+    ) == {"verdict_basis": "export"}
+    with pytest.raises(UsageError) as info:
+        insert_options_json(insert_options_extra={"k": "{not json"})
+    assert b"not valid JSON" in info.value.message
+    with pytest.raises(TypeError):
+        insert_options_json(insert_options_extra={"k": 1})  # type: ignore[dict-item]
+
+
+def test_filter_and_schema_options() -> None:
+    assert json.loads(filter_options_json(param_encoding=ParamEncoding.RAW) or b"") == {
+        "param_encoding": "raw"
+    }
+    assert json.loads(
+        schema_options_json(posture=Posture.LOAD, schema_options_extra={"x": "true"}) or b""
+    ) == {"posture": "load", "x": True}
+
+
+@pytest.mark.parametrize("bad", [5, b"input", None.__class__])
+def test_an_enum_option_is_a_str_or_its_enum(bad) -> None:
+    with pytest.raises(TypeError):
+        insert_options_json(verdict_basis=bad)
+
+
+def test_the_options_never_validate_a_member() -> None:
+    # The library refuses an unknown value, naming it; the binding sends it.
+    assert json.loads(insert_options_json(verdict_basis="nonsense") or b"") == {
+        "verdict_basis": "nonsense"
+    }
 
 
 def test_valid_non_ascii_serializes_byte_for_byte_as_before() -> None:
