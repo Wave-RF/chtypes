@@ -254,9 +254,30 @@
         "FetchOptions.lock_path",
         "FetchOptions.lock_write",
         "FetchOptions.update",
-        "FetchOptions.strict_cache"
+        "FetchOptions.strict_cache",
+        "FetchOptions.allow_revoked",
+        "FetchOptions.require_revocation_check"
       ],
       "reason": "§6: the fetch options carry everything fetch-v1.md configures (bases, cache directory, system directories, trusted keys, token, allow-unsigned, offline, frozen, the lock path) 'under the fetch module's own names', which the doc names in prose and does not spell per language. lock_write and update are the lock's write and update modes of fetch-v1.md §6."
+    },
+    {
+      "binding": "rust",
+      "kind": "extra",
+      "names": [
+        "Revocation.signed",
+        "Revocation.manifest",
+        "Revocation.advisories",
+        "Revocation.message",
+        "Advisory",
+        "Advisory.id",
+        "Advisory.url",
+        "Advisory.class",
+        "Advisory.summary",
+        "Advisory.build",
+        "Advisory.superseded_by",
+        "Advisory.revoked_at"
+      ],
+      "reason": "§4's 'a revocation' bullet: a CHTYPES_ARTIFACT_REVOKED (fetch-v1.md, Build-level revocation; public issue #625) carries whether it is signed, the manifest a signed one revokes, and each advisory's id, URL, class, summary, build, superseded_by and revoked_at, which the doc names in prose and does not spell per language. Rust's variant holds them in its Revocation struct, as Error::CacheUnusable holds a CacheFault."
     },
     {
       "binding": "ts",

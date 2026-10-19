@@ -86,6 +86,7 @@ pub fn resolve(spelling: &str, mut options: Options) -> Result<(Vec<Resolution>,
         bases: &res.bases,
         client: &res.client,
         auth: &res.auth,
+        budget: super::http::Budget::default(),
     };
     let (fetched_index, alias_absent) = oci::fetch_by_request(&source, &version_request)?;
     let index = oci::parse_index(&fetched_index.bytes, &format!("index for {spelling:?}"))?;

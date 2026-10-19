@@ -15,6 +15,7 @@ use super::layout::{self, VerifiedRecord};
 use super::lock::{self, Lock, LockEntry};
 use super::oci::{self, Source, VersionRequest};
 use super::referrers;
+use super::revocation::{self, Found, Revocation, Subject};
 use super::unpack;
 
 /// Every digest this module checked, for diagnostics and the lock file.
@@ -50,11 +51,17 @@ pub struct Resolved {
     pub warnings: Vec<String>,
 }
 
-/// One entry of [`verify_installed`]'s report.
+/// One entry of [`verify_installed`]'s report. `revocation` is set, and
+/// `detail` is its message, when the entry holds a stored revocation that
+/// verifies (docs/guides/fetch-v1.md, "Build-level revocation"): `chtypes
+/// verify` reports the build as revoked and exits 11.
 pub struct VerifyResult {
+    pub platform: String,
+    pub version: String,
     pub dir: PathBuf,
     pub ok: bool,
     pub detail: String,
+    pub revocation: Option<Revocation>,
 }
 
 /// Options shared by every entry point. A library caller builds one per
@@ -98,6 +105,13 @@ pub struct Options {
     /// installed", and never a fall-through to a system dir. `None` reads
     /// `CHTYPES_CACHE_STRICT` (`1` is on), else off.
     pub strict_cache: Option<bool>,
+    /// Use a build a verified revocation refuses, with one warning naming the
+    /// advisory (docs/guides/fetch-v1.md, "Build-level revocation"). Per call,
+    /// never an environment variable; ignored with `lock_write` or `update`.
+    pub allow_revoked: bool,
+    /// A revocation status that cannot be read is the transport's error rather
+    /// than one warning.
+    pub require_revocation_check: bool,
     /// The trust list: raw 32-byte ed25519 public keys as hex. Non-empty
     /// REPLACES the default (else `$CHTYPES_TRUSTED_KEYS`, else the contract's
     /// key); it never appends to it. Ignored by the dev channel, which trusts
@@ -131,6 +145,8 @@ impl Default for Options {
             update: false,
             allow_unsigned: false,
             strict_cache: None,
+            allow_revoked: false,
+            require_revocation_check: false,
             trusted_keys: None,
             token: None,
             clock: None,
@@ -149,6 +165,12 @@ pub(super) struct Resources {
     pub(super) client: Client,
     pub(super) auth: AuthConfig,
     pub(super) trust: Vec<TrustedKey>,
+    /// Offline (the option, or `CHTYPES_OFFLINE=1`): no request is made.
+    pub(super) offline: bool,
+    /// The override, dropped with `lock_write` or `update`: it never lets a
+    /// lock or an update pin a revoked build.
+    pub(super) allow_revoked: bool,
+    pub(super) require_revocation_check: bool,
 }
 
 /// The ordered base list one call uses: the options' own, else
@@ -205,6 +227,9 @@ pub(super) fn resources(options: &mut Options) -> Result<Resources> {
         client,
         auth,
         trust,
+        offline: channel::offline_mode(options.offline),
+        allow_revoked: options.allow_revoked && !options.lock_write && !options.update,
+        require_revocation_check: options.require_revocation_check,
     })
 }
 
@@ -237,11 +262,16 @@ pub fn ensure(request: &str, mut options: Options) -> Result<Resolved> {
         None => None,
     };
 
-    if channel::offline_mode(options.offline) {
-        if options.frozen {
-            return resolve_frozen_offline(&res, request, &options, lock.as_ref());
-        }
-        return resolve_offline(&res, &version_request, request, &options, lock.as_ref());
+    if res.offline {
+        let mut resolved = if options.frozen {
+            resolve_frozen_offline(&res, request, &options, lock.as_ref())?
+        } else {
+            resolve_offline(&res, &version_request, request, &options, lock.as_ref())?
+        };
+        // Offline makes no request, so only a stored revocation can refuse it
+        // (docs/guides/fetch-v1.md, "Build-level revocation").
+        revocation::check_installed_stored(&res, &mut resolved)?;
+        return Ok(resolved);
     }
     if res.strict {
         // Strict: the cache is checked before anything is fetched into it.
@@ -278,7 +308,17 @@ pub fn ensure(request: &str, mut options: Options) -> Result<Resolved> {
         }
     }
 
-    let resolved = ensure_online(&res, &version_request, request, &options)?;
+    let mut resolved = ensure_online(&res, &version_request, request, &options)?;
+
+    // `update` re-resolves every locked request, so under generation 2 it
+    // refuses a revoked build on every platform the lock pins
+    // (docs/guides/fetch-v1.md, "Build-level revocation").
+    if options.update && channel::active().revocation {
+        if let Some(existing) = &lock {
+            let warnings = check_locked_for_revocation(&res, existing)?;
+            resolved.warnings.extend(warnings);
+        }
+    }
 
     // `update` always rewrites the lock (it exists to refresh a stale
     // entry), even when `lock_write` was not separately requested — plan
@@ -291,9 +331,10 @@ pub fn ensure(request: &str, mut options: Options) -> Result<Resolved> {
                 // Plan §6: "Writing a lock for every platform the index
                 // offers... downloads and verifies every platform's bundle
                 // but fetches the layer only for the host's own platform."
-                for (platform, entry) in
-                    lock_entries_for_all_platforms(&res, &version_request, &resolved)?
-                {
+                let (entries, warnings) =
+                    lock_entries_for_all_platforms(&res, &version_request, &resolved)?;
+                resolved.warnings.extend(warnings);
+                for (platform, entry) in entries {
                     lock.set_entry(request, &platform, entry);
                 }
             } else {
@@ -328,6 +369,7 @@ fn ensure_online(
         bases: &res.bases,
         client: &res.client,
         auth: &res.auth,
+        budget: super::http::Budget::default(),
     };
     let (fetched_index, alias_absent) = oci::fetch_by_request(&source, version_request)?;
     let index = oci::parse_index(&fetched_index.bytes, &format!("index for {request:?}"))?;
@@ -339,10 +381,11 @@ fn ensure_online(
     oci::check_platform_manifest(&manifest, &format!("manifest {}", descriptor.digest))?;
     let layer = &manifest.layers[0];
 
-    let trust_result = referrers::find_trusted_statement(&source, &descriptor.digest, &res.trust);
-    let (predicate, signed_by, bundle_layer_digest, bundle_manifest_digest, mut warnings) =
+    let trust_result =
+        referrers::trusted_statement_with_listing(&source, &descriptor.digest, &res.trust);
+    let (predicate, signed_by, bundle_layer_digest, bundle_manifest_digest, mut warnings, listing) =
         match trust_result {
-            Ok(stmt) => {
+            Ok((stmt, listing)) => {
                 check_artifact_statement(&stmt, &layer.digest)?;
                 (
                     stmt.predicate,
@@ -350,6 +393,7 @@ fn ensure_online(
                     Some(stmt.bundle_layer_digest),
                     Some(stmt.bundle_manifest_digest),
                     Vec::new(),
+                    Some(listing),
                 )
             }
             Err(Error::ArtifactUntrusted(detail)) if options.allow_unsigned => (
@@ -360,6 +404,7 @@ fn ensure_online(
                 vec![format!(
                     "chtypes: no verified signature found; CHTYPES_ALLOW_UNSIGNED is set, continuing unsigned: {detail}"
                 )],
+                None,
             ),
             Err(e) => return Err(e),
         };
@@ -383,6 +428,29 @@ fn ensure_online(
 
     let already = is_fully_installed(&layout::unpacked_dir(&res.root, &descriptor.digest)?)?;
 
+    // A revocation of the candidate, from the trust listing just read (no extra
+    // listing request), refuses it before the monotonic rule and before its
+    // layer is requested: a revoked build is never downloaded. With the
+    // override, it is installed, and its revocation stored beside it. A build
+    // that is already installed is checked below instead, by the installed-build
+    // check, which follows the memo and its own budget.
+    let mut pending: Option<Found> = None;
+    if signed && !already && channel::active().revocation {
+        if let Some(listing) = listing {
+            let sub = Subject::of_statement(
+                &predicate,
+                &descriptor.digest,
+                &layer.digest,
+                &res.platform,
+                request,
+            );
+            let out =
+                revocation::check_candidates(&source, &listing.revocations, &sub, &res.trust)?;
+            warnings.extend(revocation::settle(res, &sub, &out, false)?);
+            pending = out.verified;
+        }
+    }
+
     // Monotonicity (docs/guides/fetch-v1.md §9, `monotonic-warning`): a
     // HIGHER build within the request, already installed, is kept in place
     // of what the source now offers, with a warning, whether or not the
@@ -403,6 +471,10 @@ fn ensure_online(
             let mut resolved =
                 record_to_resolved(request, &res.platform, &dir, record, "cache", true);
             resolved.warnings = warnings;
+            // A build used without a download is checked for a revocation, at
+            // most once per process (docs/guides/fetch-v1.md, "Build-level
+            // revocation").
+            check_used_installed(res, &mut resolved)?;
             return Ok(resolved);
         }
     }
@@ -458,7 +530,7 @@ fn ensure_online(
             platform.map(|p| (p.os, p.architecture)),
             options.before_index_rename.as_deref(),
         )?;
-        return Ok(Resolved {
+        let mut resolved = Resolved {
             abi_generation: channel::active().abi,
             platform: res.platform.clone(),
             request: request.to_string(),
@@ -479,11 +551,25 @@ fn ensure_online(
             source: fetched_manifest.base,
             already_installed: already,
             warnings,
-        });
+        };
+        if already {
+            check_used_installed(res, &mut resolved)?;
+        } else {
+            revocation::store_pending(res, &resolved, pending.as_ref());
+        }
+        return Ok(resolved);
     }
     Err(Error::ArtifactCorrupt(
         "install succeeded but no verified.json was written".to_string(),
     ))
+}
+
+/// The installed-build revocation check of a build an `ensure` answers with no
+/// download; its warnings join `resolved`'s.
+fn check_used_installed(res: &Resources, resolved: &mut Resolved) -> Result<()> {
+    let warnings = revocation::check_installed_once(res, resolved)?;
+    resolved.warnings.extend(warnings);
+    Ok(())
 }
 
 /// `lock_write`'s "every platform the index offers" rule (plan §6): the
@@ -496,16 +582,18 @@ fn lock_entries_for_all_platforms(
     res: &Resources,
     version_request: &VersionRequest,
     host_resolved: &Resolved,
-) -> Result<Vec<(String, LockEntry)>> {
+) -> Result<(Vec<(String, LockEntry)>, Vec<String>)> {
     let source = Source {
         bases: &res.bases,
         client: &res.client,
         auth: &res.auth,
+        budget: super::http::Budget::default(),
     };
     let (fetched_index, _alias_absent) = oci::fetch_by_request(&source, version_request)?;
     let index = oci::parse_index(&fetched_index.bytes, "index")?;
 
     let mut out = Vec::new();
+    let mut warnings = Vec::new();
     for d in &index.manifests {
         let Some(p) = &d.platform else { continue };
         let Some(platform) = constants::PLATFORMS
@@ -533,8 +621,22 @@ fn lock_entries_for_all_platforms(
         let manifest: oci::Manifest = serde_json::from_slice(&manifest_fetched.bytes)?;
         oci::check_platform_manifest(&manifest, &format!("manifest {}", d.digest))?;
         let layer = &manifest.layers[0];
-        let stmt = referrers::find_trusted_statement(&source, &d.digest, &res.trust)?;
+        let (stmt, listing) =
+            referrers::trusted_statement_with_listing(&source, &d.digest, &res.trust)?;
         check_artifact_statement(&stmt, &layer.digest)?;
+        // Under generation 2 a revoked build on any platform the lock would pin
+        // refuses the call, whatever the override says (it is dropped for a
+        // lock): the candidates come from the trust listing just read.
+        warnings.extend(revocation_of_locked_platform(
+            res,
+            &source,
+            &listing,
+            &stmt.predicate,
+            &d.digest,
+            &layer.digest,
+            platform.key,
+            &host_resolved.request,
+        )?);
         out.push((
             platform.key.to_string(),
             LockEntry {
@@ -550,7 +652,72 @@ fn lock_entries_for_all_platforms(
             },
         ));
     }
-    Ok(out)
+    Ok((out, warnings))
+}
+
+/// The revocation check of one platform a lock or an update pins, from the
+/// trust listing already read for it: a revoked build is refused
+/// (`revocation_of_locked_platform` is a no-op under the v1 contract).
+#[allow(clippy::too_many_arguments)]
+fn revocation_of_locked_platform(
+    res: &Resources,
+    source: &Source<'_>,
+    listing: &referrers::Listing,
+    predicate: &serde_json::Value,
+    manifest: &str,
+    layer: &str,
+    platform: &str,
+    request: &str,
+) -> Result<Vec<String>> {
+    if !channel::active().revocation {
+        return Ok(Vec::new());
+    }
+    let sub = Subject::of_statement(predicate, manifest, layer, platform, request);
+    let out = revocation::check_candidates(source, &listing.revocations, &sub, &res.trust)?;
+    revocation::settle(res, &sub, &out, false)
+}
+
+/// `update`'s revocation check: every (request, platform) pair the lock pins is
+/// re-resolved and refused when its build is revoked, as `update` re-resolves
+/// every locked request (docs/guides/fetch-v1.md §6).
+fn check_locked_for_revocation(res: &Resources, existing: &Lock) -> Result<Vec<String>> {
+    let source = Source {
+        bases: &res.bases,
+        client: &res.client,
+        auth: &res.auth,
+        budget: super::http::Budget::default(),
+    };
+    let mut warnings = Vec::new();
+    for (spelling, by_platform) in &existing.requests {
+        let version_request = VersionRequest::parse(spelling)?;
+        let (fetched_index, _alias_absent) = oci::fetch_by_request(&source, &version_request)?;
+        let index = oci::parse_index(&fetched_index.bytes, &format!("index for {spelling:?}"))?;
+        for platform_key in by_platform.keys() {
+            let Some(platform) = constants::PLATFORMS.iter().find(|p| p.key == platform_key) else {
+                continue;
+            };
+            let descriptor = oci::select_platform(&index, platform.key)?;
+            let fetched_manifest =
+                oci::fetch_by_digest(&source, &descriptor.digest, constants::MANIFEST_MAX_BYTES)?;
+            let manifest: oci::Manifest = serde_json::from_slice(&fetched_manifest.bytes)?;
+            oci::check_platform_manifest(&manifest, &format!("manifest {}", descriptor.digest))?;
+            let layer = &manifest.layers[0];
+            let (stmt, listing) =
+                referrers::trusted_statement_with_listing(&source, &descriptor.digest, &res.trust)?;
+            check_artifact_statement(&stmt, &layer.digest)?;
+            warnings.extend(revocation_of_locked_platform(
+                res,
+                &source,
+                &listing,
+                &stmt.predicate,
+                &descriptor.digest,
+                &layer.digest,
+                platform.key,
+                spelling,
+            )?);
+        }
+    }
+    Ok(warnings)
 }
 
 fn ensure_frozen(
@@ -564,11 +731,15 @@ fn ensure_frozen(
         bases: &res.bases,
         client: &res.client,
         auth: &res.auth,
+        budget: super::http::Budget::default(),
     };
     // A build already installed under exactly the pinned manifest, layer and
     // bundle digests is used as it is: zero requests (docs/guides/fetch-v1.md
     // §6; public issues #414 and #487).
-    if let Some(resolved) = installed_by_pin(res, request, entry)? {
+    if let Some(mut resolved) = installed_by_pin(res, request, entry)? {
+        // Under generation 2, the one listing a warm `--frozen` fetch makes
+        // (docs/guides/fetch-v1.md §6, "Build-level revocation").
+        revocation::check_frozen_installed(res, &mut resolved)?;
         return Ok(resolved);
     }
 
@@ -609,6 +780,22 @@ fn ensure_frozen(
         Err(e) => return Err(e),
     };
 
+    // The bundle, then (generation 2) the one revocation listing, and only then
+    // the layer, so a revoked pin is never downloaded.
+    let mut pending: Option<Found> = None;
+    if !signed_by.is_empty() && channel::active().revocation {
+        let sub = Subject::of_statement(
+            &predicate,
+            &entry.manifest,
+            &layer.digest,
+            platform,
+            request,
+        );
+        let out = revocation::check_listing(&source, &res.trust, &sub)?;
+        warnings.extend(revocation::settle(res, &sub, &out, false)?);
+        pending = out.verified;
+    }
+
     let fetched_layer =
         oci::fetch_blob_by_digest(&source, &layer.digest, constants::MAX_UNPACKED_BYTES)?;
     let decompressed = unpack::decompress_zstd(&fetched_layer.bytes)?;
@@ -638,7 +825,7 @@ fn ensure_frozen(
         )
     })?;
 
-    Ok(Resolved {
+    let resolved = Resolved {
         abi_generation: channel::active().abi,
         platform: platform.to_string(),
         request: request.to_string(),
@@ -659,7 +846,9 @@ fn ensure_frozen(
         source: fetched_manifest.base,
         already_installed: false,
         warnings,
-    })
+    };
+    revocation::store_pending(res, &resolved, pending.as_ref());
+    Ok(resolved)
 }
 
 /// The installed build a lock entry pins, with no network: an unpacked
@@ -978,15 +1167,57 @@ pub fn verify_installed(mut options: Options) -> Result<Vec<VerifyResult>> {
     probe(&res)?;
     let mut out = Vec::new();
     for (dir, record) in layout::list_verified(&res.root)? {
-        out.push(verify_one_install(&dir, &record));
+        out.push(verify_one_with_revocation(&res, &dir, &record));
     }
     for sysdir in &res.system_dirs {
         for (dir, record) in layout::list_verified(sysdir).unwrap_or_default() {
-            out.push(verify_one_install(&dir, &record));
+            out.push(verify_one_with_revocation(&res, &dir, &record));
         }
     }
     Ok(out)
 }
+
+/// [`verify_one_install`], and under generation 2 the entry's stored
+/// revocation, when it verifies: the build is then reported revoked
+/// (docs/guides/fetch-v1.md, "Build-level revocation").
+fn verify_one_with_revocation(
+    res: &Resources,
+    dir: &Path,
+    record: &VerifiedRecord,
+) -> VerifyResult {
+    let mut result = verify_one_install(dir, record);
+    if !channel::active().revocation {
+        return result;
+    }
+    let Ok(body) = std::fs::read(dir.join(constants::CACHE_REVOCATION_RECORD)) else {
+        return result;
+    };
+    let resolved = record_to_resolved("", &record.platform, dir, record.clone(), "cache", true);
+    let sub = Subject::of_resolved(res, &resolved);
+    if let Ok(rev) = revocation::verify_revocation(&body, &res.trust, &sub) {
+        let text = revocation::revoked_text(&sub, &rev);
+        result.detail.clone_from(&text);
+        result.revocation = Some(rev.with_message(text));
+    }
+    result
+}
+
+/// The installed-build revocation check a registry makes after
+/// [`resolve_installed`] answers and before it loads the build
+/// (docs/guides/fetch-v1.md §9, `check_installed`): the stored record, then,
+/// unless offline, at most one check per build per process, with one attempt
+/// per base, no backoff and one 5 s deadline. Returns the warnings the open
+/// prints, or `CHTYPES_ARTIFACT_REVOKED`, or in strict mode the transport's
+/// error. Under the v1 contract it does nothing.
+pub fn check_installed(resolved: &Resolved, mut options: Options) -> Result<Vec<String>> {
+    let res = resources(&mut options)?;
+    revocation::check_installed_once(&res, resolved)
+}
+
+/// Forgets every kept revocation outcome, as a new process would: a
+/// conformance runner calls it before every case.
+#[cfg(test)]
+pub use super::revocation::reset_revocation_memo_for_tests;
 
 fn verify_one_install(dir: &Path, record: &VerifiedRecord) -> VerifyResult {
     let lib_path = dir.join(&record.library);
@@ -994,20 +1225,29 @@ fn verify_one_install(dir: &Path, record: &VerifiedRecord) -> VerifyResult {
         Ok(bytes) => match oci::verify_digest(&bytes, &format!("sha256:{}", record.library_sha256))
         {
             Ok(()) => VerifyResult {
+                platform: record.platform.clone(),
+                version: record.version.clone(),
                 dir: dir.to_path_buf(),
                 ok: true,
                 detail: format!("{} matches the recorded sha256", lib_path.display()),
+                revocation: None,
             },
             Err(e) => VerifyResult {
+                platform: record.platform.clone(),
+                version: record.version.clone(),
                 dir: dir.to_path_buf(),
                 ok: false,
                 detail: e.to_string(),
+                revocation: None,
             },
         },
         Err(e) => VerifyResult {
+            platform: record.platform.clone(),
+            version: record.version.clone(),
             dir: dir.to_path_buf(),
             ok: false,
             detail: format!("{}: {e}", lib_path.display()),
+            revocation: None,
         },
     }
 }
@@ -1054,6 +1294,7 @@ pub fn fetch_signed(
         bases: repository_bases,
         client: &client,
         auth: &auth,
+        budget: super::http::Budget::default(),
     };
 
     if expected_predicate_type == constants::PREDICATE_TYPE_GOLDENS {
