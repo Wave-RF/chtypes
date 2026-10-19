@@ -341,7 +341,10 @@
         "MergeReason.Known",
         "DeclinedTier.Known",
         "DeclinedLayer.Known",
-        "DiscoverQueryParam.Known"
+        "DiscoverQueryParam.Known",
+        "RefusalSite.Known",
+        "Posture.Known",
+        "DefaultSupport.Known"
       ],
       "issue": 511,
       "reason": "The ABI v2 dev binding's rule r3 (spec/abi-v2/docs.md): every vocabulary has an unknown(n) member, an unlisted value kept per field, which Go spells as the raw value plus Known() false. docs/reference/bindings-v1.md is the 1.x surface and names none of them; the v2 surface document lands with the other three dev bindings (public issue #511), and this entry goes with it."
