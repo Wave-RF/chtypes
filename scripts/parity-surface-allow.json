@@ -68,7 +68,10 @@
         "DefaultKind.of",
         "MergeReason.of",
         "DeclinedTier.of",
-        "DeclinedLayer.of"
+        "DeclinedLayer.of",
+        "RefusalSite.of",
+        "Posture.of",
+        "DefaultSupport.of"
       ],
       "reason": "Generated from the description by scripts/abi-v1/gen.py: each string vocabulary's decoder from a document's text, with the description's fallback. The decoders use it; §3 names the vocabularies and their facts, not their decoders."
     },
@@ -365,7 +368,10 @@
         "DeclinedTier.known",
         "DeclinedLayer.known",
         "DiscoverQueryParam.known",
-        "DiscoverQueryParam.of"
+        "DiscoverQueryParam.of",
+        "RefusalSite.known",
+        "Posture.known",
+        "DefaultSupport.known"
       ],
       "issue": 511,
       "reason": "The ABI v2 dev binding's rule r3 (spec/abi-v2/docs.md), as Python spells it: an unlisted value of an enum class is that class's unknown(n) member (`Outcome(\"x\")`, named `unknown(x)`), and every vocabulary gains `known`, False for exactly that member (a property on the enum classes, a function on the plain-string Reason and Source); DiscoverQueryParam has `of`, as the other document vocabularies have (their own entry). docs/reference/bindings-v1.md is the 1.x surface and names neither; the v2 surface document lands with the other dev bindings (public issue #511), and this entry goes with it."
@@ -435,6 +441,59 @@
       ],
       "issue": 511,
       "reason": "The ABI v2 dev binding's rule r3 (spec/abi-v2/docs.md): every vocabulary has an explicit unknown(n) member, an unlisted value kept per field, which Rust spells as an Unknown variant carrying the raw value, with is_known() false and from_wire/from_code to read one; the call status, the transform reasons and the value sources gain types of their own (Status, Reason, Source; the 1.x status, reason and source modules stay beside them). DiscoverQueryParam.ch_type is the description's ch_type fact of the discovery query's parameters, which Rust alone exposes; the v2 surface document settles it. Refusal.dev_message is rule r6's exact fingerprint message. docs/reference/bindings-v1.md is the 1.x surface and names none of them; the v2 surface document lands with the other dev bindings (public issue #511), and this entry goes with it."
+    },
+    {
+      "binding": "python",
+      "kind": "extra",
+      "names": [
+        "Schema.row(insertable_columns=)",
+        "Schema.row(column_defaults=)",
+        "Schema.row(verdict_basis=)",
+        "Schema.row(defer_defaults=)",
+        "Schema.row(insert_options_extra=)",
+        "Schema.rows(insertable_columns=)",
+        "Schema.rows(column_defaults=)",
+        "Schema.rows(verdict_basis=)",
+        "Schema.rows(defer_defaults=)",
+        "Schema.rows(insert_options_extra=)",
+        "Schema.parse_block(insertable_columns=)",
+        "Schema.parse_block(column_defaults=)",
+        "Schema.parse_block(verdict_basis=)",
+        "Schema.parse_block(defer_defaults=)",
+        "Schema.parse_block(insert_options_extra=)",
+        "Filter.rows(insertable_columns=)",
+        "Filter.rows(column_defaults=)",
+        "Filter.rows(verdict_basis=)",
+        "Filter.rows(defer_defaults=)",
+        "Filter.rows(insert_options_extra=)",
+        "Filter.rows(columns=)",
+        "Schema.compile_filter(param_encoding=)",
+        "Schema.compile_filter(filter_options_extra=)",
+        "Library.compile_table(posture=)",
+        "Library.compile_table(schema_options_extra=)"
+      ],
+      "reason": "ABI v2's options documents and the filter column list (bindings-v1.md §2, the call options table): the table names each option once, by its Python keyword, and the gate reads that as 'some call takes it'. These are the per-call spellings: the five insert_options members on the four calls that model an INSERT of a body (row, rows, parse_block, and Filter.rows, which also takes the columns list), param_encoding and filter_options_extra on compile_filter, posture and schema_options_extra on compile_table. Keyword-only, as every Python call option is.",
+      "issue": 511
+    },
+    {
+      "binding": "python",
+      "kind": "extra",
+      "names": [
+        "ColumnDefault",
+        "ColumnDefault.name",
+        "ColumnDefault.value",
+        "VerdictBasis",
+        "VerdictBasis.INPUT",
+        "VerdictBasis.EXPORT",
+        "DeferDefaults",
+        "DeferDefaults.NONE",
+        "DeferDefaults.SERVER",
+        "ParamEncoding",
+        "ParamEncoding.ESCAPED",
+        "ParamEncoding.RAW"
+      ],
+      "reason": "The option value types of ABI v2's options documents (bindings-v1.md §2): the hand-written enums VerdictBasis, DeferDefaults and ParamEncoding (Go's VerdictBasis, DeferDefaults and ParamEncoding, spelled as StrEnum members) and the ColumnDefault record of a column_defaults entry. The call options table names the values (`WithVerdictBasis(VerdictBasis)`) and not the Python types; the v2 surface document lands with the other dev bindings (public issue #511), and this entry goes with it.",
+      "issue": 511
     }
   ]
 }

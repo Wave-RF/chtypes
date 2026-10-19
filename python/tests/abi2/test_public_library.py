@@ -398,3 +398,39 @@ def test_an_unnamed_member_reaches_the_library_which_refuses_it_by_name(lib) -> 
             schema.compile_filter("a > 1", filter_options_extra={"future": "1"})
     with pytest.raises(UsageError, match='unknown key "future"'):
         lib.compile_table(CREATE, schema_options_extra={"future": "1"})
+
+
+def test_a_call_error_carries_the_librarys_reason(monkeypatch) -> None:
+    """`CallError.reason` is `chs_error_reason`, read with the other five fields.
+    The stub writes an empty reason, so a fake raw table (real memory behind each
+    buffer) supplies one: the verdict is what the generated `_check` raised."""
+    import ctypes
+
+    keep: list[ctypes.Array] = []
+    length: dict[int, int] = {}
+
+    def buf(text: bytes) -> int:
+        b = ctypes.create_string_buffer(text, max(len(text), 1))
+        keep.append(b)
+        length[ctypes.addressof(b)] = len(text)
+        return ctypes.addressof(b)
+
+    ch_name, message, column, reason = buf(b"CH"), buf(b"msg"), buf(b""), buf(b"zone-declined")
+    raw = {
+        "chs_error_status": lambda e: 2,
+        "chs_error_ch_code": lambda e: 0,
+        "chs_error_ch_name": lambda e: ch_name,
+        "chs_error_message": lambda e: message,
+        "chs_error_column": lambda e: column,
+        "chs_error_reason": lambda e: reason,
+        "chs_error_free": lambda e: None,
+        "chs_buf_data": lambda p: p,
+        "chs_buf_len": lambda p: length[p],
+        "chs_buf_free": lambda p: None,
+    }
+    api = object.__new__(_decls.Api)
+    api._raw = raw
+    with pytest.raises(Exception) as info:
+        api._check(2, ctypes.c_void_p(1))
+    assert info.value.reason == "zone-declined" and info.value.ch_name == "CH"
+    assert info.value.message == b"msg"
