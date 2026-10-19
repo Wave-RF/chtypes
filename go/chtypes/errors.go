@@ -1,7 +1,7 @@
 package chtypes
 
 // errors.go — the error classes (bindings-v1.md section 4). Every call error
-// carries the five fields of chs_error verbatim; the class of a status is
+// carries the six fields of chs_error verbatim; the class of a status is
 // spec/abi-v2/sdk.json's table, generated into the abi2 layer. A status the
 // description does not list is its unknown(n) and an InternalError (rule r3).
 
@@ -15,7 +15,7 @@ import (
 	"github.com/wave-rf/chtypes/go/v2/internal/ocifetch"
 )
 
-// CallError is the five fields every call error carries, verbatim and with
+// CallError is the six fields every call error carries, verbatim and with
 // nothing synthesized. It is embedded in *SchemaError, *UnsupportedError,
 // *UsageError and *InternalError, so the fields read directly
 // (se.ChCode); AsCallError reads them from any of the four.
@@ -33,6 +33,9 @@ type CallError struct {
 	Message string
 	// Column is the column concerned, empty if none. It is bytes.
 	Column string
+	// Reason is the error's catalog id, read through chs_error_reason: ASCII,
+	// empty if none.
+	Reason string
 }
 
 // display is the one lossy display form: invalid UTF-8 replaced, for printing
@@ -125,7 +128,7 @@ func callError(c *abi2.CallError) error {
 	if c == nil {
 		return nil
 	}
-	ce := CallError{ChCode: c.ChCode, ChName: c.ChName, Message: c.Message, Column: c.Column}
+	ce := CallError{ChCode: c.ChCode, ChName: c.ChName, Message: c.Message, Column: c.Column, Reason: c.Reason}
 	status, known := statusOfName(c.Status)
 	if !known {
 		raw := int64(StatusInternal)

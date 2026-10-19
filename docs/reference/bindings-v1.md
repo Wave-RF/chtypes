@@ -300,7 +300,7 @@ The class for each status and each loader refusal is [`spec/abi-v1/sdk.json`](..
 
 ### The fields
 
-**Every call error carries the five fields of `chs_error`, verbatim, and nothing synthesized:**
+**Every call error carries the six fields of `chs_error`, verbatim, and nothing synthesized:**
 
 | field     | meaning                                                                   | Go               | Python           | TypeScript             | Rust               |
 | --------- | ------------------------------------------------------------------------- | ---------------- | ---------------- | ---------------------- | ------------------ |
@@ -309,6 +309,7 @@ The class for each status and each loader refusal is [`spec/abi-v1/sdk.json`](..
 | `ch_name` | the name this build's vendored table gives the code; ASCII; empty if none | `ChName string`  | `ch_name: str`   | `chName: string`       | `ch_name: String`  |
 | `message` | ClickHouse's own message for a refusal, the library's otherwise; bytes    | `Message string` | `message: bytes` | `messageBytes: Buffer` | `message: RawText` |
 | `column`  | the column concerned, empty if none; bytes                                | `Column string`  | `column: bytes`  | `column: Buffer`       | `column: RawText`  |
+| `reason`  | the catalog id (`chs_error_reason`); ASCII; empty if none                 | `Reason string`  | `reason: str`    | `reason: string`       | `reason: String`   |
 
 A misuse the binding detects itself carries `status` `CHS_INVALID_ARGUMENT`, `ch_code` 0, an empty `ch_name` and `column`, and a message naming the misuse, so a handler sees one shape whichever side caught it.
 

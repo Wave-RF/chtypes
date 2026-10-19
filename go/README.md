@@ -108,7 +108,7 @@ A bad **row** is a verdict, not an error: `Outcome` becomes `Rejected` with Clic
 - `*InternalError`: a library bug, or a document that does not decode.
 - `*ArtifactError`: fetch and load failures, with a `Code` and a sentinel per code for `errors.Is`.
 
-`chtypes.AsCallError` reads the five fields every call error carries.
+`chtypes.AsCallError` reads the six fields every call error carries.
 
 ## Threads
 
