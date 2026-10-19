@@ -3,7 +3,7 @@
   "reuse_v0_names": true,
   "provisional_markers": {},
   "errors": {
-    "fields": ["status", "ch_code", "ch_name", "message", "column"],
+    "fields": ["status", "ch_code", "ch_name", "message", "column", "reason"],
     "codes": {
       "artifact_incompatible": "CHTYPES_ARTIFACT_INCOMPATIBLE",
       "artifact_corrupt": "CHTYPES_ARTIFACT_CORRUPT"

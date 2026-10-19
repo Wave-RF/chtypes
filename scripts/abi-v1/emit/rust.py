@@ -1383,6 +1383,9 @@ _RUST_VOCAB = {
     "merge_reason": ("MergeReason", "string"),
     "declined_tier": ("DeclinedTier", "string"),
     "declined_layer": ("DeclinedLayer", "string"),
+    "posture": ("Posture", "string"),
+    "refusal_site": ("RefusalSite", "string"),
+    "default_support": ("DefaultSupport", "string"),
 }
 
 _UNKNOWN_STRING_DOC = (
@@ -1780,6 +1783,41 @@ def render_vocab_v2(model) -> str:
         ),
     )
 
+    out += _string_enum_v2(
+        model,
+        "posture",
+        "Posture",
+        variant=_words,
+        doc=(
+            "How a schema's statement was compiled: `create`, as a server's CREATE TABLE, or `load`, as a server\n"
+            "loads the stored definition of a table it holds. A posture the description does not list is `Unknown`,\n"
+            "and the document decodes on (rule r3)."
+        ),
+    )
+
+    out += _string_enum_v2(
+        model,
+        "refusal_site",
+        "RefusalSite",
+        variant=_words,
+        doc=(
+            "Where a batch or filter document's refusal sits: the call, the body outside any row (a header, the\n"
+            "framing), one row (`refused_row`) or a whole-body step. A site the description does not list is\n"
+            "`Unknown`, and the document decodes on (rule r3)."
+        ),
+    )
+
+    out += _string_enum_v2(
+        model,
+        "default_support",
+        "DefaultSupport",
+        variant=_words,
+        doc=(
+            "What this build does with a column's DEFAULT, as a schema description reports it per column. A value\n"
+            "the description does not list is `Unknown`, and the column decodes on (rule r3)."
+        ),
+    )
+
     reason = model.enums["transform_reason"]
     rfb = next(v for v in reason.values if v.value == reason.fallback)
     out += _string_enum_v2(
@@ -1821,24 +1859,33 @@ def render_vocab_v2(model) -> str:
         "",
     ]
 
+    src_enum = model.enums["value_src"]
+    src_fb = src_enum.fallback
+    if src_fb is None:
+        src_doc = (
+            "The `value_src` vocabulary: where a column's value came from, and whether the description says it is\n"
+            "stored. A source the description does not list is `Unknown`; the description does not yet say what\n"
+            "its `is_stored` reports (rule r3, \"Facts without a fallback\"), and until it does, `false`."
+        )
+        src_unknown, src_fact_doc = False, (
+            "The description's `is_stored` fact for this source; `false` for `Unknown` until the description\n"
+            "says otherwise."
+        )
+    else:
+        src_unknown = next(v.fields["is_stored"] for v in src_enum.values if v.value == src_fb)
+        src_doc = (
+            "The `value_src` vocabulary: where a column's value came from, and whether the description says it is\n"
+            f"stored. A source the description does not list is `Unknown`, and reports its fallback's (`{src_fb}`)\n"
+            "`is_stored` (rule r3)."
+        )
+        src_fact_doc = f"The description's `is_stored` fact for this source; `Unknown` reports the fallback's (`{src_fb}`)."
     out += _string_enum_v2(
         model,
         "value_src",
         "Source",
         variant=_words,
-        doc=(
-            "The `value_src` vocabulary: where a column's value came from, and whether the description says it is\n"
-            "stored. A source the description does not list is `Unknown`; the description does not yet say what\n"
-            "its `is_stored` reports (rule r3, \"Facts without a fallback\"), and until it does, `false`."
-        ),
-        facts=[
-            (
-                "is_stored",
-                False,
-                "The description's `is_stored` fact for this source; `false` for `Unknown` until the description\n"
-                "says otherwise.",
-            )
-        ],
+        doc=src_doc,
+        facts=[("is_stored", src_unknown, src_fact_doc)],
     )
 
     src = model.enums["value_src"]

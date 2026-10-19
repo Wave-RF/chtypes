@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import textwrap
 
-from model import CONTENTS, DOCS_MD, THREADS, input_name
+from model import CONTENTS, DOCS_MD, INITS, THREADS, input_name
 
 from . import Output, banner, marker_key
 from .reference import compact_json
@@ -120,7 +120,7 @@ def _section(title: str) -> list[str]:
 
 
 def _function_facts(model, fn) -> str:
-    facts = [f"Class: {fn.cls}. Thread: {fn.thread}."]
+    facts = [f"Class: {fn.cls}. Thread: {fn.thread}." + (f" Init: {fn.init}." if fn.init else "")]
     if fn.returns.kind == "status":
         facts.append("Returns one of: " + ", ".join(fn.may_return) + ".")
     r = fn.returns
@@ -261,6 +261,13 @@ def render_header(model) -> str:
         + "\n".join(f"- {k}: {v}." for k, v in THREADS.items()),
         "thread classes",
     )
+    if any(f.init for f in model.functions):
+        out += _section("init classes")
+        out += comment(
+            "Every function below names its init class: whether it is valid before `chs_initialize` "
+            "(Initialization, above).\n\n" + "\n".join(f"- {k}: {v}." for k, v in INITS.items()),
+            "init classes",
+        )
 
     bs = model.byte_strings
     out += _section("byte strings in JSON")

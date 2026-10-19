@@ -167,6 +167,20 @@ def _schema_args(model, create_table: bytes, server: dict | None = None) -> list
     return out
 
 
+def _pad(model, fn_name: str, args: list) -> list:
+    """`args` with an empty input appended for each trailing bytes_in input
+    parameter the hand-written list does not reach: a growable call's options
+    document (rule r1), so a recipe written for generation 1 stays valid for
+    generation 2's longer signature."""
+    inputs = [p for p in model.function(fn_name).params if not p.is_out]
+    out = list(args)
+    for p in inputs[len(out) :]:
+        if p.kind != "bytes_in":
+            raise ValueError(f"_pad: {fn_name}'s input {p.name!r} is not bytes_in; extend the recipe by hand")
+        out.append({"bytes_hex": ""})
+    return out
+
+
 def _schema_recipe(model) -> dict:
     return {"fn": "chs_schema_create", "args": _schema_args(model, b"CREATE TABLE t (x Int32)")}
 
@@ -179,25 +193,33 @@ def _server_recipe(model) -> dict:  # noqa: ARG001 - every recipe takes the mode
 def _filter_recipe(model) -> dict:
     return {
         "fn": "chs_filter_create",
-        "args": [
-            {"handle": _schema_recipe(model)},
-            {"bytes_hex": b"x = 1".hex()},
-            {"bytes_hex": "{}".encode().hex()},
-            {"bytes_hex": ""},
-        ],
+        "args": _pad(
+            model,
+            "chs_filter_create",
+            [
+                {"handle": _schema_recipe(model)},
+                {"bytes_hex": b"x = 1".hex()},
+                {"bytes_hex": "{}".encode().hex()},
+                {"bytes_hex": ""},
+            ],
+        ),
     }
 
 
 def _block_recipe(model) -> dict:
     return {
         "fn": "chs_block_create",
-        "args": [
-            {"handle": _schema_recipe(model)},
-            {"int": 0},  # CHS_JSON_EACH_ROW
-            {"bytes_hex": b"{}".hex()},
-            {"bytes_hex": ""},
-            {"bytes_hex": ""},
-        ],
+        "args": _pad(
+            model,
+            "chs_block_create",
+            [
+                {"handle": _schema_recipe(model)},
+                {"int": 0},  # CHS_JSON_EACH_ROW
+                {"bytes_hex": b"{}".hex()},
+                {"bytes_hex": ""},
+                {"bytes_hex": ""},
+            ],
+        ),
     }
 
 
@@ -222,6 +244,7 @@ CONTENT_PLACEHOLDER: dict[str, bytes] = {
     "message": b"msg",
     "ascii": b"abc",
     "json_object_string_values": b"{}",
+    "json_object_byte_values": b"{}",
     "json_array_names": b"[]",
     "timezone": b"UTC",
 }
@@ -456,7 +479,12 @@ def _input_document_cases(model) -> list[dict]:
             d = model.input_of(p)
             if d is None:
                 continue
-            known = {k: ({} if s.get("type") == "object" else "") for k, s in d.schema.get("properties", {}).items()}
+            # Every key the document defines, at a value its schema admits (its first enum value, or {} for an
+            # object), so the unknown key is the document's only fault.
+            known = {
+                k: ({} if s.get("type") == "object" else [] if s.get("type") == "array" else s["enum"][0] if "enum" in s else "")
+                for k, s in d.schema.get("properties", {}).items()
+            }
             doc = json.dumps({**known, UNKNOWN_INPUT_KEY: "1"}, separators=(",", ":")).encode()
             for case_id, data, key in (
                 (f"input_document.{fn.name}.{p.name}.unknown_key_refused", doc, UNKNOWN_INPUT_KEY),
@@ -569,7 +597,7 @@ def _document_cases(model) -> list[dict]:
         param, template = _stubshared.DOC_FUNCTIONS[fn_name]
         data = _stubshared.DOC_PREFIX + payload
         case = _overridden_echo_case(model, case_id, fn_name, {param: data})
-        doc = _stubshared.doc_render(template, data)
+        doc = _stubshared.doc_render(template, data, model.major)
         problems = abimodel.validate(doc, model.documents[template].schema)
         if problems:
             raise ValueError(f"{case_id}: the expected document fails documents.{template}.schema: {problems}")
@@ -606,24 +634,27 @@ def _lifecycle_cases(model) -> list[dict]:
     schema = _schema_recipe(model)
     filt = {
         "fn": "chs_filter_create",
-        "args": [{"ref": "s"}, {"bytes_hex": b"x = 1".hex()}, {"bytes_hex": b"{}".hex()}, {"bytes_hex": ""}],
+        "args": _pad(
+            model, "chs_filter_create", [{"ref": "s"}, {"bytes_hex": b"x = 1".hex()}, {"bytes_hex": b"{}".hex()}, {"bytes_hex": ""}]
+        ),
     }
     block = {
         "fn": "chs_block_create",
-        "args": [{"ref": "s"}, {"int": 0}, {"bytes_hex": b"{}".hex()}, {"bytes_hex": ""}, {"bytes_hex": ""}],
+        "args": _pad(
+            model, "chs_block_create", [{"ref": "s"}, {"int": 0}, {"bytes_hex": b"{}".hex()}, {"bytes_hex": ""}, {"bytes_hex": ""}]
+        ),
     }
     body = b'{"x":1}'
-    eval_body = {
-        "fn": "chs_filter_eval_body",
-        "args": [{"ref": "f"}, {"int": 0}, {"bytes_hex": body.hex()}, {"bytes_hex": ""}],
-    }
+    eval_body_written = [{"ref": "f"}, {"int": 0}, {"bytes_hex": body.hex()}, {"bytes_hex": ""}]
+    eval_body = {"fn": "chs_filter_eval_body", "args": _pad(model, "chs_filter_eval_body", eval_body_written)}
     eval_body_expect = {
         "status": "CHS_OK",
         "outputs": {
             "out": {
                 "fn": "chs_filter_eval_body",
                 "out": "out",
-                "args": [{"kind": "chs_filter"}, 0, _stubshared.echo_bytes_field(body), _stubshared.echo_bytes_field(b"")],
+                "args": [{"kind": "chs_filter"}, 0, _stubshared.echo_bytes_field(body), _stubshared.echo_bytes_field(b"")]
+                + [_stubshared.echo_bytes_field(b"")] * (len(eval_body["args"]) - len(eval_body_written)),
             }
         },
     }

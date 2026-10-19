@@ -1088,6 +1088,9 @@ _PY_VOCAB = {
     "merge_reason": "MergeReason",
     "declined_tier": "DeclinedTier",
     "declined_layer": "DeclinedLayer",
+    "posture": "Posture",
+    "refusal_site": "RefusalSite",
+    "default_support": "DefaultSupport",
 }
 
 _KNOWN_PROPERTY = (
@@ -1349,6 +1352,40 @@ def render_vocab_v2(model: Model) -> str:
     parts.append(
         _str_enum_v2(
             model,
+            "Posture",
+            "posture",
+            "How a schema's statement was compiled: `create`, as a server's CREATE TABLE,\n"
+            "    or `load`, as a server loads the stored definition of a table it holds.",
+        )
+    )
+    parts.append("")
+    parts.append("")
+    parts.append(
+        _str_enum_v2(
+            model,
+            "RefusalSite",
+            "refusal_site",
+            "Where a batch or filter document's refusal sits: `call` (the call, its settings or its\n"
+            "    column list), `body_read` (the body outside any row: a header, the framing), `row` (one\n"
+            "    row, `refused_row`) or `body_step` (a whole-body step).",
+        )
+    )
+    parts.append("")
+    parts.append("")
+    parts.append(
+        _str_enum_v2(
+            model,
+            "DefaultSupport",
+            "default_support",
+            "What this build does with a column's DEFAULT, as `schema_description` reports it per\n"
+            "    column: `computed`, `generated`, `deferred` or `declined` (with a reason).",
+        )
+    )
+    parts.append("")
+    parts.append("")
+    parts.append(
+        _str_enum_v2(
+            model,
             "DiscoverQueryParam",
             "discover_query_param",
             "A query parameter of the SQL `discover_query` returns, which the caller binds\n"
@@ -1396,10 +1433,17 @@ def render_vocab_v2(model: Model) -> str:
     parts.append("")
     parts.append("    @staticmethod")
     parts.append("    def is_stored(source: str) -> bool:")
-    parts.append('        """The description\'s `is_stored` fact for `source`. The description does not yet')
-    parts.append('        say what an unknown(n) source reports (rule r3, "Facts without a fallback");')
-    parts.append('        until it does, an unlisted source is not stored."""')
-    parts.append("        return _SOURCE_IS_STORED.get(source, False)")
+    src_fb = model.enums["value_src"].fallback
+    if src_fb is None:
+        parts.append('        """The description\'s `is_stored` fact for `source`. The description does not yet')
+        parts.append('        say what an unknown(n) source reports (rule r3, "Facts without a fallback");')
+        parts.append('        until it does, an unlisted source is not stored."""')
+        parts.append("        return _SOURCE_IS_STORED.get(source, False)")
+    else:
+        src_fb_stored = next(f["is_stored"] for _, v, f in sources if v == src_fb)
+        parts.append('        """The description\'s `is_stored` fact for `source`; an unknown(n) source')
+        parts.append(f'        reports its fallback\'s (`{src_fb}`), as rule r3 says."""')
+        parts.append(f"        return _SOURCE_IS_STORED.get(source, {_lit(src_fb_stored)})")
     parts.append("")
     parts.append("")
     parts.append(
