@@ -15,13 +15,18 @@ import pytest
 from chtypes import (
     BatchResult,
     CallError,
+    ColumnDefault,
+    DeferDefaults,
     DocFlags,
     Format,
     InternalError,
     Outcome,
+    ParamEncoding,
+    Posture,
     SchemaError,
     UnsupportedError,
     UsageError,
+    VerdictBasis,
 )
 from chtypes._abi2 import _decls
 
@@ -149,8 +154,8 @@ def test_rows_marshals_columns_filter_export_and_doc_flags(lib, monkeypatch) -> 
     # lists, reads as its unknown(n) member, never as accepted (rule r3).
     assert result.outcome == "" and not result.outcome.known and result.payload is not None
     assert result.outcome is not Outcome.ACCEPTED
-    (_, fmt, body, settings, columns, handle, export, flags), plain = calls
-    assert fmt == 0 and body == b'{"a":1}\n' and settings is None
+    (_, fmt, body, settings, columns, handle, export, flags, options), plain = calls
+    assert fmt == 0 and body == b'{"a":1}\n' and settings is None and options is None
     assert json.loads(columns) == [{"name": "a"}, {"name_b64": "/w=="}]
     assert handle is not None and export == int(Format.CSV) and flags == 3
     assert plain[5] is None and plain[6] == -1 and plain[7] == 7  # no export, all groups
@@ -169,12 +174,12 @@ def test_filter_zone_and_parse_zone_are_distinct_arguments(lib, monkeypatch) -> 
     monkeypatch.setattr(
         lib._api,
         "filter_create",
-        lambda s, e, p, st: (created.append(st), real_create(s, e, p, st))[1],
+        lambda s, e, p, st, o: (created.append(st), real_create(s, e, p, st, o))[1],
     )
     monkeypatch.setattr(
         lib._api,
         "filter_eval_body",
-        lambda f, fmt, b, st: (evaluated.append(st), real_eval(f, fmt, b, st))[1],
+        lambda f, fmt, b, st, c, o: (evaluated.append(st), real_eval(f, fmt, b, st, c, o))[1],
     )
     with lib.compile_table(CREATE) as schema:
         with schema.compile_filter("a > 1", params={"p": "1"}, session_timezone="Asia/Tokyo") as f:
@@ -327,3 +332,69 @@ def test_error_codes_are_decoded_once_and_kept_on_success_only(lib, monkeypatch)
     table = lib.error_codes()
     assert table.name(62) == "SYNTAX_ERROR"
     assert lib.error_codes() is table and len(calls) == 2
+
+
+def _spy(lib, monkeypatch, name):
+    calls: list[tuple] = []
+    real = getattr(lib._api, name)
+
+    def spy(*args):
+        calls.append(args)
+        return real(*args)
+
+    monkeypatch.setattr(lib._api, name, spy)
+    return calls
+
+
+def test_insert_options_reach_the_four_insert_calls_and_nothing_else(lib, monkeypatch) -> None:
+    """Spec batch 2: `options` on preview_row, preview_batch, block_create and
+    filter_eval_body, the `columns` of filter_eval_body, and no document at all
+    when no member is set. What the library did with each is the stub's echo."""
+    row = _spy(lib, monkeypatch, "preview_row")
+    batch = _spy(lib, monkeypatch, "preview_batch")
+    block = _spy(lib, monkeypatch, "block_create")
+    body = _spy(lib, monkeypatch, "filter_eval_body")
+    with lib.compile_table(CREATE) as schema, schema.compile_filter("a > 1") as flt:
+        kw = {
+            "insertable_columns": ["a"],
+            "column_defaults": [ColumnDefault("a", "1")],
+            "verdict_basis": VerdictBasis.EXPORT,
+            "defer_defaults": DeferDefaults.SERVER,
+        }
+        schema.row(Format.CSV, b"1", **kw)
+        schema.rows(Format.CSV, b"1", **kw)
+        schema.parse_block(Format.CSV, b"1", **kw).close()
+        flt.rows(Format.CSV, b"1", columns=["a"], **kw)
+        schema.row(Format.CSV, b"1")
+    want = {
+        "insertable_columns": [{"name": "a"}],
+        "column_defaults": [{"name": "a", "value": "1"}],
+        "verdict_basis": "export",
+        "defer_defaults": "server",
+    }
+    assert json.loads(row[0][-1]) == want and row[1][-1] is None
+    assert json.loads(batch[0][-1]) == want
+    assert json.loads(block[0][-1]) == want
+    assert json.loads(body[0][-1]) == want and json.loads(body[0][-2]) == [{"name": "a"}]
+
+
+def test_filter_and_schema_options_reach_their_creates(lib, monkeypatch) -> None:
+    created = _spy(lib, monkeypatch, "filter_create")
+    schemas = _spy(lib, monkeypatch, "schema_create")
+    with lib.compile_table(CREATE, posture=Posture.LOAD) as schema:
+        schema.compile_filter("a > 1", param_encoding=ParamEncoding.RAW).close()
+        schema.compile_filter("a > 1").close()
+    assert json.loads(schemas[0][-1]) == {"posture": "load"}
+    assert json.loads(created[0][-1]) == {"param_encoding": "raw"} and created[1][-1] is None
+
+
+def test_an_unnamed_member_reaches_the_library_which_refuses_it_by_name(lib) -> None:
+    """Rule r1: the binding never drops a key it has no name for; the library
+    refuses one it does not know, naming it (here the stub, which enforces r1)."""
+    with lib.compile_table(CREATE) as schema:
+        with pytest.raises(UsageError, match='unknown key "future"'):
+            schema.row(Format.CSV, b"1", insert_options_extra={"future": "[1]"})
+        with pytest.raises(UsageError, match='unknown key "future"'):
+            schema.compile_filter("a > 1", filter_options_extra={"future": "1"})
+    with pytest.raises(UsageError, match='unknown key "future"'):
+        lib.compile_table(CREATE, schema_options_extra={"future": "1"})

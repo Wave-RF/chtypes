@@ -32,10 +32,13 @@ from ._abi2._vocab import (
     DeclinedLayer,
     DeclinedTier,
     DefaultKind,
+    DefaultSupport,
     FilterOutcome,
     MergeReason,
     Outcome,
+    Posture,
     Reason,
+    RefusalSite,
     Source,
     Verdict,
 )
@@ -291,6 +294,20 @@ def _spans(obj: Mapping[str, Any], key: str, where: str) -> tuple[Span, ...]:
     return _objects(obj, key, where, _span)
 
 
+def _row_spans(obj: Mapping[str, Any], key: str, where: str) -> tuple[Span | None, ...]:
+    """`row_spans`: one entry per row, a span or null for a row not exported."""
+    out: list[Span | None] = []
+    for i, item in enumerate(_list(obj, key, where)):
+        out.append(None if item is None else _span(_obj(item, where, key), f"{where}.{key}[{i}]"))
+    return tuple(out)
+
+
+def _refused_at(obj: Mapping[str, Any], where: str) -> RefusalSite | None:
+    # An unlisted site is its unknown(n): kept, never a failure (rule r3).
+    value = _opt_text(obj, "refused_at", where)
+    return None if value is None else RefusalSite.of(value)
+
+
 def _value(obj: dict[str, Any], where: str) -> Value:
     # An unlisted src is its unknown(n): kept, never a failure (rule r3), and
     # not stored until the description says what one reports. An ABSENT src is
@@ -353,7 +370,7 @@ def _int_list(obj: Mapping[str, Any], key: str, where: str) -> tuple[int, ...] |
 def _at_merge(obj: dict[str, Any], where: str) -> AtMergeEntry:
     # An unlisted reason is its unknown(n): kept, never a failure (rule r3).
     return AtMergeEntry(
-        row=_int(obj, "row", where),
+        part_row=_int(obj, "part_row", where),
         reason=MergeReason.of(_text(obj, "reason", where)),
         column=_bytes_or_none(obj, "column", where),
         stored=_bytes_or_none(obj, "stored", where),
@@ -386,14 +403,17 @@ def decode_row(obj: Mapping[str, Any], where: str = "row") -> RowResult:
         outcome=Outcome.of(_text(obj, "outcome", where)),
         err_code=_int(obj, "code", where),
         err_msg=_bytes(obj, "err", where),
+        reason=_opt_text(obj, "reason", where),
+        refused_at=_refused_at(obj, where),
+        refused_row=_opt_u64(obj, "refused_row", where),
         columns=columns,
         values=tuple(v for v in columns if v.is_stored),
         transformed=_objects(obj, "transformed", where, _transform),
         unknown_fields=_name_list(obj, "unknown_fields", where),
-        unsupported_settings=_name_list(obj, "unsupported_settings", where),
         computed=_objects(obj, "computed", where, _computed),
         verdict=None if verdict is None else Verdict.of(verdict),
         verdict_code=_int(obj, "verdict_code", where),
+        verdict_reason=_opt_text(obj, "verdict_reason", where),
         verdict_err=_bytes(obj, "verdict_err", where),
         partition_id=partition,
         input_span=_opt_span(obj, "input_span", where),
@@ -427,7 +447,10 @@ def decode_batch(raw: bytes, export: bytes | None) -> BatchResult:
     obj = _obj(strict_loads(raw, where), where)
     framing = obj.get("framing")
     engine_rows = None if obj.get("engine_rows") is None else _engine_rows(obj, where)
-    spans = None if obj.get("row_spans") is None else _spans(obj, "row_spans", where)
+    spans = None if obj.get("row_spans") is None else _row_spans(obj, "row_spans", where)
+    export_columns = (
+        None if obj.get("export_columns") is None else _name_list(obj, "export_columns", where)
+    )
     export_declined = _bytes(obj, "export_declined", where)
     if export_declined:
         # A declined export has no payload and no spans, whatever buffer the call
@@ -439,6 +462,9 @@ def decode_batch(raw: bytes, export: bytes | None) -> BatchResult:
         outcome=Outcome.of(_text(obj, "outcome", where)),
         err_code=_int(obj, "code", where),
         err_msg=_bytes(obj, "err", where),
+        reason=_opt_text(obj, "reason", where),
+        refused_at=_refused_at(obj, where),
+        refused_row=_opt_u64(obj, "refused_row", where),
         rows=_objects(obj, "rows", where, decode_row),
         rows_read=_u64(obj, "rows_read", where),
         rows_skipped=_u64(obj, "rows_skipped", where),
@@ -446,7 +472,9 @@ def decode_batch(raw: bytes, export: bytes | None) -> BatchResult:
         engine_rows=engine_rows,
         payload=export,
         spans=spans,
+        export_columns=export_columns,
         export_declined=export_declined,
+        export_declined_reason=_opt_text(obj, "export_declined_reason", where),
         rows_passed=_u64(obj, "rows_passed", where),
         rows_cut=_u64(obj, "rows_cut", where),
         partition_count=_opt_u64(obj, "partition_count", where),
@@ -467,6 +495,7 @@ def _filter_row_error(obj: dict[str, Any], where: str) -> FilterRowError:
     return FilterRowError(
         row=_int(obj, "row", where),
         code=_int(obj, "code", where),
+        reason=_opt_text(obj, "reason", where),
         msg=_bytes(obj, "err", where),
     )
 
@@ -479,6 +508,9 @@ def decode_filter_result(raw: bytes) -> FilterResult:
         outcome=FilterOutcome.of(_text(obj, "outcome", where)),
         err_code=_int(obj, "code", where),
         err_msg=_bytes(obj, "err", where),
+        reason=_opt_text(obj, "reason", where),
+        refused_at=_refused_at(obj, where),
+        refused_row=_opt_u64(obj, "refused_row", where),
         rows_read=_u64(obj, "rows_read", where),
         unsupported_settings=_name_list(obj, "unsupported_settings", where),
         verdicts=tuple(Verdict.of(c) for c in verdicts),
@@ -487,12 +519,17 @@ def decode_filter_result(raw: bytes) -> FilterResult:
 
 
 def _column(obj: dict[str, Any], where: str) -> Column:
-    # An unlisted default_kind is its unknown(n): kept, never a failure (rule r3).
+    # An unlisted default_kind or default_support is its unknown(n): kept, never a
+    # failure (rule r3).
+    support = _opt_text(obj, "default_support", where)
     return Column(
         name=_name(obj, "name", where),
         type=_bytes(obj, "type", where),
         default_kind=DefaultKind.of(_text(obj, "default_kind", where)),
         default_expr=_bytes(obj, "default_expression", where),
+        default_support=None if support is None else DefaultSupport.of(support),
+        default_support_reason=_opt_text(obj, "default_support_reason", where),
+        reads=None if obj.get("reads") is None else _name_list(obj, "reads", where),
     )
 
 
@@ -506,6 +543,14 @@ def _string_map(obj: Mapping[str, Any], key: str, where: str) -> dict[str, str] 
     inner = _obj(value, where, key)
     out: dict[str, str] = {}
     for name, item in inner.items():
+        if isinstance(item, dict):
+            # The object form of a value that was not UTF-8: its bytes, spelled
+            # with surrogateescape (the spelling the input side takes back).
+            if set(item) != {"b64"}:
+                raise _wrong(f"{where}.{key}", name, "a string or a b64 object", item)
+            item = _decode_b64(item["b64"], f"{where}.{key}", name).decode(
+                "utf-8", "surrogateescape"
+            )
         if not isinstance(item, str):
             raise _wrong(f"{where}.{key}", name, "a string", item)
         out[name] = item
@@ -543,6 +588,7 @@ def decode_schema_description(raw: bytes) -> SchemaDescription:
     # decodes exactly as it did before servers existed.
     server = obj.get("server")
     replicated = obj.get("replicated")
+    posture = _opt_text(obj, "posture", where)
     return SchemaDescription(
         columns=_objects(obj, "columns", where, _column),
         server=None
@@ -557,6 +603,7 @@ def decode_schema_description(raw: bytes) -> SchemaDescription:
         filter_declined_settings=_objects(
             obj, "filter_declined_settings", where, _declined_setting
         ),
+        posture=None if posture is None else Posture.of(posture),
     )
 
 

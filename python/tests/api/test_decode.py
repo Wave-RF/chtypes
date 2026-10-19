@@ -7,7 +7,17 @@ import json
 
 import pytest
 
-from chtypes import DefaultKind, FilterOutcome, InternalError, MergeReason, Outcome, Verdict
+from chtypes import (
+    DefaultKind,
+    DefaultSupport,
+    FilterOutcome,
+    InternalError,
+    MergeReason,
+    Outcome,
+    Posture,
+    RefusalSite,
+    Verdict,
+)
 from chtypes._decode import (
     decode_batch,
     decode_discovery,
@@ -42,7 +52,7 @@ ROW = {
         {"column_b64": b64(b"\xff"), "input_b64": b64(b"\x80"), "stored": "x", "reason": "zzz"},
     ],
     "unknown_fields": [{"name": "extra"}, {"name_b64": b64(b"\xff\x00")}],
-    "unsupported_settings": [{"name": "foo"}],
+    "unsupported_settings": [{"name": "removed_at_row_level"}],  # skipped: not a member now
     "computed": [{"name": "c", "kind": "materialized", "stored": "9", "value_b64": b64(b"9")}],
     "verdict": "t",
     "verdict_code": 0,
@@ -67,7 +77,9 @@ def test_a_row_decodes_one_to_one_with_names_and_values_as_bytes() -> None:
     assert row.transformed[1].column == b"\xff" and row.transformed[1].input == b"\x80"
     assert row.transformed[1].reason == "zzz" and row.transformed[1].lossy is True
     assert row.transformed[1].row == 0
-    assert row.unknown_fields == (b"extra", b"\xff\x00") and row.unsupported_settings == (b"foo",)
+    assert row.unknown_fields == (b"extra", b"\xff\x00") and not hasattr(
+        row, "unsupported_settings"
+    )
     assert row.computed[0].text == b"9" and row.computed[0].value == b"9"
     assert row.verdict is Verdict.TRUE
     assert row.partition_id == b"p1" and row.input_span.off == 0 and row.input_span.len == 5
@@ -80,6 +92,8 @@ def test_absent_is_the_default() -> None:
     assert row.outcome == "" and not row.outcome.known and row.outcome is not Outcome.ACCEPTED
     assert row.columns == () and row.verdict is None and row.input_span is None
     assert row.err_msg == b"" and row.partition_id is None
+    assert row.reason is None and row.refused_at is None and row.refused_row is None
+    assert row.verdict_reason is None
 
 
 @pytest.mark.parametrize(
@@ -232,30 +246,38 @@ AT_MERGE_BATCH = {
     "outcome": "accepted",
     "unsupported_settings": [{"name": "session_timezone"}, {"name_b64": b64(b"\xff")}],
     "at_merge": [
-        {"row": 0, "reason": "ttl_delete"},
-        {"row": 1, "reason": "ttl_column_reset", "column": "c", "stored": "0"},
-        {"row": 2, "reason": "ttl_column_reset", "column": "t"},
+        {"part_row": 0, "reason": "ttl_delete"},
+        {"part_row": 1, "reason": "ttl_column_reset", "column": "c", "stored": "0"},
+        {"part_row": 2, "reason": "ttl_column_reset", "column": "t"},
         {
-            "row": 3,
+            "part_row": 3,
             "reason": "ttl_column_reset",
             "column_b64": b64(b"\xff\x00"),
             "stored_b64": b64(b"\xff"),
         },
-        {"row": 4, "reason": "ttl_delete", "input_rows": [4, 7]},
+        {"part_row": 4, "reason": "ttl_delete", "input_rows": [4, 7]},
         {
-            "row": 5,
+            "part_row": 5,
             "reason": "a_reason_nobody_listed",
             "x_future": {"a": [1]},
             "x_future_b64": "/w==",
         },
-        {"row": 6, "reason": "ttl_column_reset", "column": "e", "stored": "", "input_rows": []},
+        {
+            "part_row": 6,
+            "reason": "ttl_column_reset",
+            "column": "e",
+            "stored": "",
+            "input_rows": [],
+        },
     ],
 }
 
 
 def test_a_batch_decodes_at_merge_one_to_one() -> None:
     entries = decode_batch(dumps(AT_MERGE_BATCH), None).at_merge
-    got = [(e.row, e.reason, e.reason.known, e.column, e.stored, e.input_rows) for e in entries]
+    got = [
+        (e.part_row, e.reason, e.reason.known, e.column, e.stored, e.input_rows) for e in entries
+    ]
     assert got == [
         (0, MergeReason.TTL_DELETE, True, None, None, None),
         (1, MergeReason.TTL_COLUMN_RESET, True, b"c", b"0", None),
@@ -298,14 +320,18 @@ def test_absent_at_merge_and_unsupported_settings_are_empty(doc) -> None:
     [
         {
             "at_merge": [
-                {"row": 0, "reason": "ttl_column_reset", "column": "c", "column_b64": "Yw=="}
+                {"part_row": 0, "reason": "ttl_column_reset", "column": "c", "column_b64": "Yw=="}
             ]
         },
-        {"at_merge": [{"row": 0, "reason": "ttl_column_reset", "column": "c", "stored_b64": "!!"}]},
-        {"at_merge": [{"row": 0, "reason": "ttl_delete", "input_rows": ["x"]}]},
-        {"at_merge": [{"row": 0, "reason": "ttl_delete", "input_rows": [-1]}]},
-        {"at_merge": [{"row": 0, "reason": 7}]},
-        {"at_merge": {"row": 0}},
+        {
+            "at_merge": [
+                {"part_row": 0, "reason": "ttl_column_reset", "column": "c", "stored_b64": "!!"}
+            ]
+        },
+        {"at_merge": [{"part_row": 0, "reason": "ttl_delete", "input_rows": ["x"]}]},
+        {"at_merge": [{"part_row": 0, "reason": "ttl_delete", "input_rows": [-1]}]},
+        {"at_merge": [{"part_row": 0, "reason": 7}]},
+        {"at_merge": {"part_row": 0}},
         {"unsupported_settings": ["session_timezone"]},
     ],
 )
@@ -415,7 +441,6 @@ def test_error_code_table_and_live_handles() -> None:
         {"unknown_fields": ["bare string"]},
         {"unknown_fields": [{}]},
         {"unknown_fields": [{"name": "a", "name_b64": "YQ=="}]},
-        {"unsupported_settings": ["x"]},
         {"partition_id": "p", "partition_id_b64": "cA=="},
         {"cols": [{"name": "a", "null": False, "src": "input", "value_b64": "YQ"}]},  # unpadded
         {"computed": [{"name": "c", "value_b64": "!!"}]},
@@ -431,3 +456,150 @@ def test_an_engine_row_must_be_a_list_of_cells_never_an_object() -> None:
         decode_batch(dumps({"engine_rows": [{"a": "1"}]}), None)
     with pytest.raises(InternalError):
         decode_batch(dumps({"engine_rows": [[{"stored": "1", "null": False}]]}), None)  # no name
+
+
+# ABI v2 spec batch 2: the refusal members, the export members, the null row span
+# and the schema description's new members.
+
+
+def test_a_declined_batch_names_its_code_reason_and_site() -> None:
+    batch = decode_batch(
+        dumps(
+            {
+                "outcome": "unsupported",
+                "code": -2,
+                "reason": "preview-batch-zone-mismatch",
+                "refused_at": "body_read",
+                "rows_read": 0,
+                "rows_skipped": 0,
+                "unsupported_settings": [],
+            }
+        ),
+        None,
+    )
+    assert batch.err_code == -2 and batch.reason == "preview-batch-zone-mismatch"
+    assert batch.refused_at is RefusalSite.BODY_READ and batch.refused_at.known
+    assert batch.refused_row is None
+
+
+def test_a_row_refusal_names_its_row_and_a_future_site_is_kept() -> None:
+    row = decode_row_document(
+        dumps(
+            {
+                "outcome": "unsupported",
+                "code": -2,
+                "reason": "drawn-value",
+                "refused_at": "row",
+                "refused_row": 0,
+                "verdict": "d",
+                "verdict_code": -2,
+                "verdict_reason": "defer-defaults-reader",
+            }
+        )
+    )
+    assert row.reason == "drawn-value" and row.refused_at is RefusalSite.ROW
+    assert row.refused_row == 0  # present zero is not absent
+    assert row.verdict is Verdict.DECLINE and row.verdict_code == -2
+    assert row.verdict_reason == "defer-defaults-reader"
+    future = decode_row_document(dumps({"refused_at": "a_site_nobody_listed"}))
+    assert future.refused_at == "a_site_nobody_listed" and not future.refused_at.known
+
+
+def test_a_filter_result_carries_the_batchs_refusal_members_and_error_reasons() -> None:
+    res = decode_filter_result(
+        dumps(
+            {
+                "outcome": "unsupported",
+                "code": -2,
+                "reason": "filter-zone",
+                "refused_at": "call",
+                "rows_read": 1,
+                "verdicts": "d",
+                "errors": [
+                    {"row": 0, "code": -2, "reason": "drawn-value"},
+                    {"row": 1, "code": 386},
+                ],
+            }
+        )
+    )
+    assert res.err_code == -2 and res.reason == "filter-zone"
+    assert res.refused_at is RefusalSite.CALL and res.refused_row is None
+    assert [(e.code, e.reason) for e in res.errors] == [(-2, "drawn-value"), (386, None)]
+
+
+def test_the_export_members_and_the_null_row_span() -> None:
+    batch = decode_batch(
+        dumps(
+            {
+                "outcome": "accepted",
+                "row_spans": [{"off": 0, "len": 4}, None, {"off": 4, "len": 2}],
+                "export_columns": [{"name": "a"}, {"name_b64": b64(b"\xff")}],
+                "export_declined": "",
+            }
+        ),
+        b"abcdef",
+    )
+    assert batch.spans is not None
+    assert [s and (s.off, s.len) for s in batch.spans] == [(0, 4), None, (4, 2)]
+    assert batch.export_columns == (b"a", b"\xff") and batch.export_declined_reason is None
+    declined = decode_batch(
+        dumps(
+            {
+                "outcome": "rejected",
+                "row_spans": [None],
+                "export_columns": [{"name": "a"}],
+                "export_declined": "no export",
+                "export_declined_reason": "export-after-refusal",
+            }
+        ),
+        None,
+    )
+    assert declined.spans is None and declined.payload is None
+    assert declined.export_declined == b"no export"
+    assert declined.export_declined_reason == "export-after-refusal"
+    assert decode_batch(dumps({}), None).export_columns is None
+
+
+def test_a_schema_description_decodes_posture_default_support_reads_and_b64_settings() -> None:
+    desc = decode_schema_description(
+        dumps(
+            {
+                "posture": "load",
+                "columns": [
+                    {
+                        "name": "a",
+                        "type": "UInt8",
+                        "default_kind": "DEFAULT",
+                        "default_support": "declined",
+                        "default_support_reason": "drawn-value",
+                        "reads": [{"name": "b"}, {"name_b64": b64(b"\xff")}],
+                    },
+                    {"name": "b", "type": "UInt8", "default_kind": ""},
+                ],
+                "server": {
+                    "timezone": "UTC",
+                    "settings": {"plain": "1", "raw": {"b64": b64(b"\xff\x00")}},
+                },
+            }
+        )
+    )
+    assert desc.posture is Posture.LOAD
+    a, b = desc.columns
+    assert (
+        a.default_support is DefaultSupport.DECLINED and a.default_support_reason == "drawn-value"
+    )
+    assert a.reads == (b"b", b"\xff")
+    assert b.default_support is None and b.default_support_reason is None and b.reads is None
+    assert desc.server is not None
+    assert desc.server.settings == {"plain": "1", "raw": "\udcff\x00"}
+    assert desc.server.settings["raw"].encode("utf-8", "surrogateescape") == b"\xff\x00"
+    assert decode_schema_description(dumps({"columns": []})).posture is None
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [{"k": {"b64": "!!"}}, {"k": {"b64": "YQ==", "x": 1}}, {"k": 5}],
+)
+def test_a_bad_server_settings_value_is_an_internal_error(settings) -> None:
+    with pytest.raises(InternalError):
+        decode_schema_description(dumps({"server": {"settings": settings}}))
