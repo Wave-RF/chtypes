@@ -486,7 +486,13 @@ fn an_installed_line_never_waits_for_another_lines_fetch() {
         held_rx.try_recv().is_err(),
         "for_version(26.3) returned while its fetch was held at the gate"
     );
-    assert_eq!(fx.wait_parked("flight-held", 1), 1, "26.3's one request");
+    // 26.8's installed-build revocation check also parks at the closed gate (its
+    // listing request) until its own 5 s deadline passes; that is no fetch, and
+    // the open answered without it.
+    assert!(
+        fx.wait_parked("flight-held", 1) >= 1,
+        "26.3's request is still parked"
+    );
 
     fx.open_gate("flight-held");
     let held = held_rx

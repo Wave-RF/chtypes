@@ -438,7 +438,7 @@ func (s *session) checkCandidates(ctx context.Context, bases []string, cands []D
 			continue
 		}
 		var rev *Revocation
-		reason := ""
+		var reason string
 		if err != nil {
 			reason = err.Error()
 		} else {
@@ -531,21 +531,21 @@ func writeRevocationRecord(dir string, bundle []byte) error {
 // checkStored reads sub's stored record, if its entry holds one: verified, it
 // decides the call (decided true); one that does not verify is a warning, and
 // the call goes on.
-func (ro resolvedOptions) checkStored(sub revocationSubject) (warnings []string, err error, decided bool) {
+func (ro resolvedOptions) checkStored(sub revocationSubject) (warnings []string, decided bool, err error) {
 	if sub.dir == "" {
-		return nil, nil, false
+		return nil, false, nil
 	}
 	path := filepath.Join(sub.dir, CacheRevocationRecord)
 	body, rerr := os.ReadFile(path)
 	if rerr != nil {
-		return nil, nil, false
+		return nil, false, nil
 	}
 	rev, reason := verifyRevocation(body, ro.trustedKeys, sub)
 	if rev == nil {
-		return []string{fmt.Sprintf("chtypes: revocation record %s for manifest %s does not verify and is ignored: %s", path, sub.manifest, reason)}, nil, false
+		return []string{fmt.Sprintf("chtypes: revocation record %s for manifest %s does not verify and is ignored: %s", path, sub.manifest, reason)}, false, nil
 	}
 	w, err := ro.settle(sub, revocationOutcome{verified: &found{bundle: body, rev: rev}}, "", false)
-	return w, err, true
+	return w, true, err
 }
 
 // checkInstalledStored is the check every call that answers from the cache
@@ -554,7 +554,7 @@ func checkInstalledStored(ro resolvedOptions, res *Resolved) error {
 	if !ro.ch.revocation || res == nil {
 		return nil
 	}
-	w, err, _ := ro.checkStored(subjectOf(ro, res))
+	w, _, err := ro.checkStored(subjectOf(ro, res))
 	res.Warnings = append(res.Warnings, w...)
 	return err
 }
@@ -566,7 +566,7 @@ func (s *session) checkFrozenInstalled(ctx context.Context, ro resolvedOptions, 
 		return nil
 	}
 	sub := subjectOf(ro, res)
-	w, err, decided := ro.checkStored(sub)
+	w, decided, err := ro.checkStored(sub)
 	res.Warnings = append(res.Warnings, w...)
 	if decided || err != nil {
 		return err
@@ -622,7 +622,7 @@ func (s *session) checkInstalledOnce(ctx context.Context, ro resolvedOptions, re
 		return nil, nil
 	}
 	sub := subjectOf(ro, res)
-	warnings, err, decided := ro.checkStored(sub)
+	warnings, decided, err := ro.checkStored(sub)
 	if decided || err != nil || ro.offline {
 		return warnings, err
 	}

@@ -798,7 +798,7 @@ pub fn reset_revocation_memo_for_tests() {
     memo().clear();
 }
 
-/// Serialises the unit tests that read the memo against
+/// Serializes the unit tests that read the memo against
 /// [`reset_revocation_memo_for_tests`]: the conformance suite resets it before
 /// every case, and libtest runs its tests in parallel.
 #[cfg(test)]
