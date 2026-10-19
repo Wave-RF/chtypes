@@ -12,7 +12,7 @@
 
 import type * as http from 'node:http';
 import { RETIRED_MESSAGE_MAX_CODE_POINTS, RETIRED_STATUSES } from './constants.gen.js';
-import { type Advisory, ArtifactRevokedError, FetchV1Error, SourceRetiredError } from './errors.js';
+import { type Advisory, ArtifactRevokedError, type FetchV1Error, SourceRetiredError } from './errors.js';
 
 /** Is this status a retired repository's? */
 export function isRetiredStatus(status: number): boolean {

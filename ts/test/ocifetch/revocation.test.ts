@@ -23,7 +23,7 @@ interface TableRow {
   readonly body_text?: string;
   readonly body_hex?: string;
   readonly code: string;
-  readonly revoked?: {
+  readonly revoked?: null | {
     readonly text: string;
     readonly advisories: readonly {
       readonly id: string;
@@ -55,14 +55,14 @@ describe('goneError: the shared table (tests/fixtures/revoked-410/cases.json)', 
 
   it('has rows', () => {
     expect(table.cases.length).toBeGreaterThan(0);
-    expect(table.cases.some((c) => c.revoked !== undefined)).toBe(true);
+    expect(table.cases.some((c) => c.revoked != null)).toBe(true);
   });
 
   for (const row of table.cases) {
     it(row.name, () => {
       const err = goneError(URL_410, 410, bodyOf(row), true);
       expect(err.code).toBe(row.code);
-      if (row.revoked === undefined) {
+      if (row.revoked == null) {
         expect(err).toBeInstanceOf(SourceRetiredError);
         return;
       }
