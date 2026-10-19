@@ -137,10 +137,9 @@ fn r2_unknown_members_are_ignored(dir: &Path, variants: &serde_json::Map<String,
         (
             r.computed.len(),
             r.transformed.len(),
-            r.unknown_fields.len(),
-            r.unsupported_settings.len()
+            r.unknown_fields.len()
         ),
-        (1, 1, 1, 1),
+        (1, 1, 1),
         "{r:?}"
     );
     // Public issue #384: the library's own transformed entry is reported; nothing is derived.

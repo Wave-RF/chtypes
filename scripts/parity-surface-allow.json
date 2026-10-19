@@ -163,7 +163,10 @@
         "MergeReason.as_str",
         "DeclinedTier.as_str",
         "DeclinedLayer.as_str",
-        "DiscoverQueryParam.as_str"
+        "DiscoverQueryParam.as_str",
+        "RefusalSite.as_str",
+        "Posture.as_str",
+        "DefaultSupport.as_str"
       ],
       "reason": "A string vocabulary's document spelling. Rust's vocabularies are enums, so the text is a method, where Python's StrEnum member and TypeScript's const-object value are the string itself and Go's type is a string. Generated from the description by scripts/abi-v1/gen.py."
     },
@@ -396,6 +399,24 @@
       "binding": "rust",
       "kind": "extra",
       "names": [
+        "VerdictBasis.Input",
+        "VerdictBasis.Export",
+        "VerdictBasis.as_str",
+        "DeferDefaults.None",
+        "DeferDefaults.Server",
+        "DeferDefaults.as_str",
+        "ParamEncoding.Escaped",
+        "ParamEncoding.Raw",
+        "ParamEncoding.as_str",
+        "ColumnDefault.name",
+        "ColumnDefault.value"
+      ],
+      "reason": "\u00a72, the call options: the options documents' hand-written value types (spec batch 2, ABI v2). The doc names VerdictBasis, DeferDefaults, ParamEncoding and ColumnDefault in the Rust option fields' types and gives Go's members (VerdictBasisInput, DeferDefaultsNone, ParamEncodingEscaped, ColumnDefault{Name, Value}) in its Go column; Rust spells each as the enum variant or struct field of the same word, and as_str is the wire spelling the options document is built from (the same fact the generated vocabularies' as_str gives)."
+    },
+    {
+      "binding": "rust",
+      "kind": "extra",
+      "names": [
         "Format.Unknown",
         "Format.code",
         "Format.from_code",
@@ -431,7 +452,16 @@
         "DiscoverQueryParam.Unknown",
         "DiscoverQueryParam.from_wire",
         "DiscoverQueryParam.is_known",
-        "DiscoverQueryParam.ch_type"
+        "DiscoverQueryParam.ch_type",
+        "RefusalSite.Unknown",
+        "RefusalSite.from_wire",
+        "RefusalSite.is_known",
+        "Posture.Unknown",
+        "Posture.from_wire",
+        "Posture.is_known",
+        "DefaultSupport.Unknown",
+        "DefaultSupport.from_wire",
+        "DefaultSupport.is_known"
       ],
       "issue": 511,
       "reason": "The ABI v2 dev binding's rule r3 (spec/abi-v2/docs.md): every vocabulary has an explicit unknown(n) member, an unlisted value kept per field, which Rust spells as an Unknown variant carrying the raw value, with is_known() false and from_wire/from_code to read one; the call status, the transform reasons and the value sources gain types of their own (Status, Reason, Source; the 1.x status, reason and source modules stay beside them). DiscoverQueryParam.ch_type is the description's ch_type fact of the discovery query's parameters, which Rust alone exposes; the v2 surface document settles it. Refusal.dev_message is rule r6's exact fingerprint message. docs/reference/bindings-v1.md is the 1.x surface and names none of them; the v2 surface document lands with the other dev bindings (public issue #511), and this entry goes with it."
