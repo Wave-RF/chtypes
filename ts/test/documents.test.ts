@@ -307,17 +307,17 @@ describe('the batch document: at_merge and the batch\'s own unsupported_settings
       inputRows: e.inputRows,
     }));
     expect(got).toEqual([
-      { part_row: 0, reason: MergeReason.TtlDelete, known: true, column: undefined, stored: undefined, inputRows: undefined },
-      { part_row: 1, reason: MergeReason.TtlColumnReset, known: true, column: [0x63], stored: [0x30], inputRows: undefined },
+      { row: 0, reason: MergeReason.TtlDelete, known: true, column: undefined, stored: undefined, inputRows: undefined },
+      { row: 1, reason: MergeReason.TtlColumnReset, known: true, column: [0x63], stored: [0x30], inputRows: undefined },
       // stored absent: the column's DEFAULT is decided at the merge
-      { part_row: 2, reason: MergeReason.TtlColumnReset, known: true, column: [0x74], stored: undefined, inputRows: undefined },
+      { row: 2, reason: MergeReason.TtlColumnReset, known: true, column: [0x74], stored: undefined, inputRows: undefined },
       // both by their _b64 form
-      { part_row: 3, reason: MergeReason.TtlColumnReset, known: true, column: [0xff, 0x00], stored: [0xff], inputRows: undefined },
-      { part_row: 4, reason: MergeReason.TtlDelete, known: true, column: undefined, stored: undefined, inputRows: [4, 7] },
+      { row: 3, reason: MergeReason.TtlColumnReset, known: true, column: [0xff, 0x00], stored: [0xff], inputRows: undefined },
+      { row: 4, reason: MergeReason.TtlDelete, known: true, column: undefined, stored: undefined, inputRows: [4, 7] },
       // an unlisted reason is its unknown(n), kept verbatim, and the unknown members are ignored (r2, r3)
-      { part_row: 5, reason: 'a_reason_nobody_listed', known: false, column: undefined, stored: undefined, inputRows: undefined },
+      { row: 5, reason: 'a_reason_nobody_listed', known: false, column: undefined, stored: undefined, inputRows: undefined },
       // an empty stored is not an absent one
-      { part_row: 6, reason: MergeReason.TtlColumnReset, known: true, column: [0x65], stored: [], inputRows: [] },
+      { row: 6, reason: MergeReason.TtlColumnReset, known: true, column: [0x65], stored: [], inputRows: [] },
     ]);
   });
 
