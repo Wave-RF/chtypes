@@ -572,6 +572,9 @@ fn check_used_installed(res: &Resources, resolved: &mut Resolved) -> Result<()> 
     Ok(())
 }
 
+/// The lock entries of every platform, and the warnings of the revocation checks.
+type LockEntries = (Vec<(String, LockEntry)>, Vec<String>);
+
 /// `lock_write`'s "every platform the index offers" rule (plan §6): the
 /// host's own platform reuses `host_resolved` (already fetched and
 /// verified, no extra request); every other platform has its manifest
@@ -582,7 +585,7 @@ fn lock_entries_for_all_platforms(
     res: &Resources,
     version_request: &VersionRequest,
     host_resolved: &Resolved,
-) -> Result<(Vec<(String, LockEntry)>, Vec<String>)> {
+) -> Result<LockEntries> {
     let source = Source {
         bases: &res.bases,
         client: &res.client,
@@ -1217,6 +1220,7 @@ pub fn check_installed(resolved: &Resolved, mut options: Options) -> Result<Vec<
 /// Forgets every kept revocation outcome, as a new process would: a
 /// conformance runner calls it before every case.
 #[cfg(test)]
+#[allow(unused_imports)]
 pub use super::revocation::reset_revocation_memo_for_tests;
 
 fn verify_one_install(dir: &Path, record: &VerifiedRecord) -> VerifyResult {

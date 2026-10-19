@@ -295,7 +295,7 @@ fn predicate_str(predicate: &serde_json::Value, key: &str) -> String {
 
 impl Subject {
     /// The subject an installed build's [`Resolved`] names.
-    pub fn of_resolved(res: &Resources, resolved: &Resolved) -> Subject {
+    pub(super) fn of_resolved(res: &Resources, resolved: &Resolved) -> Subject {
         Subject {
             manifest: resolved.digests.manifest.clone(),
             layer: resolved.digests.layer.clone(),
@@ -620,7 +620,12 @@ fn not_checked_text(sub: &Subject, bases: &[String], cause: &str) -> String {
 /// an installed, writable entry (when `store`) and refuses the build, or with
 /// the override becomes one warning; an unread status is one warning, or in
 /// strict mode the transport's error.
-pub fn settle(res: &Resources, sub: &Subject, out: &Outcome, store: bool) -> Result<Vec<String>> {
+pub(super) fn settle(
+    res: &Resources,
+    sub: &Subject,
+    out: &Outcome,
+    store: bool,
+) -> Result<Vec<String>> {
     let mut warnings = out.warnings.clone();
     if let Some(found) = &out.verified {
         if store && sub.writable {
@@ -664,7 +669,7 @@ pub fn write_record(dir: &Path, bundle: &[u8]) -> Result<()> {
 
 /// Stores the revocation an override let a call install past, in the entry it
 /// installed.
-pub fn store_pending(res: &Resources, resolved: &Resolved, pending: Option<&Found>) {
+pub(super) fn store_pending(res: &Resources, resolved: &Resolved, pending: Option<&Found>) {
     if let Some(found) = pending {
         if under_dir(&res.root, &resolved.dir) {
             let _ = write_record(&resolved.dir, &found.bundle);
@@ -704,7 +709,7 @@ fn check_stored(res: &Resources, sub: &Subject) -> Result<(Vec<String>, bool)> {
 
 /// The check every call that answers from the cache with no request makes
 /// (`--offline`, `--frozen --offline`): the stored record.
-pub fn check_installed_stored(res: &Resources, resolved: &mut Resolved) -> Result<()> {
+pub(super) fn check_installed_stored(res: &Resources, resolved: &mut Resolved) -> Result<()> {
     if !channel::active().revocation {
         return Ok(());
     }
@@ -716,7 +721,7 @@ pub fn check_installed_stored(res: &Resources, resolved: &mut Resolved) -> Resul
 
 /// `--frozen`'s check of the build installed under its pin: the stored record,
 /// then one listing under the retry table.
-pub fn check_frozen_installed(res: &Resources, resolved: &mut Resolved) -> Result<()> {
+pub(super) fn check_frozen_installed(res: &Resources, resolved: &mut Resolved) -> Result<()> {
     if !channel::active().revocation {
         return Ok(());
     }
@@ -796,7 +801,7 @@ pub fn reset_revocation_memo_for_tests() {
 /// one deadline. Concurrent checks of one build share one; a kept "not checked"
 /// answers only a call without strict mode, and a check that ends in an error
 /// keeps nothing. Returns the warnings of the call.
-pub fn check_installed_once(res: &Resources, resolved: &Resolved) -> Result<Vec<String>> {
+pub(super) fn check_installed_once(res: &Resources, resolved: &Resolved) -> Result<Vec<String>> {
     if !channel::active().revocation {
         return Ok(Vec::new());
     }
