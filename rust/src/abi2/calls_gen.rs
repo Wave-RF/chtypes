@@ -22,6 +22,7 @@ pub(crate) struct RawCallError {
     pub(crate) ch_name: String,
     pub(crate) message: Vec<u8>,
     pub(crate) column: Vec<u8>,
+    pub(crate) reason: String,
 }
 
 /// Copy one owned `chs_buf *` into a `Vec<u8>` and free it. NULL reads as
@@ -63,6 +64,7 @@ unsafe fn read_free_error(api: &Api, status: i32, err: *mut ChsError) -> RawCall
             ch_name: String::new(),
             message: b"the library returned a non-OK status with no error object".to_vec(),
             column: Vec::new(),
+            reason: String::new(),
         };
     }
     // SAFETY: the caller's `# Safety` clause; every accessor reads the live
@@ -76,6 +78,11 @@ unsafe fn read_free_error(api: &Api, status: i32, err: *mut ChsError) -> RawCall
         .into_owned();
         let message = copy_free_buf(api, (api.chs_error_message)(err as *const ChsError));
         let column = copy_free_buf(api, (api.chs_error_column)(err as *const ChsError));
+        let reason = String::from_utf8_lossy(&copy_free_buf(
+            api,
+            (api.chs_error_reason)(err as *const ChsError),
+        ))
+        .into_owned();
         (api.chs_error_free)(err);
         RawCallError {
             status,
@@ -83,6 +90,7 @@ unsafe fn read_free_error(api: &Api, status: i32, err: *mut ChsError) -> RawCall
             ch_name,
             message,
             column,
+            reason,
         }
     }
 }
@@ -97,6 +105,7 @@ fn missing_output(status: i32, what: &str) -> RawCallError {
         ch_name: String::new(),
         message: format!("the library answered OK and returned no {what}").into_bytes(),
         column: Vec::new(),
+        reason: String::new(),
     }
 }
 

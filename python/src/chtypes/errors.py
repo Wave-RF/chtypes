@@ -96,6 +96,7 @@ class CallError(ChtypesError):
         message: ClickHouse's own message for a refusal, the library's
             otherwise; bytes.
         column: the column concerned, empty if none; bytes.
+        reason: the catalog id (`chs_error_reason`), ASCII; empty if none.
     """
 
     def __init__(
@@ -105,6 +106,7 @@ class CallError(ChtypesError):
         ch_name: str = "",
         message: bytes = b"",
         column: bytes = b"",
+        reason: str = "",
     ) -> None:
         super().__init__(message.decode("utf-8", "replace"))
         self.status = status
@@ -112,6 +114,7 @@ class CallError(ChtypesError):
         self.ch_name = ch_name
         self.message = message
         self.column = column
+        self.reason = reason
 
 
 class SchemaError(CallError):

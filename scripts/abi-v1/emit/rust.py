@@ -842,6 +842,7 @@ def _method_name(fn, model) -> str:
 
 
 def render_calls(model) -> str:
+    has_reason = any(fn.name == "chs_error_reason" for fn in model.functions)
     out: list[str] = [
         f"// {banner(model)}",
         "//",
@@ -872,6 +873,7 @@ def render_calls(model) -> str:
         "    pub(crate) ch_name: String,",
         "    pub(crate) message: Vec<u8>,",
         "    pub(crate) column: Vec<u8>,",
+        *(["    pub(crate) reason: String,"] if has_reason else []),
         "}",
         "",
         "/// Copy one owned `chs_buf *` into a `Vec<u8>` and free it. NULL reads as",
@@ -913,6 +915,7 @@ def render_calls(model) -> str:
         "            ch_name: String::new(),",
         "            message: b\"the library returned a non-OK status with no error object\".to_vec(),",
         "            column: Vec::new(),",
+        *(["            reason: String::new(),"] if has_reason else []),
         "        };",
         "    }",
         "    // SAFETY: the caller's `# Safety` clause; every accessor reads the live",
@@ -923,8 +926,18 @@ def render_calls(model) -> str:
         "            .into_owned();",
         "        let message = copy_free_buf(api, (api.chs_error_message)(err as *const ChsError));",
         "        let column = copy_free_buf(api, (api.chs_error_column)(err as *const ChsError));",
+        *(
+            [
+                "        let reason = String::from_utf8_lossy(&copy_free_buf(api, (api.chs_error_reason)(err as *const ChsError)))",
+                "            .into_owned();",
+            ]
+            if has_reason
+            else []
+        ),
         "        (api.chs_error_free)(err);",
-        "        RawCallError { status, ch_code, ch_name, message, column }",
+        "        RawCallError { status, ch_code, ch_name, message, column"
+        + (", reason" if has_reason else "")
+        + " }",
         "    }",
         "}",
         "",
@@ -938,6 +951,7 @@ def render_calls(model) -> str:
         "        ch_name: String::new(),",
         "        message: format!(\"the library answered OK and returned no {what}\").into_bytes(),",
         "        column: Vec::new(),",
+        *(["        reason: String::new(),"] if has_reason else []),
         "    }",
         "}",
         "",

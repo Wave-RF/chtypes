@@ -384,6 +384,17 @@ def render_decls(model: Model) -> str:
     typed_wrappers = _typed_wrappers(model)
     handle_class_dict = _dict_block([(_lit(h), cls) for h, cls in handle_classes.items()])
     cross_check = _cross_check_literal(model)
+    # A description that declares chs_error_reason (ABI v2) has every call error
+    # carry it; one that does not (ABI v1) emits the layer unchanged.
+    has_reason = any(fn.name == "chs_error_reason" for fn in model.functions)
+    info_reason_field = "\n    reason: bytes = b\"\"" if has_reason else ""
+    info_reason_read = (
+        '\n    reason = _read_buf(api, api._raw["chs_error_reason"](err_ptr))' if has_reason else ""
+    )
+    info_reason_arg = "\n        reason=reason," if has_reason else ""
+    raise_reason_arg = (
+        '\n            reason=info.reason.decode("ascii", "replace") if info else "",' if has_reason else ""
+    )
 
     handle_class_defs = "\n\n\n".join(
         f'class {cls}(Handle):\n    """A `{h}` the library owns the free function for."""'
@@ -639,7 +650,7 @@ class Api:
             info.ch_code if info else 0,
             info.ch_name.decode("ascii", "replace") if info else "",
             message,
-            info.column if info else b"",
+            info.column if info else b"",{raise_reason_arg}
         )
 
 {typed_wrappers}
@@ -675,7 +686,7 @@ class ErrorInfo:
     ch_code: int
     ch_name: bytes
     message: bytes
-    column: bytes
+    column: bytes{info_reason_field}
 
 
 @dataclass
@@ -736,14 +747,14 @@ def _decode_error(api: Api, err_ptr: int) -> ErrorInfo:
     ch_code = api._raw["chs_error_ch_code"](err_ptr)
     ch_name = _read_buf(api, api._raw["chs_error_ch_name"](err_ptr))
     message = _read_buf(api, api._raw["chs_error_message"](err_ptr))
-    column = _read_buf(api, api._raw["chs_error_column"](err_ptr))
+    column = _read_buf(api, api._raw["chs_error_column"](err_ptr)){info_reason_read}
     api._raw["chs_error_free"](err_ptr)
     return ErrorInfo(
         status=STATUS_BY_VALUE.get(status_val, f"UNKNOWN:{{status_val}}"),
         ch_code=ch_code,
         ch_name=ch_name,
         message=message,
-        column=column,
+        column=column,{info_reason_arg}
     )
 
 
