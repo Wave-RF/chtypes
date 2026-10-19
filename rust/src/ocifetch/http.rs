@@ -345,10 +345,19 @@ impl Client {
                         .with_config()
                         .limit(max_bytes)
                         .read_to_vec()
-                        .map_err(|e| {
-                            TransportOutcome::Fatal(Error::ArtifactCorrupt(format!(
-                                "response body from {url} exceeded {max_bytes} bytes or failed to read: {e}"
-                            )))
+                        .map_err(|e| match e {
+                            // Only an oversize body is corrupt, and it is never
+                            // retried. Keyed on the error variant, not its text.
+                            ureq::Error::BodyExceedsLimit(_) => {
+                                TransportOutcome::Fatal(Error::ArtifactCorrupt(format!(
+                                    "response body from {url} exceeded {max_bytes} bytes"
+                                )))
+                            }
+                            // Any other failure while reading the body (a body
+                            // shorter than its Content-Length, a reset, a TLS
+                            // close) is a transport failure: retried like a 5xx,
+                            // then CHTYPES_SOURCE_UNREACHABLE.
+                            other => classify_transport_error(url, other),
                         })?
                 };
                 Ok(HttpResponse {

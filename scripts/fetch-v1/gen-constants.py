@@ -1017,6 +1017,13 @@ def render_guide_block(data: dict[str, Any], sha: str) -> str:
     lines.append("")
     lines.append(f"A digest 404: `{data['retry']['digest_404']}`. A tag 404: `{data['retry']['tag_404']}`.")
     lines.append("")
+    lines.append(
+        "A transport failure while reading a response body (a body shorter than its Content-Length, a reset, "
+        "a TLS close) is retried like a 5xx, and once the retry table is spent it is `CHTYPES_SOURCE_UNREACHABLE`. "
+        "Only an oversize body is `CHTYPES_ARTIFACT_CORRUPT`, and it is never retried. The `body-cut-off-*` cases "
+        "(§10) hold every binding to this."
+    )
+    lines.append("")
     retired = ", ".join(str(s) for s in data["retry"]["retired_statuses"])
     lines.append(
         f"A {retired}, on any request: permanent, a retired repository. It is never retried and never a reason "
