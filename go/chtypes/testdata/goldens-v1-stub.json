@@ -68,12 +68,12 @@
       "status": "CHS_OK",
       "document": {
        "outcome": "accepted",
+       "code": 0,
        "input_span": {
         "off": 0,
         "len": 6
        },
        "unknown_fields": [],
-       "unsupported_settings": [],
        "cols": [
         {
          "name": "s",
@@ -112,12 +112,12 @@
       "status": "CHS_OK",
       "document": {
        "outcome": "accepted",
+       "code": 0,
        "input_span": {
         "off": 0,
         "len": 6
        },
        "unknown_fields": [],
-       "unsupported_settings": [],
        "cols": [
         {
          "name": "s",
@@ -164,12 +164,12 @@
       "status": "CHS_OK",
       "document": {
        "outcome": "accepted",
+       "code": 0,
        "input_span": {
         "off": 0,
         "len": 6
        },
        "unknown_fields": [],
-       "unsupported_settings": [],
        "cols": [
         {
          "name": "s",
