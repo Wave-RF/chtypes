@@ -18,7 +18,9 @@ fetch-v1.md §10). Python stdlib only.
         (never a mocked transport), and proves: a tree is served verbatim
         over HTTP; a scripted 503-then-success sequence is consumed in
         order and the request log shows both attempts; `close` resets the
-        connection with no response; a cross-origin redirect is followed
+        connection with no response; `truncate` declares a body's full
+        Content-Length, sends only its first N bytes and closes (the client
+        sees fewer bytes than declared, or a read error); a cross-origin redirect is followed
         to the second origin; and the request log at `/_log/s-<id>` is
         per-case (two different case ids never see each other's requests);
         and a request whose User-Agent is not `chtypes-<binding>/<version>`
@@ -414,6 +416,9 @@ class Handler(BaseHTTPRequestHandler):
                 pass
             self.close_connection = True
             return
+        if "truncate" in resp:
+            self._serve_truncated(resp["truncate"])
+            return
         if resp.get("from_tree"):
             self._serve_from_tree(case, self.path.split("/", 4)[-1] if False else None, raw_path=self.path)
             return
@@ -437,6 +442,29 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         if self.command != "HEAD" and body:
             self.wfile.write(body)
+
+    def _serve_truncated(self, sent: int) -> None:
+        """A body cut off part way: the route tree's bytes for this path, a
+        200 declaring their FULL Content-Length, then only the first `sent`
+        bytes and a closed socket (docs/guides/fetch-v1.md §7)."""
+        body = self._tree_bytes_for_request()
+        if sent >= len(body):
+            # A truncate that cuts nothing would be a whole body, and the case
+            # that scripts it would pass for the wrong reason.
+            self._send_status(500)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body[:sent])
+            self.wfile.flush()
+        try:
+            self.connection.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        self.close_connection = True
 
     def _referrers_filter(self, body: bytes) -> tuple[bytes, bool]:
         """Answer the referrers API's `artifactType` filter the way the real
@@ -719,6 +747,24 @@ def _run_selftest(tmp: Path) -> None:
         )
     )
 
+    (http_dir / "truncated.json").write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "id": "truncated",
+                "tree": "basic",
+                "routes": [
+                    {
+                        "method": "GET",
+                        "path": "/v2/chtypes/v1/manifests/26.8",
+                        "responses": [{"truncate": 5, "from_tree": True}, {"from_tree": True}],
+                    }
+                ],
+                "second_origin_routes": [],
+            }
+        )
+    )
+
     (tmp / "cases.json").write_text(
         json.dumps(
             {
@@ -756,7 +802,7 @@ def _run_selftest(tmp: Path) -> None:
                             "lock_after": None,
                         },
                     }
-                    for cid in ("retry-then-ok", "redirect-case", "closer", "no-script", "gone", "gated")
+                    for cid in ("retry-then-ok", "redirect-case", "closer", "no-script", "gone", "gated", "truncated")
                 ],
             }
         )
@@ -801,6 +847,31 @@ def _run_selftest(tmp: Path) -> None:
             raise AssertionError("expected the connection to reset, got a response")
         except (urllib.error.URLError, ConnectionError, OSError):
             pass
+
+        # 4b. truncated: the first answer declares the whole body's length
+        # and sends only part of it, so the client sees fewer bytes than
+        # declared (or a read error); the second is whole.
+        import http.client
+
+        def read_declared(path: str) -> tuple[int, bytes]:
+            conn = http.client.HTTPConnection("127.0.0.1", port1, timeout=5)
+            conn.request("GET", path, headers={"User-Agent": "chtypes-go/1.0.0"})
+            resp = conn.getresponse()
+            declared = int(resp.getheader("Content-Length"))
+            try:
+                data = resp.read()
+            except http.client.IncompleteRead as e:
+                data = e.partial
+            conn.close()
+            return declared, data
+
+        trunc_path = "/v2/s-truncated/chtypes/v1/manifests/26.8"
+        declared, data = read_declared(trunc_path)
+        assert declared == len(b'{"ok":true}'), f"truncate declared {declared} bytes, not the whole body's"
+        assert len(data) < declared, f"truncate sent {len(data)} of {declared} declared bytes: the body was not cut off"
+        assert data == b'{"ok"', f"truncate sent {data!r}, not the first 5 bytes"
+        declared, data = read_declared(trunc_path)
+        assert len(data) == declared == len(b'{"ok":true}'), "the second answer of a truncate script was not whole"
 
         # 5. per-case logs never cross-contaminate.
         log_closer = json.loads(get(f"http://127.0.0.1:{port1}/_log/s-closer").read())
