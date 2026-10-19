@@ -68,6 +68,18 @@ type confRequest struct {
 	OwnFingerprint *string `json:"own_fingerprint"`
 	// Prune is a prune- case's prune.
 	Prune *confPrune `json:"prune"`
+	// AllowRevoked and RequireRevocationCheck are the revocation check's
+	// per-call override and strict mode; Opens, when set, drives the registry
+	// open path that many times in one process (docs/guides/fetch-v1.md §10,
+	// "The registry-open driver").
+	AllowRevoked           bool `json:"allow_revoked"`
+	RequireRevocationCheck bool `json:"require_revocation_check"`
+	Opens                  *int `json:"opens"`
+}
+
+type confStored struct {
+	Manifest string `json:"manifest"`
+	Bundle   string `json:"bundle"`
 }
 
 type confPrune struct {
@@ -112,6 +124,10 @@ type confExpect struct {
 	Resolutions *[]confResolution `json:"resolutions"`
 	// Prune is a prune- case's report and what it leaves behind.
 	Prune *confPruneExpect `json:"prune"`
+	// WarningsMax caps the case's warnings in all; StoredRevocations names the
+	// entries that must hold a stored revocation afterwards.
+	WarningsMax       *int         `json:"warnings_max"`
+	StoredRevocations []confStored `json:"stored_revocations"`
 }
 
 type confRequestsExpect struct {
@@ -344,6 +360,9 @@ func expandBase(template, transport, fixturesDir, tree, caseID, registryBase str
 func runOneCase(t *testing.T, fixturesDir, subroot string, port, port2 int, registryBase string, c confCase, transport string) reportResult {
 	t.Helper()
 	row := reportResult{ID: c.ID, Transport: transport}
+	// Every case starts as a new process would: no kept revocation outcome
+	// (the cases reuse manifests across cache directories).
+	ResetRevocationMemoForTests()
 
 	bases := make([]string, 0, len(c.Request.Bases))
 	for _, tmpl := range c.Request.Bases {
@@ -477,6 +496,9 @@ func runOneCase(t *testing.T, fixturesDir, subroot string, port, port2 int, regi
 		Clock:           &clock,
 		OnRequest:       onRequest,
 		TrustedKeys:     trustedKeysHex,
+
+		AllowRevoked:           c.Request.AllowRevoked,
+		RequireRevocationCheck: c.Request.RequireRevocationCheck,
 	}
 
 	if c.Setup.BeforeIndexRenameHook != nil {
@@ -525,6 +547,30 @@ func runOneCase(t *testing.T, fixturesDir, subroot string, port, port2 int, regi
 	var runErr error
 
 	switch {
+	case c.Request.Opens != nil:
+		// The registry-open driver (docs/guides/fetch-v1.md §10): the two calls
+		// a registry makes before it loads a build, resolve_installed then
+		// check_installed, N times in one process; the last open is judged and
+		// every open's warnings are counted.
+		for i := 0; i < *c.Request.Opens; i++ {
+			resolvedManifest, resolvedLibrarySHA256, resolvedVersion, resolvedBuild = "", "", nil, nil
+			resolved, ferr := ResolveInstalled(Request{Spelling: c.Request.Spelling, Platform: c.Request.Platform}, c.Request.Platform, opts)
+			if ferr == nil && resolved == nil {
+				ferr = newError(CodeArtifactMissing, c.Request.Spelling, c.Request.Platform, "", nil, "no installed artifact satisfies %s", c.Request.Spelling)
+			}
+			if ferr == nil {
+				warnings = append(warnings, resolved.Warnings...)
+				var w []string
+				w, ferr = CheckInstalled(ctx, resolved, opts)
+				warnings = append(warnings, w...)
+			}
+			runErr = ferr
+			if ferr == nil {
+				resolvedManifest = string(resolved.Digests.Manifest)
+				resolvedLibrarySHA256 = sha256FileHex(resolved.LibraryPath)
+				resolvedVersion, resolvedBuild = &resolved.Version, &resolved.Build
+			}
+		}
 	case strings.HasPrefix(c.ID, "resolve-build-"):
 		// What a request resolves to on every platform, never a layer
 		// (docs/guides/fetch-v1.md §10).
@@ -589,6 +635,13 @@ func runOneCase(t *testing.T, fixturesDir, subroot string, port, port2 int, regi
 	if detail := compareOutcome(c.Expect, runErr, resolvedVersion, resolvedBuild, resolvedManifest, resolvedLibrarySHA256, warnings, sleeps); detail != "" {
 		row.Verdict, row.Detail = "fail", detail
 		return row
+	}
+	for _, s := range c.Expect.StoredRevocations {
+		path := filepath.Join(layoutDir, UnpackedDirName(), Digest(s.Manifest).Hex(), CacheRevocationRecord)
+		if got := sha256FileHex(path); "sha256:"+got != s.Bundle {
+			row.Verdict, row.Detail = "fail", fmt.Sprintf("stored_revocations: %s holds sha256 %q, want %s", path, got, s.Bundle)
+			return row
+		}
 	}
 	for _, d := range c.Expect.RecordsIntact {
 		after, err := snapshotInstall(layoutDir, d)
@@ -832,6 +885,9 @@ func compareOutcome(expect confExpect, runErr error, version, build *string, man
 		if !found {
 			return fmt.Sprintf("warnings %v do not contain a warning matching %q", warnings, want)
 		}
+	}
+	if expect.WarningsMax != nil && len(warnings) > *expect.WarningsMax {
+		return fmt.Sprintf("%d warnings, want at most %d: %q", len(warnings), *expect.WarningsMax, warnings)
 	}
 	return ""
 }

@@ -37,7 +37,8 @@
     "artifact_type": "application/vnd.wavehouse.chtypes.artifact.v1",
     "goldens_artifact_type": "application/vnd.wavehouse.chtypes.goldens.v1",
     "fixtures_artifact_type": "application/vnd.wavehouse.chtypes.sdk-fetch-fixtures.v1",
-    "channel_artifact_type": "application/vnd.wavehouse.chtypes.channel.v1"
+    "channel_artifact_type": "application/vnd.wavehouse.chtypes.channel.v1",
+    "revocation_artifact_type": "application/vnd.wavehouse.chtypes.revocation.v1"
   },
   "dsse": {
     "payload_type": "application/vnd.in-toto+json",
@@ -48,7 +49,8 @@
     "artifact": "https://artifacts.wavehouse.dev/spec/artifact/v1",
     "goldens": "https://artifacts.wavehouse.dev/spec/goldens/v1",
     "fixtures": "https://artifacts.wavehouse.dev/spec/sdk-fetch-fixtures/v1",
-    "channel": "https://artifacts.wavehouse.dev/spec/channel/v1"
+    "channel": "https://artifacts.wavehouse.dev/spec/channel/v1",
+    "revocation": "https://artifacts.wavehouse.dev/spec/revocation/v1"
   },
   "trust": {
     "release_keys": [
@@ -79,7 +81,8 @@
   },
   "timeouts": {
     "connect_s": 30,
-    "idle_read_s": 60
+    "idle_read_s": 60,
+    "revocation_check_s": 5
   },
   "limits": {
     "manifest_bytes": 4194304,
@@ -98,6 +101,7 @@
     "system_dirs": ["/usr/local/share/chtypes/v1", "/opt/chtypes/v1"],
     "unpacked_dir": "unpacked/sha256",
     "verified_record": "verified.json",
+    "revocation_record": "revocation.json",
     "annotation_prefix": "dev.wavehouse.chtypes."
   },
   "prod_v2": {
@@ -127,6 +131,7 @@
     "CHTYPES_SOURCE_INCOMPATIBLE": 7,
     "CHTYPES_ARTIFACT_INCOMPATIBLE": 8,
     "CHTYPES_CACHE_UNUSABLE": 9,
-    "CHTYPES_SOURCE_RETIRED": 10
+    "CHTYPES_SOURCE_RETIRED": 10,
+    "CHTYPES_ARTIFACT_REVOKED": 11
   }
 }

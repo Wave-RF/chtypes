@@ -105,6 +105,14 @@ pub struct FetchOptions {
     /// never a fall-through to a system dir. `None` reads
     /// `CHTYPES_CACHE_STRICT` (`1` is on), else off.
     pub strict_cache: Option<bool>,
+    /// Use a build a verified revocation refuses, for this call only, with one
+    /// warning naming the advisory (`docs/guides/fetch-v1.md`, "Build-level
+    /// revocation"). There is no environment variable, and it never lets a lock
+    /// or an update pin a revoked build.
+    pub allow_revoked: bool,
+    /// A revocation status that cannot be read is the transport's error rather
+    /// than one warning.
+    pub require_revocation_check: bool,
 }
 
 impl FetchOptions {
@@ -125,6 +133,8 @@ impl FetchOptions {
             update: self.update,
             allow_unsigned: self.allow_unsigned,
             strict_cache: self.strict_cache,
+            allow_revoked: self.allow_revoked,
+            require_revocation_check: self.require_revocation_check,
             trusted_keys: self.trusted_keys.clone(),
             token: self.token.clone(),
             clock: None,
@@ -558,7 +568,16 @@ impl Registry {
     fn resolve_and_open(&self, request: &str, may_fetch: bool) -> Result<Arc<Library>> {
         let platform = host_platform();
         let resolved = match lookup_held(request, &platform, &self.fetch)? {
-            Some(r) => r,
+            Some(r) => {
+                // The installed-build revocation check, before anything reads
+                // the library (`check_installed`; docs/guides/fetch-v1.md,
+                // "Build-level revocation"): the stored record, then at most
+                // one check per build per process. Its warnings go to stderr.
+                for warning in ensure::check_installed(&r, self.fetch.to_options())? {
+                    eprintln!("{warning}");
+                }
+                r
+            }
             None if self.autofetch && may_fetch => self.ensure_held(request)?,
             None => {
                 let message = format!(

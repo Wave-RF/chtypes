@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "id": "tag-410-revoked-line",
+  "tree": "revocation-listing",
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/v2/chtypes/v1/manifests/26.14",
+      "responses": [
+        {
+          "status": 410,
+          "headers": {
+            "Cache-Control": "no-store",
+            "Content-Type": "application/json"
+          },
+          "body": "{\"errors\":[{\"code\":\"DENIED\",\"message\":\"this tag's every build is revoked\",\"detail\":{\"revoked\":{\"repository\":\"chtypes/v2\",\"reference\":\"26.13.6.1\",\"advisories\":[{\"id\":\"GHSA-fx01-test-0001\",\"url\":\"https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0001\",\"class\":\"over-accept\",\"summary\":\"filter over-accept in fixture advisory 1\",\"build\":\"20261012.000002\",\"superseded_by\":\"20261019.000001\"},{\"id\":\"GHSA-fx01-test-0002\",\"url\":\"https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0002\",\"class\":\"crash\",\"summary\":\"a crash on a malformed DateTime64 in fixture advisory 2\",\"build\":\"20261001.000001\",\"superseded_by\":\"20261019.000001\"}]}}}]}"
+        }
+      ]
+    }
+  ],
+  "second_origin_routes": []
+}

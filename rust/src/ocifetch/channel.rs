@@ -105,6 +105,10 @@ pub struct Channel {
     /// with it. `None` does neither (the v1 contract and every production
     /// channel).
     pub own_fingerprint: Option<&'static str>,
+    /// Whether build-level revocation is on (revocation.rs;
+    /// docs/guides/fetch-v1.md, "Build-level revocation"): generation 2, the
+    /// dev channel and the production one. The v1 contract has none of it.
+    pub revocation: bool,
 }
 
 /// What a 2.0.0-dev SDK speaks, and what every non-test build of this crate
@@ -122,6 +126,7 @@ pub const DEV_CHANNEL: Channel = Channel {
     pinnable: false,
     // The generated constant (abi_fingerprint.rs), never a hand-written one.
     own_fingerprint: Some(DEV_ABI_FINGERPRINT),
+    revocation: true,
 };
 
 /// The v1 contract the fetch-v1 conformance cases specify, from the generated
@@ -142,6 +147,7 @@ const FETCH_V1_CHANNEL: Channel = Channel {
     overridable: true,
     pinnable: true,
     own_fingerprint: None,
+    revocation: false,
 };
 
 /// The production generation-2 channel a 2.0.0 SDK speaks after the lock: the
@@ -166,6 +172,7 @@ const PROD_V2_CHANNEL: Channel = Channel {
     overridable: true,
     pinnable: true,
     own_fingerprint: None,
+    revocation: true,
 };
 
 #[cfg(test)]

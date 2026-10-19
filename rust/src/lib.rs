@@ -122,7 +122,7 @@ pub use abi2::vocab_gen::{
     DocFlags, FilterOutcome, Format, MergeReason, Outcome, Posture, Reason, RefusalSite, Source,
     Status, Verdict, reason, source, status,
 };
-pub use error::{CacheFault, CallError, Error, Refusal, Result};
+pub use error::{Advisory, CacheFault, CallError, Error, Refusal, Result, Revocation};
 pub use library::Library;
 /// The `CHTYPES_*` codes of the artifact and fetch errors, as
 /// [`Error::code`] returns them, generated from `spec/fetch-v1/constants.json`

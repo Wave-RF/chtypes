@@ -20,7 +20,8 @@
       "CHTYPES_SOURCE_INCOMPATIBLE": 7,
       "CHTYPES_ARTIFACT_INCOMPATIBLE": 8,
       "CHTYPES_CACHE_UNUSABLE": 9,
-      "CHTYPES_SOURCE_RETIRED": 10
+      "CHTYPES_SOURCE_RETIRED": 10,
+      "CHTYPES_ARTIFACT_REVOKED": 11
     },
     "classes": {
       "schema": {"go": "*SchemaError", "python": "SchemaError", "ts": "SchemaError", "rust": "Error::Schema", "new": false},

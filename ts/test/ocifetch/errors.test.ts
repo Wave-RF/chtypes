@@ -13,6 +13,7 @@ import {
   ArtifactCorruptError,
   ArtifactMissingError,
   ArtifactPinnedError,
+  ArtifactRevokedError,
   ArtifactUnpublishedError,
   ArtifactUntrustedError,
   CacheUnusableError,
@@ -39,6 +40,7 @@ describe('the fetch errors are ChtypesErrors', () => {
       new ArtifactCorruptError('x'),
       new ArtifactMissingError('x'),
       new ArtifactPinnedError('x'),
+      new ArtifactRevokedError('x', { signed: false, manifest: '', advisories: [] }),
       new ArtifactUnpublishedError('x'),
       new ArtifactUntrustedError('x'),
       new SourceForbiddenError('x'),
@@ -52,6 +54,15 @@ describe('the fetch errors are ChtypesErrors', () => {
       expect(err).toBeInstanceOf(ChtypesError);
       expect(err).toBeInstanceOf(ArtifactError);
     }
+  });
+
+  it('gives a revoked build its own code, exit status 11, and the revocation for programs', () => {
+    const revocation = { signed: true, manifest: `sha256:${'0'.repeat(64)}`, advisories: [] };
+    const err = new ArtifactRevokedError('x', revocation);
+    expect(err.code).toBe('CHTYPES_ARTIFACT_REVOKED');
+    expect(ERROR_EXIT_CODES['CHTYPES_ARTIFACT_REVOKED']).toBe(11);
+    expect(err.revocation).toBe(revocation);
+    expect(err.name).toBe('ArtifactRevokedError');
   });
 });
 

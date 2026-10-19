@@ -33,6 +33,7 @@ pub fn published_versions(options: &Options) -> Result<Vec<String>> {
         bases: &bases,
         client: &client,
         auth: &auth,
+        budget: super::http::Budget::default(),
     };
     let mut last: Option<Error> = None;
     for base in &bases {
@@ -72,7 +73,7 @@ pub fn published_versions(options: &Options) -> Result<Vec<String>> {
             }
             // A retired repository (a 410, §2) is permanent: never a reason
             // to try the next base.
-            Err(e @ Error::SourceRetired(_)) => return Err(e),
+            Err(e) if e.is_gone() => return Err(e),
             Err(e) => last = Some(e),
         }
     }

@@ -19,12 +19,14 @@ import platform as _platform_module
 import re
 import shutil
 import tempfile
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
+from chtypes._advisory import Revocation
 from chtypes._ocifetch import _channel
 from chtypes._ocifetch import _constants as C
+from chtypes._ocifetch import _revocation as _rev
 from chtypes._ocifetch._dsse import (
     TrustedKey,
     env_trusted_keys,
@@ -34,6 +36,7 @@ from chtypes._ocifetch._errors import (
     ArtifactCorruptError,
     ArtifactMissingError,
     ArtifactPinnedError,
+    ArtifactRevokedError,
     ArtifactUnpublishedError,
     ArtifactUntrustedError,
     FetchError,
@@ -48,10 +51,12 @@ from chtypes._ocifetch._http import (
     Clock,
     FetchPolicy,
     ForbiddenHttpError,
+    GoneHttpError,
     NotFoundHttpError,
     OversizeHttpError,
     RetiredHttpError,
     RetryPolicy,
+    RevokedHttpError,
     TransportError,
     UnauthorizedHttpError,
     UnreachableHttpError,
@@ -83,7 +88,7 @@ from chtypes._ocifetch._oci import (
     validate_spelling,
     version_within_request,
 )
-from chtypes._ocifetch._referrers import discover_referrers
+from chtypes._ocifetch._referrers import ReferrerListing, discover_referrers, read_listing
 from chtypes._ocifetch._unpack import unpack_tar_zst
 
 __all__ = [
@@ -91,10 +96,12 @@ __all__ = [
     "Request",
     "Resolved",
     "VerifyResult",
+    "check_installed",
     "ensure",
     "fetch_signed",
     "list_installed",
     "missing_notes",
+    "reset_revocation_memo_for_tests",
     "resolve_installed",
     "verify_installed",
     "with_notes",
@@ -151,6 +158,12 @@ class Options:
     # and never a fall-through to a system dir. None reads
     # CHTYPES_CACHE_STRICT ("1" is on), else off.
     strict_cache: bool | None = None
+    # Build-level revocation (generation 2; docs/guides/fetch-v1.md, "Build-level
+    # revocation"). `allow_revoked` is per call, never an environment variable,
+    # and is ignored with `lock_write` or `update`; `require_revocation_check`
+    # makes a status that cannot be read the transport's error, not a warning.
+    allow_revoked: bool = False
+    require_revocation_check: bool = False
     clock: Clock = field(default_factory=Clock)
     retry: RetryPolicy = field(default_factory=RetryPolicy)
     # Test-only: installed before the cache's index.json atomic rename, to
@@ -197,6 +210,25 @@ class Options:
             return self.strict_cache
         return os.environ.get(C.ENV_CACHE_STRICT_NAME) == "1"
 
+    def resolved_allow_revoked(self) -> bool:
+        # The override is per call and forensic: it never lets a lock or an
+        # update pin a revoked build.
+        return self.allow_revoked and not self.lock_write and not self.update
+
+    def revocation_context(self) -> _rev.Context:
+        """What the revocation checks read of this call's options."""
+        return _rev.Context(
+            enabled=_channel.active().revocation,
+            bases=self.resolved_bases(),
+            policy=FetchPolicy(token=self.token, clock=self.clock),
+            retry=self.retry,
+            trusted_keys=self.resolved_trusted_keys(),
+            allow_revoked=self.resolved_allow_revoked(),
+            require_check=self.require_revocation_check,
+            offline=self.resolved_offline(),
+            cache_root=search_roots(self.cache_dir, self.system_dirs)[0],
+        )
+
 
 @dataclass(frozen=True)
 class Resolved:
@@ -226,6 +258,10 @@ class VerifyResult:
     build: str
     ok: bool
     detail: str
+    # Set, and `detail` is its message, when the entry holds a stored revocation
+    # that verifies (docs/guides/fetch-v1.md, "Build-level revocation"):
+    # `chtypes verify` reports the build as revoked and exits 11.
+    revocation: Revocation | None = None
 
 
 _HOST_PLATFORM_MAP = {
@@ -415,7 +451,31 @@ def _find_verified_signature(
     trusted_keys: tuple[TrustedKey, ...],
     scratch_root: Path,
 ):
+    """`_find_verified_signature_listing` without the listing."""
+    return _find_verified_signature_listing(
+        bases,
+        manifest_digest,
+        policy=policy,
+        retry=retry,
+        trusted_keys=trusted_keys,
+        scratch_root=scratch_root,
+    )[0]
+
+
+def _find_verified_signature_listing(
+    bases: Sequence[str],
+    manifest_digest: str,
+    *,
+    policy: FetchPolicy,
+    retry: RetryPolicy,
+    trusted_keys: tuple[TrustedKey, ...],
+    scratch_root: Path,
+) -> tuple[tuple | None, ReferrerListing]:
     """Try every referrer bundle of `manifest_digest` until one verifies.
+
+    Returns what was found (or None) and the listing it read, whose revocation
+    candidates an install, a lock and a cold `--frozen` fetch check at no extra
+    listing request (`_revocation.py`).
 
     Tolerates a malformed or wrongly-typed referrer and moves to the next —
     PLAN §3.2's "multiple-referrers-one-valid" and "hint-names-unknown-key-
@@ -433,16 +493,14 @@ def _find_verified_signature(
     UNTRUSTED verdict (`statement-duplicate-key` expects
     `CHTYPES_ARTIFACT_CORRUPT`, not `CHTYPES_ARTIFACT_UNTRUSTED`).
     """
-    referrers = discover_referrers(
-        bases, manifest_digest, C.MEDIA_TYPE_BUNDLE, policy=policy, retry=retry
-    )
-    for ref in referrers:
+    listing = read_listing(bases, manifest_digest, policy=policy, retry=retry)
+    for ref in listing.signatures:
         try:
             referrer_doc, _raw = fetch_manifest_by_digest(
                 bases, ref.digest, policy=policy, retry=retry
             )
             blob_desc = manifest_single_layer(referrer_doc, expected_media_type=C.MEDIA_TYPE_BUNDLE)
-        except (ArtifactCorruptError, RetiredHttpError):
+        except (ArtifactCorruptError, GoneHttpError):
             raise
         except (TransportError, FetchError):
             continue
@@ -460,15 +518,15 @@ def _find_verified_signature(
             with open(bundle_path, "rb") as f:
                 bundle_json = json.loads(f.read())
             verified = verify_bundle(bundle_json, trusted_keys)
-        except (ArtifactCorruptError, RetiredHttpError):
+        except (ArtifactCorruptError, GoneHttpError):
             raise
         except (TransportError, FetchError, json.JSONDecodeError):
             continue
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
         if verified is not None:
-            return verified, blob_desc.digest, ref.digest
-    return None
+            return (verified, blob_desc.digest, ref.digest), listing
+    return None, listing
 
 
 def _scratch_root(cache_root_path: Path) -> Path:
@@ -589,6 +647,9 @@ def _resolve_other_platform_pins(
     retry: RetryPolicy,
     trusted_keys: tuple[TrustedKey, ...],
     scratch_root: Path,
+    rev_ctx: _rev.Context,
+    warnings: list[str],
+    only: Collection[str] | None = None,
 ) -> dict[str, LockPin]:
     """docs/guides/fetch-v1.md §6: "Writing a lock for every platform the
     index offers... downloads and verifies every platform's bundle but
@@ -607,14 +668,14 @@ def _resolve_other_platform_pins(
             ),
             None,
         )
-        if key is None or key == host_platform_key:
+        if key is None or key == host_platform_key or (only is not None and key not in only):
             continue
         manifest_digest = m["digest"]
         other_manifest_doc, _raw = fetch_manifest_by_digest(
             bases, manifest_digest, policy=policy, retry=retry
         )
         layer_desc = manifest_layer_descriptor(other_manifest_doc)
-        found = _find_verified_signature(
+        found, listing = _find_verified_signature_listing(
             bases,
             manifest_digest,
             policy=policy,
@@ -637,6 +698,17 @@ def _resolve_other_platform_pins(
         if layer_hex not in statement.subject_sha256:
             raise ArtifactCorruptError(f"--lock: {key}'s signed subject did not match its layer")
         _check_predicate_matches_request(statement.predicate, key, request_spelling)
+        if rev_ctx.enabled:
+            # The revocation candidates come from the trust listing just read; a
+            # revoked build on any platform the lock would pin refuses the call,
+            # whatever the override says (it is dropped for a lock).
+            sub = _rev.subject_of_statement(
+                statement.predicate, manifest_digest, layer_desc.digest, key, request_spelling
+            )
+            out = _rev.check_candidates(
+                rev_ctx, listing.revocations, sub, policy=policy, retry=retry
+            )
+            _rev.settle(rev_ctx, sub, out, warnings, store=False)
         pins[key] = LockPin(
             version=statement.predicate["clickhouse_version"],
             build=statement.predicate["build"],
@@ -662,7 +734,7 @@ def _maybe_write_lock(
     policy: FetchPolicy,
     retry: RetryPolicy,
     scratch_root: Path,
-) -> None:
+) -> list[str]:
     """Writes the lock when `--lock` was asked for, OR when `update` just
     re-resolved an entry that must be rewritten in place (docs/guides/
     fetch-v1.md §6: "`update` re-resolves every locked request against the
@@ -673,8 +745,35 @@ def _maybe_write_lock(
     platform) it was asked about.
     """
     if not (options.lock_write or options.update):
-        return
+        return []
     extra_pins = None
+    warnings: list[str] = []
+    if (
+        options.update
+        and not options.lock_write
+        and lock is not None
+        and _channel.active().revocation
+    ):
+        # `update` re-resolves the request's locked platforms too, and a revoked
+        # build on any of them refuses the call (docs/guides/fetch-v1.md,
+        # "Build-level revocation"); only the check, the lock itself is rewritten
+        # for the one platform, as before.
+        locked = set(lock.requests.get(request.spelling, {}))
+        if locked - {platform_key}:
+            _resolve_other_platform_pins(
+                index_doc=index_doc,
+                host_platform_key=platform_key,
+                request_spelling=request.spelling,
+                index_digest=index_digest,
+                bases=bases,
+                policy=policy,
+                retry=retry,
+                trusted_keys=options.resolved_trusted_keys(),
+                scratch_root=scratch_root,
+                rev_ctx=options.revocation_context(),
+                warnings=warnings,
+                only=locked,
+            )
     if options.lock_write:
         extra_pins = _resolve_other_platform_pins(
             index_doc=index_doc,
@@ -686,8 +785,19 @@ def _maybe_write_lock(
             retry=retry,
             trusted_keys=options.resolved_trusted_keys(),
             scratch_root=scratch_root,
+            rev_ctx=options.revocation_context(),
+            warnings=warnings,
         )
     _write_lock_pin(options, lock, request.spelling, platform_key, resolved, extra_pins=extra_pins)
+    return warnings
+
+
+def _check_used_installed(ctx: _rev.Context, resolved: Resolved) -> Resolved:
+    """The installed-build revocation check of a build an ensure answers with no
+    download; its warnings join the result's."""
+    warnings: list[str] = []
+    _rev.check_installed_once(ctx, resolved, warnings)
+    return replace(resolved, warnings=(*resolved.warnings, *warnings)) if warnings else resolved
 
 
 def _ensure_floating(
@@ -699,6 +809,26 @@ def _ensure_floating(
     roots = search_roots(options.cache_dir, options.system_dirs)
     cache_root_path = roots[0]
     scratch_root = _scratch_root(cache_root_path)
+    rev_ctx = options.revocation_context()
+
+    def _finish(resolved: Resolved) -> Resolved:
+        # The lock, when one is asked for, is written for what the registry
+        # resolved the request to, whether or not this call downloaded it; a
+        # platform it pins that a revocation refuses refuses the call.
+        extra = _maybe_write_lock(
+            options,
+            lock,
+            request,
+            platform_key,
+            resolved,
+            index_doc=index_doc,
+            index_digest=index_digest,
+            bases=bases,
+            policy=policy,
+            retry=retry,
+            scratch_root=scratch_root,
+        )
+        return replace(resolved, warnings=(*resolved.warnings, *extra)) if extra else resolved
 
     index_doc, index_bytes, index_digest, alias_absent = fetch_manifest_by_tag(
         bases,
@@ -747,20 +877,10 @@ def _ensure_floating(
                 already_installed=True,
                 source="cache",
             )
-        _maybe_write_lock(
-            options,
-            lock,
-            request,
-            platform_key,
-            resolved,
-            index_doc=index_doc,
-            index_digest=index_digest,
-            bases=bases,
-            policy=policy,
-            retry=retry,
-            scratch_root=scratch_root,
-        )
-        return resolved
+        # A build used without a download is checked for a revocation, at most
+        # once per process (docs/guides/fetch-v1.md, "Build-level revocation").
+        resolved = _check_used_installed(rev_ctx, resolved)
+        return _finish(resolved)
 
     manifest_doc, _manifest_bytes = fetch_manifest_by_digest(
         bases, platform_desc.digest, policy=policy, retry=retry
@@ -768,7 +888,7 @@ def _ensure_floating(
     layer_desc = manifest_layer_descriptor(manifest_doc)
 
     trusted_keys = options.resolved_trusted_keys()
-    found = _find_verified_signature(
+    found, listing = _find_verified_signature_listing(
         bases,
         platform_desc.digest,
         policy=policy,
@@ -821,6 +941,19 @@ def _ensure_floating(
             predicate,
             cached_own_build=lambda: _cached_own_build(roots, platform_key, request.spelling),
         )
+    # A revocation of the candidate, from the trust listing just read (no extra
+    # listing request), refuses it before the monotonic rule and before its layer
+    # is requested: a revoked build is never downloaded. With the override, it is
+    # installed, and its revocation stored beside it.
+    pending: _rev.Found | None = None
+    if rev_ctx.enabled and found is not None:
+        sub = _rev.subject_of_statement(
+            predicate, platform_desc.digest, layer_desc.digest, platform_key, request.spelling
+        )
+        out = _rev.check_candidates(rev_ctx, listing.revocations, sub, policy=policy, retry=retry)
+        _rev.settle(rev_ctx, sub, out, warnings, store=False)
+        pending = out.verified
+
     newer = _newer_installed(roots, platform_key, predicate, request.spelling)
     if newer is not None:
         newer_dir, newer_record, warning = newer
@@ -831,21 +964,9 @@ def _ensure_floating(
             already_installed=True,
             source="cache",
         )
-        resolved = replace(resolved, warnings=(*resolved.warnings, warning))
-        _maybe_write_lock(
-            options,
-            lock,
-            request,
-            platform_key,
-            resolved,
-            index_doc=index_doc,
-            index_digest=index_digest,
-            bases=bases,
-            policy=policy,
-            retry=retry,
-            scratch_root=scratch_root,
-        )
-        return resolved
+        resolved = replace(resolved, warnings=(*warnings, *resolved.warnings, warning))
+        resolved = _check_used_installed(rev_ctx, resolved)
+        return _finish(resolved)
 
     dest_dir = _unpack_and_install(
         cache_root_path=cache_root_path,
@@ -889,20 +1010,8 @@ def _ensure_floating(
         source=bases[0] if bases else "cache",
         warnings=warnings,
     )
-    _maybe_write_lock(
-        options,
-        lock,
-        request,
-        platform_key,
-        resolved,
-        index_doc=index_doc,
-        index_digest=index_digest,
-        bases=bases,
-        policy=policy,
-        retry=retry,
-        scratch_root=scratch_root,
-    )
-    return resolved
+    _rev.store_pending(rev_ctx, resolved, pending)
+    return _finish(resolved)
 
 
 def _installed_by_pin(
@@ -978,7 +1087,9 @@ def _resolve_frozen_offline(
                 missing_notes(options),
             )
         )
-    return replace(installed, warnings=(*warnings, *installed.warnings))
+    stored_warnings: list[str] = []
+    _rev.check_installed_stored(options.revocation_context(), installed, stored_warnings)
+    return replace(installed, warnings=(*warnings, *installed.warnings, *stored_warnings))
 
 
 def _ensure_frozen(
@@ -998,9 +1109,18 @@ def _ensure_frozen(
     cache_root_path = roots[0]
     scratch_root = _scratch_root(cache_root_path)
 
+    rev_ctx = options.revocation_context()
     installed = _installed_by_pin(request, platform_key, options, pin)
     if installed is not None:
-        return installed
+        # Under generation 2, the one listing a warm --frozen fetch makes
+        # (docs/guides/fetch-v1.md §6, "Build-level revocation").
+        frozen_warnings: list[str] = []
+        _rev.check_frozen_installed(rev_ctx, installed, frozen_warnings)
+        return (
+            replace(installed, warnings=(*installed.warnings, *frozen_warnings))
+            if frozen_warnings
+            else installed
+        )
 
     manifest_doc, _raw = fetch_manifest_by_digest(bases, pin.manifest, policy=policy, retry=retry)
     layer_desc = manifest_layer_descriptor(manifest_doc)
@@ -1031,6 +1151,18 @@ def _ensure_frozen(
             "chtypes: --frozen: signed subject digest did not match the pinned layer"
         )
 
+    # The bundle, then (generation 2) the one revocation listing, and only then
+    # the layer, so a revoked pin is never downloaded.
+    warnings: list[str] = []
+    pending: _rev.Found | None = None
+    if rev_ctx.enabled:
+        sub = _rev.subject_of_statement(
+            predicate, pin.manifest, pin.layer, platform_key, request.spelling
+        )
+        out = _rev.check_listing(rev_ctx, sub, policy=policy, retry=retry)
+        _rev.settle(rev_ctx, sub, out, warnings, store=False)
+        pending = out.verified
+
     dest_dir = _unpack_and_install(
         cache_root_path=cache_root_path,
         scratch_root=scratch_root,
@@ -1049,13 +1181,16 @@ def _ensure_frozen(
     )
     record = read_verified_record(dest_dir)
     assert record is not None
-    return _record_to_resolved(
+    resolved = _record_to_resolved(
         dest_dir,
         record,
         request_spelling=request.spelling,
         already_installed=False,
         source=bases[0] if bases else "cache",
+        warnings=warnings,
     )
+    _rev.store_pending(rev_ctx, resolved, pending)
+    return resolved
 
 
 def _translate_transport_error(e: TransportError) -> FetchError:
@@ -1077,6 +1212,8 @@ def _translate_transport_error(e: TransportError) -> FetchError:
         return SourceForbiddenError(f"chtypes: {e}")
     if isinstance(e, OversizeHttpError):
         return ArtifactCorruptError(f"chtypes: {e}")
+    if isinstance(e, RevokedHttpError):
+        return ArtifactRevokedError(f"chtypes: {e}", revocation=e.revocation)
     if isinstance(e, RetiredHttpError):
         return SourceRetiredError(f"chtypes: {e}")
     if isinstance(e, UnreachableHttpError):
@@ -1136,6 +1273,12 @@ def _ensure(
                         missing_notes(options),
                     )
                 )
+            # Offline makes no request, so only a stored revocation can refuse it
+            # (docs/guides/fetch-v1.md, "Build-level revocation").
+            stored_warnings: list[str] = []
+            _rev.check_installed_stored(options.revocation_context(), resolved, stored_warnings)
+            if stored_warnings:
+                resolved = replace(resolved, warnings=(*resolved.warnings, *stored_warnings))
             return resolved
 
         if options.resolved_strict():
@@ -1197,6 +1340,10 @@ def _verify_and_install_from_local_blobs(
             continue
         subject = doc.get("subject") or {}
         if subject.get("digest") != manifest_digest:
+            continue
+        # A signature referrer only: a revocation of the manifest carries the same
+        # bundle media type, and is not the signature of the artifact.
+        if doc.get("artifactType") != C.MEDIA_TYPE_BUNDLE:
             continue
         try:
             referrer_layer = manifest_single_layer(doc, expected_media_type=C.MEDIA_TYPE_BUNDLE)
@@ -1403,34 +1550,87 @@ def verify_installed(options: Options) -> list[VerifyResult]:
     roots = search_roots(options.cache_dir, options.system_dirs)
     probe_roots(roots, options.resolved_strict())
     out = []
+    rev_ctx = options.revocation_context()
     for dir_path, record in list_verified_records(roots):
-        lib_path = dir_path / record.library
-        try:
-            data = lib_path.read_bytes()
-        except OSError as e:
-            out.append(
-                VerifyResult(dir_path, record.platform, record.version, record.build, False, str(e))
-            )
-            continue
-        expected_sha = record.predicate.get("library_sha256")
-        expected_bytes = record.predicate.get("library_bytes")
-        actual_sha = hashlib.sha256(data).hexdigest()
-        if len(data) != expected_bytes or actual_sha != expected_sha:
-            out.append(
-                VerifyResult(
-                    dir_path,
-                    record.platform,
-                    record.version,
-                    record.build,
-                    False,
-                    "on-disk library no longer matches its verified record",
-                )
-            )
-        else:
-            out.append(
-                VerifyResult(dir_path, record.platform, record.version, record.build, True, "")
-            )
+        result = _verify_one(dir_path, record)
+        if rev_ctx.enabled:
+            result = _with_stored_revocation(rev_ctx, dir_path, record, result)
+        out.append(result)
     return out
+
+
+def _with_stored_revocation(
+    ctx: _rev.Context, dir_path: Path, record: VerifiedRecord, result: VerifyResult
+) -> VerifyResult:
+    """`result`, reporting the entry's stored revocation when it verifies."""
+    try:
+        body = (dir_path / C.CACHE_REVOCATION_RECORD).read_bytes()
+    except OSError:
+        return result
+    resolved = _record_to_resolved(
+        dir_path, record, request_spelling=record.version, already_installed=True, source="cache"
+    )
+    sub = _rev.subject_of(ctx, resolved)
+    rev, _reason = _rev.verify_revocation(body, ctx.trusted_keys, sub)
+    if rev is None:
+        return result
+    return replace(result, revocation=rev, detail=_rev.revoked_text(sub, rev))
+
+
+def _verify_one(dir_path: Path, record: VerifiedRecord) -> VerifyResult:
+    """Re-hash one installed library's on-disk bytes against its own record."""
+    lib_path = dir_path / record.library
+    try:
+        data = lib_path.read_bytes()
+    except OSError as e:
+        return VerifyResult(dir_path, record.platform, record.version, record.build, False, str(e))
+    expected_sha = record.predicate.get("library_sha256")
+    expected_bytes = record.predicate.get("library_bytes")
+    actual_sha = hashlib.sha256(data).hexdigest()
+    if len(data) != expected_bytes or actual_sha != expected_sha:
+        return VerifyResult(
+            dir_path,
+            record.platform,
+            record.version,
+            record.build,
+            False,
+            "on-disk library no longer matches its verified record",
+        )
+    return VerifyResult(dir_path, record.platform, record.version, record.build, True, "")
+
+
+def check_installed(resolved: Resolved, options: Options) -> list[str]:
+    """The installed-build revocation check a registry makes after
+    `resolve_installed` answers and before it loads the build
+    (docs/guides/fetch-v1.md §9, `check_installed`): the stored record, then,
+    unless offline, at most one check per build per process, one attempt per base
+    and one 5 s deadline. Returns the warnings the open prints, or raises
+    `CHTYPES_ARTIFACT_REVOKED`, or in strict mode the transport's error (the
+    warnings gathered before a failure are on the error's `warnings`). Under the
+    v1 contract it does nothing."""
+    ctx = options.revocation_context()
+    warnings: list[str] = []
+    try:
+        _rev.check_installed_once(ctx, resolved, warnings)
+    except TransportError as e:
+        err: FetchError = _translate_transport_error(e)
+        err.warnings = tuple(warnings)  # type: ignore[attr-defined]
+        raise err from e
+    except FetchError as e:
+        e.warnings = tuple(warnings)  # type: ignore[attr-defined]
+        raise
+    except OSError as e:
+        typed = unwritable(e, search_roots(options.cache_dir, options.system_dirs))
+        if typed is None:
+            raise
+        raise typed from e
+    return warnings
+
+
+def reset_revocation_memo_for_tests() -> None:
+    """Forget every kept revocation outcome, as a new process would. A conformance
+    runner calls it before every case. Raises outside a test run."""
+    _rev.reset_memo_for_tests()
 
 
 def fetch_signed(repository: str, ref: str, predicate_type: str, options: Options) -> dict:
@@ -1586,7 +1786,7 @@ def _fetch_goldens(
                     retry=retry,
                     max_bytes=C.MAX_UNPACKED_BYTES,
                 )
-            except RetiredHttpError:
+            except GoneHttpError:
                 raise
             except (TransportError, FetchError) as e:
                 first_failure = first_failure or e
@@ -1702,7 +1902,7 @@ def _verify_goldens_signature(
         except ArtifactCorruptError as e:
             failure = failure or e
             continue
-        except RetiredHttpError:
+        except GoneHttpError:
             raise
         except (TransportError, FetchError, json.JSONDecodeError):
             continue

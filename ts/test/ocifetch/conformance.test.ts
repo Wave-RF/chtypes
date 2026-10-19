@@ -19,7 +19,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { Readable } from 'node:stream';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { ensure, fetchSigned, listTags, resolveInstalled } from '../../src/ocifetch/ensure.js';
+import { checkInstalled, ensure, fetchSigned, listTags, resolveInstalled } from '../../src/ocifetch/ensure.js';
 import { FIXTURES_REPO_SUFFIX, PREDICATE_TYPE_FIXTURES, PREDICATE_TYPE_GOLDENS, RELEASE_KEYS, TEST_KEYS } from '../../src/ocifetch/constants.gen.js';
 import { ArtifactMissingError, type FetchV1ErrorCode } from '../../src/ocifetch/errors.js';
 import { hold } from '../../src/ocifetch/hold.js';
@@ -27,6 +27,7 @@ import { readIndexEntries } from '../../src/ocifetch/layout.js';
 import { verifyAndInstallFromLocalBlobs } from '../../src/ocifetch/localverify.js';
 import { readLock, type LockFile } from '../../src/ocifetch/lock.js';
 import { prune, type Superseded } from '../../src/ocifetch/prune.js';
+import { resetRevocationMemoForTests } from '../../src/ocifetch/revocation.js';
 import { resolveBuilds } from '../../src/ocifetch/resolve.js';
 import { type Clock, isPlatformKey, type PlatformKey } from '../../src/ocifetch/types.js';
 import { channelName, useOwnFingerprintForTests, useFetchV1ForTests, useProdV2ForTests } from '../../src/ocifetch/channel.js';
@@ -112,6 +113,10 @@ interface ConformanceCase {
     readonly own_fingerprint: string | null;
     /** A `prune-` case's prune. */
     readonly prune: { readonly line: string | null; readonly keep: number; readonly dry_run: boolean } | null;
+    /** Build-level revocation (guide §10): the per-call override and strict mode, and, when set, the registry-open driver's number of opens. */
+    readonly allow_revoked?: boolean;
+    readonly require_revocation_check?: boolean;
+    readonly opens?: number | null;
   };
   readonly env: Readonly<Record<string, string>>;
   readonly expect: {
@@ -137,6 +142,10 @@ interface ConformanceCase {
     readonly resolutions: readonly ResolutionExpect[] | null;
     /** A `prune-` case's report and what it leaves behind. */
     readonly prune: PruneExpect | null;
+    /** Caps the case's warnings in all. */
+    readonly warnings_max?: number | null;
+    /** Entries that must hold a stored revocation afterwards: the manifest, and the bundle digest the record's bytes hash to. */
+    readonly stored_revocations?: readonly { readonly manifest: string; readonly bundle: string }[];
   };
 }
 
@@ -354,6 +363,10 @@ async function runOne(
   serverPort: number | undefined,
   serverPort2: number | undefined,
 ): Promise<string> {
+  // Every case starts as a new process would: no kept revocation outcome (the
+  // cases reuse manifests across cache directories, which one process never
+  // sees in use).
+  resetRevocationMemoForTests();
   const work = await mkdtemp(path.join(tmpdir(), 'ocifetch-v1-case-'));
   try {
     const cacheDir = path.join(work, 'cache');
@@ -421,6 +434,8 @@ async function runOne(
       systemDirs: systemDirRoots,
       lockPath,
       trustedKeys,
+      ...(c.request.allow_revoked === true ? { allowRevoked: true } : {}),
+      ...(c.request.require_revocation_check === true ? { requireRevocationCheck: true } : {}),
       ...(token !== undefined ? { token } : {}),
       ...(beforeIndexRename !== undefined ? { beforeIndexRename } : {}),
     };
@@ -450,7 +465,9 @@ async function runOne(
     try {
       // Before any other prefix, and before anything reads request.spelling
       // (a prune- case's is the empty string).
-      if (c.id.startsWith('resolve-build-')) {
+      if (c.request.opens !== null && c.request.opens !== undefined) {
+        resultDetail = await runOpens(c, baseOptions);
+      } else if (c.id.startsWith('resolve-build-')) {
         resultDetail = await runResolveBuilds(c, baseOptions);
       } else if (c.id.startsWith('prune-')) {
         resultDetail = await runPrune(c, baseOptions, layoutDir, filesBefore);
@@ -465,6 +482,12 @@ async function runOne(
       restoreAlias?.();
     }
     if (resultDetail !== '') return resultDetail;
+    for (const stored of c.expect.stored_revocations ?? []) {
+      const file = path.join(layoutDir, 'unpacked', 'sha256', stored.manifest.replace(/^sha256:/, ''), 'revocation.json');
+      const bytes = await readFile(file).catch(() => undefined);
+      const got = bytes === undefined ? '' : `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+      if (got !== stored.bundle) return `stored_revocations: ${file} holds ${got === '' ? 'nothing' : got}, want ${stored.bundle}`;
+    }
     for (const [d, before] of intactBefore) {
       if ((await snapshotInstall(layoutDir, d)) !== before) return `records_intact: the install of ${d} changed`;
     }
@@ -522,6 +545,9 @@ async function runEnsure(c: ConformanceCase, baseOptions: EnsureOptions, lockPat
         return `expected a warning containing ${JSON.stringify(w)}, got [${resolved.warnings.join(' | ')}]`;
       }
     }
+    if (c.expect.warnings_max !== null && c.expect.warnings_max !== undefined && resolved.warnings.length > c.expect.warnings_max) {
+      return `${resolved.warnings.length} warnings, want at most ${c.expect.warnings_max}: [${resolved.warnings.join(' | ')}]`;
+    }
     if (c.expect.lock_after !== null) {
       const expectedRaw = await readFile(path.join(conformanceDir, 'locks', 'expected', `${c.expect.lock_after}.json`), 'utf8');
       const expected = JSON.parse(expectedRaw) as LockFile;
@@ -540,6 +566,59 @@ async function runEnsure(c: ConformanceCase, baseOptions: EnsureOptions, lockPat
     }
     return messageDetail(c, err);
   }
+}
+
+/**
+ * A case with `request.opens` (guide §10, "The registry-open driver"): the two
+ * calls a registry makes before it loads a build, `resolveInstalled` then
+ * `checkInstalled`, that many times in one process, nothing loaded. The last open
+ * is judged; every open's warnings are counted. A miss is
+ * `CHTYPES_ARTIFACT_MISSING`.
+ */
+async function runOpens(c: ConformanceCase, baseOptions: EnsureOptions): Promise<string> {
+  const warnings: string[] = [];
+  let last: Awaited<ReturnType<typeof resolveInstalled>>;
+  let failure: unknown;
+  for (let i = 0; i < (c.request.opens ?? 0); i++) {
+    last = undefined;
+    failure = undefined;
+    const found = await resolveInstalled(c.request.spelling, c.request.platform as PlatformKey, baseOptions);
+    if (found === undefined) {
+      failure = new ArtifactMissingError(`chtypes: no installed artifact satisfies ${c.request.spelling}`);
+      continue;
+    }
+    warnings.push(...found.warnings);
+    const checked = await checkInstalled(found, baseOptions);
+    warnings.push(...checked.warnings);
+    if (checked.error !== undefined) failure = checked.error;
+    else last = found;
+  }
+  if (failure !== undefined) {
+    if (c.expect.ok) return `unexpected throw: ${failure instanceof Error ? failure.message : String(failure)}`;
+    const code = (failure as { code?: string }).code;
+    if (c.expect.code !== null && code !== c.expect.code) {
+      return `code ${code} != expected ${c.expect.code} (${failure instanceof Error ? failure.message : String(failure)})`;
+    }
+    const detail = messageDetail(c, failure);
+    if (detail !== '') return detail;
+  } else {
+    if (!c.expect.ok) return `expected failure (code ${c.expect.code}), got ok`;
+    if (last !== undefined) {
+      if (c.expect.version !== null && last.version !== c.expect.version) return `version ${last.version} != expected ${c.expect.version}`;
+      if (c.expect.build !== null && last.build !== c.expect.build) return `build ${last.build} != expected ${c.expect.build}`;
+      if (c.expect.manifest !== null && last.digests.manifest !== c.expect.manifest) return `manifest ${last.digests.manifest} != expected ${c.expect.manifest}`;
+      if (c.expect.library_sha256 !== null && last.predicate.library_sha256 !== c.expect.library_sha256) {
+        return `library_sha256 ${last.predicate.library_sha256} != expected ${c.expect.library_sha256}`;
+      }
+    }
+  }
+  for (const w of c.expect.warnings) {
+    if (!warnings.some((have) => have.includes(w))) return `expected a warning containing ${JSON.stringify(w)}, got [${warnings.join(' | ')}]`;
+  }
+  if (c.expect.warnings_max !== null && c.expect.warnings_max !== undefined && warnings.length > c.expect.warnings_max) {
+    return `${warnings.length} warnings, want at most ${c.expect.warnings_max}: [${warnings.join(' | ')}]`;
+  }
+  return '';
 }
 
 /** A `resolve-build-` case (guide §10): what the spelling resolves to on every platform, never a layer. */

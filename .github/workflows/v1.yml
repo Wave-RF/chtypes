@@ -139,6 +139,11 @@ jobs:
           }
       - name: committed fixtures match the generator (third check, post-write)
         run: cd scripts/fetch-v1/genfixtures && go run . --check
+      # The generation-2 corpus (tests/fixtures/fetch-v2) comes from the same
+      # builders with --abi=2 and alone carries the revocation cases (public
+      # issue #625), so it is held to the generator too.
+      - name: the generation-2 corpus matches the generator (--abi=2)
+        run: cd scripts/fetch-v1/genfixtures && go run . --abi=2 --check
       - name: validate cases.json, http scripts and locks/expected against their schemas
         run: python3 scripts/fetch-v1/schema_check.py --selftest && python3 scripts/fetch-v1/schema_check.py
       - name: "server.py --selftest — a real loopback server, driven by urllib.request"

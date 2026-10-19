@@ -29,12 +29,17 @@ type constantsFile struct {
 		GoldensArtifactType  string `json:"goldens_artifact_type"`
 		FixturesArtifactType string `json:"fixtures_artifact_type"`
 		ChannelArtifactType  string `json:"channel_artifact_type"`
+		// RevocationArtifactType is a revocation referrer's artifactType
+		// (revocationcases.go).
+		RevocationArtifactType string `json:"revocation_artifact_type"`
 	} `json:"media_types"`
 	PredicateTypes struct {
 		Artifact string `json:"artifact"`
 		Goldens  string `json:"goldens"`
 		Fixtures string `json:"fixtures"`
 		Channel  string `json:"channel"`
+		// Revocation is a revocation statement's predicateType.
+		Revocation string `json:"revocation"`
 	} `json:"predicate_types"`
 	Trust struct {
 		ReleaseKeys []struct {
@@ -57,6 +62,11 @@ type constantsFile struct {
 	Registry struct {
 		FixturesRepositorySuffix string `json:"fixtures_repository_suffix"`
 	} `json:"registry"`
+	Cache struct {
+		// RevocationRecord is the stored revocation's file name in an
+		// installed build's entry (revocationcases.go).
+		RevocationRecord string `json:"revocation_record"`
+	} `json:"cache"`
 }
 
 func loadConstants(repoRoot string) constantsFile {

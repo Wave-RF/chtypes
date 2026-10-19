@@ -100,6 +100,10 @@ type channel struct {
 	// itself, and the cache lookups see only records signed with it. ""
 	// does neither (the v1 contract and every production channel).
 	ownFingerprint string
+	// revocation turns on build-level revocation (revocation.go;
+	// docs/guides/fetch-v1.md, "Build-level revocation"): generation 2, the
+	// dev channel and the production one. The v1 contract has none of it.
+	revocation bool
 }
 
 // devChannel is what a 2.0.0-dev SDK speaks, and what every non-test binary of
@@ -115,6 +119,7 @@ var devChannel = channel{
 	keys:         []ReleaseKey{{KeyID: DevKeyID, Ed25519Hex: DevKeyHex}},
 	// The generated constant (abi_fingerprint_gen.go), never a hand-written one.
 	ownFingerprint: strings.TrimPrefix(DevABIFingerprint, "sha256:"),
+	revocation:     true,
 }
 
 // fetchV1Channel is the v1 contract the conformance cases specify, from the
@@ -150,6 +155,7 @@ var prodV2Channel = channel{
 	keys:         ReleaseKeys,
 	overridable:  true,
 	pinnable:     true,
+	revocation:   true,
 }
 
 var current atomic.Pointer[channel]
