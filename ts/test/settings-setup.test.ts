@@ -116,6 +116,19 @@ describe('the options documents (rule r1)', () => {
     });
   });
 
+  it('column_defaults wire form: UTF-8, value_b64, name_b64, an empty value, and order', () => {
+    const cd = (columnDefaults: { name: string | Uint8Array; value: string | Uint8Array }[]) => doc(encodeInsertOptions({ columnDefaults }));
+    expect(cd([{ name: 'a', value: 'h\u00e9llo' }])).toEqual({ column_defaults: [{ name: 'a', value: 'h\u00e9llo' }] });
+    expect(cd([{ name: 'a', value: new Uint8Array([0xff, 0x00]) }])).toEqual({ column_defaults: [{ name: 'a', value_b64: '/wA=' }] });
+    expect(cd([{ name: new Uint8Array([0xfe]), value: 'v' }])).toEqual({ column_defaults: [{ name_b64: '/g==', value: 'v' }] });
+    // An empty value is a supplied value: sent as "", never omitted.
+    expect(cd([{ name: 'a', value: '' }])).toEqual({ column_defaults: [{ name: 'a', value: '' }] });
+    expect(cd([{ name: 'a', value: new Uint8Array(0) }])).toEqual({ column_defaults: [{ name: 'a', value: '' }] });
+    expect(encodeInsertOptions({ columnDefaults: [{ name: 'z', value: '1' }, { name: 'a', value: '2' }] }).toString()).toBe(
+      '{"column_defaults":[{"name":"z","value":"1"},{"name":"a","value":"2"}]}',
+    );
+  });
+
   it('an absent list leaves the member out, and a present empty list is sent as []', () => {
     expect(doc(encodeInsertOptions({ insertableColumns: [], columnDefaults: [] }))).toEqual({ insertable_columns: [], column_defaults: [] });
     expect(encodeInsertOptions({ insertableColumns: undefined })).toHaveLength(0);

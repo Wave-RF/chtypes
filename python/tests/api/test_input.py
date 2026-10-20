@@ -213,3 +213,26 @@ def test_valid_non_ascii_serializes_byte_for_byte_as_before() -> None:
     assert settings_json({"é": "\ufffd"}, "Asia/Tokyo") == (
         b'{"\\u00e9":"\\ufffd","session_timezone":"Asia/Tokyo"}'
     )
+
+
+def test_column_defaults_wire_form_utf8_b64_empty_and_order() -> None:
+    def doc(*entries: ColumnDefault) -> dict[str, object]:
+        return json.loads(insert_options_json(column_defaults=list(entries)) or b"")
+
+    assert doc(ColumnDefault("a", "h\u00e9llo")) == {
+        "column_defaults": [{"name": "a", "value": "h\u00e9llo"}]
+    }
+    assert doc(ColumnDefault("a", b"\xff\x00")) == {
+        "column_defaults": [{"name": "a", "value_b64": "/wA="}]
+    }
+    assert doc(ColumnDefault(b"\xfe", "v")) == {
+        "column_defaults": [{"name_b64": "/g==", "value": "v"}]
+    }
+    # An empty value is a supplied value: sent as "", never omitted.
+    assert doc(ColumnDefault("a", "")) == {"column_defaults": [{"name": "a", "value": ""}]}
+    assert doc(ColumnDefault("a", b"")) == {"column_defaults": [{"name": "a", "value": ""}]}
+    # The list keeps its order (a JSON list compares in order).
+    raw = insert_options_json(column_defaults=[ColumnDefault("z", "1"), ColumnDefault("a", "2")])
+    assert json.loads(raw or b"") == {
+        "column_defaults": [{"name": "z", "value": "1"}, {"name": "a", "value": "2"}]
+    }

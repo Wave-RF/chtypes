@@ -972,6 +972,19 @@ mod tests {
         assert!(r.columns[2].is_stored && !r.columns[1].is_stored);
     }
 
+    #[test]
+    fn default_override_is_a_stored_source_and_default_deferred_is_not() {
+        let r = row(br#"{"outcome":"accepted","cols":[
+                {"name":"a","null":false,"src":"default_override","stored":"5"},
+                {"name":"b","null":false,"src":"default_deferred","stored":""}]}"#)
+        .unwrap();
+        assert_eq!(r.columns[0].source, Source::DefaultOverride);
+        assert!(r.columns[0].is_stored && !r.columns[1].is_stored);
+        assert_eq!(r.columns[0].text.as_bytes(), b"5");
+        assert_eq!(r.values.len(), 1);
+        assert_eq!(r.values[0].column.as_bytes(), b"a");
+    }
+
     /// Rule r3: an unlisted source is its `Unknown`, for that column alone, not
     /// stored, and the row decodes on; an absent one is still malformed.
     #[test]

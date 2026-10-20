@@ -37,6 +37,24 @@ const rowDoc = `{
   "partition_id": "all"
 }`
 
+func TestDecodeRowDefaultOverride(t *testing.T) {
+	r, err := decodeRow([]byte(`{"outcome":"accepted","code":0,"cols":[
+		{"name":"a","null":false,"src":"default_override","stored":"5"},
+		{"name":"b","null":false,"src":"default_deferred","stored":""}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := r.Columns[0]; v.Source != SourceDefaultOverride || !v.IsStored || v.Text != "5" {
+		t.Errorf("default_override entry = %+v, want stored with text 5", v)
+	}
+	if r.Columns[1].IsStored {
+		t.Errorf("default_deferred read as stored")
+	}
+	if len(r.Values) != 1 || r.Values[0].Column != "a" {
+		t.Errorf("Values = %+v, want only the override cell", r.Values)
+	}
+}
+
 func TestDecodeRow(t *testing.T) {
 	r, err := decodeRow([]byte(rowDoc))
 	if err != nil {

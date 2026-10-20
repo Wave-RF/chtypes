@@ -603,3 +603,22 @@ def test_a_schema_description_decodes_posture_default_support_reads_and_b64_sett
 def test_a_bad_server_settings_value_is_an_internal_error(settings) -> None:
     with pytest.raises(InternalError):
         decode_schema_description(dumps({"server": {"settings": settings}}))
+
+
+def test_default_override_decodes_as_a_stored_value_source() -> None:
+    row = decode_row_document(
+        dumps(
+            {
+                "outcome": "accepted",
+                "code": 0,
+                "cols": [
+                    {"name": "a", "null": False, "src": "default_override", "stored": "5"},
+                    {"name": "b", "null": False, "src": "default_deferred", "stored": ""},
+                ],
+            }
+        )
+    )
+    assert row.columns[0].source == "default_override" and row.columns[0].is_stored is True
+    assert row.columns[0].text == b"5"
+    assert row.columns[1].is_stored is False
+    assert [c.column for c in row.values] == [b"a"]

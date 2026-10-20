@@ -296,6 +296,27 @@ func TestAFailedOpenUnlocksOnlyItsOwnRecordAndNeverALatchedOne(t *testing.T) {
 	}
 }
 
+func TestColumnDefaultsDocument(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []ColumnDefault
+		want string
+	}{
+		{"utf8", []ColumnDefault{{Name: "a", Value: "héllo"}}, `{"column_defaults":[{"name":"a","value":"héllo"}]}`},
+		{"non-utf8 value is value_b64", []ColumnDefault{{Name: "a", Value: "\xff\x00"}}, `{"column_defaults":[{"name":"a","value_b64":"/wA="}]}`},
+		{"non-utf8 name is name_b64", []ColumnDefault{{Name: "\xfe", Value: "v"}}, `{"column_defaults":[{"name_b64":"/g==","value":"v"}]}`},
+		{"empty value is sent", []ColumnDefault{{Name: "a", Value: ""}}, `{"column_defaults":[{"name":"a","value":""}]}`},
+		{"order is kept", []ColumnDefault{{Name: "z", Value: "1"}, {Name: "a", Value: "2"}}, `{"column_defaults":[{"name":"z","value":"1"},{"name":"a","value":"2"}]}`},
+		{"empty list is sent", []ColumnDefault{}, `{"column_defaults":[]}`},
+	}
+	for _, tc := range cases {
+		b, err := rowConfig([]RowOption{WithColumnDefaults(tc.in)}).insertOpts.json("insert options")
+		if err != nil || string(b) != tc.want {
+			t.Errorf("%s: got %s, %v, want %s", tc.name, b, err, tc.want)
+		}
+	}
+}
+
 func TestInsertOptionsDocument(t *testing.T) {
 	// No member set: no document (length 0).
 	if b, err := rowConfig(nil).insertOpts.json("insert options"); err != nil || b != nil {

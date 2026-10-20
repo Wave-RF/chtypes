@@ -288,6 +288,46 @@ mod tests {
     }
 
     #[test]
+    fn column_defaults_wire_form_utf8_b64_empty_and_order() {
+        let doc = |defaults: Vec<ColumnDefault>| {
+            text(
+                InsertMembers {
+                    column_defaults: Some(&defaults),
+                    ..members()
+                }
+                .document()
+                .unwrap(),
+            )
+        };
+        let cd = |n: &[u8], v: &[u8]| ColumnDefault {
+            name: n.to_vec(),
+            value: v.to_vec(),
+        };
+        assert_eq!(
+            doc(vec![cd(b"a", "h\u{e9}llo".as_bytes())]),
+            "{\"column_defaults\":[{\"name\":\"a\",\"value\":\"h\u{e9}llo\"}]}"
+        );
+        assert_eq!(
+            doc(vec![cd(b"a", &[0xff, 0x00])]),
+            r#"{"column_defaults":[{"name":"a","value_b64":"/wA="}]}"#
+        );
+        assert_eq!(
+            doc(vec![cd(&[0xfe], b"v")]),
+            r#"{"column_defaults":[{"name_b64":"/g==","value":"v"}]}"#
+        );
+        // An empty value is a supplied value: sent as "", never omitted.
+        assert_eq!(
+            doc(vec![cd(b"a", b"")]),
+            r#"{"column_defaults":[{"name":"a","value":""}]}"#
+        );
+        // The list keeps its order.
+        assert_eq!(
+            doc(vec![cd(b"z", b"1"), cd(b"a", b"2")]),
+            r#"{"column_defaults":[{"name":"z","value":"1"},{"name":"a","value":"2"}]}"#
+        );
+    }
+
+    #[test]
     fn an_empty_list_is_sent_as_an_empty_list_and_none_is_left_out() {
         let none: Vec<Vec<u8>> = Vec::new();
         let doc = InsertMembers {
