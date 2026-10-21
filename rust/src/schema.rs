@@ -28,10 +28,14 @@ use std::sync::Arc;
 use serde_json::{Map, Value as Json};
 
 use crate::abi2::calls_gen::{BlockHandle, FilterHandle, SchemaHandle};
-use crate::abi2::vocab_gen::{DocFlags, EXPORT_NONE, Format};
+use crate::abi2::vocab_gen::{DocFlags, EXPORT_NONE, Format, Posture};
 use crate::decode;
 use crate::error::{Error, Result};
 use crate::library::Library;
+use crate::options::{
+    ColumnDefault, DeferDefaults, InsertMembers, ParamEncoding, VerdictBasis, filter_options,
+    name_object,
+};
 use crate::result::{BatchResult, FilterResult, RowResult, SchemaDescription};
 
 /// The settings key a call's zone travels under.
@@ -77,24 +81,10 @@ fn string_object(
 /// each name is `{"name": "<utf-8>"}`, or `{"name_b64": "<base64>"}` when its
 /// bytes are not valid UTF-8. Empty means none.
 fn columns_array(columns: &[Vec<u8>]) -> Result<Vec<u8>> {
-    use base64::Engine as _;
     if columns.is_empty() {
         return Ok(Vec::new());
     }
-    let items: Vec<Json> = columns
-        .iter()
-        .map(|name| {
-            let mut o = Map::new();
-            match std::str::from_utf8(name) {
-                Ok(s) => o.insert("name".to_string(), Json::String(s.to_string())),
-                Err(_) => o.insert(
-                    "name_b64".to_string(),
-                    Json::String(base64::engine::general_purpose::STANDARD.encode(name)),
-                ),
-            };
-            Json::Object(o)
-        })
-        .collect();
+    let items: Vec<Json> = columns.iter().map(|name| name_object(name)).collect();
     serde_json::to_vec(&Json::Array(items))
         .map_err(|e| Error::internal(format!("the column list does not encode: {e}")))
 }
@@ -117,6 +107,35 @@ pub struct CompileOptions {
     /// server, exactly as before the server profile existed. A server from
     /// another library is that library's own refusal ([`Error::Usage`]).
     pub server: Option<crate::server::Server>,
+    /// `schema_options`' `posture` (ABI v2): how the statement is compiled,
+    /// [`Posture::Create`] (the default) as a server's CREATE TABLE, or
+    /// [`Posture::Load`] as a server loads the stored definition of a table it
+    /// holds. `None` leaves the member out. The caller's obligation under
+    /// `Load` is `spec/abi-v2/docs.md`'s (`input:schema_options`).
+    pub posture: Option<Posture>,
+    /// A `schema_options` member this binding has no name for: its key and its
+    /// value as JSON text, passed through as given. The library refuses a key
+    /// it does not know; text that is not valid JSON is [`Error::Usage`].
+    pub schema_options_extra: Vec<(String, String)>,
+}
+
+/// Implement `insert_options_document` over a struct's six insert-option
+/// fields, so the three structs that carry them build one document one way.
+macro_rules! insert_options_document {
+    ($t:ty) => {
+        impl $t {
+            fn insert_options_document(&self) -> Result<Vec<u8>> {
+                InsertMembers {
+                    insertable_columns: self.insertable_columns.as_deref(),
+                    column_defaults: self.column_defaults.as_deref(),
+                    verdict_basis: self.verdict_basis,
+                    defer_defaults: self.defer_defaults,
+                    extra: &self.insert_options_extra,
+                }
+                .document()
+            }
+        }
+    };
 }
 
 /// What `row` and `parse_block` take.
@@ -129,7 +148,28 @@ pub struct RowOptions {
     pub session_timezone: Option<String>,
     /// The INSERT column list, each name as bytes; empty for none.
     pub columns: Vec<Vec<u8>>,
+    /// `insert_options`' `insertable_columns` (ABI v2): the columns an INSERT
+    /// may supply (the server's column-level INSERT grant), checked on the
+    /// INSERT's header before any byte of the body is read. `None` leaves the
+    /// member out (every column); `Some` of an empty list is sent as `[]` (no
+    /// column). Each name is bytes.
+    pub insertable_columns: Option<Vec<Vec<u8>>>,
+    /// `insert_options`' `column_defaults` (ABI v2): per-call DEFAULT
+    /// overrides. `None` leaves the member out; `Some` of an empty list is sent
+    /// as `[]`.
+    pub column_defaults: Option<Vec<ColumnDefault>>,
+    /// `insert_options`' `verdict_basis` (ABI v2).
+    pub verdict_basis: Option<VerdictBasis>,
+    /// `insert_options`' `defer_defaults` (ABI v2).
+    pub defer_defaults: Option<DeferDefaults>,
+    /// An `insert_options` member this binding has no name for: its key and
+    /// its value as JSON text, passed through as given (rule r1). The library
+    /// refuses a key it does not know; text that is not valid JSON is
+    /// [`Error::Usage`]. A key set twice keeps the last value.
+    pub insert_options_extra: Vec<(String, String)>,
 }
+
+insert_options_document!(RowOptions);
 
 /// What `rows` takes.
 #[derive(Debug, Clone, Default)]
@@ -140,6 +180,25 @@ pub struct RowsOptions {
     pub session_timezone: Option<String>,
     /// The INSERT column list, each name as bytes; empty for none.
     pub columns: Vec<Vec<u8>>,
+    /// `insert_options`' `insertable_columns` (ABI v2): the columns an INSERT
+    /// may supply (the server's column-level INSERT grant), checked on the
+    /// INSERT's header before any byte of the body is read. `None` leaves the
+    /// member out (every column); `Some` of an empty list is sent as `[]` (no
+    /// column). Each name is bytes.
+    pub insertable_columns: Option<Vec<Vec<u8>>>,
+    /// `insert_options`' `column_defaults` (ABI v2): per-call DEFAULT
+    /// overrides. `None` leaves the member out; `Some` of an empty list is sent
+    /// as `[]`.
+    pub column_defaults: Option<Vec<ColumnDefault>>,
+    /// `insert_options`' `verdict_basis` (ABI v2).
+    pub verdict_basis: Option<VerdictBasis>,
+    /// `insert_options`' `defer_defaults` (ABI v2).
+    pub defer_defaults: Option<DeferDefaults>,
+    /// An `insert_options` member this binding has no name for: its key and
+    /// its value as JSON text, passed through as given (rule r1). The library
+    /// refuses a key it does not know; text that is not valid JSON is
+    /// [`Error::Usage`]. A key set twice keeps the last value.
+    pub insert_options_extra: Vec<(String, String)>,
     /// An attached filter. Its WHERE runs in the zone it was compiled under.
     pub filter: Option<Filter>,
     /// An export format; `None` asks for no export.
@@ -147,6 +206,8 @@ pub struct RowsOptions {
     /// Which document groups to emit; `None` means all.
     pub doc_flags: Option<DocFlags>,
 }
+
+insert_options_document!(RowsOptions);
 
 /// What `compile_filter` takes.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -158,16 +219,47 @@ pub struct FilterOptions {
     pub settings: Vec<(String, String)>,
     /// The `session_timezone` key: the filter's own zone, fixed at compile.
     pub session_timezone: Option<String>,
+    /// `filter_options`' `param_encoding` (ABI v2): how a query parameter's
+    /// value is read. `None` leaves the member out.
+    pub param_encoding: Option<ParamEncoding>,
+    /// A `filter_options` member this binding has no name for: its key and its
+    /// value as JSON text, passed through as given (rule r1).
+    pub filter_options_extra: Vec<(String, String)>,
 }
 
-/// What `Filter::rows` takes: the body's PARSE settings, never the WHERE's.
+/// What `Filter::rows` takes: the body's PARSE settings, never the WHERE's,
+/// and the same INSERT the schema's `rows` models (`columns` and the
+/// insert options, ABI v2).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EvalOptions {
     /// The body's parse settings. Values are strings.
     pub settings: Vec<(String, String)>,
     /// The `session_timezone` key: the zone the body is parsed in.
     pub session_timezone: Option<String>,
+    /// The INSERT column list, each name as bytes; empty for none.
+    pub columns: Vec<Vec<u8>>,
+    /// `insert_options`' `insertable_columns` (ABI v2): the columns an INSERT
+    /// may supply (the server's column-level INSERT grant), checked on the
+    /// INSERT's header before any byte of the body is read. `None` leaves the
+    /// member out (every column); `Some` of an empty list is sent as `[]` (no
+    /// column). Each name is bytes.
+    pub insertable_columns: Option<Vec<Vec<u8>>>,
+    /// `insert_options`' `column_defaults` (ABI v2): per-call DEFAULT
+    /// overrides. `None` leaves the member out; `Some` of an empty list is sent
+    /// as `[]`.
+    pub column_defaults: Option<Vec<ColumnDefault>>,
+    /// `insert_options`' `verdict_basis` (ABI v2).
+    pub verdict_basis: Option<VerdictBasis>,
+    /// `insert_options`' `defer_defaults` (ABI v2).
+    pub defer_defaults: Option<DeferDefaults>,
+    /// An `insert_options` member this binding has no name for: its key and
+    /// its value as JSON text, passed through as given (rule r1). The library
+    /// refuses a key it does not know; text that is not valid JSON is
+    /// [`Error::Usage`]. A key set twice keeps the last value.
+    pub insert_options_extra: Vec<(String, String)>,
 }
+
+insert_options_document!(EvalOptions);
 
 /// A compiled table. Immutable; `Clone` shares one handle.
 #[derive(Clone)]
@@ -228,9 +320,17 @@ impl Schema {
     pub fn row(&self, format: Format, body: &[u8], options: &RowOptions) -> Result<RowResult> {
         let settings = settings_object(&options.settings, options.session_timezone.as_deref())?;
         let columns = columns_array(&options.columns)?;
-        let doc = self
-            .library
-            .call(|api| api.preview_row(&self.handle, format.code(), body, &settings, &columns))?;
+        let insert = options.insert_options_document()?;
+        let doc = self.library.call(|api| {
+            api.preview_row(
+                &self.handle,
+                format.code(),
+                body,
+                &settings,
+                &columns,
+                &insert,
+            )
+        })?;
         decode::row(&doc)
     }
 
@@ -239,6 +339,7 @@ impl Schema {
     pub fn rows(&self, format: Format, body: &[u8], options: &RowsOptions) -> Result<BatchResult> {
         let settings = settings_object(&options.settings, options.session_timezone.as_deref())?;
         let columns = columns_array(&options.columns)?;
+        let insert = options.insert_options_document()?;
         let filter = options.filter.as_ref().map(|f| &*f.handle);
         let export = options.export.map_or(EXPORT_NONE, Format::code);
         let flags = options.doc_flags.unwrap_or(DocFlags::ALL).bits();
@@ -252,6 +353,7 @@ impl Schema {
                 filter,
                 export,
                 flags,
+                &insert,
             )
         })?;
         decode::batch(&doc, payload)
@@ -266,9 +368,10 @@ impl Schema {
     ) -> Result<Filter> {
         let params = string_object(&options.params, None, "params")?;
         let settings = settings_object(&options.settings, options.session_timezone.as_deref())?;
-        let handle = self
-            .library
-            .call(|api| api.filter_create(&self.handle, expr.as_ref(), &params, &settings))?;
+        let document = filter_options(options.param_encoding, &options.filter_options_extra)?;
+        let handle = self.library.call(|api| {
+            api.filter_create(&self.handle, expr.as_ref(), &params, &settings, &document)
+        })?;
         Ok(Filter {
             library: Arc::clone(&self.library),
             handle: Arc::new(handle),
@@ -279,9 +382,17 @@ impl Schema {
     pub fn parse_block(&self, format: Format, body: &[u8], options: &RowOptions) -> Result<Block> {
         let settings = settings_object(&options.settings, options.session_timezone.as_deref())?;
         let columns = columns_array(&options.columns)?;
-        let handle = self
-            .library
-            .call(|api| api.block_create(&self.handle, format.code(), body, &settings, &columns))?;
+        let insert = options.insert_options_document()?;
+        let handle = self.library.call(|api| {
+            api.block_create(
+                &self.handle,
+                format.code(),
+                body,
+                &settings,
+                &columns,
+                &insert,
+            )
+        })?;
         Ok(Block {
             handle: Arc::new(handle),
         })
@@ -290,13 +401,23 @@ impl Schema {
 
 impl Filter {
     /// Evaluate over a body (`chs_filter_eval_body`). The options are the
-    /// body's parse settings; the WHERE runs in the zone the filter was
-    /// compiled under.
+    /// body's parse settings and the INSERT it models (`columns` and the insert
+    /// options, as on [`Schema::rows`]); the WHERE runs in the zone the filter
+    /// was compiled under.
     pub fn rows(&self, format: Format, body: &[u8], options: &EvalOptions) -> Result<FilterResult> {
         let settings = settings_object(&options.settings, options.session_timezone.as_deref())?;
-        let doc = self
-            .library
-            .call(|api| api.filter_eval_body(&self.handle, format.code(), body, &settings))?;
+        let columns = columns_array(&options.columns)?;
+        let insert = options.insert_options_document()?;
+        let doc = self.library.call(|api| {
+            api.filter_eval_body(
+                &self.handle,
+                format.code(),
+                body,
+                &settings,
+                &columns,
+                &insert,
+            )
+        })?;
         decode::filter_result(&doc)
     }
 
@@ -372,6 +493,72 @@ mod tests {
         assert!(v[0].get("name_b64").is_none());
         assert_eq!(v[1]["name_b64"], Json::String("AP8=".into()));
         assert!(v[1].get("name").is_none());
+    }
+
+    #[test]
+    fn the_four_insert_calls_build_one_insert_options_document() {
+        let members = || {
+            (
+                Some(vec![b"a".to_vec()]),
+                Some(vec![ColumnDefault {
+                    name: b"b".to_vec(),
+                    value: b"7".to_vec(),
+                }]),
+                Some(VerdictBasis::Export),
+                Some(DeferDefaults::Server),
+                vec![("x_future".to_string(), "{\"k\":[1]}".to_string())],
+            )
+        };
+        let (ic, cd, vb, dd, ex) = members();
+        let row = RowOptions {
+            insertable_columns: ic,
+            column_defaults: cd,
+            verdict_basis: vb,
+            defer_defaults: dd,
+            insert_options_extra: ex,
+            ..Default::default()
+        };
+        let (ic, cd, vb, dd, ex) = members();
+        let rows = RowsOptions {
+            insertable_columns: ic,
+            column_defaults: cd,
+            verdict_basis: vb,
+            defer_defaults: dd,
+            insert_options_extra: ex,
+            ..Default::default()
+        };
+        let (ic, cd, vb, dd, ex) = members();
+        let eval = EvalOptions {
+            insertable_columns: ic,
+            column_defaults: cd,
+            verdict_basis: vb,
+            defer_defaults: dd,
+            insert_options_extra: ex,
+            ..Default::default()
+        };
+        let want = row.insert_options_document().unwrap();
+        assert_eq!(
+            String::from_utf8(want.clone()).unwrap(),
+            concat!(
+                r#"{"column_defaults":[{"name":"b","value":"7"}],"defer_defaults":"server","#,
+                r#""insertable_columns":[{"name":"a"}],"verdict_basis":"export","x_future":{"k":[1]}}"#
+            )
+        );
+        assert_eq!(rows.insert_options_document().unwrap(), want);
+        assert_eq!(eval.insert_options_document().unwrap(), want);
+        // Nothing set sends nothing: the call before the document existed.
+        assert!(
+            RowOptions::default()
+                .insert_options_document()
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            EvalOptions::default()
+                .insert_options_document()
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

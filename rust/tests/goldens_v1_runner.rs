@@ -548,7 +548,7 @@ fn execute(api: &Arc<Api>, case: &Value) -> Result<Result<Answered, Stopped>, St
 
     match call {
         "preview_row" => Ok(
-            match api.preview_row(&schema, format, &body, &settings, &columns) {
+            match api.preview_row(&schema, format, &body, &settings, &columns, &[]) {
                 Ok(doc) => {
                     let ok = decode::row(&doc).is_ok();
                     Ok((doc, None, ok))
@@ -575,6 +575,7 @@ fn execute(api: &Arc<Api>, case: &Value) -> Result<Result<Answered, Stopped>, St
                     None,
                     export_format,
                     doc_flags,
+                    &[],
                 ) {
                     Ok((doc, export)) => {
                         // The public call hands the export to the decoder as the payload.
@@ -590,7 +591,7 @@ fn execute(api: &Arc<Api>, case: &Value) -> Result<Result<Answered, Stopped>, St
             let expr = dec(&filter_in["expr_b64"], "expr_b64")?;
             let params = dec(&filter_in["query_params_b64"], "query_params_b64")?;
             let filter_settings = dec(&filter_in["settings_b64"], "filter settings_b64")?;
-            let filter = match api.filter_create(&schema, &expr, &params, &filter_settings) {
+            let filter = match api.filter_create(&schema, &expr, &params, &filter_settings, &[]) {
                 Ok(f) => f,
                 Err(error) => {
                     return Ok(Err(Stopped {
@@ -600,7 +601,7 @@ fn execute(api: &Arc<Api>, case: &Value) -> Result<Result<Answered, Stopped>, St
                 }
             };
             Ok(
-                match api.filter_eval_body(&filter, format, &body, &settings) {
+                match api.filter_eval_body(&filter, format, &body, &settings, &columns, &[]) {
                     Ok(doc) => {
                         let ok = decode::filter_result(&doc).is_ok();
                         Ok((doc, None, ok))

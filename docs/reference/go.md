@@ -31,7 +31,7 @@ Row and batch verdicts are **never** Go errors: they are `Outcome` in the result
 | `*InternalError`    | `CHS_INTERNAL`, or a document that does not decode                                                                                                                    |
 | `*ArtifactError`    | a fetch or load failure, with a `Code` (an `ErrorCode`, one of the generated `Code…` constants) and a sentinel per code for `errors.Is`, such as `ErrArtifactMissing` |
 
-All four call types embed `CallError`, whose five fields (`Status`, `ChCode`, `ChName`, `Message`, `Column`) read directly; `AsCallError` reads them from any of the four. `Message` and `Column` are byte strings, and `Error()` is the one lossy display form.
+All four call types embed `CallError`, whose six fields (`Status`, `ChCode`, `ChName`, `Message`, `Column`, `Reason`) read directly; `AsCallError` reads them from any of the four. `Reason` is the catalog id (ASCII). `Message` and `Column` are byte strings, and `Error()` is the one lossy display form.
 
 ## The Go spellings
 

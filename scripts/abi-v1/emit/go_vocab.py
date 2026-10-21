@@ -176,6 +176,13 @@ def _format(model) -> list[str]:
             out += _doc("ExportNone is CHS_EXPORT_NONE: no export was asked for.")
             out.append(f"const ExportNone Format = {const.value}")
             out.append("")
+        elif name == "CHS_CODE_DECLINED":
+            out += _doc(
+                "CodeDeclined is CHS_CODE_DECLINED: the code a declined row, outcome or verdict carries, outside\n"
+                "ClickHouse's code table (the Codes paragraph of the reference)."
+            )
+            out.append(f"const CodeDeclined int32 = {const.value}")
+            out.append("")
     if model.major >= 2:
         out += _known_method("Format", [v.fields["ch_name"] for v in enum.values], "format", "f")
     out += _doc(
@@ -206,7 +213,7 @@ def _doc_flags(model) -> list[str]:
             out += _doc(f"{ident} is {name}.")
             out.append(f"const {ident} DocFlags = {const.value}")
             out.append("")
-        elif name not in ("CHS_EXPORT_NONE", "CHS_ABI_REVISION_TOMBSTONE"):
+        elif name not in ("CHS_EXPORT_NONE", "CHS_ABI_REVISION_TOMBSTONE", "CHS_CODE_DECLINED"):
             raise VocabError(f"go_vocab.py: constant {name} has no Go spelling; teach emit/go_vocab.py about it")
     return out
 
@@ -260,6 +267,9 @@ _PREFIX = {
     "merge_reason": "Merge",
     "declined_tier": "Tier",
     "declined_layer": "Layer",
+    "posture": "Posture",
+    "refusal_site": "RefusedAt",
+    "default_support": "DefaultSupport",
 }
 
 
@@ -312,12 +322,14 @@ def _source(model) -> list[str]:
         + (
             "\nThe description does not yet say what an unknown(n) source reports (rule r3, \"Facts without a\n"
             "fallback\"); until it does, IsStored is false for one."
+            if model.major >= 2 and enum.fallback is None
+            else f"\nAn unknown(n) source reports its fallback's ({enum.fallback}) fact (rule r3)."
             if model.major >= 2
             else ""
         ),
         enum,
         "is_stored",
-        None,
+        enum.fallback if model.major >= 2 else None,
     )
     if model.major >= 2:
         out += _known_method("Source", [i for i, _ in values], "source")
@@ -506,6 +518,50 @@ def _declined_layer(model) -> list[str]:
     return out
 
 
+def _posture(model) -> list[str]:
+    """ABI v2: posture, how a schema's statement was compiled (r3: its unknown(n) too)."""
+    enum = model.enums["posture"]
+    values = [(f"Posture{_value_ident(enum.name, v.value)}", v.value) for v in enum.values]
+    out = _string_type(
+        "Posture",
+        "Posture is posture: how a schema's statement was compiled, as a server's CREATE TABLE (create)\n"
+        "or as a server loads the stored definition of a table it holds (load). The spelling is the\n"
+        "description's.",
+        values,
+    )
+    out += _known_method("Posture", [i for i, _ in values], "posture")
+    return out
+
+
+def _refusal_site(model) -> list[str]:
+    """ABI v2: refusal_site, where a batch or filter document's refusal sits (r3: its unknown(n) too)."""
+    enum = model.enums["refusal_site"]
+    values = [(f"RefusedAt{_value_ident(enum.name, v.value)}", v.value) for v in enum.values]
+    out = _string_type(
+        "RefusalSite",
+        "RefusalSite is refusal_site: where a batch or filter document's refusal sits, the call (its settings\n"
+        "or its column list), the body outside any row (a header, the framing), one row (RefusedRow) or a\n"
+        "whole-body step. The spelling is the description's.",
+        values,
+    )
+    out += _known_method("RefusalSite", [i for i, _ in values], "site")
+    return out
+
+
+def _default_support(model) -> list[str]:
+    """ABI v2: default_support, what this build does with a column's DEFAULT (r3: its unknown(n) too)."""
+    enum = model.enums["default_support"]
+    values = [(f"DefaultSupport{_value_ident(enum.name, v.value)}", v.value) for v in enum.values]
+    out = _string_type(
+        "DefaultSupport",
+        "DefaultSupport is default_support: what this build does with a column's DEFAULT, as a schema\n"
+        "description reports it per column. The spelling is the description's.",
+        values,
+    )
+    out += _known_method("DefaultSupport", [i for i, _ in values], "support")
+    return out
+
+
 def _discover_query_param(model) -> list[str]:
     """ABI v2: discover_query_param's type (r3: every enum has its unknown(n))."""
     enum = model.enums["discover_query_param"]
@@ -536,6 +592,9 @@ _GO_VOCAB = {
     "merge_reason": ("MergeReason", "string"),
     "declined_tier": ("DeclinedTier", "string"),
     "declined_layer": ("DeclinedLayer", "string"),
+    "posture": ("Posture", "string"),
+    "refusal_site": ("RefusalSite", "string"),
+    "default_support": ("DefaultSupport", "string"),
 }
 
 
@@ -593,7 +652,7 @@ def render_vocab_gen(model) -> str:
         _default_kind,
     ]
     if model.major >= 2:
-        parts += [_discover_query_param, _merge_reason, _declined_tier, _declined_layer, _described]
+        parts += [_discover_query_param, _merge_reason, _declined_tier, _declined_layer, _posture, _refusal_site, _default_support, _described]
     for part in parts:
         out += part(model)
     while out and out[-1] == "":

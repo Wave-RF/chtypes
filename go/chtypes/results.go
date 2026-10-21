@@ -69,8 +69,9 @@ type EngineCell struct {
 // the batch's at_merge list. EngineRows stays exactly what the INSERT writer
 // produces, so the two never contradict each other.
 type AtMergeEntry struct {
-	// Row indexes EngineRows: the part's row, not the input body's.
-	Row int
+	// PartRow indexes EngineRows: the part's row, not the input body's (the
+	// document's part_row).
+	PartRow int
 	// Reason is a merge_reason value. One the description does not list is its
 	// unknown(n), kept as it came (rule r3).
 	Reason MergeReason
@@ -91,20 +92,35 @@ type AtMergeEntry struct {
 type RowResult struct {
 	// Outcome is final: the library applies every promotion.
 	Outcome Outcome
+	// ErrCode is the document's code: ClickHouse's own error code, 0 only on a
+	// success, and CodeDeclined (-2) where this build declined the row.
 	ErrCode int32
 	ErrMsg  string
+	// Reason is the decline's catalog id (spec/abi-v2/declines/declines.json),
+	// from reason; "" when the document carries none, which it does exactly where
+	// ErrCode is CodeDeclined. Key on it, never on ErrMsg.
+	Reason string
+	// RefusedAt is where a single-row result's refusal sits, from refused_at: ""
+	// for an accepted or skipped row. The rows of a batch carry neither this nor
+	// RefusedRow: the batch's own say where.
+	RefusedAt RefusalSite
+	// RefusedRow is the row index of a RefusedAtRow refusal, from refused_row; nil
+	// when the document carries none.
+	RefusedRow *uint64
 	// Columns is every entry of cols, in document order; Values is the subset
 	// whose IsStored is true.
-	Columns             []Value
-	Values              []Value
-	Transformed         []Transform
-	UnknownFields       []string
-	UnsupportedSettings []string
-	Computed            []Computed
+	Columns       []Value
+	Values        []Value
+	Transformed   []Transform
+	UnknownFields []string
+	Computed      []Computed
 	// Verdict is present only with an attached filter.
 	Verdict     *Verdict
 	VerdictCode int32
-	VerdictErr  string
+	// VerdictReason is the catalog id of a declined verdict (VerdictCode is
+	// CodeDeclined), from verdict_reason; "" when the document carries none.
+	VerdictReason string
+	VerdictErr    string
 	// PartitionID is nil when the document carries none; it is bytes.
 	PartitionID *string
 	// InputSpan is the bytes the reader consumed for this record.
@@ -130,9 +146,18 @@ type Framing struct {
 
 // BatchResult is a body's verdict, counts and per-row documents.
 type BatchResult struct {
-	Outcome     Outcome
-	ErrCode     int32
-	ErrMsg      string
+	Outcome Outcome
+	// ErrCode is the document's code, as RowResult.ErrCode.
+	ErrCode int32
+	ErrMsg  string
+	// Reason is the catalog id of a declined batch (ErrCode is CodeDeclined),
+	// from reason; "" when the document carries none.
+	Reason string
+	// RefusedAt is where a refusal or decline sits, from refused_at: "" for an
+	// accepted batch. A RefusedAtRow one names its row in RefusedRow (below
+	// RowsRead); nil otherwise.
+	RefusedAt   RefusalSite
+	RefusedRow  *uint64
 	Rows        []RowResult
 	RowsRead    uint64
 	RowsSkipped uint64
@@ -156,13 +181,23 @@ type BatchResult struct {
 	// 20261011.105019 returned a zero-length buffer), non-nil and empty for an
 	// accepted batch with zero rows.
 	Payload []byte
-	// Spans is each exported row's place in Payload; nil when absent, and
-	// always nil when the export was declined.
-	Spans          []Span
-	ExportDeclined string
-	RowsPassed     uint64
-	RowsCut        uint64
-	PartitionCount *uint64
+	// Spans is each row's place in Payload, from row_spans: one entry per
+	// Rows entry, index-aligned, nil for a row not exported (a skipped row, or a
+	// row a filter cut). The slice itself is nil when absent, and always nil when
+	// the export was declined.
+	Spans []*Span
+	// ExportColumns is the export's one column list, in the order every line
+	// carries its columns, from export_columns; nil when the document carries
+	// none (no export ran).
+	ExportColumns []string
+	// ExportDeclined names the cause of a declined export, and ExportDeclinedReason
+	// its catalog id, from export_declined_reason; both "" when the export ran or
+	// none was asked for.
+	ExportDeclined       string
+	ExportDeclinedReason string
+	RowsPassed           uint64
+	RowsCut              uint64
+	PartitionCount       *uint64
 	// Unconsumed is the byte ranges the reader's error recovery skipped. It
 	// does not account for every record: a skipped row's InputSpan can cover
 	// more than one input record, so verdicts can be fewer than records while
@@ -177,14 +212,23 @@ type BatchResult struct {
 type FilterRowError struct {
 	Row  int
 	Code int32
-	Msg  string
+	// Reason is the catalog id where Code is CodeDeclined, from reason; "" when
+	// the entry carries none.
+	Reason string
+	Msg    string
 }
 
 // FilterResult is a filter evaluation.
 type FilterResult struct {
-	Outcome             FilterOutcome
-	ErrCode             int32
-	ErrMsg              string
+	Outcome FilterOutcome
+	// ErrCode is the document's code, as RowResult.ErrCode.
+	ErrCode int32
+	ErrMsg  string
+	// Reason, RefusedAt and RefusedRow are the batch's (see BatchResult): where a
+	// refused or declined evaluation sits, and its catalog id.
+	Reason              string
+	RefusedAt           RefusalSite
+	RefusedRow          *uint64
 	RowsRead            uint64
 	UnsupportedSettings []string
 	// Verdicts is one verdict per row. A verdict counts only when Outcome is
@@ -203,12 +247,23 @@ type Column struct {
 	Type        string
 	DefaultKind DefaultKind
 	DefaultExpr string
+	// DefaultSupport is what this build does with the column's DEFAULT, from
+	// default_support (reserved: "" when the build reports none), and
+	// DefaultSupportReason the catalog id behind a DefaultSupportDeclined one.
+	DefaultSupport       DefaultSupport
+	DefaultSupportReason string
+	// Reads is the columns the column's expression reads, from reads (reserved:
+	// nil when the build reports none).
+	Reads []string
 }
 
 // SchemaDescription is a schema's columns, in declared order, the settings
 // its filters decline, and the server it was compiled on.
 type SchemaDescription struct {
 	Columns []Column
+	// Posture is how the schema's statement was compiled, from posture, which the
+	// document carries only for PostureLoad: "" is PostureCreate.
+	Posture Posture
 	// FilterDeclinedSettings is the settings the schema compiles under that
 	// this build's filters do not honor in a WHERE, over every layer known at
 	// schema compile (the defaults Setup set, the server profile and the
@@ -234,8 +289,9 @@ type SchemaServer struct {
 	// Timezone is the zone the schema's types bind: the profile's, or else the
 	// image zone (Setup's), exactly as chs_initialize spelled it.
 	Timezone string
-	// Settings is the server's settings as the profile gave them; the library
-	// reports {} (an empty map) when it gave none.
+	// Settings is the server's settings as the profile gave them (a value that
+	// was not UTF-8 comes back as its bytes); the library reports {} (an empty
+	// map) when it gave none.
 	Settings map[string]string
 	// Macros is the server's macro set: nil exactly when the profile carried
 	// no macros (unknown), and non-nil, even empty, when it did (the complete

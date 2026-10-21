@@ -98,7 +98,16 @@ This has cost real bugs, so v1 makes it one rule in all four bindings: **a setti
 
 The reason is one setting in particular. `chtypes_now_epoch_nanos` is a 19-digit nanosecond epoch, and 19 digits do not survive an IEEE double: `1700000000123456789` becomes `1.7e+18`. Sent as a JSON number, the setting would be **silently ignored** — the batch keeps stamping the real wall clock, and nothing anywhere says so. A loud `TypeError` is the whole point.
 
-A value whose bytes are not valid UTF-8 cannot be passed as a setting or a query parameter in 1.0. Inline it in the SQL as `unhex('<hex>')`, built from hex digits only ([`limitations.md`](../limitations.md#binary-input-parameters-must-be-utf-8)).
+A value whose bytes are not valid UTF-8 is sent in the object form `{"b64": "<standard base64, padded>"}` (ABI v2): a setting value, a query-parameter value, a `Setup` default and a value of a server profile's `settings`. The binding writes it in place of the string, so the library sees the exact bytes; a value that is valid UTF-8 stays a plain string. Three of the bindings can send one:
+
+| Binding    | How a non-UTF-8 value is passed                                                                    |
+| ---------- | -------------------------------------------------------------------------------------------------- |
+| Go         | a `string` holding the bytes (a Go `string` is a byte string)                                      |
+| Python     | a `str` carrying the bytes with `surrogateescape`                                                  |
+| TypeScript | a `Uint8Array` (a `string` holding a lone surrogate has no bytes and is refused, as a key is)      |
+| Rust       | **cannot**: settings and query parameters take `String`, so a non-UTF-8 value is unreachable there |
+
+A key that is not valid UTF-8 cannot be carried in any binding (a JSON object has no byte form for a key), and neither can a macro's name or value. Each is refused before any call. Where a binding cannot send the bytes, inline them in the SQL as `unhex('<hex>')`, built from hex digits only ([`limitations.md`](../limitations.md#binary-input-parameters-must-be-utf-8)).
 
 ## An unknown name refuses the whole call
 

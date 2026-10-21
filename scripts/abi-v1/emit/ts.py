@@ -985,6 +985,13 @@ def render_vocab_v2(model) -> str:
             f"export const EXPORT_NONE = {export_none.value};",
             "",
         ]
+    declined = model.constants.get("CHS_CODE_DECLINED")
+    if declined is not None:
+        lines += [
+            "/** The code a declined row, outcome or verdict carries (`CHS_CODE_DECLINED`), outside ClickHouse's code table. */",
+            f"export const CODE_DECLINED = {declined.value};",
+            "",
+        ]
     lines += _render_described(model)
     return "\n".join(lines)
 

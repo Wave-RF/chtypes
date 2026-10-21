@@ -225,8 +225,11 @@ function decodeError(raw: RawApi, status: number, errSlot: Slot): CallErrorField
   const chName = readOwnedBuf(raw, rawFn(raw, SYMBOL.ERROR_CH_NAME)([errPtr]) as JsExternal).toString('utf8');
   const messageBytes = readOwnedBuf(raw, rawFn(raw, SYMBOL.ERROR_MESSAGE)([errPtr]) as JsExternal);
   const column = readOwnedBuf(raw, rawFn(raw, SYMBOL.ERROR_COLUMN)([errPtr]) as JsExternal);
+  // The catalog id: ASCII by the ABI's own promise, empty for an error that has none. The generator
+  // emits no error construction for this binding, so the field is read here, by hand, beside the others.
+  const reason = readOwnedBuf(raw, rawFn(raw, SYMBOL.ERROR_REASON)([errPtr]) as JsExternal).toString('utf8');
   rawFn(raw, SYMBOL.ERROR_FREE)([errPtr]);
-  return { status, chCode, chName, messageBytes, column };
+  return { status, chCode, chName, messageBytes, column, reason };
 }
 
 /**

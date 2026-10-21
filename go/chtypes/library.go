@@ -225,8 +225,13 @@ func (l *Library) CompileTable(createTable string, opts ...CompileOption) (*Sche
 		defer c.server.g.leave()
 		server = c.server.h
 	}
-	// No schema option is defined yet: length 0, which the library reads as {}.
-	h, cerr := l.tbl.SchemaCreate(server, []byte(createTable), settings, nil)
+	// The options document (posture, and any member passed through), or length
+	// 0, which the library reads as {}.
+	options, err := c.schemaOpts.json("schema options")
+	if err != nil {
+		return nil, err
+	}
+	h, cerr := l.tbl.SchemaCreate(server, []byte(createTable), settings, options)
 	if cerr != nil {
 		return nil, callError(cerr)
 	}

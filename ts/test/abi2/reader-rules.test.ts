@@ -114,7 +114,7 @@ describe.skipIf(!stubsAvailable)('r2: unknown members are ignored at every level
     expect(r.transformed[0]?.lossy).toBe(true);
     expect(r.transformed[0]?.row).toBe(0);
     expect(r.unknownFields.map((b) => b.toString())).toEqual(['u']);
-    expect(r.unsupportedSettings.map((b) => b.toString())).toEqual(['st']);
+    // ABI v2 spec batch 2: a row document no longer carries unsupported_settings; only the batch's own does (below).
 
     const b = schema.rows(Format.JSONEachRow, body('{"x":1}'), { exportFormat: Format.JSONEachRow });
     expect(b.outcome).toBe(Outcome.Accepted);
@@ -176,7 +176,7 @@ describe.skipIf(!stubsAvailable)('r3: an unlisted value is kept as its unknown(n
     const src = schema.row(Format.JSONEachRow, planted('row.cols.src'));
     expect(src.columns[0]?.source).toBe('x_future_src');
     expect(sourceKnown(src.columns[0]?.source ?? '')).toBe(false);
-    expect(src.columns[0]?.isStored).toBe(false); // value_src names no fallback: unknown(n) reads not stored
+    expect(src.columns[0]?.isStored).toBe(false); // value_src's fallback is `skipped`: unknown(n) reports its is_stored fact, false
     expect(src.columns[0]?.text.toString()).toBe('abc');
     expect(src.outcome).toBe(Outcome.Accepted);
 

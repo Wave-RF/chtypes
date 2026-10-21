@@ -12,13 +12,18 @@ import {
   batchOutcomeKnown,
   DefaultKind,
   defaultKindKnown,
+  DefaultSupport,
+  defaultSupportKnown,
   filterOutcomeKnown,
   MergeReason,
   mergeReasonKnown,
   Outcome,
   outcomeKnown,
+  Posture,
   Reason,
   reasonKnown,
+  RefusalSite,
+  refusalSiteKnown,
   Source,
   sourceKnown,
   verdictAnswered,
@@ -52,7 +57,6 @@ describe('the row document', () => {
     ],
     transformed: [{ column: 'a', input: '300', stored: '44', reason: 'overflow_wrap', row: 0 }],
     unknown_fields: [{ name: 'zz' }],
-    unsupported_settings: [],
     computed: [{ name: 'm', kind: 'materialized', stored: '9', value_b64: b64([0x39]) }],
     verdict: 't',
     verdict_code: 0,
@@ -280,13 +284,13 @@ const AT_MERGE_BATCH = {
   outcome: 'accepted',
   unsupported_settings: [{ name: 'session_timezone' }, { name_b64: b64([0xff]) }],
   at_merge: [
-    { row: 0, reason: 'ttl_delete' },
-    { row: 1, reason: 'ttl_column_reset', column: 'c', stored: '0' },
-    { row: 2, reason: 'ttl_column_reset', column: 't' },
-    { row: 3, reason: 'ttl_column_reset', column_b64: b64([0xff, 0x00]), stored_b64: b64([0xff]) },
-    { row: 4, reason: 'ttl_delete', input_rows: [4, 7] },
-    { row: 5, reason: 'a_reason_nobody_listed', x_future: { a: [1] }, x_future_b64: '/w==' },
-    { row: 6, reason: 'ttl_column_reset', column: 'e', stored: '', input_rows: [] },
+    { part_row: 0, reason: 'ttl_delete' },
+    { part_row: 1, reason: 'ttl_column_reset', column: 'c', stored: '0' },
+    { part_row: 2, reason: 'ttl_column_reset', column: 't' },
+    { part_row: 3, reason: 'ttl_column_reset', column_b64: b64([0xff, 0x00]), stored_b64: b64([0xff]) },
+    { part_row: 4, reason: 'ttl_delete', input_rows: [4, 7] },
+    { part_row: 5, reason: 'a_reason_nobody_listed', x_future: { a: [1] }, x_future_b64: '/w==' },
+    { part_row: 6, reason: 'ttl_column_reset', column: 'e', stored: '', input_rows: [] },
   ],
 };
 
@@ -295,7 +299,7 @@ describe('the batch document: at_merge and the batch\'s own unsupported_settings
 
   it('decodes each at_merge entry one to one', () => {
     const got = decodeBatch(enc(AT_MERGE_BATCH), undefined).atMerge.map((e) => ({
-      row: e.row,
+      row: e.partRow,
       reason: e.reason,
       known: mergeReasonKnown(e.reason),
       column: bytes(e.column),
@@ -332,11 +336,11 @@ describe('the batch document: at_merge and the batch\'s own unsupported_settings
 
   it('refuses an at_merge that breaks its schema as an InternalError', () => {
     for (const bad of [
-      { at_merge: [{ row: 0, reason: 'ttl_column_reset', column: 'c', column_b64: 'Yw==' }] },
-      { at_merge: [{ row: 0, reason: 'ttl_column_reset', column: 'c', stored_b64: '!!' }] },
-      { at_merge: [{ row: 0, reason: 'ttl_delete', input_rows: ['x'] }] },
-      { at_merge: [{ row: 0, reason: 'ttl_delete', input_rows: [-1] }] },
-      { at_merge: [{ row: 0, reason: 7 }] },
+      { at_merge: [{ part_row: 0, reason: 'ttl_column_reset', column: 'c', column_b64: 'Yw==' }] },
+      { at_merge: [{ part_row: 0, reason: 'ttl_column_reset', column: 'c', stored_b64: '!!' }] },
+      { at_merge: [{ part_row: 0, reason: 'ttl_delete', input_rows: ['x'] }] },
+      { at_merge: [{ part_row: 0, reason: 'ttl_delete', input_rows: [-1] }] },
+      { at_merge: [{ part_row: 0, reason: 7 }] },
       { at_merge: { row: 0 } },
       { unsupported_settings: ['session_timezone'] },
     ]) {
@@ -425,16 +429,16 @@ describe('the schema description, discovery, error-code and live-handle document
 
 describe('name lists and engine rows (rule 5)', () => {
   it('reads unknown_fields and unsupported_settings as name objects in either form', () => {
-    const r = decodeRow(
-      enc({ outcome: 'accepted', unknown_fields: [{ name: 'a' }, { name_b64: b64([0xff, 0x00]) }], unsupported_settings: [{ name: 'x' }] }),
-    );
+    const r = decodeRow(enc({ outcome: 'accepted', unknown_fields: [{ name: 'a' }, { name_b64: b64([0xff, 0x00]) }] }));
     expect(r.unknownFields.map((b) => [...b])).toEqual([[0x61], [0xff, 0x00]]);
-    expect(r.unsupportedSettings.map((b) => b.toString())).toEqual(['x']);
+    const b = decodeBatch(enc({ outcome: 'accepted', unsupported_settings: [{ name: 'x' }], export_columns: [{ name: 'a' }, { name_b64: b64([0xff]) }] }), undefined);
+    expect(b.unsupportedSettings.map((n) => n.toString())).toEqual(['x']);
+    expect(b.exportColumns?.map((n) => [...n])).toEqual([[0x61], [0xff]]);
   });
 
   it('refuses a bare string in a name list, an element carrying both forms, and one carrying neither', () => {
     expect(() => decodeRow(enc({ outcome: 'accepted', unknown_fields: ['zz'] }))).toThrow(InternalError);
-    expect(() => decodeRow(enc({ outcome: 'accepted', unsupported_settings: ['zz'] }))).toThrow(InternalError);
+    expect(() => decodeBatch(enc({ outcome: 'accepted', unsupported_settings: ['zz'] }), undefined)).toThrow(InternalError);
     expect(() => decodeRow(enc({ outcome: 'accepted', unknown_fields: [{ name: 'a', name_b64: 'YQ==' }] }))).toThrow(InternalError);
     expect(() => decodeRow(enc({ outcome: 'accepted', unknown_fields: [{}] }))).toThrow(InternalError);
   });
@@ -482,5 +486,160 @@ describe('name lists and engine rows (rule 5)', () => {
     expect([...(r.partitionId ?? [])]).toEqual([0xff]);
     const f = decodeFilterResult(enc({ outcome: 'ok', unsupported_settings: [{ name_b64: b64([0xff]) }] }));
     expect([...(f.unsupportedSettings[0] ?? [])]).toEqual([0xff]);
+  });
+});
+
+// ABI v2 spec batch 2 (the sixth interface batch): a refusal or decline names its code (-2 is
+// CHS_CODE_DECLINED), its catalog id and where it sits.
+describe('spec batch 2: the refusal members (reason, refused_at, refused_row)', () => {
+  it('reads a declined batch: code -2, its catalog id, the site and the row', () => {
+    const b = decodeBatch(
+      enc({ outcome: 'unsupported', code: -2, reason: 'preview-batch-zone-mismatch', refused_at: 'body_read', refused_row: 3, rows_read: 0, rows: [] }),
+      undefined,
+    );
+    expect(b.errCode).toBe(-2);
+    expect(b.reason).toBe('preview-batch-zone-mismatch');
+    expect(b.refusedAt).toBe(RefusalSite.BodyRead);
+    expect(refusalSiteKnown(b.refusedAt ?? '')).toBe(true);
+    expect(b.refusedRow).toBe(3);
+  });
+
+  it('an accepted batch carries no refusal members: they are absent, never empty', () => {
+    const b = decodeBatch(enc({ outcome: 'accepted', code: 0, rows_read: 1 }), undefined);
+    expect(b.reason).toBeUndefined();
+    expect(b.refusedAt).toBeUndefined();
+    expect(b.refusedRow).toBeUndefined();
+  });
+
+  it('keeps an unlisted site as its unknown(n), never a failure (r3)', () => {
+    const b = decodeBatch(enc({ outcome: 'rejected', refused_at: 'a_site_nobody_listed' }), undefined);
+    expect(b.refusedAt).toBe('a_site_nobody_listed');
+    expect(refusalSiteKnown(b.refusedAt ?? '')).toBe(false);
+  });
+
+  it('reads a row: code, reason, site, row, and the declined verdict with its own catalog id', () => {
+    const r = decodeRow(
+      enc({ outcome: 'unsupported', code: -2, reason: 'drawn-value', refused_at: 'row', refused_row: 0, verdict: 'd', verdict_code: -2, verdict_reason: 'defer-defaults-reader' }),
+    );
+    expect(r.errCode).toBe(-2);
+    expect(r.reason).toBe('drawn-value');
+    expect(r.refusedAt).toBe(RefusalSite.Row);
+    expect(r.refusedRow).toBe(0);
+    expect(r.verdict).toBe(Verdict.Decline);
+    expect(r.verdictCode).toBe(-2);
+    expect(r.verdictReason).toBe('defer-defaults-reader');
+    const ok = decodeRow(enc({ outcome: 'accepted', code: 0 }));
+    expect([ok.reason, ok.refusedAt, ok.refusedRow, ok.verdictReason]).toEqual([undefined, undefined, undefined, undefined]);
+  });
+
+  it('reads a filter result: code, reason, site, and an errors entry with its own reason', () => {
+    const f = decodeFilterResult(
+      enc({ outcome: 'unsupported', code: -2, reason: 'filter-zone', refused_at: 'call', rows_read: 0, verdicts: '', errors: [{ row: 0, code: -2, reason: 'drawn-value', err: 'x' }], unsupported_settings: [] }),
+    );
+    expect(f.errCode).toBe(-2);
+    expect(f.reason).toBe('filter-zone');
+    expect(f.refusedAt).toBe(RefusalSite.Call);
+    expect(f.refusedRow).toBeUndefined();
+    expect(f.errors[0]?.code).toBe(-2);
+    expect(f.errors[0]?.reason).toBe('drawn-value');
+    expect(decodeFilterResult(enc({ outcome: 'ok', errors: [{ row: 1, code: 70 }] })).errors[0]?.reason).toBeUndefined();
+  });
+
+  it('a member of the wrong JSON type is an InternalError', () => {
+    expect(() => decodeBatch(enc({ outcome: 'rejected', refused_row: 'x' }), undefined)).toThrow(InternalError);
+    expect(() => decodeRow(enc({ outcome: 'rejected', reason: 7 }))).toThrow(InternalError);
+  });
+});
+
+describe('spec batch 2: the export members (row_spans, export_columns, export_declined_reason)', () => {
+  it('row_spans is one entry per row, a null for a row not exported, aligned with rows; export_columns are bytes', () => {
+    const b = decodeBatch(
+      enc({ outcome: 'accepted', rows_read: 3, row_spans: [{ off: 0, len: 5 }, null, { off: 5, len: 6 }], export_columns: [{ name: 'a' }, { name_b64: b64([0xff]) }] }),
+      Buffer.from('0123456789a'),
+    );
+    expect(b.spans).toEqual([{ off: 0, len: 5 }, null, { off: 5, len: 6 }]);
+    expect(b.exportColumns?.map((n) => [...n])).toEqual([[0x61], [0xff]]);
+    expect(b.exportDeclinedReason).toBeUndefined();
+  });
+
+  it('a declined export has no payload, no spans and no export columns, and names its reason', () => {
+    const d = decodeBatch(
+      enc({ outcome: 'unsupported', export_declined: 'nope', export_declined_reason: 'export-batch-not-accepted', row_spans: [null], export_columns: [{ name: 'a' }] }),
+      Buffer.from('x'),
+    );
+    expect(d.exportDeclined.toString()).toBe('nope');
+    expect(d.exportDeclinedReason).toBe('export-batch-not-accepted');
+    expect(d.payload).toBeUndefined();
+    expect(d.spans).toBeUndefined();
+    expect(d.exportColumns).toBeUndefined();
+  });
+
+  it('no export asked for: none of the export members', () => {
+    const b = decodeBatch(enc({ outcome: 'accepted' }), undefined);
+    expect([b.spans, b.exportColumns, b.exportDeclinedReason]).toEqual([undefined, undefined, undefined]);
+  });
+});
+
+describe('spec batch 2: the schema description members', () => {
+  const described = decodeSchemaDescription(
+    enc({
+      columns: [
+        { name: 'a', type: 'Int32', default_kind: '', default_support: 'deferred', default_support_reason: 'r-x', reads: [{ name: 'b' }, { name_b64: b64([0xff]) }] },
+        { name: 'b', type: 'Int32', default_kind: 'DEFAULT', default_support: 'a_support_nobody_listed' },
+      ],
+      filter_declined_settings: [],
+      posture: 'load',
+      server: { timezone: 'UTC', settings: { s: 'v', t: { b64: b64([0xff]) } } },
+    }),
+  );
+
+  it('reads the posture, and each column\'s default support, its reason and the columns it reads', () => {
+    expect(described.posture).toBe(Posture.Load);
+    expect(described.columns[0]?.defaultSupport).toBe(DefaultSupport.Deferred);
+    expect(described.columns[0]?.defaultSupportReason).toBe('r-x');
+    expect(described.columns[0]?.reads?.map((n) => [...n])).toEqual([[0x62], [0xff]]);
+  });
+
+  it('keeps an unlisted default support as its unknown(n); an absent reads is undefined', () => {
+    const c = described.columns[1];
+    expect(c?.defaultSupport).toBe('a_support_nobody_listed');
+    expect(defaultSupportKnown(c?.defaultSupport ?? '')).toBe(false);
+    expect(c?.reads).toBeUndefined();
+    expect(c?.defaultSupportReason).toBeUndefined();
+  });
+
+  it('reads a server settings value in the {"b64": ...} form as its bytes', () => {
+    expect(described.server?.settings?.s).toBe('v');
+    expect([...((described.server?.settings?.t as Buffer | undefined) ?? [])]).toEqual([0xff]);
+  });
+
+  it('a create-posture schema and a build that reports no default support carry none of the members', () => {
+    const d = decodeSchemaDescription(enc({ columns: [{ name: 'a', type: 'Int32', default_kind: '' }], filter_declined_settings: [] }));
+    expect(d.posture).toBeUndefined();
+    expect(d.columns[0]?.defaultSupport).toBeUndefined();
+    expect(d.columns[0]?.reads).toBeUndefined();
+  });
+
+  it('a b64 value that is not the one-member object form is an InternalError', () => {
+    expect(() => decodeSchemaDescription(enc({ columns: [], server: { settings: { t: { b64: b64([0xff]), x: 1 } } } }))).toThrow(InternalError);
+    expect(() => decodeSchemaDescription(enc({ columns: [], server: { settings: { t: { b64: 7 } } } }))).toThrow(InternalError);
+    expect(() => decodeSchemaDescription(enc({ columns: [], server: { settings: { t: 7 } } }))).toThrow(InternalError);
+  });
+});
+
+describe('spec batch 2: value_src gains default_deferred and default_override', () => {
+  it('reads their stored facts from the description: deferred is not stored, an override is', () => {
+    const r = decodeRow(
+      enc({
+        outcome: 'accepted',
+        code: 0,
+        cols: [
+          { name: 'a', null: false, stored: '', src: 'default_deferred' },
+          { name: 'b', null: false, stored: '5', src: 'default_override' },
+        ],
+      }),
+    );
+    expect(r.columns.map((c) => c.isStored)).toEqual([false, true]);
+    expect(r.values.map((c) => c.column.toString())).toEqual(['b']);
   });
 });

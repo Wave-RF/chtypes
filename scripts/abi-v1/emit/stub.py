@@ -1157,7 +1157,7 @@ def _document_mode(model, fn) -> list[str]:
             True,
         )
 
-    for step in _stubshared.DOC_TEMPLATES[template]:
+    for step in _stubshared.doc_templates(model.major)[template]:
         op = step[0]
         if op == "raw":
             lines.append(f"            chs_sb_cat(&sb, {_c_str(step[1])});")
@@ -1432,6 +1432,8 @@ def _declined_settings(model, fn) -> list[str]:
     ids = list(_stubshared.DECLINED_LISTS)
     deep_sel = len(ids)  # the deep input's selection, after every list's
     if fn.name == _DECLINED_CREATE:
+        if fn.name != deep["fn"] or deep["status"] not in model.function(fn.name).may_return:
+            raise ValueError(f"{fn.name}: the deep input is refused here, with {deep['status']}; the shape has changed")
         b = next(p for p in fn.params if p.kind == "bytes_in").name
         lines = ["#if defined(CHS_STUB_DECLINED_SETTINGS)", "    chs_stub_declined_sel = -1;"]
         for i, sel in enumerate([*ids, deep["id"]]):
@@ -1440,26 +1442,26 @@ def _declined_settings(model, fn) -> list[str]:
                 f"    if ({b}_len == {len(key)} && memcmp({b}, {_c_str(key.decode('ascii'))}, {len(key)}) == 0) "
                 f"chs_stub_declined_sel = {i};"
             )
-        return [*lines, "#endif"]
-    if fn.name == _DECLINED_DESCRIBE:
-        out, others = _doc_out(fn)
-        if out is None or out.content != "document:schema_description" or fn.name != deep["fn"]:
-            raise ValueError(f"{fn.name}: the shape _declined_settings answers has changed")
-        if deep["status"] not in model.function(fn.name).may_return:
-            raise ValueError(f"{fn.name}: {deep['status']} is not in its may_return")
-        docs = ", ".join(
-            _c_str(json.dumps(_stubshared.declined_document(sel), separators=(",", ":"), ensure_ascii=True))
-            for sel in ids
-        )
         name_lit, msg_lit = _c_str(deep["ch_name"]), _c_str(deep["message"])
-        return [
-            "#if defined(CHS_STUB_DECLINED_SETTINGS)",
+        lines += [
             f"    if (chs_stub_declined_sel == {deep_sel}) {{",
             f"        static const char name[] = {name_lit};",
             f"        static const char msg[] = {msg_lit};",
             f"        chs_stub_set_err(err, chs_stub_make_error({deep['status']}, {deep['ch_code']}, name, sizeof(name) - 1, msg, sizeof(msg) - 1));",
             f"        return {deep['status']};",
             "    }",
+        ]
+        return [*lines, "#endif"]
+    if fn.name == _DECLINED_DESCRIBE:
+        out, others = _doc_out(fn)
+        if out is None or out.content != "document:schema_description":
+            raise ValueError(f"{fn.name}: the shape _declined_settings answers has changed")
+        docs = ", ".join(
+            _c_str(json.dumps(_stubshared.declined_document(sel), separators=(",", ":"), ensure_ascii=True))
+            for sel in ids
+        )
+        return [
+            "#if defined(CHS_STUB_DECLINED_SETTINGS)",
             f"    if (chs_stub_declined_sel >= 0 && chs_stub_declined_sel < {len(ids)}) {{",
             f"        static const char *const declined_docs[] = {{{docs}}};",
             *_answer_doc(out, others, "declined_docs[chs_stub_declined_sel]"),
@@ -1601,6 +1603,16 @@ def _special(model) -> dict[str, str]:
             "}",
         ]
     )
+    if any(f.name == "chs_error_reason" for f in model.functions):  # generation 2 on
+        s["chs_error_reason"] = "\n".join(
+            [
+                f"{sig('chs_error_reason')} {{",
+                "    if (error == NULL || chs_stub_check_handle((const chs_handle_common *) error, "
+                f'{_kind_const(ERROR_HANDLE)}, "error") != NULL) return NULL;',
+                "    return chs_stub_make_buf(NULL, 0);",
+                "}",
+            ]
+        )
     for name, field_ptr, field_len in (
         ("chs_error_ch_name", "ch_name", "ch_name_len"),
         ("chs_error_message", "message", "message_len"),
