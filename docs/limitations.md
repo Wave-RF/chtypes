@@ -313,6 +313,8 @@ On a 1.0 library, **workaround:** compare `value`, the raw bytes, with your inpu
 
 **Workaround:** read the version and settings from your own connection and pass them in. **Planned.**
 
+On ABI v2, a table a server already holds was created under that CREATE's own settings, which its `create_table_query` does not carry, so compile such a statement at `posture: load`, as the caller's obligation in [`spec/abi-v2/docs.md`](../spec/abi-v2/docs.md) (`input:schema_options`) requires: compiled at `create` instead, a table created under `flatten_nested = 0` has its `Nested` column read as flattened arrays.
+
 ### A time-dependent TTL in a CREATE comes back as an internal error
 
 `TTL now() + INTERVAL 1 DAY` in a `CREATE TABLE` returns an `InternalError` (`CHS_INTERNAL`) where a server refuses the statement with its own error. Measured against the 26.9.8.3 library (`measured`).
