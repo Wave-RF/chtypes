@@ -2262,7 +2262,7 @@ Everything is validated here, once, and the server never changes after it. A key
 
 The macros are the server's whole `system.macros` when `macros` is present, even as `{}`: a macro a Replicated engine's arguments name that the set lacks is then the server's own refusal (`CHS_REJECTED`, 139, NO_ELEMENTS_IN_CONFIG). When `macros` is absent the server's macros are unknown, and a schema whose engine reads one is declined, as it is without a server, except under `schema_options`' `posture` `load`, where a stored Replicated definition compiles without expanding them (`input:schema_options`). A build that validates a profile's macros but does not yet apply them declines such a schema in both cases.
 
-A setting this build's filters do not honor in a WHERE is no decline here, and the call succeeds. So does `chs_schema_create` on the server, because a profile never changes a schema compile: it lists the setting in the schema's `filter_declined_settings` (`schema_description`), at layer `server`.
+A setting this build's filters do not honor in a WHERE is no decline here, and the call succeeds. So does `chs_schema_create` on the server: it lists the setting in the schema's `filter_declined_settings` (`schema_description`), at layer `server`.
 
 The call reads no defaults and leaves `chs_set_defaults`' latch open. Its init class is `required`, so before `chs_initialize` it refuses (Initialization, in the Preamble).
 

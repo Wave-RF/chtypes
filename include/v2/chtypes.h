@@ -141,8 +141,11 @@
  * or declined (`chs_filter_create` says how). A server resource limit (an `execution`-tier setting,
  * e.g. a small `max_columns_to_read`) can make the server refuse a query the library answers; that
  * is resource policy, not row access, and the library does not model it. A server's settings are
- * the ones its profile applies to every query, and they never change how a schema compiles. No call
- * reads a server's version or its changed settings itself: that discovery is a recorded gap in this
+ * the ones its profile applies to every query. At posture `create`, they are layered under the
+ * schema's own settings for the whole CREATE, so they shape how the schema compiles
+ * (`flatten_nested`, the type gates and the aggregate gates among them). At posture `load`, the
+ * stored definition is taken as written, as a server attaches it at startup. No call reads a
+ * server's version or its changed settings itself: that discovery is a recorded gap in this
  * generation, so a caller that wants a server's settings passes them explicitly, in a server
  * profile, through `chs_set_defaults` or in each call's settings.
  *
@@ -1230,9 +1233,8 @@ CHS_API chs_status chs_quote_string(
  * yet apply them declines such a schema in both cases.
  *
  * A setting this build's filters do not honor in a WHERE is no decline here, and the call succeeds.
- * So does `chs_schema_create` on the server, because a profile never changes a schema compile: it
- * lists the setting in the schema's `filter_declined_settings` (`schema_description`), at layer
- * `server`.
+ * So does `chs_schema_create` on the server: it lists the setting in the schema's
+ * `filter_declined_settings` (`schema_description`), at layer `server`.
  *
  * The call reads no defaults and leaves `chs_set_defaults`' latch open. Its init class is
  * `required`, so before `chs_initialize` it refuses (Initialization, in the Preamble).
