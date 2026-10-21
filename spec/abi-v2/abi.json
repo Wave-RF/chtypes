@@ -1,7 +1,7 @@
 {
   "description_schema": 2,
   "abi": 2,
-  "stability": "unstable",
+  "stability": "locked",
   "library": {
     "stem": "libchtypes",
     "prefix": "chs_"

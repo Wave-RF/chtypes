@@ -8,7 +8,7 @@
     scripts/abi-v1/gen.py --selftest      prove every refusal fires, on temporary copies of the tree
 
     scripts/abi-v1/gen.py --major 2 --write|--check|--fingerprint
-                                          the same, for ABI v2 (UNSTABLE): spec/abi-v2/ and its own outputs
+                                          the same, for ABI v2 (locked): spec/abi-v2/ and its own outputs
 
 MAJORS. Without --major, everything here is ABI v1 and behaves exactly as it
 did before ABI v2 existed: the same inputs, outputs, banners and messages.
