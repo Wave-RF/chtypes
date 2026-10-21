@@ -9,6 +9,7 @@ The four bindings in this repository are released together and give one answer, 
 ### Added
 
 - `column_defaults` is covered by unit tests (ABI v2): the exact `insert_options` JSON for a UTF-8 value, a non-UTF-8 value (`value_b64`), an empty value (sent as `""`) and two entries in order, and the decode of a `default_override` cell (`Source.DEFAULT_OVERRIDE`, stored). The batches guide gains a usage section. No behavior changed.
+- Docs: `docs/guides/batches.md` shows how a `column_defaults` value is read, in the body format's own field encoding (CSV quoting, TSV escapes, a JSON string or number), with a value that doesn't read refused at the call before any body byte.
 - `CODE_DECLINED` (ABI v2, -2): the code a declined row, outcome or verdict carries, generated from the description and exported from `chtypes`, as `bindings-v1.md` section 3 promises.
 - `CallError.reason` (ABI v2): the error's catalog id, read through `chs_error_reason` and passed through verbatim (ASCII, empty if none), on all four call classes.
 - Spec batch 2, the options documents (ABI v2; moves the dev fingerprint): keyword-only `insertable_columns`, `column_defaults` (a sequence of `ColumnDefault`), `verdict_basis` (`VerdictBasis`: `INPUT`, `EXPORT`) and `defer_defaults` (`DeferDefaults`: `NONE`, `SERVER`) build `insert_options` for `Schema.row`, `Schema.rows`, `Schema.parse_block` and `Filter.rows`; `param_encoding` (`ParamEncoding`: `ESCAPED`, `RAW`) builds `filter_options` for `Schema.compile_filter`; `posture` (`Posture`: `CREATE`, `LOAD`) builds `schema_options` for `Library.compile_table`. `insert_options_extra`, `filter_options_extra` and `schema_options_extra` pass a member the binding has no name for through as JSON text, so the library, which refuses an unknown key (rule r1), is the only judge. A document with no member set is not sent. `Filter.rows` takes `columns` (`chs_filter_eval_body` takes the column list).
@@ -34,7 +35,7 @@ The four bindings in this repository are released together and give one answer, 
 
 ### Changed
 
-- **Breaking (ABI v2 dev): `BatchResult.spans` is a tuple of `Span | None`**, one entry per `rows` entry and index-aligned with it: `row_spans` carries `null` for a row the export did not carry (a skipped row, or a row a filter cut), which reads as `None`. It was the exported rows' spans only.
+- **Breaking (ABI v2 dev): `BatchResult.spans` is a tuple of `Span | None`**, one entry per `rows` entry and index-aligned with it: `row_spans` carries `null` for a row the export did not carry (a skipped row, or a row a filter cut), which reads as `None`. It was the exported rows' spans only. Code that reads `span.off` from every entry raises `AttributeError` on a `None` entry: check each entry before reading it.
 - **Breaking (ABI v2 dev): `AtMergeEntry.row` is `AtMergeEntry.part_row`**, the document's `part_row`.
 - A document's `code` can be -2 (`CHS_CODE_DECLINED`) for a row, batch, filter result or verdict this build declined, and every decline names its `reason`.
 - The refusal of a settings, query-parameter, default or server-settings value that is not valid UTF-8 is gone (it is the `{"b64": ...}` form now); a key that is not valid UTF-8, a macro and a server timezone are still refused, as a `UsageError` naming the input.
