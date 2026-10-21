@@ -472,7 +472,6 @@ def section6(lib: chtypes.Library) -> None:
         blank()
 
         kv("unknown_fields[]", str([show(n) for n in r.unknown_fields]))
-        kv("unsupported_settings[]", str([show(n) for n in r.unsupported_settings]))
         blank()
 
     with lib.compile_table(table("a UInt8, d UInt8 DEFAULT a + 1")) as dep:
@@ -1019,15 +1018,16 @@ def section15(lib: chtypes.Library) -> None:
         note("wire order = declared minus MATERIALIZED/ALIAS/EPHEMERAL, so these bytes are")
         note("INSERT-able with no column list; DEFAULTs are already applied")
         for i, span in enumerate(batch.spans or ()):
-            line = "(no bytes - row not accepted)"
-            if span.len:
+            line = "(no bytes - row not exported)"
+            if span is not None and span.len:
                 line = repr(payload[span.off : span.off + span.len])
             kv(
-                f"  span[{i}] {{off:{span.off} len:{span.len}}}",
+                f"  span[{i}] "
+                + ("None" if span is None else f"{{off:{span.off} len:{span.len}}}"),
                 f"{batch.rows[i].outcome.value} -> {line}",
             )
-        note("spans are INDEX-ALIGNED with rows; concatenating the non-zero spans")
-        note("reproduces the payload exactly")
+        note("spans are INDEX-ALIGNED with rows, None for a row not exported;")
+        note("concatenating the non-None spans reproduces the payload exactly")
         blank()
 
         lean = schema.rows(
