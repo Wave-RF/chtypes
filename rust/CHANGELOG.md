@@ -80,6 +80,7 @@ The four bindings in this repository are released together and give one answer, 
 - **Enforcement gate lifted** for `26.8` on `darwin-arm64`.
 - **Enforcement gate lifted** for `26.9` on `darwin-arm64`.
 - `docs/limitations.md` is re-checked against artifact build `20261012.142240` (v2-dev.13), the library half measured on that build: functions that need a server, in a column expression, and a body the server may read serially or in parallel under a non-zero error budget are listed under "Declined by design"; the known divergence for a column expression that calls a function needing a server is retired, since that build declines those schemas (on 26.8 and 26.9 the `AI*` and `ai*` functions compile, as the page says); and the `lossy` raw-NUL TSV gap is marked fixed on that build and still present in the 1.0 libraries. `docs/guides/filters.md` gains a section on subcolumn filters and a JSON value typed by its batch.
+- The ABI v2 spec now states the INSERT-time settings layering the library already uses, since artifact build `20261021.025722` (#632): at the INSERT, the schema's own settings (the compile profile) reach only the parse, minus a type gate, and every expression the INSERT evaluates and its limits (`max_partitions_per_insert_block` among them) run under the call's own settings, the server profile and the setup defaults only. A setting your INSERT session carries for those goes in the call's settings or the server profile (`docs/guides/settings.md`). No API change.
 
 ### Removed
 

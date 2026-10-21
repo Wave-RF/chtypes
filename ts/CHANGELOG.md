@@ -86,6 +86,7 @@ The four bindings in this repository are released together and give one answer, 
 - **Breaking (ABI v2 dev): `AtMergeEntry.row` is `AtMergeEntry.partRow`**, the document's `part_row`.
 - **Breaking (ABI v2 dev): `Settings` values and `sessionTimezone` take `string | Uint8Array`**, and a string holding a lone surrogate (no bytes) is still refused as a `UsageError`; the refusal of a value that is not UTF-8 is gone for a `Uint8Array`, while a key that is not valid UTF-8 is still refused.
 - A document's `code` can be -2 for a row, batch, filter result or verdict this build declined, and every decline names its `reason`; a `Source` the description does not list reads the description's fallback (`skipped`), not stored.
+- The ABI v2 spec now states the INSERT-time settings layering the library already uses, since artifact build `20261021.025722` (#632): at the INSERT, the schema's own settings (the compile profile) reach only the parse, minus a type gate, and every expression the INSERT evaluates and its limits (`max_partitions_per_insert_block` among them) run under the call's own settings, the server profile and the setup defaults only. A setting your INSERT session carries for those goes in the call's settings or the server profile (`docs/guides/settings.md`). No API change.
 
 ### Removed
 

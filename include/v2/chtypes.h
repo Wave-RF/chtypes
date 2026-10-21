@@ -119,12 +119,32 @@
  * server profile, the schema's own, and the filter's own (`chs_filter_create`), with
  * `session_timezone` at every layer staying on the zone path (Time zones, above). One exception: a
  * type gate in the schema's own settings binds the CREATE only, and a WHERE's CAST validates under
- * the session layers, every layer but the schema's own. Each setting that reaches a WHERE is
- * honored (applied to it), passed through (accepted and ignored), or declined (`chs_filter_create`
- * says how). A server resource limit (an `execution`-tier setting, e.g. a small
- * `max_columns_to_read`) can make the server refuse a query the library answers; that is resource
- * policy, not row access, and the library does not model it. A server's settings are the ones its
- * profile applies to every query, and they never change how a schema compiles. No call reads a
+ * the session layers, every layer but the schema's own. At the INSERT, the schema's own settings
+ * reach only the parse, as a server's CREATE-time settings never reach its INSERT: the settings
+ * ClickHouse's own `FormatFactory::getFormatSettings` reads, which shape how a body is read, keep
+ * all five layers, except a type gate among them (`Nullable(Tuple)`'s, for one), which binds the
+ * CREATE only. Everything else the INSERT does runs under the call's own settings, its server's
+ * `settings` and `chs_set_defaults` only, over the build's own, with every type gate at the build's
+ * default unless one of those three sets it. That covers every expression it evaluates (a `DEFAULT`
+ * or `MATERIALIZED` fill, a `CHECK`, a TTL, a partition key the server rebuilds at INSERT, one with
+ * a modulo, a projection, an expression a `Values` body evaluates while it is read, and the creator
+ * of any aggregate function in them) and its limits, `max_partitions_per_insert_block` and
+ * `throw_on_max_partitions_per_insert_block` among them. The sorting key and the skip indices,
+ * which a server builds under its global context, run under its server's `settings` and
+ * `chs_set_defaults` only, though an aggregate function's creator there still reads the call's own
+ * settings. So a gated `CAST` or a gated aggregate function in such an expression, a `Values`
+ * body's included, with its gate only in the schema's own settings, is refused as the server
+ * refuses it (455, 44 or 63), and a partition limit in the schema's own settings does not reach the
+ * INSERT; a caller whose real INSERT session carries such a setting passes it in the call's
+ * settings or the server profile, as that INSERT does. `session_timezone` keeps the zone path. Each
+ * setting that reaches a WHERE is honored (applied to it), passed through (accepted and ignored),
+ * or declined (`chs_filter_create` says how). A server resource limit (an `execution`-tier setting,
+ * e.g. a small `max_columns_to_read`) can make the server refuse a query the library answers; that
+ * is resource policy, not row access, and the library does not model it. A server's settings are
+ * the ones its profile applies to every query. At posture `create`, they are layered under the
+ * schema's own settings for the whole CREATE, so they shape how the schema compiles
+ * (`flatten_nested`, the type gates and the aggregate gates among them). At posture `load`, the
+ * stored definition is taken as written, as a server attaches it at startup. No call reads a
  * server's version or its changed settings itself: that discovery is a recorded gap in this
  * generation, so a caller that wants a server's settings passes them explicitly, in a server
  * profile, through `chs_set_defaults` or in each call's settings.
@@ -1214,9 +1234,8 @@ CHS_API chs_status chs_quote_string(
  * yet apply them declines such a schema in both cases.
  *
  * A setting this build's filters do not honor in a WHERE is no decline here, and the call succeeds.
- * So does `chs_schema_create` on the server, because a profile never changes a schema compile: it
- * lists the setting in the schema's `filter_declined_settings` (`schema_description`), at layer
- * `server`.
+ * So does `chs_schema_create` on the server: it lists the setting in the schema's
+ * `filter_declined_settings` (`schema_description`), at layer `server`.
  *
  * The call reads no defaults and leaves `chs_set_defaults`' latch open. Its init class is
  * `required`, so before `chs_initialize` it refuses (Initialization, in the Preamble).
@@ -1535,10 +1554,11 @@ CHS_API chs_status chs_preview_batch(
  * defaults, the server profile, the schema's own settings and this call's), as a subscriber's
  * SELECT in its own session would. An evaluation's `settings` (`chs_filter_eval_body`,
  * `chs_preview_batch` with a filter, `chs_block_create`) are the INSERT session's: they govern
- * parsing the body and never reach the WHERE, so they are never named as WHERE settings. So a
- * filter evaluated in the INSERT's own session, a materialized view's WHERE for example, is created
- * with that session's WHERE-tier settings in its own `settings`. Every key still meets the server's
- * own SET check first, so a name the server does not know is `CHS_REJECTED` with ch_code 115.
+ * parsing the body and the expressions the INSERT itself evaluates (Settings, above), and never
+ * reach the WHERE, so they are never named as WHERE settings. So a filter evaluated in the INSERT's
+ * own session, a materialized view's WHERE for example, is created with that session's WHERE-tier
+ * settings in its own `settings`. Every key still meets the server's own SET check first, so a name
+ * the server does not know is `CHS_REJECTED` with ch_code 115.
  *
  * A filter under a per-call `session_timezone` answers as the artifact producer has measured
  * against live servers, including how the zone in an evaluation's settings combines with the zone
@@ -1587,17 +1607,18 @@ CHS_API void chs_filter_free(chs_filter *filter);
 
 /*
  * chs_filter_eval_body: Evaluates the filter over every row of a body, returning one verdict per
- * row. `settings` governs parsing the body, and `session_timezone` there is this call's zone.
- * `columns` is the INSERT column list, a JSON array of name objects (`{name}` or `{name_b64}`), and
- * empty for none, read exactly as `chs_preview_batch` reads it: with a list the call models the
- * INSERT that names it, and with none the INSERT that names none. When a server would not accept an
- * INSERT of the body, because `chs_preview_batch`'s verdict over the same body, settings and column
- * list, with no filter, is not `accepted`, every verdict is `d` and the outcome mirrors that
- * verdict (`filter_outcome`). The call reads an accepted body once, for its verdicts and that batch
- * verdict together, and under any outcome but `ok` writes `d` for every verdict, answering a
- * refusal or decline of the call itself in the document (`refused_at` `call`), never as a status.
- * `options` (`input:insert_options`) is that INSERT's, read as `chs_preview_batch` reads it, so the
- * verdict mirrored is `chs_preview_batch`'s over the same body, settings, columns and options.
+ * row. `settings` is the INSERT session's: it governs parsing the body and the expressions the
+ * INSERT evaluates (Settings, above), and `session_timezone` there is this call's zone. `columns`
+ * is the INSERT column list, a JSON array of name objects (`{name}` or `{name_b64}`), and empty for
+ * none, read exactly as `chs_preview_batch` reads it: with a list the call models the INSERT that
+ * names it, and with none the INSERT that names none. When a server would not accept an INSERT of
+ * the body, because `chs_preview_batch`'s verdict over the same body, settings and column list,
+ * with no filter, is not `accepted`, every verdict is `d` and the outcome mirrors that verdict
+ * (`filter_outcome`). The call reads an accepted body once, for its verdicts and that batch verdict
+ * together, and under any outcome but `ok` writes `d` for every verdict, answering a refusal or
+ * decline of the call itself in the document (`refused_at` `call`), never as a status. `options`
+ * (`input:insert_options`) is that INSERT's, read as `chs_preview_batch` reads it, so the verdict
+ * mirrored is `chs_preview_batch`'s over the same body, settings, columns and options.
  *
  * Class: api. Thread: shared. Init: required. Returns one of: CHS_OK, CHS_INVALID_ARGUMENT,
  * CHS_INTERNAL. Growable (rule r1): an input it gains is a new member of its options document,
@@ -1633,8 +1654,9 @@ CHS_API chs_status chs_filter_eval_body(
 
 /*
  * chs_block_create: Parses a body once under the schema, for evaluating many filters over it.
- * `settings` governs the parse, `session_timezone` there included, and `columns` is read as
- * `chs_preview_row` reads it. The block holds a counted reference to the schema. It also records
+ * `settings` is the INSERT session's: it governs the parse and the expressions the INSERT evaluates
+ * (Settings, above), `session_timezone` there included, and `columns` is read as `chs_preview_row`
+ * reads it. The block holds a counted reference to the schema. It also records
  * `chs_preview_batch`'s verdict over the same body, settings, columns and options, with no filter,
  * which `chs_filter_eval_block` answers by; a refusal or decline of the call or the body is
  * recorded there, so this call returns a status other than `CHS_OK` only for misuse or an internal

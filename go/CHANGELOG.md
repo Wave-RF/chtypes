@@ -78,6 +78,7 @@ The four bindings in this repository are released together and give one answer, 
 - **Breaking (ABI v2 dev): `BatchResult.Spans` is `[]*Span`**, one entry per `Rows` entry and index-aligned with it: `row_spans` carries `null` for a row the export did not carry (a skipped row, or a row a filter cut), which the entry reads as nil. It was `[]Span` of the exported rows only. **This change compiles silently:** code written for `[]Span` that reads `r.Spans[i].Off` still builds, because Go dereferences the pointer for you, and it panics at run time on a nil entry. Check each entry for nil before reading it.
 - **Breaking (ABI v2 dev): `AtMergeEntry.Row` is `AtMergeEntry.PartRow`**, the document's `part_row`.
 - A document's `code` can be `CodeDeclined` (-2) for a row, batch, filter result or verdict this build declined, and every decline names its `Reason`; a `Source` the description does not list reads the description's fallback (`skipped`), not stored.
+- The ABI v2 spec now states the INSERT-time settings layering the library already uses, since artifact build `20261021.025722` (#632): at the INSERT, the schema's own settings (the compile profile) reach only the parse, minus a type gate, and every expression the INSERT evaluates and its limits (`max_partitions_per_insert_block` among them) run under the call's own settings, the server profile and the setup defaults only. A setting your INSERT session carries for those goes in the call's settings or the server profile (`docs/guides/settings.md`). No API change.
 
 ### Removed
 

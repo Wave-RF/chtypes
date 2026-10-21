@@ -21,7 +21,8 @@
 //! A filter's zone is its own, fixed when it is compiled
 //! ([`FilterOptions`]): its WHERE runs in that zone for every evaluation. An
 //! evaluation's settings ([`EvalOptions`], [`RowOptions`] for a block) are the
-//! body's PARSE settings only. Differing zones are an ordinary input.
+//! body's INSERT settings: its parse and the expressions the INSERT evaluates,
+//! never the WHERE. Differing zones are an ordinary input.
 
 use std::sync::Arc;
 

@@ -109,7 +109,8 @@ export interface FilterOptions {
 }
 
 /**
- * Options of `Filter.rows`. The settings are PARSE settings only: they decide how the body is parsed, never the filter's WHERE.
+ * Options of `Filter.rows`. The settings are the body's INSERT settings: they decide how the body is parsed and the
+ * expressions the INSERT evaluates, never the filter's WHERE.
  * `columns` and the `insert_options` members model the same INSERT as on `Schema.rows` (ABI v2).
  */
 export interface EvalOptions {

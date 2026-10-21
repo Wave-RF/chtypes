@@ -212,7 +212,8 @@ class Filter(_Handle):
         insert_options_extra: Mapping[str, str] | None = None,
     ) -> FilterResult:
         """Evaluate over a body. `settings` and `session_timezone` are the body's
-        PARSE settings only: the filter's own zone was fixed when it compiled.
+        INSERT settings: they govern its parse and the expressions the INSERT
+        evaluates, never the WHERE, whose zone was fixed when the filter compiled.
         `columns` is the INSERT column list and the keywords after it the
         `insert_options` members, as for `Schema.rows`."""
         payload = body_bytes(body)

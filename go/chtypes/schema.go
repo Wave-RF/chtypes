@@ -258,7 +258,8 @@ func (f *Filter) enter() error {
 }
 
 // Rows evaluates the filter over a body (chs_filter_eval_body). The settings
-// are the body's parse settings only; the filter's own zone governs its WHERE.
+// are the body's INSERT settings: they govern its parse and the expressions the
+// INSERT evaluates, never the WHERE, which runs in the filter's own zone.
 // WithColumns and the insert options model the same INSERT as on Schema.Rows.
 func (f *Filter) Rows(format Format, body []byte, opts ...EvalOption) (FilterResult, error) {
 	c := evalConfig(opts)
