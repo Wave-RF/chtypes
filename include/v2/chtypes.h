@@ -1082,22 +1082,23 @@ CHS_API chs_status chs_initialize(const uint8_t *timezone, size_t timezone_len, 
  * may use); `chtypes_default_eval_cpu_nanos` (process, int64, default 1000000000, 0 disables: the
  * admission time budget, the evaluating thread's CPU time, detected not interrupted; the earlier
  * name `chtypes_default_eval_wall_nanos` is refused on v2 with `CHS_INVALID_ARGUMENT` naming this
- * one); `chtypes_custom_settings_prefixes` (process, string, default none: the server's
- * `custom_settings_prefixes`, comma-separated). A process knob in a call's settings is declined,
- * named in `unsupported_settings` (`call-setting-process-only-key`), and a clock knob whose value
- * is not an integer likewise (`call-setting-clock-value`). An evaluation that exceeds a budget is
- * declined with that budget's own reason id, never answered: `admission-memory-budget` for the
- * memory budget and `admission-time-budget` for the time budget; the earlier single id
- * `admission-envelope` is retired, its catalog entry naming both successors (rule r4). The time
- * budget is the evaluating thread's CPU time, not wall time. Each catalog entry states its load
- * dependence. A memory-budget decline is deterministic (`measured`). A time-budget decline depends
- * on load only near the budget: CPU time rose up to x1.03 under load on linux-arm64 and up to x2.0
- * on linux-amd64 when two busy hardware threads share a core, so a time-budget decline is
- * retry-stable when the evaluation costs more than the budget on an idle core and never happens
- * under about half of it; between half and one times the budget the host's load can decide. Normal
- * evaluations cost about 1000 times less than the 1 s default. a schema whose DEFAULT exceeds a
- * budget at admission is declined at compile. The defaults are this description's, not a build's: a
- * build reports nothing about them.
+ * one); `chtypes_custom_settings_prefixes` (process, string, default this version's shipped server
+ * config value, `SQL_` on every supported line, and no prefix for a version whose shipped config
+ * names none: the server's `custom_settings_prefixes`, comma-separated). A process knob in a call's
+ * settings is declined, named in `unsupported_settings` (`call-setting-process-only-key`), and a
+ * clock knob whose value is not an integer likewise (`call-setting-clock-value`). An evaluation
+ * that exceeds a budget is declined with that budget's own reason id, never answered:
+ * `admission-memory-budget` for the memory budget and `admission-time-budget` for the time budget;
+ * the earlier single id `admission-envelope` is retired, its catalog entry naming both successors
+ * (rule r4). The time budget is the evaluating thread's CPU time, not wall time. Each catalog entry
+ * states its load dependence. A memory-budget decline is deterministic (`measured`). A time-budget
+ * decline depends on load only near the budget: CPU time rose up to x1.03 under load on linux-arm64
+ * and up to x2.0 on linux-amd64 when two busy hardware threads share a core, so a time-budget
+ * decline is retry-stable when the evaluation costs more than the budget on an idle core and never
+ * happens under about half of it; between half and one times the budget the host's load can decide.
+ * Normal evaluations cost about 1000 times less than the 1 s default. a schema whose DEFAULT
+ * exceeds a budget at admission is declined at compile. The defaults are this description's, not a
+ * build's: a build reports nothing about them.
  *
  * Setup only. The defaults are immutable once this image has created its first `chs_schema` (a
  * filter or a block needs one): from then on the call changes nothing and answers
