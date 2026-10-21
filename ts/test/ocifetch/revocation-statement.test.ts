@@ -165,7 +165,7 @@ describe.skipIf(!present)('the shared revocation-statement table: listings throu
   beforeEach(() => {
     restore = useProdV2ForTests();
     resetRevocationMemoForTests();
-    cache = mkdtempSync(path.join(tmpdir(), 'chtypes-revstmt-'));
+    cache = mkdtempSync(path.join(tmpdir(), 'ts-revstmt-'));
   });
   afterEach(() => {
     resetRevocationMemoForTests();
