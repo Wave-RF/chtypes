@@ -4,6 +4,8 @@ Every item here is a deliberate decline or a stated boundary, not a bug queue. T
 
 When you get one, fall back to the server: validate cautiously, forward the row unpreviewed, and never tell a user they are wrong on the strength of a decline.
 
+The builds this page names by id were measured while v2 was in development, on its pre-release channel. The SDK 2.0.0 libraries on the production channel are later builds: a claim tied to a build id holds for them once it is re-checked on them, and this page then names them.
+
 <a id="macos-is-a-development-floor-not-an-oracle"></a>
 
 ## macOS artifacts match ClickHouse on macOS; on 26.3, match the server's platform

@@ -1,10 +1,8 @@
 # chtypes — Go SDK
 
-> **2.0.0-dev: UNSTABLE, staging only, not for production.** This is the ABI v2 development binding (public issue #511). It speaks ABI v2's unstable description, pins its dev fingerprint and refuses a library with any other ("update your dev SDK"). It fetches only from the staging dev channel (`https://registry-staging.wavehouse.dev/chtypes/v2-dev`) and trusts only the staging key; `CHTYPES_ARTIFACTS_URL`, `CHTYPES_TRUSTED_KEYS` and `CHTYPES_ALLOW_UNSIGNED` are ignored, each with one warning; `--lock`, `--frozen` and `--update` are refused, because a dev build is replaceable and a superseded one expires after 14 days. Its cache is `${XDG_CACHE_HOME:-~/.cache}/chtypes/v2-dev`, or `<CHTYPES_CACHE>/v2-dev` under an explicit cache, which no 1.x SDK reads. A dev SDK prefers the newest build of its own fingerprint: it resolves `<tag>--fp-<its fingerprint>` first and the tag only when no such build exists, and its cache lookups ignore another dev SDK's builds in a shared cache, so a newer dev fingerprint never strands it (§3 of [`docs/guides/fetch-v1.md`](../docs/guides/fetch-v1.md)). The rules are r1 to r6 of [`docs/reference/abi-v2.md`](../docs/reference/abi-v2.md). For production, use the 1.x module, `github.com/wave-rf/chtypes/go`.
+> **SDK 2.x speaks ABI v2.** This binding speaks ABI v2's locked description and refuses a library with any other fingerprint. It fetches from the production channel, `https://registry.wavehouse.dev/chtypes/v2`, signed with the release key, and honors `CHTYPES_ARTIFACTS_URL`, `CHTYPES_TRUSTED_KEYS` and `CHTYPES_ALLOW_UNSIGNED` (and the matching `FetchOptions` fields), and `--lock`, `--frozen` and `--update` (and their options) ([`docs/guides/fetch-v1.md`](../docs/guides/fetch-v1.md#generation-2-after-the-lock)). Its cache is `${XDG_CACHE_HOME:-~/.cache}/chtypes/v2`, or `<CHTYPES_CACHE>/v2` under an explicit cache, which no 1.x SDK reads. Every vocabulary keeps a value it does not list as that type's `unknown(n)`: `Known` reports false for it, and it never fails a document. The rules are r1 to r9 of [`docs/reference/abi-v2.md`](../docs/reference/abi-v2.md). The 1.x module, `github.com/wave-rf/chtypes/go`, speaks ABI v1. A `2.0.0-dev.N` pre-release spoke an unstable draft of ABI v2 from the staging dev channel: it refuses the 2.0.0 library, and 2.0.0 refuses a dev build.
 >
-> An explicit cache directory gets the `v2-dev` subroot whether it comes from `CHTYPES_CACHE` or from `FetchOptions.CacheDir`: the layout is under `<CacheDir>/v2-dev`, never in the directory itself, so code that inspects or pre-populates a cache looks there; `chtypes.CacheRoot` and `chtypes.SearchDirs` return the resolved paths. `CHTYPES_OFFLINE=1` is the environment twin of `FetchOptions.Offline` and `--offline`: the cache only, no request.
->
-> <!-- remove-at-v2-lock -->v2-dev builds before the one that carries this contract (its release notice names it) can answer `ok` with `t` verdicts after a refused row. On those builds, when a body or block holds more than one row, treat every verdict as `d` if `errors` is non-empty.<!-- /remove-at-v2-lock -->
+> An explicit cache directory gets the `v2` subroot whether it comes from `CHTYPES_CACHE` or from `FetchOptions.CacheDir`: the layout is under `<CacheDir>/v2`, never in the directory itself, so code that inspects or pre-populates a cache looks there; `chtypes.CacheRoot` and `chtypes.SearchDirs` return the resolved paths. `CHTYPES_OFFLINE=1` is the environment twin of `FetchOptions.Offline` and `--offline`: the cache only, no request.
 
 **If this row were inserted into this table on this ClickHouse version, what would happen?** chtypes answers with ClickHouse's own code: the real C++ type machinery, vendored per release into a native artifact behind the frozen `chs_*` C ABI and reached here through cgo. Nothing semantic is reimplemented, so _"what does ClickHouse do with `256` into a `UInt8`?"_ is answered by ClickHouse rather than by a model of it. One peer binding among `{go, python, ts, rust}` — no language is privileged, and all four give one answer.
 
@@ -13,10 +11,10 @@
 Two things: this package, and at least one **artifact**, the per-version native library it `dlopen`s at runtime. The registry fetches, verifies and installs artifacts for you when autofetch is on (`WithAutoFetch(true)` or `CHTYPES_AUTOFETCH=1`); the default build is **dlopen-only**: it compiles with cgo (for `dlfcn`) but links nothing and needs no build tree.
 
 ```sh
-go get github.com/wave-rf/chtypes/go/v2@<a 2.0.0-dev pre-release tag>
+go get github.com/wave-rf/chtypes/go/v2
 ```
 
-`go get github.com/wave-rf/chtypes/go/v2` never selects a pre-release on its own: name the dev version you want.
+The `/v2` is Go's major-version rule: `go get github.com/wave-rf/chtypes/go` keeps resolving the 1.x module.
 
 ## Quickstart
 

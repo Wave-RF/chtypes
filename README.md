@@ -12,7 +12,7 @@
 <p align="center">
   <a href="https://github.com/Wave-RF/chtypes/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/Wave-RF/chtypes/ci.yml?branch=main&label=CI&color=%2306B0BF"></a>
   <a href="LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/License-Apache_2.0-%23086D77"></a>
-  <a href="https://pkg.go.dev/github.com/wave-rf/chtypes/go"><img alt="Go" src="https://img.shields.io/badge/Go-pkg.go.dev-%2306B0BF?logo=go&logoColor=white"></a>
+  <a href="https://pkg.go.dev/github.com/wave-rf/chtypes/go/v2"><img alt="Go" src="https://img.shields.io/badge/Go-pkg.go.dev-%2306B0BF?logo=go&logoColor=white"></a>
   <a href="https://pypi.org/project/chtypes/"><img alt="PyPI" src="https://img.shields.io/pypi/v/chtypes?label=PyPI&color=%2306B0BF&logo=pypi&logoColor=white"></a>
   <a href="https://www.npmjs.com/package/@wavehouse/chtypes"><img alt="npm" src="https://img.shields.io/npm/v/%40wavehouse%2Fchtypes?label=npm&color=%2306B0BF&logo=npm&logoColor=white"></a>
   <a href="https://crates.io/crates/chtypes"><img alt="crates.io" src="https://img.shields.io/crates/v/chtypes?label=crates.io&color=%2306B0BF&logo=rust&logoColor=white"></a>
@@ -44,7 +44,7 @@ That last line is the point. ClickHouse will accept `256` into a `UInt8`, store 
 Two things, always: the **binding** for your language, and at least one **library** — the per-version native library it loads. The binding is small; the library is real ClickHouse, compiled.
 
 ```sh
-go get github.com/wave-rf/chtypes/go     # Go
+go get github.com/wave-rf/chtypes/go/v2  # Go
 uv add chtypes                           # Python  (or: pip install chtypes)
 pnpm add @wavehouse/chtypes              # TypeScript
 cargo add chtypes                        # Rust
@@ -53,7 +53,7 @@ cargo add chtypes                        # Rust
 Then fetch a library: resolved over OCI, verified, and unpacked into the per-user cache every binding reads by default. Each binding ships the same command, so you need nothing from this repository:
 
 ```sh
-go run github.com/wave-rf/chtypes/go/cmd/chtypes@latest fetch 26.8
+go run github.com/wave-rf/chtypes/go/v2/cmd/chtypes@latest fetch 26.8
 python -m chtypes fetch 26.8
 npx @wavehouse/chtypes fetch 26.8
 cargo install chtypes && chtypes fetch 26.8
