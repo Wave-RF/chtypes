@@ -1338,21 +1338,42 @@ def _selftest_v2() -> list[str]:
         )
         plant("the map leaves a binding out", set_map(rust=None), "missing binding 'rust'")
 
-        # Locking drops the UNSTABLE notes, and the outputs follow the description.
-        def lock(w: Path) -> None:
-            _json_edit(w / abi, lambda d: d.update(stability="locked"))
+        # The outputs follow the description's stability, both ways: an unstable
+        # description generates the UNSTABLE notes and locking drops them. Each
+        # state is planted in its own copy, so the proof holds whichever state
+        # the tree's own description is in.
+        def set_stability(value: str):
+            def mutate(w: Path) -> None:
+                _json_edit(w / abi, lambda d: d.update(stability=value))
 
-        plant("a locked description generates and checks", lock, None, (("--major", "2", "--write"), ("--major", "2", "--check")))
-        work = Path(tmp) / "locked"
-        shutil.copytree(pristine, work)
-        lock(work)
-        rc, log = _run(work, "--major", "2", "--write")
-        header = (work / "include/v2/chtypes.h").read_text(encoding="utf-8")
-        page = (work / "docs/reference/abi-v2.md").read_text(encoding="utf-8")
-        if rc or " * UNSTABLE: " in header or "| stability             | locked" not in page:
-            fails.append(f"a locked description still generated the UNSTABLE notes, or no `locked` row:\n{log}")
-        if " * UNSTABLE: " not in (pristine / "include/v2/chtypes.h").read_text(encoding="utf-8"):
-            fails.append("the unstable description's header carries no UNSTABLE note")
+            return mutate
+
+        for value in ("unstable", "locked"):
+            plant(
+                f"a description declaring `stability` {value!r} generates and checks",
+                set_stability(value),
+                None,
+                (("--major", "2", "--write"), ("--major", "2", "--check")),
+            )
+            work = Path(tmp) / f"stability-{value}"
+            shutil.copytree(pristine, work)
+            set_stability(value)(work)
+            rc, log = _run(work, "--major", "2", "--write")
+            if rc:
+                fails.append(f"a description declaring `stability` {value!r} did not generate:\n{log}")
+                continue
+            header = (work / "include/v2/chtypes.h").read_text(encoding="utf-8")
+            page = (work / "docs/reference/abi-v2.md").read_text(encoding="utf-8")
+            if value == "unstable":
+                if " * UNSTABLE: " not in header:
+                    fails.append("the unstable description's header carries no UNSTABLE note")
+                if "| stability             | UNSTABLE: " not in page:
+                    fails.append("the unstable description's reference page has no `UNSTABLE` stability row")
+            else:
+                if " * UNSTABLE: " in header:
+                    fails.append("the locked description's header still carries an UNSTABLE note")
+                if "| stability             | locked" not in page:
+                    fails.append("the locked description's reference page has no `locked` stability row")
     return fails
 
 

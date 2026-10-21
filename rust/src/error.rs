@@ -410,10 +410,18 @@ mod tests {
         }
     }
 
-    /// Rule r6: a fingerprint refusal of this dev SDK is
-    /// `CHTYPES_ARTIFACT_INCOMPATIBLE` and displays exactly the rule's message.
+    /// Rule r6 after the lock: a fingerprint refusal is still
+    /// `CHTYPES_ARTIFACT_INCOMPATIBLE`, and this SDK's description is locked,
+    /// so it displays the code and the loader's own message, never the dev
+    /// one. The dev side, rule r6's exact text, is
+    /// `abi2::loader::tests::a_dev_fingerprint_refusal_is_rule_r6_exactly`.
     #[test]
-    fn a_dev_fingerprint_refusal_is_incompatible_with_rule_r6s_message() {
+    fn a_fingerprint_refusal_after_the_lock_is_incompatible_with_the_loaders_message() {
+        assert_eq!(
+            crate::abi2::decls::CHS_ABI_STABILITY,
+            "locked",
+            "this test pins the locked SDK's refusal"
+        );
         let fingerprint = crate::abi2::decls::CHS_ABI_FINGERPRINT;
         let other = format!("sha256:{}", "0".repeat(64));
         let e = Error::from_refusal(Refusal {
@@ -424,7 +432,7 @@ mod tests {
             message: None,
         });
         let want = format!(
-            "this SDK speaks dev fingerprint {fingerprint}; the library has {other} — update your dev SDK"
+            "CHTYPES_ARTIFACT_INCOMPATIBLE: /p: fingerprint (want {fingerprint}, got {other})"
         );
         assert!(matches!(e, Error::ArtifactIncompatible(_)), "{e:?}");
         assert_eq!(e.code(), Some("CHTYPES_ARTIFACT_INCOMPATIBLE"));
