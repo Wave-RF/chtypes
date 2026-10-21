@@ -291,6 +291,57 @@ Three payload states, and they are distinct: absent means no export was requeste
 
 Attaching a compiled filter to this same call narrows the export further, to the rows the filter admits, from the same one parse: [`filters.md` → Exporting only the rows a filter admits](filters.md#exporting-only-the-rows-a-filter-admits).
 
+## Overriding a column's DEFAULT for one call (ABI v2)
+
+`column_defaults` is a per-call list of `{name, value}`. In a cell the server would have filled from the column's DEFAULT, the call uses your `value` instead. The library decides which cells those are, by ClickHouse's own reader and the call's format settings: a field the record omits, a `null` for a non-Nullable column under `input_format_null_as_default`, an empty CSV field under `input_format_csv_empty_as_default`. A field the record supplied is never overridden, and `""` is a value like any other. A cell an override fills reads `default_override` (`Source` in each binding), which is stored, and the export carries it as a present value, so inserting the export needs no override.
+
+The binding only passes the list: `name` and `value` are byte strings (UTF-8, else the `name_b64` and `value_b64` forms), the order is kept, and an empty list is sent as `[]`. It validates nothing. An entry that names an unknown, non-insertable, MATERIALIZED or ALIAS column, or a value that does not read as the column's type, is `CHS_INVALID_ARGUMENT` at the call, naming `column_defaults[i]`. A build that does not implement the member declines it. The option exists on the four calls that model an INSERT of a body: row, rows, parse a block and filter rows.
+
+<details open><summary><b>Go</b></summary>
+
+```go
+batch, err := schema.Rows(chtypes.JSONEachRow, body,
+	chtypes.WithColumnDefaults([]chtypes.ColumnDefault{{Name: "region", Value: "eu"}}))
+// a cell filled from the override: batch.Rows[i].Columns[j].Source == chtypes.SourceDefaultOverride
+```
+
+</details>
+
+<details><summary><b>Python</b></summary>
+
+```python
+batch = schema.rows(
+    Format.JSON_EACH_ROW, body, column_defaults=[ColumnDefault("region", "eu")]
+)
+# a cell filled from the override has source == Source.DEFAULT_OVERRIDE
+```
+
+</details>
+
+<details><summary><b>TypeScript</b></summary>
+
+```ts
+const batch = schema.rows(Format.JSONEachRow, body, {
+  columnDefaults: [{ name: 'region', value: 'eu' }],
+});
+// a cell filled from the override has source Source.DefaultOverride
+```
+
+</details>
+
+<details><summary><b>Rust</b></summary>
+
+```rust
+let options = RowsOptions {
+    column_defaults: Some(vec![ColumnDefault { name: b"region".to_vec(), value: b"eu".to_vec() }]),
+    ..Default::default()
+};
+let batch = schema.rows(Format::JsonEachRow, body, &options)?;
+// a cell filled from the override has source Source::DefaultOverride
+```
+
+</details>
+
 ## Next
 
 - [`transformations.md`](transformations.md) — what the accepted rows were silently changed into.

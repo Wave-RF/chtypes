@@ -636,10 +636,6 @@ fn section6(lib: &Arc<Library>) {
     }
     blank();
     kv("unknown_fields[]", &format!("{:?}", r.unknown_fields));
-    kv(
-        "unsupported_settings[]",
-        &format!("{:?}", r.unsupported_settings),
-    );
     blank();
 
     let dep = compile(lib, "a UInt8, d UInt8 DEFAULT a + 1");
@@ -1221,21 +1217,27 @@ fn section15(lib: &Arc<Library>) {
         ),
     );
     for (i, span) in batch.spans.iter().flatten().enumerate() {
-        let line = if span.len > 0 {
+        let line = if let Some(span) = span.as_ref().filter(|s| s.len > 0) {
             let (off, len) = (span.off as usize, span.len as usize);
             format!(
                 "{:?}",
                 String::from_utf8_lossy(payload.get(off..off + len).unwrap_or_default())
             )
         } else {
-            "(no bytes: row not accepted)".to_string()
+            "(no bytes: row not exported)".to_string()
         };
         let outcome = batch
             .rows
             .get(i)
             .map_or("?".to_string(), |r| r.outcome.to_string());
         kv(
-            &format!("  span[{i}] {{off:{} len:{}}}", span.off, span.len),
+            &format!(
+                "  span[{i}] {}",
+                span.as_ref().map_or("None".to_string(), |s| format!(
+                    "{{off:{} len:{}}}",
+                    s.off, s.len
+                ))
+            ),
             &format!("{outcome} -> {line}"),
         );
     }

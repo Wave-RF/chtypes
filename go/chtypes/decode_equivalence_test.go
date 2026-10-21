@@ -67,9 +67,15 @@ var batchFixtures = map[string]string{
 	"byte-safe batch fields": `{"outcome":"rejected","code":27,"err_b64":"/w==","export_declined_b64":"/gA=","rows_read":"7"}`,
 	"storage transforms":     `{"outcome":"accepted","storage_transforms":[{"row":0,"column":"a","stored":"1"}]}`,
 	"at_merge, every shape":  atMergeBatchDoc,
-	"at_merge, nulls":        `{"outcome":"accepted","at_merge":[{"row":null,"reason":null,"column":null,"stored":null,"input_rows":null}],"unsupported_settings":null}`,
+	"at_merge, nulls":        `{"outcome":"accepted","at_merge":[{"part_row":null,"reason":null,"column":null,"stored":null,"input_rows":null}],"unsupported_settings":null}`,
 	"at_merge, empty":        `{"outcome":"accepted","at_merge":[],"unsupported_settings":[]}`,
 	"at_merge, null list":    `{"outcome":"accepted","at_merge":null}`,
+	// Spec batch 2: the refusal members, the export's column list and reason, and
+	// a row_spans with a null entry for a row not exported.
+	"refusal members":               `{"outcome":"unsupported","code":-2,"reason":"preview-batch-zone-mismatch","refused_at":"body_read","refused_row":3,"rows_read":0,"rows":[]}`,
+	"refusal, unlisted site":        `{"outcome":"rejected","code":27,"refused_at":"a_site_nobody_listed","refused_row":"9007199254740991"}`,
+	"export, spans with nulls":      `{"outcome":"accepted","rows_read":3,"rows":[],"row_spans":[{"off":0,"len":5},null,{"off":5,"len":6}],"export_columns":[{"name":"a"},{"name_b64":"/w=="}]}`,
+	"export declined with a reason": `{"outcome":"unsupported","export_declined":"x","export_declined_reason":"export-batch-not-accepted","export_columns":[]}`,
 }
 
 // rowFixtures are documents of one row, as decodeRow reads them; each also
@@ -77,8 +83,9 @@ var batchFixtures = map[string]string{
 var rowFixtures = map[string]string{
 	"row, every field":        rowDoc,
 	"row, minimal":            `{"outcome":"accepted"}`,
-	"row, empty lists":        `{"outcome":"accepted","cols":[],"computed":[],"transformed":[],"unknown_fields":[],"unsupported_settings":[]}`,
-	"row, null lists":         `{"outcome":"accepted","cols":null,"computed":null,"transformed":null,"unknown_fields":null,"unsupported_settings":null,"input_span":null,"verdict":null,"partition_id":null}`,
+	"row, declined":           `{"outcome":"unsupported","code":-2,"reason":"drawn-value","refused_at":"row","refused_row":0,"verdict":"d","verdict_code":-2,"verdict_reason":"defer-defaults-reader"}`,
+	"row, empty lists":        `{"outcome":"accepted","cols":[],"computed":[],"transformed":[],"unknown_fields":[]}`,
+	"row, null lists":         `{"outcome":"accepted","cols":null,"computed":null,"transformed":null,"unknown_fields":null,"input_span":null,"verdict":null,"partition_id":null}`,
 	"row, partition id bytes": `{"outcome":"accepted","partition_id_b64":"/w==","err_b64":"/gA=","verdict_err_b64":"/w==","verdict_code":3}`,
 	"row, string value":       `{"outcome":"accepted","cols":[{"name":"s","src":"input","null":false,"stored":"\"a\\\"b\"","value_b64":"YSJi","type":"String","ref":"x"}]}`,
 	"row, unknown outcome":    `{"outcome":"something_new"}`,

@@ -579,14 +579,24 @@ def render_abi_gen(model) -> str:
     return text
 
 
+def _has_error_reason(model) -> bool:
+    """True when the description declares chs_error_reason (ABI v2): every call error then carries it."""
+    return any(fn.name == "chs_error_reason" for fn in model.functions)
+
+
 def render_call_error(model) -> str:
     fields = [("Status", "string"), ("ChCode", "int32"), ("ChName", "string"), ("Message", "string"), ("Column", "string")]
+    has_reason = _has_error_reason(model)
+    if has_reason:
+        fields.append(("Reason", "string"))
     s = _struct(
         "CallError",
         fields,
         doc=(
             "CallError is D3's per-call error shape, read verbatim off a non-OK status:\n"
-            "the chs_status NAME (never the bare int), ch_code, ch_name, message and column.\n"
+            "the chs_status NAME (never the bare int), ch_code, ch_name, message and column"
+            + (" and, from chs_error_reason, reason" if has_reason else "")
+            + ".\n"
             "It carries no class of its own -- StatusClass(e.Status) is sdk.json's table,\n"
             "generated into errmap_gen.go, and the public API (wave C) is what turns this\n"
             "into an idiomatic *SchemaError/*UsageError/..."
@@ -672,6 +682,11 @@ def render_helpers(model) -> str:
             f"{TAB}{TAB}ce.ChName = string(readAndFreeBuf(t, t.ErrorChName(err)))",
             f"{TAB}{TAB}ce.Message = string(readAndFreeBuf(t, t.ErrorMessage(err)))",
             f"{TAB}{TAB}ce.Column = string(readAndFreeBuf(t, t.ErrorColumn(err)))",
+            *(
+                [f"{TAB}{TAB}ce.Reason = string(readAndFreeBuf(t, t.ErrorReason(err)))"]
+                if _has_error_reason(model)
+                else []
+            ),
             f"{TAB}{TAB}err.Close()",
             f"{TAB}}}",
             f"{TAB}return ce",

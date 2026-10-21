@@ -147,6 +147,7 @@ def _case_record(api: Any, case: dict, setup_id: str, platform: str) -> dict:
                         _b64d(body["body_b64"]),
                         _b64d(body["settings_b64"]),
                         _b64d(body["columns_b64"]) if "columns_b64" in body else None,
+                        None,
                     ),
                     None,
                 )
@@ -162,6 +163,7 @@ def _case_record(api: Any, case: dict, setup_id: str, platform: str) -> dict:
                     None,
                     requested,
                     body["doc_flags"],
+                    None,
                 )
                 if requested == -1:
                     export = None
@@ -174,6 +176,7 @@ def _case_record(api: Any, case: dict, setup_id: str, platform: str) -> dict:
                         _b64d(f["expr_b64"]),
                         _b64d(f["query_params_b64"]),
                         _b64d(f["settings_b64"]),
+                        None,
                     )
                 except CallError as err:
                     return failed("filter_create", err)
@@ -183,6 +186,8 @@ def _case_record(api: Any, case: dict, setup_id: str, platform: str) -> dict:
                         body["format"],
                         _b64d(body["body_b64"]),
                         _b64d(body["settings_b64"]),
+                        _b64d(body["columns_b64"]) if "columns_b64" in body else None,
+                        None,
                     ),
                     None,
                 )

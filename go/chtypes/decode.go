@@ -162,12 +162,26 @@ func (r *reader) stringMap(m map[string]any, key, path string) map[string]string
 	}
 	out := make(map[string]string, len(om))
 	for k, e := range om {
-		s, ok := e.(string)
-		if !ok {
-			r.fail(path+"."+key+"."+k, "want a JSON string")
+		switch s := e.(type) {
+		case string:
+			out[k] = s
+		case map[string]any:
+			// The object form of a value whose bytes are not UTF-8: {"b64": ...}.
+			enc, ok := s["b64"].(string)
+			if !ok || len(s) != 1 {
+				r.fail(path+"."+key+"."+k, `want a JSON string or {"b64": "..."}`)
+				return nil
+			}
+			raw, err := base64.StdEncoding.DecodeString(enc)
+			if err != nil {
+				r.fail(path+"."+key+"."+k, "b64 is not standard base64: %v", err)
+				return nil
+			}
+			out[k] = string(raw)
+		default:
+			r.fail(path+"."+key+"."+k, `want a JSON string or {"b64": "..."}`)
 			return nil
 		}
-		out[k] = s
 	}
 	return out
 }
@@ -257,6 +271,16 @@ func (r *reader) u64Of(v any, path string) uint64 {
 		r.fail(path, "want an unsigned 64-bit integer, got %s", n)
 	}
 	return u
+}
+
+// optU64 reads an unsigned 64-bit integer that may be absent: nil when absent.
+func (r *reader) optU64(m map[string]any, key, path string) *uint64 {
+	v := r.field(m, key)
+	if v == nil {
+		return nil
+	}
+	n := r.u64Of(v, path+"."+key)
+	return &n
 }
 
 func (r *reader) i32(m map[string]any, key, path string) int32 {
@@ -361,6 +385,24 @@ func (r *reader) span(v any, path string) *Span {
 	return &Span{Off: r.u64(m, "off", path), Len: r.u64(m, "len", path)}
 }
 
+// rowSpans reads row_spans: one entry per row, a span for an exported row and
+// JSON null for a row not exported (nil here).
+func (r *reader) rowSpans(m map[string]any, key, path string) []*Span {
+	arr := r.array(r.field(m, key), path+"."+key)
+	if arr == nil {
+		return nil
+	}
+	out := make([]*Span, 0, len(arr))
+	for i, e := range arr {
+		if e == nil {
+			out = append(out, nil)
+			continue
+		}
+		out = append(out, r.span(e, fmt.Sprintf("%s.%s[%d]", path, key, i)))
+	}
+	return out
+}
+
 func (r *reader) spans(m map[string]any, key, path string) []Span {
 	arr := r.array(r.field(m, key), path+"."+key)
 	if arr == nil {
@@ -417,7 +459,7 @@ func (r *reader) atMerge(m map[string]any, key, path string) []AtMergeEntry {
 			return nil
 		}
 		out = append(out, AtMergeEntry{
-			Row:       r.int(em, "row", p),
+			PartRow:   r.int(em, "part_row", p),
 			Reason:    MergeReason(r.text(em, "reason", p)),
 			Column:    r.optBytes(em, "column", p),
 			Stored:    r.optBytes(em, "stored", p),
@@ -456,14 +498,17 @@ func (r *reader) declinedSettings(m map[string]any, key, path string) []Declined
 // batch's rows).
 func (r *reader) row(m map[string]any, path string) RowResult {
 	res := RowResult{
-		Outcome:             parseRowOutcome(r.text(m, "outcome", path)),
-		ErrCode:             r.i32(m, "code", path),
-		ErrMsg:              r.bytes(m, "err", path),
-		Transformed:         r.transforms(m, "transformed", path),
-		UnsupportedSettings: r.nameList(m, "unsupported_settings", path),
-		UnknownFields:       r.nameList(m, "unknown_fields", path),
-		VerdictCode:         r.i32(m, "verdict_code", path),
-		VerdictErr:          r.bytes(m, "verdict_err", path),
+		Outcome:       parseRowOutcome(r.text(m, "outcome", path)),
+		ErrCode:       r.i32(m, "code", path),
+		ErrMsg:        r.bytes(m, "err", path),
+		Reason:        r.text(m, "reason", path),
+		RefusedAt:     RefusalSite(r.text(m, "refused_at", path)),
+		RefusedRow:    r.optU64(m, "refused_row", path),
+		Transformed:   r.transforms(m, "transformed", path),
+		UnknownFields: r.nameList(m, "unknown_fields", path),
+		VerdictCode:   r.i32(m, "verdict_code", path),
+		VerdictReason: r.text(m, "verdict_reason", path),
+		VerdictErr:    r.bytes(m, "verdict_err", path),
 	}
 	if arr := r.array(r.field(m, "cols"), path+".cols"); arr != nil {
 		for i, e := range arr {
@@ -568,18 +613,23 @@ func decodeBatchGeneric(raw []byte, payload []byte) (BatchResult, error) {
 	r := &reader{doc: "batch"}
 	m := r.object(v, "$")
 	res := BatchResult{
-		Outcome:        parseBatchOutcome(r.text(m, "outcome", "$")),
-		ErrCode:        r.i32(m, "code", "$"),
-		ErrMsg:         r.bytes(m, "err", "$"),
-		RowsRead:       r.u64(m, "rows_read", "$"),
-		RowsSkipped:    r.u64(m, "rows_skipped", "$"),
-		Transformed:    r.transforms(m, "transformed", "$"),
-		Payload:        payload,
-		Spans:          r.spans(m, "row_spans", "$"),
-		ExportDeclined: r.bytes(m, "export_declined", "$"),
-		RowsPassed:     r.u64(m, "rows_passed", "$"),
-		RowsCut:        r.u64(m, "rows_cut", "$"),
-		Unconsumed:     r.spans(m, "unconsumed", "$"),
+		Outcome:              parseBatchOutcome(r.text(m, "outcome", "$")),
+		ErrCode:              r.i32(m, "code", "$"),
+		ErrMsg:               r.bytes(m, "err", "$"),
+		Reason:               r.text(m, "reason", "$"),
+		RefusedAt:            RefusalSite(r.text(m, "refused_at", "$")),
+		RefusedRow:           r.optU64(m, "refused_row", "$"),
+		RowsRead:             r.u64(m, "rows_read", "$"),
+		RowsSkipped:          r.u64(m, "rows_skipped", "$"),
+		Transformed:          r.transforms(m, "transformed", "$"),
+		Payload:              payload,
+		Spans:                r.rowSpans(m, "row_spans", "$"),
+		ExportColumns:        r.nameList(m, "export_columns", "$"),
+		ExportDeclined:       r.bytes(m, "export_declined", "$"),
+		ExportDeclinedReason: r.text(m, "export_declined_reason", "$"),
+		RowsPassed:           r.u64(m, "rows_passed", "$"),
+		RowsCut:              r.u64(m, "rows_cut", "$"),
+		Unconsumed:           r.spans(m, "unconsumed", "$"),
 		// The call's own declined settings, and what a merge of the part would
 		// do (ABI v2): both absent on a document that predates them.
 		UnsupportedSettings: r.nameList(m, "unsupported_settings", "$"),
@@ -660,6 +710,9 @@ func decodeFilterResult(raw []byte) (FilterResult, error) {
 		Outcome:             parseFilterOutcome(r.text(m, "outcome", "$")),
 		ErrCode:             r.i32(m, "code", "$"),
 		ErrMsg:              r.bytes(m, "err", "$"),
+		Reason:              r.text(m, "reason", "$"),
+		RefusedAt:           RefusalSite(r.text(m, "refused_at", "$")),
+		RefusedRow:          r.optU64(m, "refused_row", "$"),
 		RowsRead:            r.u64(m, "rows_read", "$"),
 		UnsupportedSettings: r.nameList(m, "unsupported_settings", "$"),
 	}
@@ -674,9 +727,10 @@ func decodeFilterResult(raw []byte) (FilterResult, error) {
 				break
 			}
 			res.Errors = append(res.Errors, FilterRowError{
-				Row:  r.int(em, "row", p),
-				Code: r.i32(em, "code", p),
-				Msg:  r.bytes(em, "err", p),
+				Row:    r.int(em, "row", p),
+				Code:   r.i32(em, "code", p),
+				Reason: r.text(em, "reason", p),
+				Msg:    r.bytes(em, "err", p),
 			})
 		}
 	}
@@ -705,9 +759,17 @@ func decodeSchemaDescription(raw []byte) (SchemaDescription, error) {
 				Type:        r.bytes(cm, "type", p),
 				DefaultKind: kind,
 				DefaultExpr: r.bytes(cm, "default_expression", p),
+				// Reserved members: absent until a build reports them. An unlisted
+				// default_support is its unknown(n), kept (r3).
+				DefaultSupport:       DefaultSupport(r.text(cm, "default_support", p)),
+				DefaultSupportReason: r.text(cm, "default_support_reason", p),
+				Reads:                r.nameList(cm, "reads", p),
 			})
 		}
 	}
+	// Present only for a schema compiled in the load posture; an unlisted
+	// posture is its unknown(n), kept (r3).
+	res.Posture = Posture(r.text(m, "posture", "$"))
 	// Over every layer known at schema compile, with or without a server.
 	res.FilterDeclinedSettings = r.declinedSettings(m, "filter_declined_settings", "$")
 	// Both are absent on a schema compiled without a server, so that document

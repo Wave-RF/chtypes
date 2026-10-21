@@ -86,7 +86,7 @@ def test_r2_unknown_members_are_ignored(open_variant) -> None:
     entry0 = row.transformed[0]
     assert (entry0.column, entry0.input, entry0.stored) == (b"s", b"1", b"2")
     assert entry0.reason == Reason.VALUE_CHANGED and entry0.lossy is True and entry0.row == 0
-    assert row.unknown_fields == (b"u",) and row.unsupported_settings == (b"st",)
+    assert row.unknown_fields == (b"u",)
 
     batch = schema.rows(JSON, b'{"x":1}', export=JSON)
     assert batch.outcome is Outcome.ACCEPTED and batch.rows_read == 1

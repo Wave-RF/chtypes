@@ -384,6 +384,17 @@ def render_decls(model: Model) -> str:
     typed_wrappers = _typed_wrappers(model)
     handle_class_dict = _dict_block([(_lit(h), cls) for h, cls in handle_classes.items()])
     cross_check = _cross_check_literal(model)
+    # A description that declares chs_error_reason (ABI v2) has every call error
+    # carry it; one that does not (ABI v1) emits the layer unchanged.
+    has_reason = any(fn.name == "chs_error_reason" for fn in model.functions)
+    info_reason_field = "\n    reason: bytes = b\"\"" if has_reason else ""
+    info_reason_read = (
+        '\n    reason = _read_buf(api, api._raw["chs_error_reason"](err_ptr))' if has_reason else ""
+    )
+    info_reason_arg = "\n        reason=reason," if has_reason else ""
+    raise_reason_arg = (
+        '\n            reason=info.reason.decode("ascii", "replace") if info else "",' if has_reason else ""
+    )
 
     handle_class_defs = "\n\n\n".join(
         f'class {cls}(Handle):\n    """A `{h}` the library owns the free function for."""'
@@ -639,7 +650,7 @@ class Api:
             info.ch_code if info else 0,
             info.ch_name.decode("ascii", "replace") if info else "",
             message,
-            info.column if info else b"",
+            info.column if info else b"",{raise_reason_arg}
         )
 
 {typed_wrappers}
@@ -675,7 +686,7 @@ class ErrorInfo:
     ch_code: int
     ch_name: bytes
     message: bytes
-    column: bytes
+    column: bytes{info_reason_field}
 
 
 @dataclass
@@ -736,14 +747,14 @@ def _decode_error(api: Api, err_ptr: int) -> ErrorInfo:
     ch_code = api._raw["chs_error_ch_code"](err_ptr)
     ch_name = _read_buf(api, api._raw["chs_error_ch_name"](err_ptr))
     message = _read_buf(api, api._raw["chs_error_message"](err_ptr))
-    column = _read_buf(api, api._raw["chs_error_column"](err_ptr))
+    column = _read_buf(api, api._raw["chs_error_column"](err_ptr)){info_reason_read}
     api._raw["chs_error_free"](err_ptr)
     return ErrorInfo(
         status=STATUS_BY_VALUE.get(status_val, f"UNKNOWN:{{status_val}}"),
         ch_code=ch_code,
         ch_name=ch_name,
         message=message,
-        column=column,
+        column=column,{info_reason_arg}
     )
 
 
@@ -1088,6 +1099,9 @@ _PY_VOCAB = {
     "merge_reason": "MergeReason",
     "declined_tier": "DeclinedTier",
     "declined_layer": "DeclinedLayer",
+    "posture": "Posture",
+    "refusal_site": "RefusalSite",
+    "default_support": "DefaultSupport",
 }
 
 _KNOWN_PROPERTY = (
@@ -1349,6 +1363,40 @@ def render_vocab_v2(model: Model) -> str:
     parts.append(
         _str_enum_v2(
             model,
+            "Posture",
+            "posture",
+            "How a schema's statement was compiled: `create`, as a server's CREATE TABLE,\n"
+            "    or `load`, as a server loads the stored definition of a table it holds.",
+        )
+    )
+    parts.append("")
+    parts.append("")
+    parts.append(
+        _str_enum_v2(
+            model,
+            "RefusalSite",
+            "refusal_site",
+            "Where a batch or filter document's refusal sits: `call` (the call, its settings or its\n"
+            "    column list), `body_read` (the body outside any row: a header, the framing), `row` (one\n"
+            "    row, `refused_row`) or `body_step` (a whole-body step).",
+        )
+    )
+    parts.append("")
+    parts.append("")
+    parts.append(
+        _str_enum_v2(
+            model,
+            "DefaultSupport",
+            "default_support",
+            "What this build does with a column's DEFAULT, as `schema_description` reports it per\n"
+            "    column: `computed`, `generated`, `deferred` or `declined` (with a reason).",
+        )
+    )
+    parts.append("")
+    parts.append("")
+    parts.append(
+        _str_enum_v2(
+            model,
             "DiscoverQueryParam",
             "discover_query_param",
             "A query parameter of the SQL `discover_query` returns, which the caller binds\n"
@@ -1396,10 +1444,17 @@ def render_vocab_v2(model: Model) -> str:
     parts.append("")
     parts.append("    @staticmethod")
     parts.append("    def is_stored(source: str) -> bool:")
-    parts.append('        """The description\'s `is_stored` fact for `source`. The description does not yet')
-    parts.append('        say what an unknown(n) source reports (rule r3, "Facts without a fallback");')
-    parts.append('        until it does, an unlisted source is not stored."""')
-    parts.append("        return _SOURCE_IS_STORED.get(source, False)")
+    src_fb = model.enums["value_src"].fallback
+    if src_fb is None:
+        parts.append('        """The description\'s `is_stored` fact for `source`. The description does not yet')
+        parts.append('        say what an unknown(n) source reports (rule r3, "Facts without a fallback");')
+        parts.append('        until it does, an unlisted source is not stored."""')
+        parts.append("        return _SOURCE_IS_STORED.get(source, False)")
+    else:
+        src_fb_stored = next(f["is_stored"] for _, v, f in sources if v == src_fb)
+        parts.append('        """The description\'s `is_stored` fact for `source`; an unknown(n) source')
+        parts.append(f'        reports its fallback\'s (`{src_fb}`), as rule r3 says."""')
+        parts.append(f"        return _SOURCE_IS_STORED.get(source, {_lit(src_fb_stored)})")
     parts.append("")
     parts.append("")
     parts.append(
@@ -1420,6 +1475,12 @@ def render_vocab_v2(model: Model) -> str:
         f"# `chs_preview_batch`'s `export_format` for no export (`CHS_EXPORT_NONE`).\nEXPORT_NONE: Final = {c['CHS_EXPORT_NONE'].value}"
     )
     parts.append("")
+    if "CHS_CODE_DECLINED" in c:
+        parts.append(
+            "# The code a declined row, outcome or verdict carries (`CHS_CODE_DECLINED`), outside\n"
+            f"# ClickHouse's code table.\nCODE_DECLINED: Final = {c['CHS_CODE_DECLINED'].value}"
+        )
+        parts.append("")
     parts.append("# Every enum the description defines, by its own name, and the Python type that")
     parts.append("# spells it: rule r3's tests reach every one from here, so a new enum is covered")
     parts.append("# without a hand-kept list.")

@@ -22,13 +22,13 @@ func TestCallErrorClasses(t *testing.T) {
 		{"CHS_INTERNAL", "*chtypes.InternalError", StatusInternal},
 	}
 	for _, c := range cases {
-		err := callError(&abi2.CallError{Status: c.status, ChCode: 53, ChName: "TYPE_MISMATCH", Message: "m\xff", Column: "c\x00"})
+		err := callError(&abi2.CallError{Status: c.status, ChCode: 53, ChName: "TYPE_MISMATCH", Message: "m\xff", Column: "c\x00", Reason: "option-not-implemented"})
 		if got := fmt.Sprintf("%T", err); got != c.want {
 			t.Errorf("%s -> %s, want %s", c.status, got, c.want)
 		}
 		ce, ok := AsCallError(err)
-		if !ok || ce.Status != c.code || ce.ChCode != 53 || ce.ChName != "TYPE_MISMATCH" || ce.Message != "m\xff" || ce.Column != "c\x00" {
-			t.Errorf("%s: AsCallError = %+v, %v: the five fields are verbatim", c.status, ce, ok)
+		if !ok || ce.Status != c.code || ce.ChCode != 53 || ce.ChName != "TYPE_MISMATCH" || ce.Message != "m\xff" || ce.Column != "c\x00" || ce.Reason != "option-not-implemented" {
+			t.Errorf("%s: AsCallError = %+v, %v: the six fields are verbatim", c.status, ce, ok)
 		}
 		// Wrapped, still reachable.
 		if _, ok := AsCallError(fmt.Errorf("wrapped: %w", err)); !ok {

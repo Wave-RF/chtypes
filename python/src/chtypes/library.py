@@ -13,20 +13,27 @@ from __future__ import annotations
 import contextlib
 import os
 import threading
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 from types import TracebackType
 
 from . import _decode, _setup
 from ._abi2 import _decls, _loader
-from ._abi2._vocab import EXPORT_NONE, DocFlags, Format
+from ._abi2._vocab import EXPORT_NONE, DocFlags, Format, Posture
 from ._guard import CloseGuard
 from ._input import (
     BytesIn,
+    ColumnDefault,
+    DeferDefaults,
+    ParamEncoding,
     ServerProfile,
     Settings,
+    VerdictBasis,
     body_bytes,
     columns_json,
+    filter_options_json,
+    insert_options_json,
+    schema_options_json,
     server_profile_json,
     settings_json,
     string_map_json,
@@ -197,14 +204,30 @@ class Filter(_Handle):
         *,
         settings: Settings | None = None,
         session_timezone: str | None = None,
+        columns: Sequence[BytesIn] | None = None,
+        insertable_columns: Sequence[BytesIn] | None = None,
+        column_defaults: Sequence[ColumnDefault] | None = None,
+        verdict_basis: VerdictBasis | str | None = None,
+        defer_defaults: DeferDefaults | str | None = None,
+        insert_options_extra: Mapping[str, str] | None = None,
     ) -> FilterResult:
         """Evaluate over a body. `settings` and `session_timezone` are the body's
-        PARSE settings only: the filter's own zone was fixed when it compiled."""
+        PARSE settings only: the filter's own zone was fixed when it compiled.
+        `columns` is the INSERT column list and the keywords after it the
+        `insert_options` members, as for `Schema.rows`."""
         payload = body_bytes(body)
         settings_bytes = settings_json(settings, session_timezone)
+        columns_bytes = columns_json(columns)
+        options = insert_options_json(
+            insertable_columns=insertable_columns,
+            column_defaults=column_defaults,
+            verdict_basis=verdict_basis,
+            defer_defaults=defer_defaults,
+            insert_options_extra=insert_options_extra,
+        )
         with _hold(self._guard):
             raw = self._library._api.filter_eval_body(
-                self._handle, int(format), payload, settings_bytes
+                self._handle, int(format), payload, settings_bytes, columns_bytes, options
             )
         return _decode.decode_filter_result(raw)
 
@@ -239,14 +262,30 @@ class Schema(_Handle):
         settings: Settings | None = None,
         session_timezone: str | None = None,
         columns: Sequence[BytesIn] | None = None,
+        insertable_columns: Sequence[BytesIn] | None = None,
+        column_defaults: Sequence[ColumnDefault] | None = None,
+        verdict_basis: VerdictBasis | str | None = None,
+        defer_defaults: DeferDefaults | str | None = None,
+        insert_options_extra: Mapping[str, str] | None = None,
     ) -> RowResult:
-        """One row, as a server's INSERT would validate and coerce it."""
+        """One row, as a server's INSERT would validate and coerce it. The keywords
+        after `columns` are the `insert_options` members (rule r1), passed through
+        unvalidated: `insertable_columns`, `column_defaults`, `verdict_basis`,
+        `defer_defaults`, and `insert_options_extra` (JSON text by key) for a
+        member this binding has no name for."""
         payload = body_bytes(body)
         settings_bytes = settings_json(settings, session_timezone)
         columns_bytes = columns_json(columns)
+        options = insert_options_json(
+            insertable_columns=insertable_columns,
+            column_defaults=column_defaults,
+            verdict_basis=verdict_basis,
+            defer_defaults=defer_defaults,
+            insert_options_extra=insert_options_extra,
+        )
         with _hold(self._guard):
             raw = self._library._api.preview_row(
-                self._handle, int(format), payload, settings_bytes, columns_bytes
+                self._handle, int(format), payload, settings_bytes, columns_bytes, options
             )
         return _decode.decode_row_document(raw)
 
@@ -258,6 +297,11 @@ class Schema(_Handle):
         settings: Settings | None = None,
         session_timezone: str | None = None,
         columns: Sequence[BytesIn] | None = None,
+        insertable_columns: Sequence[BytesIn] | None = None,
+        column_defaults: Sequence[ColumnDefault] | None = None,
+        verdict_basis: VerdictBasis | str | None = None,
+        defer_defaults: DeferDefaults | str | None = None,
+        insert_options_extra: Mapping[str, str] | None = None,
         row_filter: Filter | None = None,
         export: Format | int | None = None,
         doc_flags: DocFlags = DocFlags.ALL,
@@ -268,6 +312,13 @@ class Schema(_Handle):
         payload = body_bytes(body)
         settings_bytes = settings_json(settings, session_timezone)
         columns_bytes = columns_json(columns)
+        options = insert_options_json(
+            insertable_columns=insertable_columns,
+            column_defaults=column_defaults,
+            verdict_basis=verdict_basis,
+            defer_defaults=defer_defaults,
+            insert_options_extra=insert_options_extra,
+        )
         if row_filter is not None and not isinstance(row_filter, Filter):
             raise TypeError(f"row_filter must be a Filter, not {type(row_filter).__name__}")
         guards = [self._guard] + ([] if row_filter is None else [row_filter._guard])
@@ -281,6 +332,7 @@ class Schema(_Handle):
                 None if row_filter is None else row_filter._handle,
                 EXPORT_NONE if export is None else int(export),
                 int(doc_flags),
+                options,
             )
         return _decode.decode_batch(raw, exported if export is not None else None)
 
@@ -291,16 +343,24 @@ class Schema(_Handle):
         params: Settings | None = None,
         settings: Settings | None = None,
         session_timezone: str | None = None,
+        param_encoding: ParamEncoding | str | None = None,
+        filter_options_extra: Mapping[str, str] | None = None,
     ) -> Filter:
         """Compile a boolean expression over this schema's columns. The filter's
         zone is its own, fixed here: its WHERE runs in the session this call's
-        `session_timezone` (or `settings`) names, on every evaluation."""
+        `session_timezone` (or `settings`) names, on every evaluation.
+        `param_encoding` and `filter_options_extra` (JSON text by key, for a
+        member this binding has no name for) are the `filter_options` members,
+        passed through unvalidated (rule r1)."""
         expr_bytes = to_bytes(expr, "expr")
         params_bytes = string_map_json(params, "query parameters")
         settings_bytes = settings_json(settings, session_timezone)
+        options = filter_options_json(
+            param_encoding=param_encoding, filter_options_extra=filter_options_extra
+        )
         with _hold(self._guard):
             handle = self._library._api.filter_create(
-                self._handle, expr_bytes, params_bytes, settings_bytes
+                self._handle, expr_bytes, params_bytes, settings_bytes, options
             )
         return Filter(self._library, handle)
 
@@ -312,14 +372,27 @@ class Schema(_Handle):
         settings: Settings | None = None,
         session_timezone: str | None = None,
         columns: Sequence[BytesIn] | None = None,
+        insertable_columns: Sequence[BytesIn] | None = None,
+        column_defaults: Sequence[ColumnDefault] | None = None,
+        verdict_basis: VerdictBasis | str | None = None,
+        defer_defaults: DeferDefaults | str | None = None,
+        insert_options_extra: Mapping[str, str] | None = None,
     ) -> Block:
-        """Parse a body once, for evaluating many filters over it."""
+        """Parse a body once, for evaluating many filters over it. The keywords
+        after `columns` are the `insert_options` members, as for `row`."""
         payload = body_bytes(body)
         settings_bytes = settings_json(settings, session_timezone)
         columns_bytes = columns_json(columns)
+        options = insert_options_json(
+            insertable_columns=insertable_columns,
+            column_defaults=column_defaults,
+            verdict_basis=verdict_basis,
+            defer_defaults=defer_defaults,
+            insert_options_extra=insert_options_extra,
+        )
         with _hold(self._guard):
             handle = self._library._api.block_create(
-                self._handle, int(format), payload, settings_bytes, columns_bytes
+                self._handle, int(format), payload, settings_bytes, columns_bytes, options
             )
         return Block(self._library, handle)
 
@@ -421,6 +494,8 @@ class Library:
         settings: Settings | None = None,
         session_timezone: str | None = None,
         server: Server | None = None,
+        posture: Posture | str | None = None,
+        schema_options_extra: Mapping[str, str] | None = None,
     ) -> Schema:
         """Compile exactly one `CREATE TABLE` statement. `settings` is the profile;
         a compiled type always takes the image zone, never the profile's.
@@ -431,17 +506,22 @@ class Library:
         replica name expand the server's macros. A closed server is a
         `UsageError`, raised before any call; a server from another library is
         that library's own refusal, also a `UsageError`. `None` is no server: the
-        schema is on the image's own server."""
+        schema is on the image's own server.
+
+        `posture` (`Posture.CREATE`, the default, or `Posture.LOAD`) and
+        `schema_options_extra` (JSON text by key, for a member this binding has no
+        name for) are the `schema_options` members, passed through unvalidated
+        (rule r1)."""
         statement = to_bytes(create_table, "create_table")
         settings_bytes = settings_json(settings, session_timezone)
         if server is not None and not isinstance(server, Server):
             raise TypeError(f"server must be a Server, not {type(server).__name__}")
-        # No schema option is defined yet: none, which the library reads as `{}`.
+        options = schema_options_json(posture=posture, schema_options_extra=schema_options_extra)
         # A closed server is refused here, before the call, because its freed
         # handle would cross as NULL and the library would compile on the
         # image's server instead of refusing.
         with _hold(*(() if server is None else (server._guard,))):
             handle = self._api.schema_create(
-                None if server is None else server._handle, statement, settings_bytes, None
+                None if server is None else server._handle, statement, settings_bytes, options
             )
         return Schema(self, handle)

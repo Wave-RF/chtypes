@@ -77,7 +77,7 @@ A bad **row** is a verdict, not an exception: `outcome` becomes `Outcome.REJECTE
 
 **`ctypes` releases the GIL for the whole of a foreign call**, so calls on compiled handles run in parallel across threads. The package takes no lock around a call; it keeps a close guard per handle and one setup guard.
 
-**The INSERT column list is a keyword-only `columns`** on `schema.row`, `schema.rows` and `schema.parse_block`: `schema.row(Format.JSON_EACH_ROW, body, columns=["id", "e"])`. `None` or an empty sequence is the no-list shape; a list makes the data supply exactly those columns, with a listed `EPHEMERAL` value read and in scope for the DEFAULTs that reference it but never stored.
+**The INSERT column list is a keyword-only `columns`** on `schema.row`, `schema.rows`, `schema.parse_block` and `filter.rows`: `schema.row(Format.JSON_EACH_ROW, body, columns=["id", "e"])`. `None` or an empty sequence is the no-list shape; a list makes the data supply exactly those columns, with a listed `EPHEMERAL` value read and in scope for the DEFAULTs that reference it but never stored.
 
 **Known gaps in 1.0** are listed, with workarounds, in [`docs/limitations.md`](https://github.com/wave-rf/chtypes/blob/main/docs/limitations.md#known-gaps-in-10).
 
