@@ -39,8 +39,8 @@ impl TrustedKey {
 /// `$CHTYPES_TRUSTED_KEYS` (comma-separated hex) if it is set, else the
 /// contract's key. An explicit list or the environment REPLACES the default;
 /// it never appends to it, and the fixture-only test key is trusted only when
-/// a list names it. Under the dev channel this build speaks
-/// (`super::channel`), the staging key alone, always: neither the list nor the
+/// a list names it. Under the dev channel (`super::channel`; test builds
+/// only), the staging key alone, always: neither the list nor the
 /// variable is honored (spec/abi-v2/docs.md, rule r6).
 pub fn trusted_keys(explicit: Option<&[String]>) -> Result<Vec<TrustedKey>> {
     let mut out = Vec::new();

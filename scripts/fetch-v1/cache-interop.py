@@ -5,7 +5,7 @@ r"""scripts/fetch-v1/cache-interop.py — a cache one binding writes, every bind
     scripts/fetch-v1/cache-interop.py --cli go=<cmd> --cli python=<cmd> --cli ts=<cmd> --cli rust=<cmd>
                                       [--other-user <name>] [--system-dir <a default system dir>] [--faults-as-self]
     scripts/fetch-v1/cache-interop.py --abi 2 --cli <binding>=<cmd> ... [--other-user <name>] [--coarse-clock]
-                                      [--system-dir <a v2-dev system dir>] [--faults-as-self] [--only-faults]
+                                      [--system-dir <a v2 system dir>] [--faults-as-self] [--only-faults]
                                       [--platform <os-arch>] [--processes N] [--rounds N] [--coarse-rounds N]
     scripts/fetch-v1/cache-interop.py --selftest
 
@@ -98,10 +98,11 @@ cross-uid table, writes the same to $GITHUB_STEP_SUMMARY when set, and exits
 nonzero if any cell fails. Without --other-user the cross-uid block is skipped
 LOUDLY, by name.
 
-ABI v2 MODE (`--abi 2`; public issue #511). A 2.0.0-dev CLI honors no source
-or trust override (spec/abi-v2/docs.md r6), so no fixture server can feed it:
-these rows drive the real, unmodified CLIs against the channel's real
-registry, the staging `chtypes/v2-dev` repository, as a user's install does,
+ABI v2 MODE (`--abi 2`; public issue #511). These rows drive the real,
+unmodified CLIs with no override, as a user's install does, so they read the
+channel's real registry: since the lock, the production `chtypes/v2`
+repository (a 2.0.0-dev CLI read the staging `chtypes/v2-dev` one and honored
+no override at all, spec/abi-v2/docs.md r6),
 with the real library (~300 MB unpacked) in every cell. What they are judged
 against never comes from a CLI: the channel (registry, cache subroot, record
 schema, key id, abi) is read from scripts/release-channel.sh, the one file
@@ -1235,9 +1236,9 @@ def host_platform() -> str | None:
 
 
 class V2Harness:
-    """Runs the ABI v2 CLIs: no CHTYPES_* variable reaches them (a dev CLI
-    honors no override anyway, rule r6), HOME is a scratch directory, and
-    every command names its cache explicitly."""
+    """Runs the ABI v2 CLIs: no CHTYPES_* variable reaches them, so each
+    speaks its channel's defaults, HOME is a scratch directory, and every
+    command names its cache explicitly."""
 
     def __init__(
         self, clis: dict[str, list[str]], work: Path, channel: Channel, platform: str, extra_env: dict[str, str] | None = None

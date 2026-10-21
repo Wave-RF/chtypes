@@ -11,11 +11,13 @@ and `prune` and the registry's in-use `hold` (§1, "In use"). Every other module
 (`_http`, `_oci`, `_referrers`, `_dsse`, `_unpack`, `_layout`,
 `_lock`, `_errors`) is a private implementation detail of `_ensure`.
 
-`_channel` says which fetch contract the process speaks: a 2.0.0-dev SDK speaks
-the ABI v2 dev channel (spec/abi-v2/docs.md, rules r5 and r6), the v1 contract
-narrowed to the staging base and key, with no override, no pinning, schema-2
-records and a `v2-dev` cache. The v1 contract stays here, reachable only from a
-test run, because the fetch-v1 conformance cases specify it.
+`_channel` says which fetch contract the process speaks: every non-test process
+speaks the production generation-2 channel (docs/guides/fetch-v1.md,
+"Generation 2 after the lock"). The ABI v2 dev channel a 2.0.0-dev SDK spoke
+(spec/abi-v2/docs.md, rules r5 and r6: the v1 contract narrowed to the staging
+base and key, with no override, no pinning, schema-2 records and a `v2-dev`
+cache) and the v1 contract stay here, reachable only from a test run, because
+the conformance cases specify them.
 """
 
 from __future__ import annotations

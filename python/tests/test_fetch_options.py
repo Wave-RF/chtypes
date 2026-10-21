@@ -2,14 +2,29 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
+
+import pytest
 
 import chtypes
 from chtypes._ocifetch import _channel
 from chtypes._ocifetch._layout import search_roots
 
-# These run under the dev channel, as a user's process does: an explicit cache
-# is read through its v2-dev subroot (spec/abi-v2/docs.md, rule r5).
+# These run under the dev channel, as a 2.0.0-dev SDK did: an explicit cache
+# is read through its v2-dev subroot (spec/abi-v2/docs.md, rule r5). Since the
+# lock a process speaks the production channel by default, so they select it.
+
+
+@pytest.fixture(autouse=True)
+def _dev_channel() -> Iterator[None]:
+    """These tests exercise the dev channel's own rules, which a 2.0.0-dev SDK
+    spoke by default; since the lock they select it explicitly."""
+    restore = _channel.use_dev_channel_for_tests()
+    try:
+        yield
+    finally:
+        restore()
 
 
 def test_to_options_is_not_public() -> None:

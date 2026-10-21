@@ -67,17 +67,19 @@ else
   LINE="$(newest_published_line || true)"
   [ -n "$LINE" ] || LINE=26.8
 fi
-# A binding that speaks ABI v2 (spec/binding-majors.json; the 2.0.0-dev
-# bindings) fetches only from the staging dev channel and caches under its own
-# v2-dev root (spec/abi-v2/docs.md, rules r5 and r6): its line, without
-# $CHPLAY_LINE, is the newest that channel publishes, and $LINE when it lists
-# none (so the fetch then fails loudly, naming the line it could not find).
-DEV_BASE="https://registry-staging.wavehouse.dev/chtypes/v2-dev"
+# A binding that speaks ABI v2 (spec/binding-majors.json) fetches from the
+# production generation-2 channel and caches under its own v2 root
+# (docs/guides/fetch-v1.md, "Generation 2 after the lock"): its line, without
+# $CHPLAY_LINE, is the newest that channel publishes (its default base, read
+# from spec/fetch-v1/constants.json, unless $CHTYPES_ARTIFACTS_URL names
+# another, which that channel honors), and $LINE when it lists none (so the
+# fetch then fails loudly, naming the line it could not find).
+V2_BASE="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["prod_v2"]["default_bases"][0])' "$HERE/../spec/fetch-v1/constants.json" 2>/dev/null || true)"
 major_of() { python3 "$HERE/../scripts/abi-v1/majors.py" get "$1" 2>/dev/null || echo 1; }
 line_for() {
   local line=""
-  if [ -z "${CHPLAY_LINE:-}" ] && [ "$(major_of "$1")" != "1" ]; then
-    line="$(CHTYPES_ARTIFACTS_URL="$DEV_BASE" newest_published_line || true)"
+  if [ -z "${CHPLAY_LINE:-}" ] && [ "$(major_of "$1")" != "1" ] && [ -n "${CHTYPES_ARTIFACTS_URL:-$V2_BASE}" ]; then
+    line="$(CHTYPES_ARTIFACTS_URL="${CHTYPES_ARTIFACTS_URL:-$V2_BASE}" newest_published_line || true)"
   fi
   printf '%s\n' "${line:-$LINE}"
 }

@@ -1,5 +1,5 @@
 //! ABI v2's Rust FFI layer (spec/binding-majors.json gives rust ABI v2 on this
-//! branch: the 2.0.0-dev binding, public issue #511).
+//! branch: the ABI v2 binding, public issue #511).
 //!
 //! `decls` and `invoke_gen` are generated from `spec/abi-v2/abi.json` by
 //! `scripts/abi-v1/gen.py --major 2` (`scripts/abi-v1/emit/rust.py` — see that

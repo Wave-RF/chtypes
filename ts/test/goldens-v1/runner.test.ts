@@ -31,7 +31,8 @@
  *   4. For every CHS_OK document the child runs the binding's decoder for that document type (the same
  *      function the public `Schema` methods call) and records `decoded_ok`.
  *
- * THE ABI v2 DEV CHANNEL. This is the 2.0.0-dev binding: its fetch layer fetches only from the staging dev
+ * THE ABI v2 DEV CHANNEL. Since the lock the binding's default is the production channel, but this runner
+ * selects the dev channel itself (`useDevChannelForTests`) and fetches only from the staging dev
  * channel under the staging key (`spec/abi-v2/docs.md`, rule r6), whatever `CHTYPES_GOLDENS_REGISTRY_BASE`
  * names (that base is ignored, with one warning). Its goldens are the v2-dev release's referrers, signed with
  * the staging key. The first v2-dev builds carry none: when the release is published but has no goldens
@@ -67,6 +68,11 @@ import {
   hostPlatformKey,
   type PlatformKey,
 } from '../../src/ocifetch/index.js';
+import { useDevChannelForTests } from '../../src/ocifetch/channel.js';
+
+// The registry runs still fetch from the dev channel (production has no builds yet; a follow-up moves
+// this): since the lock the default is the production channel, so this file selects the dev one itself.
+useDevChannelForTests();
 
 // ------------------------------------------------------------------ the document
 

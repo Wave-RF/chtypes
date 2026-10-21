@@ -59,8 +59,8 @@ func lineLess(a, b string) bool {
 }
 
 // CacheRoot is the layout directory a call with opts would use: CacheDir,
-// else CHTYPES_CACHE, each through the dev channel's v2-dev subroot (rule r5),
-// else the per-user default (§1).
+// else CHTYPES_CACHE, each through the active contract's subroot (v2, or
+// v2-dev under the dev channel; rule r5), else the per-user default (§1).
 func CacheRoot(opts *Options) (string, error) {
 	ro, err := resolveOptions(opts)
 	if err != nil {

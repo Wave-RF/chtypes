@@ -1,6 +1,11 @@
-//! The fetch contract this build speaks. A 2.0.0-dev SDK speaks the ABI v2 dev
-//! channel (spec/abi-v2/docs.md, rules r5 and r6), which is the v1 fetch
-//! contract (docs/guides/fetch-v1.md) narrowed in five ways:
+//! The fetch contract this build speaks. Every non-test build of this crate
+//! speaks the production generation-2 channel (`PROD_V2_CHANNEL`;
+//! docs/guides/fetch-v1.md, "Generation 2 after the lock"): the v1 fetch
+//! contract with v2 values. A 2.0.0-dev SDK spoke the ABI v2 dev channel
+//! (spec/abi-v2/docs.md, rules r5 and r6), which stays here, reachable only
+//! from a test build ([`use_dev_channel_for_tests`],
+//! [`allow_overrides_for_tests`]), and is the v1 fetch contract
+//! (docs/guides/fetch-v1.md) narrowed in five ways:
 //!
 //! * it fetches ONLY from [`DEV_CHANNEL_BASE`] and trusts ONLY the staging key
 //!   ([`DEV_KEY_HEX`], id [`DEV_KEY_ID`]); the release key is not in its trust
@@ -79,7 +84,7 @@ and a superseded one expires after 14 days, so nothing may pin one (spec/abi-v2/
 /// One fetch contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Channel {
-    /// `v2-dev`, or `v1` (test builds only).
+    /// `v2` (production), or, from a test build only, `v2-dev` or `v1`.
     pub name: &'static str,
     /// A predicate's `abi`, a lock's `abi`, and `Resolved::abi_generation`.
     pub abi: u32,
@@ -111,8 +116,8 @@ pub struct Channel {
     pub revocation: bool,
 }
 
-/// What a 2.0.0-dev SDK speaks, and what every non-test build of this crate
-/// speaks.
+/// What a 2.0.0-dev SDK speaks. Since the lock only a test build selects it
+/// ([`use_dev_channel_for_tests`], [`allow_overrides_for_tests`]).
 pub const DEV_CHANNEL: Channel = Channel {
     name: "v2-dev",
     abi: DEV_ABI_GENERATION,
@@ -153,10 +158,8 @@ const FETCH_V1_CHANNEL: Channel = Channel {
 /// The production generation-2 channel a 2.0.0 SDK speaks after the lock: the
 /// v1 contract with v2 values, from the generated constants
 /// (docs/guides/fetch-v1.md, "Generation 2 after the lock"). It trusts the
-/// release key, honors every override and pin, and has no alias step. NOT the
-/// default: only [`use_prod_v2_for_tests`] selects it, until the lock change
-/// makes it [`active`]'s fallback.
-#[cfg(test)]
+/// release key, honors every override and pin, and has no alias step. It is
+/// [`active`]'s fallback: what every non-test build speaks since the lock.
 const PROD_V2_CHANNEL: Channel = Channel {
     name: constants::PROD_V2_NAME,
     abi: constants::PROD_V2_ABI_GENERATION,
@@ -182,10 +185,10 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 
-/// The contract this thread fetches under: the dev channel, unless a test
-/// selected another.
+/// The contract this thread fetches under: the production generation-2
+/// channel, unless a test selected another.
 pub fn active() -> Channel {
-    test_channel().unwrap_or(DEV_CHANNEL)
+    test_channel().unwrap_or(PROD_V2_CHANNEL)
 }
 
 #[cfg(test)]
@@ -363,7 +366,7 @@ fn ahead_message(own: &str, predicate: &serde_json::Value) -> String {
     }
 }
 
-/// Make this TEST thread speak the dev channel exactly as a non-test build does
+/// Make this TEST thread speak the dev channel exactly as a 2.0.0-dev SDK did
 /// (undoing either seam above, for a test of the dev channel itself).
 #[cfg(test)]
 pub fn use_dev_channel_for_tests() -> ChannelGuard {
