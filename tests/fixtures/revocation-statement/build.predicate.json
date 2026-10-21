@@ -1,0 +1,25 @@
+{
+  "_comment": "The build every case revokes: its platform manifest and layer digests, and its own signed predicate (artifact/attestation.bundle.json, signed by key.pub.hex). Generated; never edit by hand.",
+  "repository": "chtypes/v2-dev",
+  "version": "26.8.15.10",
+  "platform": "linux/amd64",
+  "manifest": "sha256:60e3413417d490bfb7194461eadb5bfd42164280317101263984789e88d0ce65",
+  "layer": "sha256:5861b21623793901fb6aa32eee77c80855f96fca2c8f07a87b2f6e1d3655ad44",
+  "predicate": {
+    "abi": 2,
+    "abi_fingerprint": "sha256:f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0",
+    "clickhouse_version": "26.8.15.10",
+    "channel": "lts",
+    "clickhouse_minor": "26.8",
+    "clickhouse_commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "os": "linux",
+    "arch": "amd64",
+    "build": "20260101.000000",
+    "core_commit": "cccccccccccccccccccccccccccccccccccccccc",
+    "inputs_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "library": "libchtypes.so",
+    "library_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "library_bytes": 1234,
+    "glibc_floor": "2.17"
+  }
+}

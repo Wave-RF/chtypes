@@ -8,6 +8,7 @@ The four bindings in this repository are released together and give one answer, 
 
 ### Added
 
+- Tests: the shared revocation-statement table (`tests/fixtures/revocation-statement/cases.json`) runs against `verifyRevocation` and `checkInstalled`: `superseded_by` must be a string (`""` = no fix), and the first verifying revocation in a listing wins. No behavior changed.
 - `columnDefaults` is covered by unit tests (ABI v2): the exact `insert_options` JSON for a UTF-8 value, a non-UTF-8 value (`value_b64`), an empty value (sent as `""`) and two entries in order. The decode of `default_override` was already tested. The batches guide gains a usage section. No behavior changed.
 - `CODE_DECLINED` (ABI v2, -2): the code a declined row, outcome or verdict carries, generated from the description and exported from the package, as `bindings-v1.md` section 3 promises.
 - `registry.fetch(request): Promise<Resolved>`, the fetch-only call (#492): it resolves, fetches, verifies and installs the build a request names into the cache, as `chtypes fetch` does, and opens nothing (no library is loaded, the process setup is untouched, nothing appears in `libraries()`). It honors the registry's fetch options, its errors are the fetch codes (a refused spelling is a `UsageError`, as for `for`), and it shares one fetch with a concurrent open or `fetch` of the same request: an open that misses the cache now waits on the same fetch.
