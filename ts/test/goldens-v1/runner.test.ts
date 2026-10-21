@@ -142,6 +142,9 @@ const configured = overrideMode || fetchMode;
 const TS_ROOT = path.resolve(import.meta.dirname, '../..');
 const SELF = 'test/goldens-v1/runner.test.ts';
 
+/** The options document the runner sends: none (length 0, which the library reads as `{}`). */
+const NO_OPTIONS = Buffer.alloc(0);
+
 function b64(s: string): Buffer {
   return Buffer.from(s, 'base64');
 }
@@ -207,7 +210,7 @@ function runCase(image: LoadedImage, setup: string, platform: string, c: GoldenC
   let schema: SchemaHandle | undefined;
   let filter: FilterHandle | undefined;
   try {
-    const created = attempt(() => calls.schemaCreate(null, b64(c.schema.create_table_b64), b64(c.schema.settings_b64), Buffer.alloc(0)));
+    const created = attempt(() => calls.schemaCreate(null, b64(c.schema.create_table_b64), b64(c.schema.settings_b64), NO_OPTIONS));
     if (!created.ok) return { id: c.id, setup, result: 'ran', at: 'schema_create', status: created.status, error: created.error, decoded_ok: null };
     schema = created.value;
 
@@ -225,7 +228,7 @@ function runCase(image: LoadedImage, setup: string, platform: string, c: GoldenC
     const columns = b64(body.columns_b64 ?? '');
 
     if (c.call === 'preview_row') {
-      const row = attempt(() => calls.previewRow(schema as SchemaHandle, body.format, bodyBytes, settings, columns));
+      const row = attempt(() => calls.previewRow(schema as SchemaHandle, body.format, bodyBytes, settings, columns, NO_OPTIONS));
       if (!row.ok) return { id: c.id, setup, result: 'ran', at: 'call', status: row.status, error: row.error, decoded_ok: null };
       const doc = row.value;
       return { id: c.id, setup, result: 'ran', at: 'call', status: 'CHS_OK', document_b64: enc(doc), decoded_ok: decodes(() => decodeRow(doc)) };
@@ -234,7 +237,7 @@ function runCase(image: LoadedImage, setup: string, platform: string, c: GoldenC
     if (c.call === 'preview_batch') {
       const exportFormat = body.export_format ?? -1;
       const batch = attempt(() =>
-        calls.previewBatch(schema as SchemaHandle, body.format, bodyBytes, settings, columns, null, exportFormat, body.doc_flags ?? 7),
+        calls.previewBatch(schema as SchemaHandle, body.format, bodyBytes, settings, columns, null, exportFormat, body.doc_flags ?? 7, NO_OPTIONS),
       );
       if (!batch.ok) return { id: c.id, setup, result: 'ran', at: 'call', status: batch.status, error: batch.error, decoded_ok: null };
       const { out, outExport } = batch.value;
@@ -254,10 +257,10 @@ function runCase(image: LoadedImage, setup: string, platform: string, c: GoldenC
     // filter_eval_body: chs_filter_create, then chs_filter_eval_body.
     const f = c.filter;
     if (f === undefined) throw new Error(`goldens runner: case ${c.id} (filter_eval_body) carries no filter`);
-    const made = attempt(() => calls.filterCreate(schema as SchemaHandle, b64(f.expr_b64), b64(f.query_params_b64), b64(f.settings_b64)));
+    const made = attempt(() => calls.filterCreate(schema as SchemaHandle, b64(f.expr_b64), b64(f.query_params_b64), b64(f.settings_b64), NO_OPTIONS));
     if (!made.ok) return { id: c.id, setup, result: 'ran', at: 'filter_create', status: made.status, error: made.error, decoded_ok: null };
     filter = made.value;
-    const evald = attempt(() => calls.filterEvalBody(filter as FilterHandle, body.format, bodyBytes, settings));
+    const evald = attempt(() => calls.filterEvalBody(filter as FilterHandle, body.format, bodyBytes, settings, columns, NO_OPTIONS));
     if (!evald.ok) return { id: c.id, setup, result: 'ran', at: 'call', status: evald.status, error: evald.error, decoded_ok: null };
     const doc = evald.value;
     return { id: c.id, setup, result: 'ran', at: 'call', status: 'CHS_OK', document_b64: enc(doc), decoded_ok: decodes(() => decodeFilterResult(doc)) };

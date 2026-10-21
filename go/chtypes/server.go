@@ -42,25 +42,31 @@ type ServerProfile struct {
 // makes normative for macros ("absent = unknown, present even {} = complete").
 type serverProfileDoc struct {
 	Timezone string            `json:"timezone,omitzero"`
-	Settings map[string]string `json:"settings,omitzero"`
+	Settings map[string]any    `json:"settings,omitzero"`
 	Macros   map[string]string `json:"macros,omitzero"`
 }
 
 // serverProfileJSON is the profile document, with the stock encoder settings
 // use (keys in sorted order, no HTML escaping, no value rewritten).
 func serverProfileJSON(p ServerProfile) ([]byte, error) {
-	// A non-UTF-8 string would be replaced with U+FFFD by the encoder, and the
+	// A non-UTF-8 zone would be replaced with U+FFFD by the encoder, and the
 	// library would see a different profile: refuse it instead.
 	if !utf8.ValidString(p.Timezone) {
 		return nil, usageError("server profile: the timezone is not valid UTF-8, and %s", nonUTF8Hint)
 	}
-	if err := checkUTF8Map("server profile settings", p.Settings); err != nil {
-		return nil, err
+	// A setting's value that is not valid UTF-8 is the object form {"b64": ...};
+	// a setting's name, and a macro's name or value, cannot be carried.
+	var settings map[string]any
+	if p.Settings != nil {
+		var err error
+		if settings, err = byteValues("server profile settings", p.Settings); err != nil {
+			return nil, err
+		}
 	}
 	if err := checkUTF8Map("server profile macros", p.Macros); err != nil {
 		return nil, err
 	}
-	return marshalNoEscape(serverProfileDoc(p))
+	return marshalNoEscape(serverProfileDoc{Timezone: p.Timezone, Settings: settings, Macros: p.Macros})
 }
 
 // Server is one ClickHouse server (chs_server), made by Library.NewServer and

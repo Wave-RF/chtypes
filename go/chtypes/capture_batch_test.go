@@ -52,7 +52,7 @@ func TestCaptureBatchDocuments(t *testing.T) {
 	defer sch.Close()
 	body := captureBody()
 	for _, flags := range []DocFlags{0, DocAll} {
-		docBuf, exportBuf, cerr := sch.lib.tbl.PreviewBatch(sch.h, int32(JSONEachRow), body, nil, nil, nil, int32(ExportNone), uint32(flags))
+		docBuf, exportBuf, cerr := sch.lib.tbl.PreviewBatch(sch.h, int32(JSONEachRow), body, nil, nil, nil, int32(ExportNone), uint32(flags), nil)
 		if cerr != nil {
 			t.Fatal(callError(cerr))
 		}
@@ -67,12 +67,12 @@ func TestCaptureBatchDocuments(t *testing.T) {
 	// The third document is the shape a filtering caller gets: a filter
 	// attached, so the document also carries rows_passed, rows_cut and one
 	// row_spans entry per row, and an export asked for.
-	flt, cerr := sch.lib.tbl.FilterCreate(sch.h, []byte("small < {m:Int8}"), []byte(`{"m":"50"}`), nil)
+	flt, cerr := sch.lib.tbl.FilterCreate(sch.h, []byte("small < {m:Int8}"), []byte(`{"m":"50"}`), nil, nil)
 	if cerr != nil {
 		t.Fatal(callError(cerr))
 	}
 	defer flt.Close()
-	docBuf, exportBuf, cerr := sch.lib.tbl.PreviewBatch(sch.h, int32(JSONEachRow), body, nil, nil, flt, int32(JSONCompactEachRow), 0)
+	docBuf, exportBuf, cerr := sch.lib.tbl.PreviewBatch(sch.h, int32(JSONEachRow), body, nil, nil, flt, int32(JSONCompactEachRow), 0, nil)
 	if cerr != nil {
 		t.Fatal(callError(cerr))
 	}

@@ -267,6 +267,7 @@
       "fields": {
         "is_stored": "boolean"
       },
+      "fallback": "skipped",
       "values": [
         {
           "value": "input",
@@ -311,6 +312,14 @@
         {
           "value": "default_pending",
           "is_stored": false
+        },
+        {
+          "value": "default_deferred",
+          "is_stored": false
+        },
+        {
+          "value": "default_override",
+          "is_stored": true
         }
       ]
     },
@@ -393,6 +402,23 @@
         }
       ]
     },
+    "refusal_site": {
+      "repr": "string",
+      "values": [
+        {
+          "value": "call"
+        },
+        {
+          "value": "body_read"
+        },
+        {
+          "value": "row"
+        },
+        {
+          "value": "body_step"
+        }
+      ]
+    },
     "discover_query_param": {
       "repr": "string",
       "fields": {
@@ -429,6 +455,23 @@
         }
       ]
     },
+    "default_support": {
+      "repr": "string",
+      "values": [
+        {
+          "value": "computed"
+        },
+        {
+          "value": "generated"
+        },
+        {
+          "value": "deferred"
+        },
+        {
+          "value": "declined"
+        }
+      ]
+    },
     "declined_tier": {
       "repr": "string",
       "values": [
@@ -440,6 +483,9 @@
         },
         {
           "value": "result-content"
+        },
+        {
+          "value": "server-refuses"
         }
       ]
     },
@@ -456,6 +502,17 @@
           "value": "schema"
         }
       ]
+    },
+    "posture": {
+      "repr": "string",
+      "values": [
+        {
+          "value": "create"
+        },
+        {
+          "value": "load"
+        }
+      ]
     }
   },
   "constants": {
@@ -466,6 +523,10 @@
     "CHS_EXPORT_NONE": {
       "type": "int32",
       "value": -1
+    },
+    "CHS_CODE_DECLINED": {
+      "type": "int32",
+      "value": -2
     },
     "CHS_DOC_VALUES": {
       "type": "uint32",
@@ -527,6 +588,7 @@
         "columns[].name",
         "columns[].type",
         "columns[].default_expression",
+        "columns[].reads[].name",
         "filter_declined_settings[].name",
         "replicated.zookeeper_path",
         "replicated.replica_name"
@@ -548,10 +610,21 @@
                 "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
               },
               "tier": {
-                "type": "string"
+                "vocabulary": "declined_tier",
+                "enum": [
+                  "predicate",
+                  "predicate-unflipped",
+                  "result-content",
+                  "server-refuses"
+                ]
               },
               "layer": {
-                "type": "string"
+                "vocabulary": "declined_layer",
+                "enum": [
+                  "defaults",
+                  "server",
+                  "schema"
+                ]
               }
             },
             "allOf": [
@@ -575,6 +648,7 @@
             "type": "object",
             "properties": {
               "default_kind": {
+                "vocabulary": "default_kind",
                 "enum": [
                   "",
                   "DEFAULT",
@@ -606,6 +680,25 @@
               "default_expression_b64": {
                 "type": "string",
                 "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "default_support": {
+                "vocabulary": "default_support",
+                "enum": [
+                  "computed",
+                  "generated",
+                  "deferred",
+                  "declined"
+                ]
+              },
+              "default_support_reason": {
+                "type": "string",
+                "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+              },
+              "reads": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/named"
+                }
               }
             },
             "allOf": [
@@ -628,24 +721,12 @@
                   {
                     "required": [
                       "type"
-                    ],
-                    "properties": {
-                      "type_b64": false
-                    }
+                    ]
                   },
                   {
                     "required": [
                       "type_b64"
-                    ],
-                    "properties": {
-                      "type": false
-                    }
-                  },
-                  {
-                    "properties": {
-                      "type": false,
-                      "type_b64": false
-                    }
+                    ]
                   }
                 ]
               },
@@ -672,6 +753,49 @@
                       "default_expression": false,
                       "default_expression_b64": false
                     }
+                  }
+                ]
+              }
+            ],
+            "required": [
+              "default_kind"
+            ]
+          },
+          "bytes_value": {
+            "type": "object",
+            "required": [
+              "b64"
+            ],
+            "properties": {
+              "b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              }
+            }
+          },
+          "named": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "name_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              }
+            },
+            "allOf": [
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "name"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "name_b64"
+                    ]
                   }
                 ]
               }
@@ -709,7 +833,14 @@
               "settings": {
                 "type": "object",
                 "additionalProperties": {
-                  "type": "string"
+                  "oneOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "$ref": "#/$defs/bytes_value"
+                    }
+                  ]
                 }
               },
               "macros": {
@@ -768,6 +899,12 @@
                 ]
               }
             ]
+          },
+          "posture": {
+            "vocabulary": "posture",
+            "enum": [
+              "load"
+            ]
           }
         }
       }
@@ -779,7 +916,6 @@
         "verdict_err",
         "partition_id",
         "unknown_fields[].name",
-        "unsupported_settings[].name",
         "cols[].name",
         "cols[].type",
         "cols[].base",
@@ -850,10 +986,44 @@
           "col": {
             "type": "object",
             "required": [
-              "null"
+              "null",
+              "src"
             ],
             "properties": {
               "null": {
+                "type": "boolean"
+              },
+              "src": {
+                "vocabulary": "value_src",
+                "enum": [
+                  "input",
+                  "default",
+                  "default_substituted",
+                  "default_generated",
+                  "absent",
+                  "materialized_input",
+                  "skipped",
+                  "ephemeral_input",
+                  "default_expr_unsupported",
+                  "default_volatile_unresolved",
+                  "default_pending",
+                  "default_deferred",
+                  "default_override"
+                ]
+              },
+              "nullable": {
+                "type": "boolean"
+              },
+              "poison": {
+                "type": "boolean"
+              },
+              "null_input": {
+                "type": "boolean"
+              },
+              "dup_dropped": {
+                "type": "boolean"
+              },
+              "ref_unclassified": {
                 "type": "boolean"
               },
               "name": {
@@ -1126,6 +1296,9 @@
                 "type": "string",
                 "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
               },
+              "kind": {
+                "type": "string"
+              },
               "stored": {
                 "type": "string"
               },
@@ -1179,6 +1352,9 @@
                   }
                 ]
               }
+            ],
+            "required": [
+              "kind"
             ]
           },
           "transform": {
@@ -1188,6 +1364,38 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 9007199254740991
+              },
+              "reason": {
+                "vocabulary": "transform_reason",
+                "enum": [
+                  "overflow_wrap",
+                  "null_to_default",
+                  "null_loss",
+                  "decimal_truncate",
+                  "date_clamp",
+                  "datetime_wrap",
+                  "date_shift",
+                  "uuid_mangle",
+                  "ip_mangle",
+                  "float_precision",
+                  "lossy_numeric",
+                  "fixedstring_pad",
+                  "emptied",
+                  "element_changed",
+                  "enum_coerce",
+                  "value_changed",
+                  "poisoned",
+                  "duplicate_key_dropped",
+                  "reformat",
+                  "default_filled",
+                  "zero_filled",
+                  "default_materialized",
+                  "ttl_expired",
+                  "ttl_column_expired"
+                ]
+              },
+              "lossy": {
+                "type": "boolean"
               },
               "column": {
                 "type": "string"
@@ -1278,24 +1486,55 @@
                   }
                 ]
               }
+            ],
+            "required": [
+              "reason",
+              "lossy"
             ]
           }
         },
         "type": "object",
         "required": [
+          "outcome",
+          "code",
           "input_span"
         ],
         "properties": {
+          "outcome": {
+            "vocabulary": "row_outcome",
+            "enum": [
+              "accepted",
+              "accepted_poisoned",
+              "rejected",
+              "skipped",
+              "unsupported"
+            ]
+          },
+          "code": {
+            "type": "integer",
+            "minimum": -2
+          },
+          "verdict": {
+            "vocabulary": "filter_verdict",
+            "enum": [
+              "t",
+              "f",
+              "e",
+              "d"
+            ]
+          },
+          "verdict_code": {
+            "type": "integer",
+            "minimum": -2
+          },
+          "verdict_reason": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+          },
           "input_span": {
             "$ref": "#/$defs/span"
           },
           "unknown_fields": {
-            "type": "array",
-            "items": {
-              "$ref": "#/$defs/named"
-            }
-          },
-          "unsupported_settings": {
             "type": "array",
             "items": {
               "$ref": "#/$defs/named"
@@ -1339,6 +1578,24 @@
           "partition_id_b64": {
             "type": "string",
             "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+          },
+          "reason": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+          },
+          "refused_at": {
+            "vocabulary": "refusal_site",
+            "enum": [
+              "call",
+              "body_read",
+              "row",
+              "body_step"
+            ]
+          },
+          "refused_row": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
           }
         },
         "allOf": [
@@ -1432,7 +1689,6 @@
         "rows[].verdict_err",
         "rows[].partition_id",
         "rows[].unknown_fields[].name",
-        "rows[].unsupported_settings[].name",
         "rows[].cols[].name",
         "rows[].cols[].type",
         "rows[].cols[].base",
@@ -1456,6 +1712,7 @@
         "transformed[].input",
         "transformed[].stored",
         "unsupported_settings[].name",
+        "export_columns[].name",
         "framing.header.names[].name"
       ],
       "value_entries": [
@@ -1516,10 +1773,44 @@
           "col": {
             "type": "object",
             "required": [
-              "null"
+              "null",
+              "src"
             ],
             "properties": {
               "null": {
+                "type": "boolean"
+              },
+              "src": {
+                "vocabulary": "value_src",
+                "enum": [
+                  "input",
+                  "default",
+                  "default_substituted",
+                  "default_generated",
+                  "absent",
+                  "materialized_input",
+                  "skipped",
+                  "ephemeral_input",
+                  "default_expr_unsupported",
+                  "default_volatile_unresolved",
+                  "default_pending",
+                  "default_deferred",
+                  "default_override"
+                ]
+              },
+              "nullable": {
+                "type": "boolean"
+              },
+              "poison": {
+                "type": "boolean"
+              },
+              "null_input": {
+                "type": "boolean"
+              },
+              "dup_dropped": {
+                "type": "boolean"
+              },
+              "ref_unclassified": {
                 "type": "boolean"
               },
               "name": {
@@ -1792,6 +2083,9 @@
                 "type": "string",
                 "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
               },
+              "kind": {
+                "type": "string"
+              },
               "stored": {
                 "type": "string"
               },
@@ -1845,6 +2139,9 @@
                   }
                 ]
               }
+            ],
+            "required": [
+              "kind"
             ]
           },
           "transform": {
@@ -1854,6 +2151,38 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 9007199254740991
+              },
+              "reason": {
+                "vocabulary": "transform_reason",
+                "enum": [
+                  "overflow_wrap",
+                  "null_to_default",
+                  "null_loss",
+                  "decimal_truncate",
+                  "date_clamp",
+                  "datetime_wrap",
+                  "date_shift",
+                  "uuid_mangle",
+                  "ip_mangle",
+                  "float_precision",
+                  "lossy_numeric",
+                  "fixedstring_pad",
+                  "emptied",
+                  "element_changed",
+                  "enum_coerce",
+                  "value_changed",
+                  "poisoned",
+                  "duplicate_key_dropped",
+                  "reformat",
+                  "default_filled",
+                  "zero_filled",
+                  "default_materialized",
+                  "ttl_expired",
+                  "ttl_column_expired"
+                ]
+              },
+              "lossy": {
+                "type": "boolean"
               },
               "column": {
                 "type": "string"
@@ -1944,24 +2273,55 @@
                   }
                 ]
               }
+            ],
+            "required": [
+              "reason",
+              "lossy"
             ]
           },
           "row": {
             "type": "object",
             "required": [
+              "outcome",
+              "code",
               "input_span"
             ],
             "properties": {
+              "outcome": {
+                "vocabulary": "row_outcome",
+                "enum": [
+                  "accepted",
+                  "accepted_poisoned",
+                  "rejected",
+                  "skipped",
+                  "unsupported"
+                ]
+              },
+              "code": {
+                "type": "integer",
+                "minimum": -2
+              },
+              "verdict": {
+                "vocabulary": "filter_verdict",
+                "enum": [
+                  "t",
+                  "f",
+                  "e",
+                  "d"
+                ]
+              },
+              "verdict_code": {
+                "type": "integer",
+                "minimum": -2
+              },
+              "verdict_reason": {
+                "type": "string",
+                "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+              },
               "input_span": {
                 "$ref": "#/$defs/span"
               },
               "unknown_fields": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/$defs/named"
-                }
-              },
-              "unsupported_settings": {
                 "type": "array",
                 "items": {
                   "$ref": "#/$defs/named"
@@ -2005,6 +2365,24 @@
               "partition_id_b64": {
                 "type": "string",
                 "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "reason": {
+                "type": "string",
+                "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+              },
+              "refused_at": {
+                "vocabulary": "refusal_site",
+                "enum": [
+                  "call",
+                  "body_read",
+                  "row",
+                  "body_step"
+                ]
+              },
+              "refused_row": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
               }
             },
             "allOf": [
@@ -2232,17 +2610,21 @@
           "at_merge": {
             "type": "object",
             "required": [
-              "row",
+              "part_row",
               "reason"
             ],
             "properties": {
-              "row": {
+              "part_row": {
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 9007199254740991
               },
               "reason": {
-                "type": "string"
+                "vocabulary": "merge_reason",
+                "enum": [
+                  "ttl_delete",
+                  "ttl_column_reset"
+                ]
               },
               "column": {
                 "type": "string"
@@ -2325,11 +2707,29 @@
         },
         "type": "object",
         "required": [
+          "outcome",
+          "code",
           "rows",
+          "rows_read",
+          "rows_skipped",
+          "unsupported_settings",
           "unconsumed",
           "framing"
         ],
         "properties": {
+          "outcome": {
+            "vocabulary": "batch_outcome",
+            "enum": [
+              "accepted",
+              "accepted_poisoned",
+              "rejected",
+              "unsupported"
+            ]
+          },
+          "code": {
+            "type": "integer",
+            "minimum": -2
+          },
           "rows": {
             "type": "array",
             "items": {
@@ -2435,12 +2835,78 @@
             "type": "string",
             "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
           },
+          "rows_read": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "rows_skipped": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "rows_passed": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "rows_cut": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "partition_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "row_spans": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/span"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "export_columns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/named"
+            }
+          },
+          "reason": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+          },
+          "refused_at": {
+            "vocabulary": "refusal_site",
+            "enum": [
+              "call",
+              "body_read",
+              "row",
+              "body_step"
+            ]
+          },
+          "refused_row": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
           "export_declined": {
             "type": "string"
           },
           "export_declined_b64": {
             "type": "string",
             "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+          },
+          "export_declined_reason": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
           }
         },
         "allOf": [
@@ -2544,6 +3010,14 @@
                 "minimum": 0,
                 "maximum": 9007199254740991
               },
+              "code": {
+                "type": "integer",
+                "minimum": -2
+              },
+              "reason": {
+                "type": "string",
+                "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+              },
               "err": {
                 "type": "string"
               },
@@ -2579,11 +3053,35 @@
                   }
                 ]
               }
+            ],
+            "required": [
+              "row",
+              "code"
             ]
           }
         },
         "type": "object",
         "properties": {
+          "outcome": {
+            "vocabulary": "filter_outcome",
+            "enum": [
+              "ok",
+              "rejected",
+              "unsupported"
+            ]
+          },
+          "code": {
+            "type": "integer",
+            "minimum": -2
+          },
+          "rows_read": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "verdicts": {
+            "type": "string"
+          },
           "unsupported_settings": {
             "type": "array",
             "items": {
@@ -2602,6 +3100,24 @@
           "err_b64": {
             "type": "string",
             "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+          },
+          "reason": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+          },
+          "refused_at": {
+            "vocabulary": "refusal_site",
+            "enum": [
+              "call",
+              "body_read",
+              "row",
+              "body_step"
+            ]
+          },
+          "refused_row": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
           }
         },
         "allOf": [
@@ -2631,6 +3147,14 @@
               }
             ]
           }
+        ],
+        "required": [
+          "outcome",
+          "code",
+          "rows_read",
+          "unsupported_settings",
+          "verdicts",
+          "errors"
         ]
       }
     },
@@ -2870,7 +3394,14 @@
           "settings": {
             "type": "object",
             "additionalProperties": {
-              "type": "string"
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/$defs/bytes_value"
+                }
+              ]
             }
           },
           "macros": {
@@ -2880,6 +3411,21 @@
             },
             "additionalProperties": {
               "type": "string"
+            }
+          }
+        },
+        "$defs": {
+          "bytes_value": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "b64"
+            ],
+            "properties": {
+              "b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              }
             }
           }
         }
@@ -2896,7 +3442,144 @@
       "options": true,
       "schema": {
         "type": "object",
-        "additionalProperties": false
+        "additionalProperties": false,
+        "properties": {
+          "posture": {
+            "enum": [
+              "create",
+              "load"
+            ]
+          }
+        }
+      }
+    },
+    "insert_options": {
+      "options": true,
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "defer_defaults": {
+            "enum": [
+              "none",
+              "server"
+            ]
+          },
+          "insertable_columns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/named"
+            }
+          },
+          "column_defaults": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/column_default"
+            }
+          },
+          "verdict_basis": {
+            "enum": [
+              "input",
+              "export"
+            ]
+          }
+        },
+        "$defs": {
+          "named": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "name_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              }
+            },
+            "allOf": [
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "name"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "name_b64"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "column_default": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "name_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "value": {
+                "type": "string"
+              },
+              "value_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              }
+            },
+            "allOf": [
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "name"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "name_b64"
+                    ]
+                  }
+                ]
+              },
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "value"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "value_b64"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    "filter_options": {
+      "options": true,
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "param_encoding": {
+            "enum": [
+              "escaped",
+              "raw"
+            ]
+          }
+        }
       }
     }
   },
@@ -3013,6 +3696,7 @@
       "name": "chs_abi_version",
       "class": "handshake",
       "thread": "any",
+      "init": "any",
       "returns": {
         "kind": "scalar",
         "type": "int32"
@@ -3023,6 +3707,7 @@
       "name": "chs_build_info",
       "class": "handshake",
       "thread": "any",
+      "init": "any",
       "returns": {
         "kind": "scalar",
         "type": "cstr_static"
@@ -3033,6 +3718,7 @@
       "name": "chs_clickhouse_version",
       "class": "handshake",
       "thread": "any",
+      "init": "any",
       "returns": {
         "kind": "scalar",
         "type": "cstr_static"
@@ -3043,6 +3729,7 @@
       "name": "chs_abi_revision",
       "class": "tombstone",
       "thread": "any",
+      "init": "any",
       "returns": {
         "kind": "scalar",
         "type": "int",
@@ -3054,6 +3741,7 @@
       "name": "chs_buf_data",
       "class": "api",
       "thread": "shared",
+      "init": "any",
       "returns": {
         "kind": "scalar",
         "type": "u8ptr_const",
@@ -3072,6 +3760,7 @@
       "name": "chs_buf_len",
       "class": "api",
       "thread": "shared",
+      "init": "any",
       "returns": {
         "kind": "scalar",
         "type": "size"
@@ -3089,6 +3778,7 @@
       "name": "chs_buf_free",
       "class": "api",
       "thread": "handle_serial",
+      "init": "any",
       "returns": {
         "kind": "void"
       },
@@ -3105,6 +3795,7 @@
       "name": "chs_error_status",
       "class": "api",
       "thread": "shared",
+      "init": "any",
       "returns": {
         "kind": "enum",
         "type": "chs_status"
@@ -3122,6 +3813,7 @@
       "name": "chs_error_ch_code",
       "class": "api",
       "thread": "shared",
+      "init": "any",
       "returns": {
         "kind": "scalar",
         "type": "int32"
@@ -3139,6 +3831,7 @@
       "name": "chs_error_ch_name",
       "class": "api",
       "thread": "shared",
+      "init": "any",
       "returns": {
         "kind": "handle",
         "type": "chs_buf",
@@ -3159,6 +3852,7 @@
       "name": "chs_error_message",
       "class": "api",
       "thread": "shared",
+      "init": "any",
       "returns": {
         "kind": "handle",
         "type": "chs_buf",
@@ -3179,6 +3873,7 @@
       "name": "chs_error_column",
       "class": "api",
       "thread": "shared",
+      "init": "any",
       "returns": {
         "kind": "handle",
         "type": "chs_buf",
@@ -3196,9 +3891,31 @@
       ]
     },
     {
+      "name": "chs_error_reason",
+      "class": "api",
+      "thread": "shared",
+      "init": "any",
+      "returns": {
+        "kind": "handle",
+        "type": "chs_buf",
+        "owned": true,
+        "nullable": true,
+        "content": "ascii"
+      },
+      "params": [
+        {
+          "name": "error",
+          "kind": "handle",
+          "type": "chs_error",
+          "const": true
+        }
+      ]
+    },
+    {
       "name": "chs_error_free",
       "class": "api",
       "thread": "handle_serial",
+      "init": "any",
       "returns": {
         "kind": "void"
       },
@@ -3215,6 +3932,7 @@
       "name": "chs_live_handles",
       "class": "api",
       "thread": "any",
+      "init": "required",
       "returns": {
         "kind": "status"
       },
@@ -3240,6 +3958,7 @@
       "name": "chs_error_codes",
       "class": "api",
       "thread": "any",
+      "init": "required",
       "returns": {
         "kind": "status"
       },
@@ -3265,6 +3984,7 @@
       "name": "chs_registered_families",
       "class": "tooling",
       "thread": "process_serial",
+      "init": "required",
       "returns": {
         "kind": "status"
       },
@@ -3290,6 +4010,7 @@
       "name": "chs_function_flags",
       "class": "tooling",
       "thread": "process_serial",
+      "init": "required",
       "returns": {
         "kind": "status"
       },
@@ -3315,6 +4036,7 @@
       "name": "chs_reference_type",
       "class": "tooling",
       "thread": "process_serial",
+      "init": "required",
       "returns": {
         "kind": "status"
       },
@@ -3347,6 +4069,7 @@
       "name": "chs_initialize",
       "class": "api",
       "thread": "process_once",
+      "init": "any",
       "returns": {
         "kind": "status"
       },
@@ -3372,6 +4095,7 @@
       "name": "chs_set_defaults",
       "class": "api",
       "thread": "process_serial",
+      "init": "required",
       "returns": {
         "kind": "status"
       },
@@ -3379,7 +4103,7 @@
         {
           "name": "settings",
           "kind": "bytes_in",
-          "content": "json_object_string_values"
+          "content": "json_object_byte_values"
         },
         {
           "name": "err",
@@ -3398,6 +4122,7 @@
       "name": "chs_shutdown",
       "class": "api",
       "thread": "process_serial",
+      "init": "any",
       "returns": {
         "kind": "void"
       },
@@ -3407,6 +4132,7 @@
       "name": "chs_type_validate",
       "class": "api",
       "thread": "any",
+      "init": "required",
       "returns": {
         "kind": "status"
       },
@@ -3439,6 +4165,7 @@
       "name": "chs_back_quote",
       "class": "api",
       "thread": "any",
+      "init": "required",
       "returns": {
         "kind": "status"
       },
@@ -3469,6 +4196,7 @@
       "name": "chs_back_quote_if_needed",
       "class": "api",
       "thread": "any",
+      "init": "required",
       "returns": {
         "kind": "status"
       },
@@ -3499,6 +4227,7 @@
       "name": "chs_quote_string",
       "class": "api",
       "thread": "any",
+      "init": "required",
       "returns": {
         "kind": "status"
       },
@@ -3529,6 +4258,7 @@
       "name": "chs_server_create",
       "class": "api",
       "thread": "any",
+      "init": "required",
       "growable": true,
       "returns": {
         "kind": "status"
@@ -3566,6 +4296,7 @@
       "name": "chs_server_free",
       "class": "api",
       "thread": "handle_serial",
+      "init": "any",
       "returns": {
         "kind": "void"
       },
@@ -3582,6 +4313,7 @@
       "name": "chs_schema_create",
       "class": "api",
       "thread": "shared",
+      "init": "required",
       "growable": true,
       "returns": {
         "kind": "status"
@@ -3602,7 +4334,7 @@
         {
           "name": "settings",
           "kind": "bytes_in",
-          "content": "json_object_string_values"
+          "content": "json_object_byte_values"
         },
         {
           "name": "options",
@@ -3631,6 +4363,7 @@
       "name": "chs_schema_free",
       "class": "api",
       "thread": "handle_serial",
+      "init": "any",
       "returns": {
         "kind": "void"
       },
@@ -3647,6 +4380,7 @@
       "name": "chs_schema_describe",
       "class": "api",
       "thread": "shared",
+      "init": "required",
       "returns": {
         "kind": "status"
       },
@@ -3670,7 +4404,6 @@
       ],
       "may_return": [
         "CHS_OK",
-        "CHS_REJECTED",
         "CHS_INVALID_ARGUMENT",
         "CHS_INTERNAL"
       ]
@@ -3679,6 +4412,8 @@
       "name": "chs_preview_row",
       "class": "api",
       "thread": "shared",
+      "init": "required",
+      "growable": true,
       "returns": {
         "kind": "status"
       },
@@ -3702,12 +4437,17 @@
         {
           "name": "settings",
           "kind": "bytes_in",
-          "content": "json_object_string_values"
+          "content": "json_object_byte_values"
         },
         {
           "name": "columns",
           "kind": "bytes_in",
           "content": "json_array_names"
+        },
+        {
+          "name": "options",
+          "kind": "bytes_in",
+          "content": "input:insert_options"
         },
         {
           "name": "out",
@@ -3722,8 +4462,6 @@
       ],
       "may_return": [
         "CHS_OK",
-        "CHS_REJECTED",
-        "CHS_DECLINED",
         "CHS_INVALID_ARGUMENT",
         "CHS_INTERNAL"
       ]
@@ -3732,6 +4470,8 @@
       "name": "chs_preview_batch",
       "class": "api",
       "thread": "shared",
+      "init": "required",
+      "growable": true,
       "returns": {
         "kind": "status"
       },
@@ -3755,7 +4495,7 @@
         {
           "name": "settings",
           "kind": "bytes_in",
-          "content": "json_object_string_values"
+          "content": "json_object_byte_values"
         },
         {
           "name": "columns",
@@ -3780,6 +4520,11 @@
           "type": "uint32"
         },
         {
+          "name": "options",
+          "kind": "bytes_in",
+          "content": "input:insert_options"
+        },
+        {
           "name": "out",
           "kind": "out_handle",
           "type": "chs_buf",
@@ -3799,8 +4544,6 @@
       ],
       "may_return": [
         "CHS_OK",
-        "CHS_REJECTED",
-        "CHS_DECLINED",
         "CHS_INVALID_ARGUMENT",
         "CHS_INTERNAL"
       ]
@@ -3809,6 +4552,8 @@
       "name": "chs_filter_create",
       "class": "api",
       "thread": "shared",
+      "init": "required",
+      "growable": true,
       "returns": {
         "kind": "status"
       },
@@ -3827,12 +4572,17 @@
         {
           "name": "query_params",
           "kind": "bytes_in",
-          "content": "json_object_string_values"
+          "content": "json_object_byte_values"
         },
         {
           "name": "settings",
           "kind": "bytes_in",
-          "content": "json_object_string_values"
+          "content": "json_object_byte_values"
+        },
+        {
+          "name": "options",
+          "kind": "bytes_in",
+          "content": "input:filter_options"
         },
         {
           "name": "out",
@@ -3856,6 +4606,7 @@
       "name": "chs_filter_free",
       "class": "api",
       "thread": "handle_serial",
+      "init": "any",
       "returns": {
         "kind": "void"
       },
@@ -3872,6 +4623,8 @@
       "name": "chs_filter_eval_body",
       "class": "api",
       "thread": "shared",
+      "init": "required",
+      "growable": true,
       "returns": {
         "kind": "status"
       },
@@ -3895,7 +4648,17 @@
         {
           "name": "settings",
           "kind": "bytes_in",
-          "content": "json_object_string_values"
+          "content": "json_object_byte_values"
+        },
+        {
+          "name": "columns",
+          "kind": "bytes_in",
+          "content": "json_array_names"
+        },
+        {
+          "name": "options",
+          "kind": "bytes_in",
+          "content": "input:insert_options"
         },
         {
           "name": "out",
@@ -3910,8 +4673,6 @@
       ],
       "may_return": [
         "CHS_OK",
-        "CHS_REJECTED",
-        "CHS_DECLINED",
         "CHS_INVALID_ARGUMENT",
         "CHS_INTERNAL"
       ]
@@ -3920,6 +4681,8 @@
       "name": "chs_block_create",
       "class": "api",
       "thread": "shared",
+      "init": "required",
+      "growable": true,
       "returns": {
         "kind": "status"
       },
@@ -3943,12 +4706,17 @@
         {
           "name": "settings",
           "kind": "bytes_in",
-          "content": "json_object_string_values"
+          "content": "json_object_byte_values"
         },
         {
           "name": "columns",
           "kind": "bytes_in",
           "content": "json_array_names"
+        },
+        {
+          "name": "options",
+          "kind": "bytes_in",
+          "content": "input:insert_options"
         },
         {
           "name": "out",
@@ -3962,8 +4730,6 @@
       ],
       "may_return": [
         "CHS_OK",
-        "CHS_REJECTED",
-        "CHS_DECLINED",
         "CHS_INVALID_ARGUMENT",
         "CHS_INTERNAL"
       ]
@@ -3972,6 +4738,7 @@
       "name": "chs_block_free",
       "class": "api",
       "thread": "handle_serial",
+      "init": "any",
       "returns": {
         "kind": "void"
       },
@@ -3988,6 +4755,7 @@
       "name": "chs_filter_eval_block",
       "class": "api",
       "thread": "shared",
+      "init": "required",
       "returns": {
         "kind": "status"
       },
@@ -4017,8 +4785,6 @@
       ],
       "may_return": [
         "CHS_OK",
-        "CHS_REJECTED",
-        "CHS_DECLINED",
         "CHS_INVALID_ARGUMENT",
         "CHS_INTERNAL"
       ]
@@ -4027,6 +4793,7 @@
       "name": "chs_discover_query",
       "class": "api",
       "thread": "any",
+      "init": "required",
       "returns": {
         "kind": "status"
       },
@@ -4052,6 +4819,7 @@
       "name": "chs_discover_columns",
       "class": "api",
       "thread": "any",
+      "init": "required",
       "returns": {
         "kind": "status"
       },

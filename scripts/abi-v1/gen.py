@@ -1114,6 +1114,107 @@ def _selftest_v2() -> list[str]:
             "enum chs_format: the value 'CHS_FORMAT_UNKNOWN' takes the name (r3) reserves",
         )
 
+        # The init class follows the function (the Preamble's Initialization),
+        # the schema pins the classes, and the header states each function's.
+        def set_init(fn_name: str, value):
+            def mutate(w: Path) -> None:
+                _json_edit(w / abi, lambda d: _fn_entry(d, fn_name).update(init=value))
+
+            return mutate
+
+        plant(
+            "(init) a handshake call marked `required`",
+            set_init("chs_abi_version", "required"),
+            "function chs_abi_version: init class must be `any`, not `required`: it is class `handshake`",
+        )
+        plant(
+            "(init) chs_initialize marked `required`",
+            set_init("chs_initialize", "required"),
+            "function chs_initialize: init class must be `any`, not `required`: it is process setup itself",
+        )
+        plant(
+            "(init) a free marked `required`",
+            set_init("chs_schema_free", "required"),
+            "function chs_schema_free: init class must be `any`, not `required`: it returns no chs_status",
+        )
+        plant(
+            "(init) an error accessor marked `required`",
+            set_init("chs_error_message", "required"),
+            "function chs_error_message: init class must be `any`, not `required`: it returns no chs_status",
+        )
+        plant(
+            "(init) a status call marked `any` whose section does not say it is valid before chs_initialize",
+            set_init("chs_type_validate", "any"),
+            "function chs_type_validate: init class `any`, but it returns a status and its section does not say",
+        )
+
+        def said(w: Path) -> None:
+            _edit(w / docs, "### chs_type_validate\n\n", "### chs_type_validate\n\nIt is valid before `chs_initialize`. ")
+
+        plant(
+            "(init) a `required` call whose section says it is valid before chs_initialize",
+            said,
+            "function chs_type_validate: its section says it is valid before `chs_initialize`, so its init class is `any`",
+        )
+
+        def said_and_any(w: Path) -> None:
+            said(w)
+            set_init("chs_type_validate", "any")(w)
+
+        plant(
+            "(init) the positive control: a status call marked `any` whose section says it is valid before "
+            "chs_initialize generates and checks",
+            said_and_any,
+            None,
+            (("--major", "2", "--write"), ("--major", "2", "--check")),
+        )
+        plant(
+            "(init) a `required` call that cannot return CHS_INVALID_ARGUMENT",
+            lambda w: _json_edit(w / abi, lambda d: _fn_entry(d, "chs_discover_query")["may_return"].remove("CHS_INVALID_ARGUMENT")),
+            "function chs_discover_query: init class `required` refuses with CHS_INVALID_ARGUMENT",
+        )
+        plant(
+            "(init) a function with no init class",
+            lambda w: _json_edit(w / abi, lambda d: _fn_entry(d, "chs_schema_create").pop("init")),
+            "abi.schema.json",
+        )
+        plant("(init) an init class the schema does not define", set_init("chs_schema_create", "sometimes"), "abi.schema.json")
+
+        def init_enum_drift(w: Path) -> None:
+            _json_edit(w / schema, lambda d: d["$defs"]["function"]["properties"]["init"]["enum"].append("lazy"))
+
+        plant("(init) the schema's init enum differs from model.py's classes", init_enum_drift, "the init enum")
+
+        def header_disagrees(w: Path) -> None:
+            _edit(w / "include/v2/chtypes.h", "Init: required.", "Init: any.")
+
+        plant(
+            "(init) the header states another init class than the description",
+            header_disagrees,
+            "include/v2/chtypes.h: differs from the generator's output",
+        )
+
+        # A document member bound to a vocabulary (F2): the binding names a vocabulary the description
+        # defines, and the member's enum is drawn from it.
+        def batch_prop(d: dict, name: str) -> dict:
+            return d["documents"]["batch"]["schema"]["properties"][name]
+
+        plant(
+            "(vocabulary) a member bound to an enum the description does not define",
+            lambda w: _json_edit(w / abi, lambda d: batch_prop(d, "outcome").update(vocabulary="batch_verdict")),
+            "`vocabulary` names 'batch_verdict', which is not a string vocabulary",
+        )
+        plant(
+            "(vocabulary) a member's enum lists a value its vocabulary lacks",
+            lambda w: _json_edit(w / abi, lambda d: batch_prop(d, "outcome")["enum"].append("maybe")),
+            "is not drawn from the `batch_outcome` vocabulary's values",
+        )
+        plant(
+            "(required) a required member no property describes",
+            lambda w: _json_edit(w / abi, lambda d: d["documents"]["batch"]["schema"]["required"].append("rows_lost")),
+            "requires 'rows_lost', which no property describes",
+        )
+
         # (r4) generation 1's published codes keep their names and numbers.
         def renumber(d: dict) -> None:
             for v in d["enums"]["chs_status"]["values"]:

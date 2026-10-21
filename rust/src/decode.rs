@@ -26,8 +26,8 @@ use serde::de::{Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde_json::{Map, Value as Json};
 
 use crate::abi2::vocab_gen::{
-    BYTES_SUFFIX, DeclinedLayer, DeclinedTier, DefaultKind, FilterOutcome, MergeReason, Outcome,
-    Reason, Source, VALUE_BYTES, Verdict,
+    BYTES_SUFFIX, DeclinedLayer, DeclinedTier, DefaultKind, DefaultSupport, FilterOutcome,
+    MergeReason, Outcome, Posture, Reason, RefusalSite, Source, VALUE_BYTES, Verdict,
 };
 use crate::error::{Error, Result};
 use crate::raw::RawText;
@@ -273,6 +273,46 @@ impl<'a> Obj<'a> {
             .map(Some)
     }
 
+    /// An object whose values are byte values (`json_object_byte_values`): a
+    /// JSON string, or the object `{"b64": "<standard base64>"}` for bytes that
+    /// are not valid UTF-8. `None` when absent, `Some`, even of an empty map,
+    /// when present.
+    fn byte_value_map(&self, key: &str) -> Result<Option<BTreeMap<String, RawText>>> {
+        let Some(o) = self.object(key)? else {
+            return Ok(None);
+        };
+        let mut out = BTreeMap::new();
+        for (k, v) in o.map {
+            let bytes = match v {
+                Json::String(s) => s.clone().into_bytes(),
+                Json::Object(m) => match (m.len(), m.get("b64")) {
+                    (1, Some(Json::String(b))) => base64::engine::general_purpose::STANDARD
+                        .decode(b)
+                        .map_err(|_| {
+                            Error::internal(format!(
+                                "the {} document: {}.{k}.b64 is not standard base64",
+                                o.doc, o.at
+                            ))
+                        })?,
+                    _ => {
+                        return Err(Error::internal(format!(
+                            "the {} document: {}.{k} is not a string or a {{\"b64\": ...}} object",
+                            o.doc, o.at
+                        )));
+                    }
+                },
+                _ => {
+                    return Err(Error::internal(format!(
+                        "the {} document: {}.{k} is not a string or a {{\"b64\": ...}} object",
+                        o.doc, o.at
+                    )));
+                }
+            };
+            out.insert(k.clone(), RawText::from(bytes));
+        }
+        Ok(Some(out))
+    }
+
     fn strings(&self, key: &str) -> Result<Vec<String>> {
         self.array(key)?
             .iter()
@@ -369,6 +409,24 @@ fn span(o: &Obj<'_>, key: &str) -> Result<Option<Span>> {
     }
 }
 
+/// `row_spans`: one entry per row, `null` for a row that was not exported.
+fn nullable_spans(o: &Obj<'_>, key: &str) -> Result<Vec<Option<Span>>> {
+    o.array(key)?
+        .iter()
+        .enumerate()
+        .map(|(i, v)| {
+            if v.is_null() {
+                return Ok(None);
+            }
+            let s = Obj::of(o.doc, format!("{}[{i}]", o.child(key)), v)?;
+            Ok(Some(Span {
+                off: s.uint64("off")?,
+                len: s.uint64("len")?,
+            }))
+        })
+        .collect()
+}
+
 fn spans(o: &Obj<'_>, key: &str) -> Result<Vec<Span>> {
     o.array(key)?
         .iter()
@@ -462,14 +520,19 @@ fn row_of(o: &Obj<'_>) -> Result<RowResult> {
         outcome: Outcome::from_wire(&o.string("outcome")?),
         err_code: o.int32("code")?,
         err_msg: o.bytes("err")?,
+        reason: o.opt_string("reason")?,
+        refused_at: o
+            .opt_string("refused_at")?
+            .map(|v| RefusalSite::from_wire(&v)),
+        refused_row: o.opt_uint64("refused_row")?,
         columns,
         values,
         transformed: transforms(o, "transformed")?,
         unknown_fields,
-        unsupported_settings: o.name_objects("unsupported_settings")?,
         computed,
         verdict: o.opt_string("verdict")?.map(|v| Verdict::from_wire(&v)),
         verdict_code: o.int32("verdict_code")?,
+        verdict_reason: o.opt_string("verdict_reason")?,
         verdict_err: o.bytes("verdict_err")?,
         partition_id: o.bytes_opt("partition_id")?.map(RawText::from),
         input_span: span(o, "input_span")?,
@@ -517,7 +580,11 @@ pub(crate) fn batch(bytes: &[u8], payload: Option<Vec<u8>>) -> Result<BatchResul
     };
     let row_spans = match o.opt_array("row_spans")? {
         None => None,
-        Some(_) => Some(spans(&o, "row_spans")?),
+        Some(_) => Some(nullable_spans(&o, "row_spans")?),
+    };
+    let export_columns = match o.opt_array("export_columns")? {
+        None => None,
+        Some(_) => Some(o.name_objects("export_columns")?),
     };
     let framing = match o.object("framing")? {
         None => None,
@@ -545,6 +612,11 @@ pub(crate) fn batch(bytes: &[u8], payload: Option<Vec<u8>>) -> Result<BatchResul
         outcome: Outcome::from_wire(&o.string("outcome")?),
         err_code: o.int32("code")?,
         err_msg: o.bytes("err")?,
+        reason: o.opt_string("reason")?,
+        refused_at: o
+            .opt_string("refused_at")?
+            .map(|v| RefusalSite::from_wire(&v)),
+        refused_row: o.opt_uint64("refused_row")?,
         rows,
         rows_read: o.uint64("rows_read")?,
         rows_skipped: o.uint64("rows_skipped")?,
@@ -554,7 +626,9 @@ pub(crate) fn batch(bytes: &[u8], payload: Option<Vec<u8>>) -> Result<BatchResul
         at_merge,
         payload,
         spans: row_spans,
+        export_columns,
         export_declined,
+        export_declined_reason: o.opt_string("export_declined_reason")?,
         rows_passed: o.uint64("rows_passed")?,
         rows_cut: o.uint64("rows_cut")?,
         partition_count: o.opt_uint64("partition_count")?,
@@ -576,7 +650,7 @@ fn at_merge_of(o: &Obj<'_>) -> Result<AtMergeEntry> {
         ),
     };
     Ok(AtMergeEntry {
-        row: o.uint64("row")?,
+        part_row: o.uint64("part_row")?,
         reason: MergeReason::from_wire(&o.string("reason")?),
         column: o.bytes_opt("column")?.map(RawText::from),
         stored: o.bytes_opt("stored")?.map(RawText::from),
@@ -622,6 +696,7 @@ pub(crate) fn filter_result(bytes: &[u8]) -> Result<FilterResult> {
         errors.push(FilterRowError {
             row: e.uint64("row")?,
             code: e.int32("code")?,
+            reason: e.opt_string("reason")?,
             msg: e.bytes("err")?,
         });
     }
@@ -629,6 +704,11 @@ pub(crate) fn filter_result(bytes: &[u8]) -> Result<FilterResult> {
         outcome: FilterOutcome::from_wire(&o.string("outcome")?),
         err_code: o.int32("code")?,
         err_msg: o.bytes("err")?,
+        reason: o.opt_string("reason")?,
+        refused_at: o
+            .opt_string("refused_at")?
+            .map(|v| RefusalSite::from_wire(&v)),
+        refused_row: o.opt_uint64("refused_row")?,
         rows_read: o.uint64("rows_read")?,
         unsupported_settings: o.name_objects("unsupported_settings")?,
         verdicts,
@@ -668,6 +748,15 @@ pub(crate) fn schema_description(bytes: &[u8]) -> Result<SchemaDescription> {
             r#type: c.bytes("type")?,
             default_kind,
             default_expr: c.bytes("default_expression")?,
+            // Reserved members: absent while the library does not write them.
+            default_support: c
+                .opt_string("default_support")?
+                .map(|v| DefaultSupport::from_wire(&v)),
+            default_support_reason: c.opt_string("default_support_reason")?,
+            reads: match c.opt_array("reads")? {
+                None => None,
+                Some(_) => Some(c.name_objects("reads")?),
+            },
         });
     }
     // Both are absent on a schema compiled without a server, so that document
@@ -676,7 +765,7 @@ pub(crate) fn schema_description(bytes: &[u8]) -> Result<SchemaDescription> {
         None => None,
         Some(sm) => Some(SchemaServer {
             timezone: sm.string("timezone")?,
-            settings: sm.string_map("settings")?.unwrap_or_default(),
+            settings: sm.byte_value_map("settings")?.unwrap_or_default(),
             macros: sm.string_map("macros")?,
         }),
     };
@@ -689,6 +778,8 @@ pub(crate) fn schema_description(bytes: &[u8]) -> Result<SchemaDescription> {
     };
     Ok(SchemaDescription {
         columns,
+        // Present only for `load`; absent is create.
+        posture: o.opt_string("posture")?.map(|v| Posture::from_wire(&v)),
         // Over every layer known at schema compile, with or without a server.
         filter_declined_settings: declined_settings(&o)?,
         server,
@@ -881,6 +972,19 @@ mod tests {
         assert!(r.columns[2].is_stored && !r.columns[1].is_stored);
     }
 
+    #[test]
+    fn default_override_is_a_stored_source_and_default_deferred_is_not() {
+        let r = row(br#"{"outcome":"accepted","cols":[
+                {"name":"a","null":false,"src":"default_override","stored":"5"},
+                {"name":"b","null":false,"src":"default_deferred","stored":""}]}"#)
+        .unwrap();
+        assert_eq!(r.columns[0].source, Source::DefaultOverride);
+        assert!(r.columns[0].is_stored && !r.columns[1].is_stored);
+        assert_eq!(r.columns[0].text.as_bytes(), b"5");
+        assert_eq!(r.values.len(), 1);
+        assert_eq!(r.values[0].column.as_bytes(), b"a");
+    }
+
     /// Rule r3: an unlisted source is its `Unknown`, for that column alone, not
     /// stored, and the row decodes on; an absent one is still malformed.
     #[test]
@@ -1026,7 +1130,7 @@ mod tests {
         assert_eq!(b.rows_read, 9_007_199_254_740_993);
         assert_eq!(b.partition_count, None);
         assert_eq!(b.payload.as_deref(), Some(&b"{\"a\":1}\n"[..]));
-        assert_eq!(b.spans, Some(vec![Span { off: 0, len: 5 }]));
+        assert_eq!(b.spans, Some(vec![Some(Span { off: 0, len: 5 })]));
         assert_eq!(
             b.rows[0].partition_id.as_ref().map(RawText::as_bytes),
             Some(&b"202601"[..])
@@ -1095,7 +1199,11 @@ mod tests {
         .unwrap();
         let s = d.server.expect("server");
         assert_eq!(s.timezone, "Asia/Tokyo");
-        assert_eq!(s.settings, map(&[("max_threads", "8")]));
+        assert_eq!(
+            s.settings.get("max_threads").map(RawText::as_bytes),
+            Some(&b"8"[..])
+        );
+        assert_eq!(s.settings.len(), 1);
         assert_eq!(s.macros, Some(BTreeMap::new()));
 
         // Macros and a Replicated engine's resolved path, a name in its _b64
@@ -1173,13 +1281,13 @@ mod tests {
         "outcome": "accepted",
         "unsupported_settings": [{"name": "session_timezone"}, {"name_b64": "/w=="}],
         "at_merge": [
-            {"row": 0, "reason": "ttl_delete"},
-            {"row": 1, "reason": "ttl_column_reset", "column": "c", "stored": "0"},
-            {"row": 2, "reason": "ttl_column_reset", "column": "t"},
-            {"row": 3, "reason": "ttl_column_reset", "column_b64": "/wA=", "stored_b64": "/w=="},
-            {"row": 4, "reason": "ttl_delete", "input_rows": [4, 7]},
-            {"row": 5, "reason": "a_reason_nobody_listed", "x_future": {"a": [1]}, "x_future_b64": "/w=="},
-            {"row": 6, "reason": "ttl_column_reset", "column": "e", "stored": "", "input_rows": []}
+            {"part_row": 0, "reason": "ttl_delete"},
+            {"part_row": 1, "reason": "ttl_column_reset", "column": "c", "stored": "0"},
+            {"part_row": 2, "reason": "ttl_column_reset", "column": "t"},
+            {"part_row": 3, "reason": "ttl_column_reset", "column_b64": "/wA=", "stored_b64": "/w=="},
+            {"part_row": 4, "reason": "ttl_delete", "input_rows": [4, 7]},
+            {"part_row": 5, "reason": "a_reason_nobody_listed", "x_future": {"a": [1]}, "x_future_b64": "/w=="},
+            {"part_row": 6, "reason": "ttl_column_reset", "column": "e", "stored": "", "input_rows": []}
         ]
     }"#;
 
@@ -1192,7 +1300,7 @@ mod tests {
             .iter()
             .map(|e| {
                 (
-                    e.row,
+                    e.part_row,
                     e.reason.clone(),
                     e.reason.is_known(),
                     bytes(&e.column),
@@ -1291,11 +1399,11 @@ mod tests {
     #[test]
     fn an_at_merge_that_breaks_its_schema_is_internal() {
         let docs: [&[u8]; 7] = [
-            br#"{"at_merge":[{"row":0,"reason":"ttl_column_reset","column":"c","column_b64":"Yw=="}]}"#,
-            br#"{"at_merge":[{"row":0,"reason":"ttl_column_reset","column":"c","stored_b64":"!!"}]}"#,
-            br#"{"at_merge":[{"row":0,"reason":"ttl_delete","input_rows":["x"]}]}"#,
-            br#"{"at_merge":[{"row":0,"reason":"ttl_delete","input_rows":[-1]}]}"#,
-            br#"{"at_merge":[{"row":0,"reason":7}]}"#,
+            br#"{"at_merge":[{"part_row":0,"reason":"ttl_column_reset","column":"c","column_b64":"Yw=="}]}"#,
+            br#"{"at_merge":[{"part_row":0,"reason":"ttl_column_reset","column":"c","stored_b64":"!!"}]}"#,
+            br#"{"at_merge":[{"part_row":0,"reason":"ttl_delete","input_rows":["x"]}]}"#,
+            br#"{"at_merge":[{"part_row":0,"reason":"ttl_delete","input_rows":[-1]}]}"#,
+            br#"{"at_merge":[{"part_row":0,"reason":7}]}"#,
             br#"{"at_merge":{"row":0}}"#,
             br#"{"unsupported_settings":["session_timezone"]}"#,
         ];
@@ -1306,19 +1414,142 @@ mod tests {
 
     #[test]
     fn unsupported_settings_are_name_objects_and_surface_as_bytes() {
+        // The row-level member is REMOVED (ABI v2 batch 2): a row document that
+        // still carries one decodes on, as an unknown member (rule r2).
         let r = row(
             br#"{"outcome":"accepted","unsupported_settings":[{"name":"a_setting"},{"name_b64":"AP8="}]}"#,
         )
         .unwrap();
-        assert_eq!(r.unsupported_settings[0].as_bytes(), b"a_setting");
-        assert_eq!(r.unsupported_settings[1].as_bytes(), &[0x00, 0xff]);
+        assert_eq!(r.outcome, Outcome::Accepted);
         let f = filter_result(
             br#"{"outcome":"ok","verdicts":"t","unsupported_settings":[{"name":"x"}]}"#,
         )
         .unwrap();
         assert_eq!(f.unsupported_settings[0].as_bytes(), b"x");
         // A bare string is not a name object.
-        assert!(row(br#"{"outcome":"accepted","unsupported_settings":["x"]}"#).is_err());
+        assert!(filter_result(br#"{"outcome":"ok","unsupported_settings":["x"]}"#).is_err());
+    }
+
+    /// ABI v2 batch 2: the refusal members, the decline `reason`s, and the
+    /// export's column list and decline reason, each read off the document.
+    #[test]
+    fn a_refusal_carries_its_site_row_and_reason() {
+        let r = row(
+            br#"{"outcome":"unsupported","code":-2,"reason":"a-catalog-id","refused_at":"body_read",
+                "verdict":"d","verdict_code":-2,"verdict_reason":"another-id"}"#,
+        )
+        .unwrap();
+        assert_eq!(r.err_code, -2);
+        assert_eq!(r.reason.as_deref(), Some("a-catalog-id"));
+        assert_eq!(r.refused_at, Some(RefusalSite::BodyRead));
+        assert_eq!(r.refused_row, None);
+        assert_eq!(r.verdict_code, -2);
+        assert_eq!(r.verdict_reason.as_deref(), Some("another-id"));
+        // Absent is None, never an empty string or a default site.
+        let r = row(br#"{"outcome":"accepted","code":0}"#).unwrap();
+        assert_eq!(
+            (r.reason, r.refused_at, r.refused_row, r.verdict_reason),
+            (None, None, None, None)
+        );
+
+        let b = batch(
+            br#"{"outcome":"rejected","code":27,"refused_at":"row","refused_row":3,"rows_read":4,
+                "export_columns":[{"name":"a"},{"name_b64":"AP8="}],
+                "export_declined":"","export_declined_reason":null,
+                "row_spans":[{"off":0,"len":2},null,{"off":2,"len":2}]}"#,
+            Some(b"xxxx".to_vec()),
+        )
+        .unwrap();
+        assert_eq!(b.refused_at, Some(RefusalSite::Row));
+        assert_eq!(b.refused_row, Some(3));
+        assert_eq!(b.reason, None);
+        let cols: Vec<&[u8]> = b
+            .export_columns
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(RawText::as_bytes)
+            .collect();
+        assert_eq!(cols, vec![&b"a"[..], &[0x00, 0xff][..]]);
+        // One entry per row, `null` for a row that was not exported.
+        assert_eq!(
+            b.spans,
+            Some(vec![
+                Some(Span { off: 0, len: 2 }),
+                None,
+                Some(Span { off: 2, len: 2 })
+            ])
+        );
+
+        let b = batch(
+            br#"{"outcome":"unsupported","code":-2,"reason":"r-id","refused_at":"call",
+                "export_declined":"nope","export_declined_reason":"export-id"}"#,
+            None,
+        )
+        .unwrap();
+        assert_eq!(b.reason.as_deref(), Some("r-id"));
+        assert_eq!(b.refused_at, Some(RefusalSite::Call));
+        assert_eq!(b.export_declined_reason.as_deref(), Some("export-id"));
+        assert_eq!(b.export_columns, None);
+
+        let f = filter_result(
+            br#"{"outcome":"unsupported","code":-2,"reason":"f-id","refused_at":"body_step",
+                "verdicts":"d","errors":[{"row":0,"code":-2,"reason":"e-id","err":"m"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(f.reason.as_deref(), Some("f-id"));
+        assert_eq!(f.refused_at, Some(RefusalSite::BodyStep));
+        assert_eq!(f.errors[0].reason.as_deref(), Some("e-id"));
+        // A site the description does not list is its Unknown (rule r3).
+        let f = filter_result(br#"{"outcome":"rejected","refused_at":"somewhere_new"}"#).unwrap();
+        assert_eq!(
+            f.refused_at,
+            Some(RefusalSite::Unknown("somewhere_new".into()))
+        );
+    }
+
+    #[test]
+    fn a_schema_description_carries_posture_support_reads_and_b64_server_settings() {
+        let d = schema_description(
+            br#"{"posture":"load",
+                "columns":[
+                  {"name":"a","type":"UInt8","default_kind":"","default_expression":""},
+                  {"name":"b","type":"UInt8","default_kind":"DEFAULT","default_expression":"a",
+                   "default_support":"deferred","default_support_reason":"why-id",
+                   "reads":[{"name":"a"},{"name_b64":"AP8="}]}],
+                "server":{"timezone":"UTC","settings":{"s":"v","raw":{"b64":"AP8="}}}}"#,
+        )
+        .unwrap();
+        assert_eq!(d.posture, Some(Posture::Load));
+        assert_eq!(d.columns[0].default_support, None);
+        assert_eq!(d.columns[0].reads, None);
+        assert_eq!(d.columns[1].default_support, Some(DefaultSupport::Deferred));
+        assert_eq!(
+            d.columns[1].default_support_reason.as_deref(),
+            Some("why-id")
+        );
+        let reads: Vec<&[u8]> = d.columns[1]
+            .reads
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(RawText::as_bytes)
+            .collect();
+        assert_eq!(reads, vec![&b"a"[..], &[0x00, 0xff][..]]);
+        let s = d.server.unwrap().settings;
+        assert_eq!(s["s"].as_bytes(), b"v");
+        assert_eq!(s["raw"].as_bytes(), &[0x00, 0xff]);
+        // Absent posture is create, as None.
+        let d = schema_description(br#"{"columns":[]}"#).unwrap();
+        assert_eq!(d.posture, None);
+        // An object that is not the b64 form breaks the document's schema.
+        for bad in [
+            br#"{"columns":[],"server":{"settings":{"x":{"b64":"!!"}}}}"#.as_slice(),
+            br#"{"columns":[],"server":{"settings":{"x":{"other":"AP8="}}}}"#.as_slice(),
+            br#"{"columns":[],"server":{"settings":{"x":7}}}"#.as_slice(),
+        ] {
+            internal(schema_description(bad).unwrap_err());
+        }
     }
 
     #[test]

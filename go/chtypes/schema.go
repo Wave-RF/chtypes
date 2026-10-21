@@ -95,7 +95,7 @@ func (s *Schema) Describe() (SchemaDescription, error) {
 // Row previews one row (chs_preview_row).
 func (s *Schema) Row(format Format, body []byte, opts ...RowOption) (RowResult, error) {
 	c := rowConfig(opts)
-	settings, columns, err := callInputs(c)
+	settings, columns, options, err := callInputs(c)
 	if err != nil {
 		return RowResult{}, err
 	}
@@ -104,7 +104,7 @@ func (s *Schema) Row(format Format, body []byte, opts ...RowOption) (RowResult, 
 	}
 	defer s.g.leave()
 	raw, err := s.lib.document(func() (*abi2.Buf, *abi2.CallError) {
-		return s.lib.tbl.PreviewRow(s.h, int32(format), body, settings, columns)
+		return s.lib.tbl.PreviewRow(s.h, int32(format), body, settings, columns, options)
 	})
 	if err != nil {
 		return RowResult{}, err
@@ -116,7 +116,7 @@ func (s *Schema) Row(format Format, body []byte, opts ...RowOption) (RowResult, 
 // attached and an export of the accepted rows.
 func (s *Schema) Rows(format Format, body []byte, opts ...RowsOption) (BatchResult, error) {
 	c := rowsConfig(opts)
-	settings, columns, err := callInputs(c)
+	settings, columns, options, err := callInputs(c)
 	if err != nil {
 		return BatchResult{}, err
 	}
@@ -132,7 +132,7 @@ func (s *Schema) Rows(format Format, body []byte, opts ...RowsOption) (BatchResu
 		defer c.filter.g.leave()
 		fh = c.filter.h
 	}
-	docBuf, exportBuf, cerr := s.lib.tbl.PreviewBatch(s.h, int32(format), body, settings, columns, fh, int32(c.export), uint32(c.docFlags))
+	docBuf, exportBuf, cerr := s.lib.tbl.PreviewBatch(s.h, int32(format), body, settings, columns, fh, int32(c.export), uint32(c.docFlags), options)
 	if cerr != nil {
 		return BatchResult{}, callError(cerr)
 	}
@@ -175,11 +175,15 @@ func (s *Schema) CompileFilter(expr string, opts ...FilterOption) (*Filter, erro
 	if err != nil {
 		return nil, err
 	}
+	options, err := c.filterOpts.json("filter options")
+	if err != nil {
+		return nil, err
+	}
 	if err := s.enter(); err != nil {
 		return nil, err
 	}
 	defer s.g.leave()
-	h, cerr := s.lib.tbl.FilterCreate(s.h, []byte(expr), params, settings)
+	h, cerr := s.lib.tbl.FilterCreate(s.h, []byte(expr), params, settings, options)
 	if cerr != nil {
 		return nil, callError(cerr)
 	}
@@ -190,7 +194,7 @@ func (s *Schema) CompileFilter(expr string, opts ...FilterOption) (*Filter, erro
 // evaluated over it with no re-parse.
 func (s *Schema) ParseBlock(format Format, body []byte, opts ...BlockOption) (*Block, error) {
 	c := blockConfig(opts)
-	settings, columns, err := callInputs(c)
+	settings, columns, options, err := callInputs(c)
 	if err != nil {
 		return nil, err
 	}
@@ -198,23 +202,26 @@ func (s *Schema) ParseBlock(format Format, body []byte, opts ...BlockOption) (*B
 		return nil, err
 	}
 	defer s.g.leave()
-	h, cerr := s.lib.tbl.BlockCreate(s.h, int32(format), body, settings, columns)
+	h, cerr := s.lib.tbl.BlockCreate(s.h, int32(format), body, settings, columns, options)
 	if cerr != nil {
 		return nil, callError(cerr)
 	}
 	return newBlock(s.lib, h), nil
 }
 
-// callInputs serializes the settings (the per-call zone written into them) and
-// the column list of a call.
-func callInputs(c *callConfig) (settings, columns []byte, err error) {
+// callInputs serializes the settings (the per-call zone written into them), the
+// column list and the insert options document of a call that models an INSERT.
+func callInputs(c *callConfig) (settings, columns, options []byte, err error) {
 	if settings, err = callSettings(c.settings, c.timezone); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if columns, err = columnsJSON(c.columns, c.haveColumns); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	return settings, columns, nil
+	if options, err = c.insertOpts.json("insert options"); err != nil {
+		return nil, nil, nil, err
+	}
+	return settings, columns, options, nil
 }
 
 // Filter is a compiled filter. It holds its schema inside the library.
@@ -252,9 +259,10 @@ func (f *Filter) enter() error {
 
 // Rows evaluates the filter over a body (chs_filter_eval_body). The settings
 // are the body's parse settings only; the filter's own zone governs its WHERE.
+// WithColumns and the insert options model the same INSERT as on Schema.Rows.
 func (f *Filter) Rows(format Format, body []byte, opts ...EvalOption) (FilterResult, error) {
 	c := evalConfig(opts)
-	settings, err := callSettings(c.settings, c.timezone)
+	settings, columns, options, err := callInputs(c)
 	if err != nil {
 		return FilterResult{}, err
 	}
@@ -263,7 +271,7 @@ func (f *Filter) Rows(format Format, body []byte, opts ...EvalOption) (FilterRes
 	}
 	defer f.g.leave()
 	raw, err := f.lib.document(func() (*abi2.Buf, *abi2.CallError) {
-		return f.lib.tbl.FilterEvalBody(f.h, int32(format), body, settings)
+		return f.lib.tbl.FilterEvalBody(f.h, int32(format), body, settings, columns, options)
 	})
 	if err != nil {
 		return FilterResult{}, err

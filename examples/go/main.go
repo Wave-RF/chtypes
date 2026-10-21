@@ -609,7 +609,6 @@ func section6(lib *chtypes.Library) {
 
 	blank()
 	kv("UnknownFields[]", fmt.Sprintf("%q", r.UnknownFields))
-	kv("UnsupportedSettings[]", fmt.Sprintf("%q", r.UnsupportedSettings))
 	note("unknown fields are reported, not judged: whether to 400 on them is")
 	note("gateway policy")
 	blank()
@@ -1190,15 +1189,20 @@ func section15(lib *chtypes.Library) {
 	note("bytes are directly INSERT-able with no column list; DEFAULTs (seq=7,")
 	note("label='unknown') are already applied: preview == stored")
 	for i, sp := range res.Spans {
-		l := "(no bytes: row not accepted)"
-		if sp.Len > 0 {
-			l = fmt.Sprintf("%q", res.Payload[sp.Off:sp.Off+sp.Len])
+		l := "(no bytes: row not exported)"
+		sd := "nil"
+		if sp != nil {
+			sd = fmt.Sprintf("{off:%d len:%d}", sp.Off, sp.Len)
+			if sp.Len > 0 {
+				l = fmt.Sprintf("%q", res.Payload[sp.Off:sp.Off+sp.Len])
+			}
 		}
-		kv(fmt.Sprintf("  span[%d] {off:%d len:%d}", i, sp.Off, sp.Len), fmt.Sprintf("%s -> %s", res.Rows[i].Outcome, l))
+		kv(fmt.Sprintf("  span[%d] %s", i, sd), fmt.Sprintf("%s -> %s", res.Rows[i].Outcome, l))
 	}
-	note("spans are INDEX-ALIGNED with rows; slicing spans out of the payload")
-	note("IS the per-row payload, and concatenating non-zero spans reproduces")
-	note("it exactly: batches merge by byte concatenation")
+	note("spans are INDEX-ALIGNED with rows, nil for a row not exported;")
+	note("slicing spans out of the payload IS the per-row payload, and")
+	note("concatenating non-nil spans reproduces it exactly: batches merge")
+	note("by byte concatenation")
 	blank()
 
 	// The lean document: fewer doc flags keep the whole verdict channel and

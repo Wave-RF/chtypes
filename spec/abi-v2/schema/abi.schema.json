@@ -95,7 +95,7 @@
     "content": {
       "description": "What a counted byte string carries. Every one is a byte string, never a C string: NUL and invalid UTF-8 pass through. A document:<name> content names an entry in documents, and an input:<name> content an entry in inputs.",
       "type": "string",
-      "pattern": "^(bytes|name|sql|message|ascii|json_object_string_values|json_array_names|timezone|document:[a-z][a-z0-9_]*|input:[a-z][a-z0-9_]*)$"
+      "pattern": "^(bytes|name|sql|message|ascii|json_object_string_values|json_object_byte_values|json_array_names|timezone|document:[a-z][a-z0-9_]*|input:[a-z][a-z0-9_]*)$"
     },
     "handle": {
       "type": "object",
@@ -208,11 +208,12 @@
     "function": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "class", "thread", "returns", "params"],
+      "required": ["name", "class", "thread", "init", "returns", "params"],
       "properties": {
         "name": {"$ref": "#/$defs/c_type_name"},
         "class": {"enum": ["handshake", "tombstone", "api", "tooling"]},
         "thread": {"enum": ["any", "shared", "handle_serial", "process_once", "process_serial"], "description": "The thread class; scripts/abi-v1/model.py THREADS describes each, and load() ties it to the function's shape: `shared` exactly when the call reads a caller handle and is not a free, `handle_serial` exactly for a free."},
+        "init": {"enum": ["any", "required"], "description": "The init class: whether the call is valid before `chs_initialize` has succeeded (the Preamble's Initialization in docs.md). scripts/abi-v1/model.py INITS describes each, and load() ties it to the function: `any` for the handshake, the tombstone, `chs_initialize` and every call that returns no `chs_status` (the buffer and error accessors, the frees, `chs_shutdown`); `required` for every other call, unless its own docs.md section says it is valid before `chs_initialize`."},
         "provisional": {"$ref": "#/$defs/markers"},
         "growable": {"type": "boolean", "description": "Rule r1 in spec/abi-v2/docs.md: true marks a function that may gain inputs after it first ships. It takes exactly one options document (a bytes_in parameter whose content names an inputs entry with options true), and a function not marked growable takes no input document at all; scripts/abi-v1/model.py checks both."},
         "returns": {"$ref": "#/$defs/return"},

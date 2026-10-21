@@ -104,6 +104,23 @@ DOC_FUNCTIONS = {
     "chs_preview_row": ("body", "row"),
     "chs_discover_columns": ("rows", "discovery"),
 }
+# Generation 2's row document: `code` is required, beside `outcome`, and the call's declined settings are the batch
+# document's only (no row-level `unsupported_settings`). Generation 1's template above is
+# unchanged, so its fixtures are too.
+DOC_TEMPLATES_V2 = {
+    **DOC_TEMPLATES,
+    "row": [
+        ("raw", '{"outcome":"accepted","code":0,"input_span":{"off":0,"len":'),
+        ("len",),
+        ("raw", '},"unknown_fields":[],"cols":[{'),
+        *DOC_TEMPLATES["row"][3:],
+    ],
+}
+
+
+def doc_templates(major: int) -> dict:
+    """The templates of one generation: emit/stub.py compiles them and doc_render() renders them."""
+    return DOC_TEMPLATES_V2 if major >= 2 else DOC_TEMPLATES
 
 
 # --------------------------------------------------------------------------
@@ -145,9 +162,8 @@ _R2_ROW = {
         }
     ],
     "computed": [{"name": "m", "kind": "materialized", "stored": "5", **_UNK}],
-    "transformed": [{"column": "s", "input": "1", "stored": "2", "reason": "value_changed", "row": 0, **_UNK}],
+    "transformed": [{"column": "s", "input": "1", "stored": "2", "reason": "value_changed", "lossy": True, "row": 0, **_UNK}],
     "unknown_fields": [{"name": "u", **_UNK}],
-    "unsupported_settings": [{"name": "st", **_UNK}],
     "partition_id": "all",
     "verdict_code": 0,
     **_UNK_TOP,
@@ -165,7 +181,7 @@ R2_DOCS = {
         "storage_transforms": [{"row": 0, "column": "s", "stored": "2", "reason": "date_clamp", **_UNK}],
         "unsupported_settings": [{"name": "st", **_UNK}],
         "at_merge": [
-            {"row": 0, "reason": "ttl_column_reset", "column": "s", "stored": "", "input_rows": [0], **_UNK}
+            {"part_row": 0, "reason": "ttl_column_reset", "column": "s", "stored": "", "input_rows": [0], **_UNK}
         ],
         "engine_rows": [[{"name": "s", "stored": "abc", "null": False, "value_b64": "YWJj", **_UNK}]],
         "row_spans": [{"off": 0, "len": 3, **_UNK}],
@@ -327,7 +343,7 @@ DECLINED_LISTS: dict[str, dict] = {
 # the message is the stub's stand-in, not ClickHouse's text.
 DEEP = {
     "id": "deep",
-    "fn": "chs_schema_describe",
+    "fn": "chs_schema_create",
     "status": "CHS_REJECTED",
     "ch_code": 306,
     "ch_name": "TOO_DEEP_RECURSION",
@@ -443,7 +459,7 @@ def _doc_src(src: tuple, payload: bytes) -> bytes:
     return src[1] if src[0] == "lit" else payload + src[1]
 
 
-def doc_render(template: str, param: bytes) -> dict:
+def doc_render(template: str, param: bytes, major: int = 1) -> dict:
     """The document the stub returns for `param` (which starts DOC_PREFIX),
     rendered in Python from the same template the stub's C is compiled from."""
     import base64
@@ -451,7 +467,7 @@ def doc_render(template: str, param: bytes) -> dict:
 
     payload = param[len(DOC_PREFIX) :]
     out: list[str] = []
-    for step in DOC_TEMPLATES[template]:
+    for step in doc_templates(major)[template]:
         op = step[0]
         if op == "raw":
             out.append(step[1])

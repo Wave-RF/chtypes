@@ -30,9 +30,9 @@ Output-format settings that reach a WHERE (through `formatRow`, `toJSONString` o
 
 This is part of the v2 contract.
 
-A consumer passes the server's changed settings in the server profile (`settings`, see `input:server_profile` in `spec/abi-v2/docs.md`). Then it must **refuse a tenant if `filter_declined_settings` is non-empty, or a `result-content` setting is changed**.
+A consumer passes the server's changed settings in the server profile (`settings`, see `input:server_profile` in `spec/abi-v2/docs.md`). Then it must **refuse a tenant if `filter_declined_settings` is non-empty**. That is the whole rule: the list already carries every changed `result-content` setting, honored or not, and every cell of `documented-pathological.tsv` the schema's layers set (at tier `server-refuses`), so a consumer reads neither these lists nor that file to decide.
 
-`filter_declined_settings` is the top-level member of `chs_schema_describe` on the tenant's schema, one check at bind time. It lists every setting that this build's filters do not honor in a WHERE, over every layer known when the schema was compiled: the `chs_set_defaults` snapshot, the server profile and the schema's own settings. Each entry carries its tier from these lists and its layer. On such a schema, `chs_filter_create` declines (`CHS_DECLINED`): this is the backstop for a consumer that did not read the list. A filter's own settings are not in it; a declined one is named at evaluation, with every verdict `d`. An evaluation's settings govern parsing the body only: they never reach the WHERE, so they are never named as WHERE settings, and a filter evaluated in the INSERT's own session is compiled with that session's WHERE-tier settings in the filter's own settings.
+`filter_declined_settings` is the top-level member of `chs_schema_describe` on the tenant's schema, one check at bind time. It lists every setting that this build's filters do not honor in a WHERE, over every layer known when the schema was compiled: the `chs_set_defaults` snapshot, the server profile and the schema's own settings. Each entry carries its tier from these lists (or `server-refuses`, for a pathological cell) and its layer. On such a schema, `chs_filter_create` declines (`CHS_DECLINED`): this is the backstop for a consumer that did not read the list. A filter's own settings are not in it; a declined one is named at evaluation, with every verdict `d`. An evaluation's settings govern parsing the body only: they never reach the WHERE, so they are never named as WHERE settings, and a filter evaluated in the INSERT's own session is compiled with that session's WHERE-tier settings in the filter's own settings.
 
 A `result-truncate` setting never makes a consumer refuse: it is outside a row verdict's scope, since a stream can deliver rows that a paged SELECT would cut off.
 
@@ -54,7 +54,7 @@ About 63 to 81 settings per line are free strings or enums for which the flip te
 
 ## Settings the server may refuse outright
 
-Under some settings values a ClickHouse server refuses **every** filter query, so no row is ever returned, while the library answers the rows. A server configured with one of these values is outside the filter guarantee: **a consumer refuses such a profile or call.** Neither the library nor the filter's row verdicts will tell you the server would have refused.
+Under some settings values a ClickHouse server refuses **every** filter query, so no row is ever returned, while the library answers the rows. A server configured with one of these values is outside the filter guarantee, and **the library says so**: for a cell set at the `chs_set_defaults`, server-profile or schema layer, `filter_declined_settings` lists it at tier `server-refuses`, so the consumer rule above refuses it with no lookup here. A filter's own settings are not in that list, and need no lookup either: a cell set there declines `chs_filter_create` (`CHS_DECLINED`, reason `setting-server-refuses`).
 
 The exact list is the data file `documented-pathological.tsv`, copied byte for byte from the artifact producer. A leading block of `#` comment lines explains it, the last comment line names the columns, and each following row is one exact cell, with these tab-separated columns:
 
@@ -70,7 +70,7 @@ The exact list is the data file `documented-pathological.tsv`, copied byte for b
 
 Two examples from the data: `max_expanded_ast_elements=1` is refused with server code 36 on every supported line, and `page=1` is refused with code 36 on the 26.8 and 26.9 lines.
 
-The producer's differential gate counts these cells under their own heading and does not block on them. Nothing else is excused: the list grows only by sign-off, and a listed cell that stops failing must have its row removed. Treat a value that is not on the list as unknown, not as safe.
+The producer's differential gate counts these cells under their own heading and does not block on them. Nothing else is excused: the list grows only by sign-off, and a listed cell that stops failing must have its row removed. A value not on the list is one no measurement has found the server refusing; the producer's gate is what finds a new cell, and a consumer never extends the list itself.
 
 ## Not covered
 

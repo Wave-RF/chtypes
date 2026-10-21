@@ -56,7 +56,7 @@
 // answer is a *UnsupportedError, a PEER of the first that errors.As never
 // confuses with it. *UsageError is misuse (a closed object, a refused
 // version spelling, a conflicting setup) and *InternalError a library bug.
-// AsCallError reads the five fields every one of the four carries. A
+// AsCallError reads the six fields every one of the four carries. A
 // loader or fetch failure is an *ArtifactError whose Code is the shared
 // vocabulary, with a sentinel per code for errors.Is.
 //

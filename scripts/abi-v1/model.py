@@ -122,7 +122,7 @@ V0_JSON = spec(1).v0_json
 STABILITIES = ("unstable", "locked")
 # The rules every generation-2+ docs.md states in its `## Rules` section, by
 # label; load() refuses a Rules section that drops one.
-GENERATION_RULES = ("r1", "r2", "r3", "r4", "r5", "r6", "r7")
+GENERATION_RULES = ("r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8", "r9")
 # The spelling readers reserve for the member an unlisted enum value maps to
 # (r3): no described value may take it.
 UNKNOWN = "unknown"
@@ -160,6 +160,22 @@ THREADS: dict[str, str] = {
     "the same arguments is a no-op that is safe at any time",
     "process_serial": "process-level: must not overlap any other call into the same library image",
 }
+# The init classes (generation 2 on): whether a call is valid before
+# chs_initialize has succeeded. Every function names one; the emitters print
+# these descriptions (no second copy), and the schema pins the same set. The
+# rule tying a class to a function is checked in load(): the handshake, the
+# tombstone, chs_initialize and every call that returns no chs_status are
+# `any`, and every other call is `required` unless its own section says it is
+# valid before chs_initialize.
+INITS: dict[str, str] = {
+    "any": "valid before and after `chs_initialize`",
+    "required": "valid only once `chs_initialize` has succeeded: until then the call changes nothing and returns "
+    "`CHS_INVALID_ARGUMENT`, ch_code 0, and with arguments that are otherwise valid its message starts "
+    "`<function>: call chs_initialize first`",
+}
+INITIALIZE = "chs_initialize"
+# The prose that makes a status-returning call `any`: its own section says so.
+INIT_ANY_SAID = re.compile(r"\b(?:valid|safe) before `chs_initialize`")
 # What a counted byte string carries. Every one is a byte string, never a C
 # string; the description says which, so a binding picks a byte-safe type for
 # a name and the stub and the cases know what a valid input looks like. The
@@ -171,9 +187,24 @@ CONTENTS: dict[str, str] = {
     "message": "a ClickHouse message: may quote input bytes, so may carry any byte",
     "ascii": "guaranteed ASCII",
     "json_object_string_values": "a JSON object whose values are JSON strings (settings, query parameters)",
+    "json_object_byte_values": "a JSON object whose values are JSON strings, or the object `{\"b64\": \"<standard base64, padded>\"}` for a value whose bytes are not valid UTF-8 (settings, query parameters)",
     "json_array_names": "a JSON array of column names, each an object carrying the name as byte_strings says",
     "timezone": "a time zone name, validated by ClickHouse's own DateLUT; length 0 means UTC",
 }
+# The generations a content kind exists in, when not every one: a kind added for a later generation is in
+# neither an earlier one's description nor its reference, and a kind a generation replaced is in neither of
+# the later ones', so no generation's outputs change with another's (generation 2: the object form for bytes,
+# public issue #424, replaced the string-only settings object). load() refuses a content outside its
+# generations, and the reference lists only its own.
+CONTENTS_SINCE: dict[str, int] = {"json_object_byte_values": 2}
+CONTENTS_UNTIL: dict[str, int] = {"json_object_string_values": 1}
+
+
+def content_in_generation(content: str, major: int) -> bool:
+    """Whether a CONTENTS kind exists in generation `major`."""
+    return CONTENTS_SINCE.get(content, 1) <= major <= CONTENTS_UNTIL.get(content, major)
+
+
 # A bytes_in content `input:<name>` names an entry of the description's
 # `inputs` (generation 2 on): a JSON object the library validates and whose
 # unknown keys it refuses (r1). Beside CONTENTS, not in it: its meaning is the
@@ -233,6 +264,10 @@ SUPPORTED_KEYWORDS = frozenset(
         "oneOf",
         "anyOf",
         "allOf",
+        # Not a JSON Schema keyword: the description's own. A document member that carries a vocabulary's value
+        # names the vocabulary (`"vocabulary": "batch_outcome"`), so a binding generates its decoder from the
+        # structure and load() checks the member's enum against the vocabulary. validate() ignores it.
+        "vocabulary",
     }
 )
 _TYPES = {
@@ -430,6 +465,7 @@ class Function:
     params: tuple[Param, ...]
     doc: str
     growable: bool = False  # r1, generation 2 on: takes exactly one options document
+    init: str | None = None  # generation 2 on: `any` or `required` (INITS)
 
     @property
     def is_firm(self) -> bool:
@@ -1307,6 +1343,67 @@ def load(root: Path, major: int = 1) -> Model:
         named = input_name(content)
         if named is not None and named not in inputs:
             problems.append(f"{where}: content {content!r} names no entry in inputs")
+        if content in CONTENTS and not content_in_generation(content, major):
+            problems.append(
+                f"{where}: content {content!r} does not exist in generation {major} (CONTENTS_SINCE / CONTENTS_UNTIL)"
+            )
+
+    # One copy of a vocabulary's values: wherever a schema property is named after a string vocabulary and
+    # carries an enum, the enum is drawn from it, equal to it in an input document (the writer may send any
+    # value) and a subset of it in an output document (the library writes only those; an absent member can
+    # mean a value, as describe's `posture` does for `create`).
+    def vocab_enum_problems(schema, where: str, exact: bool) -> list[str]:
+        out: list[str] = []
+
+        def walk(node, at: str) -> None:
+            if not isinstance(node, dict):
+                return
+            for key in ("properties", "$defs"):
+                for name, sub in (node.get(key) or {}).items():
+                    bound = sub.get("vocabulary") if isinstance(sub, dict) else None
+                    named = key == "properties" and name in enums and enums[name].repr == "string"
+                    if key == "properties" and isinstance(sub, dict) and (bound is not None or (named and "enum" in sub)):
+                        vname = bound if bound is not None else name
+                        if vname not in enums or enums[vname].repr != "string":
+                            out.append(
+                                f"{where}{at}/{key}/{name}: `vocabulary` names {vname!r}, which is not a string "
+                                "vocabulary the description defines"
+                            )
+                        elif "enum" not in sub:
+                            out.append(
+                                f"{where}{at}/{key}/{name}: is bound to the `{vname}` vocabulary but lists no enum "
+                                "of the values the library writes"
+                            )
+                        else:
+                            want = [v.value for v in enums[vname].values]
+                            have = sub["enum"]
+                            if (sorted(have) != sorted(want)) if exact else not set(have) <= set(want):
+                                out.append(
+                                    f"{where}{at}/{key}/{name}: enum {have} is not "
+                                    + ("the" if exact else "drawn from the")
+                                    + f" `{vname}` vocabulary's values {want}"
+                                )
+                    walk(sub, f"{at}/{key}/{name}")
+            # Every member a schema requires is one it describes: a reader generates its decoder from
+            # `properties`, so a required member no property describes is one no binding can read.
+            if node.get("type") == "object" and "required" in node and "properties" in node:
+                for r in node["required"]:
+                    if r not in node["properties"]:
+                        out.append(f"{where}{at}: requires {r!r}, which no property describes")
+            for key in ("items", "additionalProperties"):
+                walk(node.get(key), f"{at}/{key}")
+            for key in ("oneOf", "anyOf", "allOf"):
+                for i, sub in enumerate(node.get(key) or []):
+                    walk(sub, f"{at}/{key}/{i}")
+
+        walk(schema, "")
+        return out
+
+    for name, inp in inputs.items():
+        problems += vocab_enum_problems(inp.schema, f"input {name}: #", exact=True)
+    for name, document in documents.items():
+        if document.schema is not None:
+            problems += vocab_enum_problems(document.schema, f"document {name}: #", exact=False)
 
     # ---- build_info
     bi = raw["build_info"]
@@ -1336,6 +1433,15 @@ def load(root: Path, major: int = 1) -> Model:
             f"{sp.abi_schema}: the thread enum {sorted(schema_threads)} differs from the classes model.py "
             f"describes {sorted(THREADS)}"
         )
+    # ---- the init vocabulary (generation 2 on), which the schema pins too
+    if major >= 2:
+        schema_inits = (_read_json(root, sp.abi_schema, problems) or {}).get("$defs", {}).get("function", {})
+        schema_inits = schema_inits.get("properties", {}).get("init", {}).get("enum", [])
+        if set(schema_inits) != set(INITS):
+            problems.append(
+                f"{sp.abi_schema}: the init enum {sorted(schema_inits)} differs from the classes model.py "
+                f"describes {sorted(INITS)}"
+            )
 
     # ---- functions
     functions: list[Function] = []
@@ -1362,6 +1468,7 @@ def load(root: Path, major: int = 1) -> Model:
             params=params,
             doc=doc(name),
             growable=bool(f.get("growable", False)),
+            init=f.get("init"),
         )
         functions.append(fn)
 
@@ -1507,6 +1614,50 @@ def load(root: Path, major: int = 1) -> Model:
             )
         elif not reads and fn.thread in ("shared", "handle_serial"):
             problems.append(f"{where}: thread class `{fn.thread}` applies only to a call that takes a handle")
+
+    # ---- init classes follow the function (generation 2 on; the Preamble's
+    # Initialization). A call that returns no chs_status has no status to refuse
+    # with, so it is `any`: the error and buffer accessors read a refusal itself,
+    # and a free before chs_initialize is given NULL (nothing makes its handle).
+    # The handshake, the tombstone and chs_initialize are `any` by what they are.
+    # Every other call is `required` unless its own section says it is valid
+    # before chs_initialize, and a `required` call can refuse.
+    for fn in functions:
+        where = f"function {fn.name}"
+        if major < 2:
+            if fn.init is not None:
+                problems.append(f"{where}: `init` is generation 2 on; generation {major} names no init class")
+            continue
+        if fn.init not in INITS:
+            problems.append(f"{where}: init class {fn.init!r} is not one of {sorted(INITS)}")
+            continue
+        if fn.cls in ("handshake", "tombstone"):
+            forced = f"it is class `{fn.cls}`"
+        elif fn.name == INITIALIZE:
+            forced = "it is process setup itself"
+        elif fn.returns.kind != "status":
+            forced = "it returns no chs_status, so it has no status to refuse with"
+        else:
+            forced = None
+        said = bool(INIT_ANY_SAID.search(fn.doc))
+        if forced is not None:
+            if fn.init != "any":
+                problems.append(f"{where}: init class must be `any`, not `{fn.init}`: {forced}")
+        elif fn.init == "any" and not said:
+            problems.append(
+                f"{where}: init class `any`, but it returns a status and its section does not say it is valid "
+                "before `chs_initialize`; such a call is `required`"
+            )
+        elif fn.init == "required" and said:
+            problems.append(
+                f"{where}: its section says it is valid before `chs_initialize`, so its init class is `any`, "
+                "not `required`"
+            )
+        elif fn.init == "required" and "CHS_INVALID_ARGUMENT" not in fn.may_return:
+            problems.append(
+                f"{where}: init class `required` refuses with CHS_INVALID_ARGUMENT before `chs_initialize`, "
+                "so may_return must list it"
+            )
 
     # ---- docs coverage: exactly one section per symbol
     required = set(handles) | set(enums) | set(fmap) | {f"{INPUT_PREFIX}{n}" for n in inputs}

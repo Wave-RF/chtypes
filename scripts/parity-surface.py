@@ -30,7 +30,9 @@ names (`Schema.rows(row_filter=)`), because the doc's Python signatures are
 where its call options live. Three things the doc delegates are completed from
 where it says they live, never from a list kept here:
 
-  - a vocabulary's members are the description's (spec/abi-v1/abi.json): each
+  - a vocabulary's members are the description's (spec/abi-v<N>/abi.json, N the
+    major spec/binding-majors.json gives the bindings checked; v1 where that
+    file is absent): each
     binding's members must number exactly the description's values and agree
     with the other three bindings, compared without case or underscores;
   - "one class per code" (§4) is expanded over the codes the row names, with
@@ -111,7 +113,25 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DOC = ROOT / "docs" / "reference" / "bindings-v1.md"
-DESCRIPTION = ROOT / "spec" / "abi-v1" / "abi.json"
+
+
+def description_path(only: Iterable[str], root: Path = ROOT) -> Path:
+    """The description of the ABI major the bindings checked speak: the
+    major spec/binding-majors.json gives them (every binding speaks 1 where
+    the file is absent, as on main). Bindings on different majors cannot share
+    one vocabulary count, so that is refused rather than checked against the
+    wrong description."""
+    f = root / "spec" / "binding-majors.json"
+    majors = json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}
+    wanted = {majors.get(b, 1) for b in only}
+    if len(wanted) != 1:
+        raise SystemExit(
+            f"parity-surface: the bindings checked speak different ABI majors ({sorted(wanted)}); "
+            "check them one major at a time"
+        )
+    return root / "spec" / f"abi-v{wanted.pop()}" / "abi.json"
+
+
 FETCH_DOC = ROOT / "docs" / "guides" / "fetch-v1.md"
 ALLOWLIST = ROOT / "scripts" / "parity-surface-allow.json"
 FIXTURES = ROOT / "tests" / "fixtures" / "parity-surface"
@@ -1989,6 +2009,26 @@ def selftest() -> int:
     if not any(f.binding == "ts" for f in compare(exp, surfaces, without, description).findings):
         failures.append("ts: removing its allowlisted spelling difference did not fail")
 
+    # The description follows the major the bindings speak: absent file -> v1,
+    # a file -> that major, mixed majors refused. Driven through description_path itself.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        if description_path(("go",), root) != root / "spec" / "abi-v1" / "abi.json":
+            failures.append("with no binding-majors.json the description was not v1's")
+        (root / "spec").mkdir()
+        (root / "spec" / "binding-majors.json").write_text(
+            '{"go": 2, "python": 2, "rust": 1, "ts": 2}', encoding="utf-8"
+        )
+        if description_path(("go", "python"), root) != root / "spec" / "abi-v2" / "abi.json":
+            failures.append("bindings on v2 did not read v2's description")
+        if description_path(("rust",), root) != root / "spec" / "abi-v1" / "abi.json":
+            failures.append("a binding on v1 did not read v1's description")
+        try:
+            description_path(("go", "rust"), root)
+            failures.append("bindings on different majors were not refused")
+        except SystemExit:
+            pass
+
     # The allowlist's `issue` field and --check-issues, offline: the lookup is injected.
     row = '{"binding": "go", "kind": "extra", "names": ["X"], "reason": "%s", "issue": %s}'
     why = "a reason long enough to be accepted here"
@@ -2202,7 +2242,7 @@ def cmd_run(tools: Path, only: tuple[str, ...], save: Path | None, proofs_only: 
             return 1 if any(proof.values()) else 0
         exp = expected_surface()
         allow, problems = load_allowlist(ALLOWLIST)
-        description = json.loads(DESCRIPTION.read_text(encoding="utf-8"))
+        description = json.loads(description_path(only).read_text(encoding="utf-8"))
         for p in problems:
             print(f"parity-surface: allowlist: {p}", file=sys.stderr)
         surfaces: dict[str, dict[str, str]] = {}

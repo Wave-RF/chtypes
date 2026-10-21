@@ -462,7 +462,6 @@ function section6(lib: Library): void {
     blank();
 
     kv('unknownFields[]', JSON.stringify(r.unknownFields.map((b) => b.toString())));
-    kv('unsupportedSettings[]', JSON.stringify(r.unsupportedSettings.map((b) => b.toString())));
     note('unknown fields are reported, not judged: whether to 400 on them is gateway policy');
     blank();
 
@@ -914,10 +913,10 @@ function section15(lib: Library): void {
   note('wire order = declared minus MATERIALIZED/ALIAS/EPHEMERAL, so these bytes are directly');
   note("INSERT-able with no column list; DEFAULTs (seq=7, label='unknown') are already applied");
   (batch.spans ?? []).forEach((span, i) => {
-    const line = span.len ? JSON.stringify(payload.subarray(span.off, span.off + span.len).toString()) : '(no bytes: row not accepted)';
-    kv(`  span[${i}] {off:${span.off} len:${span.len}}`, `${batch.rows[i]?.outcome} -> ${line}`);
+    const line = span?.len ? JSON.stringify(payload.subarray(span.off, span.off + span.len).toString()) : '(no bytes: row not exported)';
+    kv(`  span[${i}] ${span === null ? 'null' : `{off:${span.off} len:${span.len}}`}`, `${batch.rows[i]?.outcome} -> ${line}`);
   });
-  note('spans are INDEX-ALIGNED with rows; concatenating the non-zero spans reproduces the payload');
+  note('spans are INDEX-ALIGNED with rows, null for a row not exported; concatenating the non-null spans reproduces the payload');
   blank();
 
   const lean = schema.rows(Format.JSONEachRow, body, { settings, exportFormat, docFlags: 0 });
@@ -1306,7 +1305,7 @@ async function openOrNote(registry: Registry, line: string): Promise<Library | u
 
 /** A well-formed set of call-error fields, only to show the class relationships in section 10. */
 function callFields(): ConstructorParameters<typeof SchemaError>[0] {
-  return { status: 0, chCode: 0, chName: '', messageBytes: Buffer.alloc(0), column: Buffer.alloc(0) };
+  return { status: 0, chCode: 0, chName: '', messageBytes: Buffer.alloc(0), column: Buffer.alloc(0), reason: '' };
 }
 
 function errName(err: unknown): string {

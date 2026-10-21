@@ -157,38 +157,38 @@ func callResolved(t *Table, fn string, a []resolved) (*InvokeResult, error) {
 		o, ce := t.SchemaDescribe(a[0].schema())
 		return finishResult(t, fn, ce, map[string]*Buf{"out": o})
 	case "chs_preview_row":
+		if err := need(6); err != nil {
+			return nil, err
+		}
+		o, ce := t.PreviewRow(a[0].schema(), int32(a[1].i()), a[2].b(), a[3].b(), a[4].b(), a[5].b())
+		return finishResult(t, fn, ce, map[string]*Buf{"out": o})
+	case "chs_preview_batch":
+		if err := need(9); err != nil {
+			return nil, err
+		}
+		o, x, ce := t.PreviewBatch(a[0].schema(), int32(a[1].i()), a[2].b(), a[3].b(), a[4].b(), a[5].filter(), int32(a[6].i()), uint32(a[7].i()), a[8].b())
+		return finishResult(t, fn, ce, map[string]*Buf{"out": o, "out_export": x})
+	case "chs_filter_create":
 		if err := need(5); err != nil {
 			return nil, err
 		}
-		o, ce := t.PreviewRow(a[0].schema(), int32(a[1].i()), a[2].b(), a[3].b(), a[4].b())
-		return finishResult(t, fn, ce, map[string]*Buf{"out": o})
-	case "chs_preview_batch":
-		if err := need(8); err != nil {
-			return nil, err
-		}
-		o, x, ce := t.PreviewBatch(a[0].schema(), int32(a[1].i()), a[2].b(), a[3].b(), a[4].b(), a[5].filter(), int32(a[6].i()), uint32(a[7].i()))
-		return finishResult(t, fn, ce, map[string]*Buf{"out": o, "out_export": x})
-	case "chs_filter_create":
-		if err := need(4); err != nil {
-			return nil, err
-		}
-		h, ce := t.FilterCreate(a[0].schema(), a[1].b(), a[2].b(), a[3].b())
+		h, ce := t.FilterCreate(a[0].schema(), a[1].b(), a[2].b(), a[3].b(), a[4].b())
 		r, err := finishResult(t, fn, ce, nil)
 		if r != nil {
 			r.Handle = h
 		}
 		return r, err
 	case "chs_filter_eval_body":
-		if err := need(4); err != nil {
+		if err := need(6); err != nil {
 			return nil, err
 		}
-		o, ce := t.FilterEvalBody(a[0].filter(), int32(a[1].i()), a[2].b(), a[3].b())
+		o, ce := t.FilterEvalBody(a[0].filter(), int32(a[1].i()), a[2].b(), a[3].b(), a[4].b(), a[5].b())
 		return finishResult(t, fn, ce, map[string]*Buf{"out": o})
 	case "chs_block_create":
-		if err := need(5); err != nil {
+		if err := need(6); err != nil {
 			return nil, err
 		}
-		h, ce := t.BlockCreate(a[0].schema(), int32(a[1].i()), a[2].b(), a[3].b(), a[4].b())
+		h, ce := t.BlockCreate(a[0].schema(), int32(a[1].i()), a[2].b(), a[3].b(), a[4].b(), a[5].b())
 		r, err := finishResult(t, fn, ce, nil)
 		if r != nil {
 			r.Handle = h

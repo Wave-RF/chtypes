@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import json
 
-from model import CONTENTS, INPUT_PREFIX, THREADS
+from model import CONTENTS, INITS, INPUT_PREFIX, THREADS, content_in_generation
 
 from . import Output, banner, marker_key
 
@@ -157,6 +157,10 @@ def render(model) -> str:
 
     out += ["", "### Thread classes", ""]
     out += table(["class", "what a caller may run at the same time"], [[_code(k), v] for k, v in THREADS.items()])
+    has_init = any(f.init for f in model.functions)
+    if has_init:
+        out += ["", "### Init classes", ""]
+        out += table(["class", "when a call is valid"], [[_code(k), v] for k, v in INITS.items()])
 
     out += ["", "### Parameter kinds", ""]
     out += table(["kind", "C spelling", "rule"], [[_code(k), c, r] for k, c, r in PARAM_KINDS])
@@ -177,7 +181,7 @@ def render(model) -> str:
         [
             [_code(k), v]
             for k, v in [
-                *CONTENTS.items(),
+                *((k, v) for k, v in CONTENTS.items() if content_in_generation(k, model.major)),
                 ("document:<name>", "a JSON document, listed under Documents below"),
                 *inputs_row,
             ]
@@ -339,12 +343,13 @@ def render(model) -> str:
 
     out += ["", "### Functions", ""]
     out += table(
-        ["function", "class", "thread", "returns", "status"],
+        ["function", "class", "thread", *(["init"] if has_init else []), "returns", "status"],
         [
             [
                 _code(f.name),
                 f.cls,
                 f.thread,
+                *([f.init or ""] if has_init else []),
                 "status" if f.returns.kind == "status" else _code(f.returns.c_type.strip()),
                 _marks(f.provisional),
             ]
@@ -353,7 +358,11 @@ def render(model) -> str:
     )
     for f in model.functions:
         out += ["", f"#### `{f.name}`", "", "```c", f.prototype(), "```", ""]
-        facts = [f"- Class `{f.cls}`, thread `{f.thread}`, {_marks(f.provisional)}."]
+        facts = [
+            f"- Class `{f.cls}`, thread `{f.thread}`, "
+            + (f"init `{f.init}`, " if f.init else "")
+            + f"{_marks(f.provisional)}."
+        ]
         if f.returns.kind == "status":
             facts.append("- May return " + ", ".join(_code(s) for s in f.may_return) + ".")
         if f.returns.kind == "handle":
