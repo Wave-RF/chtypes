@@ -1,7 +1,7 @@
 package ocifetch
 
 // errors.go — the v1 shared error vocabulary (docs/guides/fetch-v1.md §8),
-// twelve codes instead of v0's six. CHTYPES_ARTIFACT_INCOMPATIBLE is reserved
+// thirteen codes instead of v0's six. CHTYPES_ARTIFACT_INCOMPATIBLE is reserved
 // for the FFI/loader layer (constants_gen.go's comment on ErrorExitCodes);
 // this package's own code never constructs it.
 
@@ -19,7 +19,10 @@ import (
 // FetchError names the Path, the Reason and the OSError (§1, the cache
 // faults; public issue #486). CodeSourceRetired is a source that answered 410
 // Gone, never retried and never sent to the next base (§2, "A retired
-// repository"; public issue #571).
+// repository"; public issue #571). CodeArtifactRevoked is a build a verified
+// revocation refuses, or a 410 whose body says the tag is revoked; its
+// FetchError carries the Revocation ("Build-level revocation"; public issue
+// #625).
 type ErrorCode string
 
 // Sentinel errors. errors.Is(err, ocifetch.ErrArtifactCorrupt) is true for
@@ -36,6 +39,7 @@ var (
 	ErrSourceIncompatible  = errors.New(string(CodeSourceIncompatible))
 	ErrCacheUnusable       = errors.New(string(CodeCacheUnusable))
 	ErrSourceRetired       = errors.New(string(CodeSourceRetired))
+	ErrArtifactRevoked     = errors.New(string(CodeArtifactRevoked))
 )
 
 // Sentinel returns the errors.Is target for this code, or nil for a code
@@ -64,6 +68,8 @@ func (c ErrorCode) Sentinel() error {
 		return ErrCacheUnusable
 	case CodeSourceRetired:
 		return ErrSourceRetired
+	case CodeArtifactRevoked:
+		return ErrArtifactRevoked
 	}
 	return nil
 }
@@ -97,6 +103,10 @@ type FetchError struct {
 	OSError string
 	Msg     string // the complete message, already prefixed "chtypes: "
 	Err     error  // the underlying cause, when there is one
+	// Revocation is a CHTYPES_ARTIFACT_REVOKED's, for programs: whether it is
+	// signed, the manifest a signed one revokes, and its advisories. nil for
+	// every other code.
+	Revocation *Revocation
 }
 
 func (e *FetchError) Error() string { return e.Msg }

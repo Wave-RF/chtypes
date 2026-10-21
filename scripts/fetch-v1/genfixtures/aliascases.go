@@ -73,6 +73,7 @@ func buildAliasCases(fs *FileSet) []Case {
 	// Line 26.8: the floating tag names the newest build (fingerprint N); the
 	// alias for A names an OLDER build of the same line, signed under A.
 	floating268 := buildAliasIndex(tree, "26.8.15.10", "20261005.120000", fixtureFingerprintN, []string{"26.8"}, all)
+	devAliasTag268 = floating268 // revocationcases.go's all-revoked alias falls back to it
 	alias268 := buildAliasIndex(tree, "26.8.15.9", "20260920.120000", fixtureFingerprintA, []string{aliasOf("26.8", fixtureFingerprintA)}, all)
 
 	// The exact version 26.8.14.2, built twice: the exact tag floats to the

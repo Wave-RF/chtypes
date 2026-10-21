@@ -4,7 +4,7 @@
  *
  * Two shapes (spec/abi-v2/sdk.json's two tables):
  *
- *   - a CALL error: the five fields of the library's error object, read
+ *   - a CALL error: the six fields of the library's error object, read
  *     verbatim. `errorForStatus` in `./errmap.gen.ts` picks the class from the
  *     raw status. The four classes are PEERS, never one a subtype of another:
  *     a decline that satisfied `instanceof SchemaError` would let a handler
@@ -36,7 +36,7 @@ export { FetchV1Error as ArtifactError };
 /** Re-exported unchanged: the fetch layer's corruption error, which the loader's step-4 and step-5 refusals are too. */
 export { ArtifactCorruptError };
 
-/** The five fields of a library error object, read verbatim. */
+/** The six fields of a library error object, read verbatim. */
 export interface CallErrorFields {
   /** The raw status value; compare with `Status`. */
   readonly status: number;
@@ -48,6 +48,8 @@ export interface CallErrorFields {
   readonly messageBytes: Buffer;
   /** The column concerned, empty if none; bytes. */
   readonly column: Buffer;
+  /** The catalog id of a decline or a library-side refusal (`chs_error_reason`); ASCII; empty if none. */
+  readonly reason: string;
 }
 
 function renderCallMessage(label: string, f: CallErrorFields): string {
@@ -63,6 +65,7 @@ export abstract class CallError extends ChtypesError implements CallErrorFields 
   readonly chName: string;
   readonly messageBytes: Buffer;
   readonly column: Buffer;
+  readonly reason: string;
 
   protected constructor(label: string, f: CallErrorFields) {
     super(renderCallMessage(label, f));
@@ -71,6 +74,7 @@ export abstract class CallError extends ChtypesError implements CallErrorFields 
     this.chName = f.chName;
     this.messageBytes = f.messageBytes;
     this.column = f.column;
+    this.reason = f.reason;
   }
 }
 
@@ -103,7 +107,7 @@ export class InternalError extends CallError {
 }
 
 function binding(status: number, message: string): CallErrorFields {
-  return { status, chCode: 0, chName: '', messageBytes: Buffer.from(message, 'utf8'), column: Buffer.alloc(0) };
+  return { status, chCode: 0, chName: '', messageBytes: Buffer.from(message, 'utf8'), column: Buffer.alloc(0), reason: '' };
 }
 
 /** A misuse the binding detects itself: it carries the invalid-argument status, ch_code 0 and an empty name and column, so a handler sees one shape whichever side caught it. */

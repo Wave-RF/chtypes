@@ -119,6 +119,8 @@ export interface Channel {
   readonly pinnable: boolean;
   /** The fingerprint, 64 lowercase hex, this contract's SDK speaks: a version request resolves its alias tag before the tag itself, and the cache lookups see only records signed with it. `''` does neither (the v1 contract and every production channel). */
   readonly ownFingerprint: string;
+  /** Whether build-level revocation is on (`docs/guides/fetch-v1.md`, "Build-level revocation"): generation 2, the dev channel and the production one. The v1 contract has none of it. */
+  readonly revocation: boolean;
 }
 
 /** What a 2.0.0-dev SDK speaks, and what every process speaks unless a test selected another contract. */
@@ -135,6 +137,7 @@ const DEV_CHANNEL: Channel = {
   pinnable: false,
   // The generated constant (src/abi2/decls.gen.ts), never a hand-written one.
   ownFingerprint: ABI_FINGERPRINT.slice('sha256:'.length),
+  revocation: true,
 };
 
 /** The v1 contract the fetch-v1 conformance cases specify, from the generated constants. Only `useFetchV1ForTests` selects it. */
@@ -150,6 +153,7 @@ const FETCH_V1_CHANNEL: Channel = {
   overridable: true,
   pinnable: true,
   ownFingerprint: '',
+  revocation: false,
 };
 
 /**
@@ -172,6 +176,7 @@ const PROD_V2_CHANNEL: Channel = {
   overridable: true,
   pinnable: true,
   ownFingerprint: '',
+  revocation: true,
 };
 
 let current: Channel | undefined;
@@ -191,7 +196,7 @@ function inTestRunner(): boolean {
   return process.env['VITEST'] === 'true' && process.env['VITEST_WORKER_ID'] !== undefined;
 }
 
-function testOnly(what: string): void {
+export function testOnly(what: string): void {
   if (!inTestRunner()) {
     throw new Error(`chtypes: ${what} is test-only; a 2.0.0-dev SDK has no override (spec/abi-v2/docs.md, rule r6)`);
   }

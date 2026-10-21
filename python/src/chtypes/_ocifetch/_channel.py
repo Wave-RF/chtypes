@@ -133,6 +133,10 @@ class Channel:
     # lookups see only records signed with it. "" does neither (the v1 contract
     # and every production channel).
     own_fingerprint: str = ""
+    # Build-level revocation (_revocation.py; docs/guides/fetch-v1.md, "Build-level
+    # revocation"): generation 2, the dev channel and the production one. The v1
+    # contract has none of it.
+    revocation: bool = False
 
 
 # What a 2.0.0-dev SDK speaks, and what every process speaks unless a test
@@ -149,6 +153,7 @@ DEV_CHANNEL: Final = Channel(
     overridable=False,
     pinnable=False,
     own_fingerprint=CHS_ABI_FINGERPRINT.removeprefix("sha256:"),
+    revocation=True,
 )
 
 # The v1 contract the fetch-v1 conformance cases specify, from the generated
@@ -183,6 +188,7 @@ PROD_V2_CHANNEL: Final = Channel(
     keys=C.RELEASE_KEYS,
     overridable=True,
     pinnable=True,
+    revocation=True,
 )
 
 _lock = threading.Lock()

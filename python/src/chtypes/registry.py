@@ -32,13 +32,22 @@ prune` never removes it meanwhile (public issue #494).
 from __future__ import annotations
 
 import os
+import sys
 import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from . import _setup, errors
-from ._ocifetch import Options, Request, Resolved, ensure, list_installed, resolve_installed
+from ._ocifetch import (
+    Options,
+    Request,
+    Resolved,
+    check_installed,
+    ensure,
+    list_installed,
+    resolve_installed,
+)
 from ._ocifetch import _channel as _fetch_channel
 from ._ocifetch import _constants as _fetch_constants
 from ._ocifetch._dsse import TrustedKey as _TrustedKey
@@ -66,6 +75,7 @@ _FETCH_CLASSES: dict[str, type[errors.ArtifactError]] = {
     errors.CODE_SOURCE_INCOMPATIBLE: errors.SourceIncompatibleError,
     errors.CODE_CACHE_UNUSABLE: errors.CacheUnusableError,
     errors.CODE_SOURCE_RETIRED: errors.SourceRetiredError,
+    errors.CODE_ARTIFACT_REVOKED: errors.ArtifactRevokedError,
 }
 
 
@@ -111,6 +121,14 @@ class FetchOptions:
     # "not installed", and never a fall-through to a system dir. None reads
     # CHTYPES_CACHE_STRICT ("1" is on), else off.
     strict_cache: bool | None = None
+    # Build-level revocation (generation 2; docs/guides/fetch-v1.md, "Build-level
+    # revocation"). `allow_revoked` lets a call use a build a verified revocation
+    # refuses, with one warning naming the advisory; it is per call, has no
+    # environment variable, and never lets a lock or an update pin a revoked
+    # build. `require_revocation_check` makes a revocation status that cannot be
+    # read the transport's error rather than one warning.
+    allow_revoked: bool = False
+    require_revocation_check: bool = False
 
     def _trusted_keys(self) -> tuple[_TrustedKey, ...] | None:
         if self.trusted_keys is None:
@@ -152,6 +170,8 @@ class FetchOptions:
             lock_write=self.lock_write,
             update=self.update,
             strict_cache=self.strict_cache,
+            allow_revoked=self.allow_revoked,
+            require_revocation_check=self.require_revocation_check,
         )
 
 
@@ -180,8 +200,12 @@ def _wrap(exc: FetchError) -> errors.ArtifactError:
     """The fetch layer's error as the public class of its code, one family with
     the loader's. The original stays as `__cause__`."""
     cls = _FETCH_CLASSES.get(exc.code, errors.ArtifactError)
-    if cls is errors.CacheUnusableError:
-        wrapped: errors.ArtifactError = errors.CacheUnusableError(
+    if cls is errors.ArtifactRevokedError:
+        wrapped: errors.ArtifactError = errors.ArtifactRevokedError(
+            str(exc), revocation=getattr(exc, "revocation", None)
+        )
+    elif cls is errors.CacheUnusableError:
+        wrapped = errors.CacheUnusableError(
             str(exc),
             path=getattr(exc, "path", ""),
             reason=getattr(exc, "reason", ""),
@@ -430,6 +454,11 @@ class Registry:
                         )
                     )
                 resolved = self._ensure_held(request, fetch_request, options)
+            else:
+                # The installed-build revocation check, before anything reads the
+                # library (docs/guides/fetch-v1.md §9, `check_installed`): its
+                # warnings are printed once on stderr, even when it then refuses.
+                _check_revocation(resolved, options)
         except FetchError as exc:
             raise _wrap(exc) from exc
         # The adapter: the fetch layer's record, passed on exactly as it came.
@@ -449,6 +478,19 @@ def _lookup_held(fetch_request: Request, platform: str, options: Options) -> Res
         if resolved is None or hold(resolved.dir) != VANISHED:
             return resolved
     return None
+
+
+def _check_revocation(resolved: Resolved, options: Options) -> None:
+    """Run the installed-build revocation check of a build the cache answered, and
+    print the warnings it gathered on stderr, whether or not it refuses."""
+    try:
+        warnings = check_installed(resolved, options)
+    except FetchError as exc:
+        for warning in getattr(exc, "warnings", ()):
+            sys.stderr.write(warning + "\n")
+        raise
+    for warning in warnings:
+        sys.stderr.write(warning + "\n")
 
 
 def _refuse_pinning(options: Options) -> None:

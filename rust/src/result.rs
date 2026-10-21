@@ -20,8 +20,8 @@
 use std::collections::BTreeMap;
 
 use crate::abi2::vocab_gen::{
-    DeclinedLayer, DeclinedTier, DefaultKind, FilterOutcome, MergeReason, Outcome, Reason, Source,
-    Verdict,
+    DeclinedLayer, DeclinedTier, DefaultKind, DefaultSupport, FilterOutcome, MergeReason, Outcome,
+    Posture, Reason, RefusalSite, Source, Verdict,
 };
 use crate::raw::RawText;
 
@@ -117,8 +117,8 @@ pub struct EngineCell {
 #[non_exhaustive]
 pub struct AtMergeEntry {
     /// Indexes [`BatchResult::engine_rows`]: the part's row, not the input
-    /// body's.
-    pub row: u64,
+    /// body's (`part_row`).
+    pub part_row: u64,
     /// A `merge_reason` value. One the description does not list is
     /// [`MergeReason::Unknown`] (rule r3).
     pub reason: MergeReason,
@@ -145,6 +145,16 @@ pub struct RowResult {
     pub err_code: i32,
     /// ClickHouse's message for this row (`err`).
     pub err_msg: RawText,
+    /// The catalog id of a declined row (`reason`), present exactly where
+    /// [`RowResult::err_code`] is `CHS_CODE_DECLINED` (-2). ASCII.
+    pub reason: Option<String>,
+    /// Where a single-row result's refusal sits (`refused_at`). One the
+    /// description does not list is [`RefusalSite::Unknown`] (rule r3). The
+    /// rows of a batch carry neither this nor `refused_row`.
+    pub refused_at: Option<RefusalSite>,
+    /// The row a refusal sits at (`refused_row`), present exactly when
+    /// `refused_at` is [`RefusalSite::Row`].
+    pub refused_row: Option<u64>,
     /// Every entry of `cols`, in document order.
     pub columns: Vec<Value>,
     /// The entries of `cols` whose [`Value::is_stored`] is true, in order.
@@ -153,15 +163,16 @@ pub struct RowResult {
     pub transformed: Vec<Transform>,
     /// Input fields that name no column (`unknown_fields`), as bytes.
     pub unknown_fields: Vec<RawText>,
-    /// Settings this build does not support (`unsupported_settings`, name
-    /// objects), as bytes.
-    pub unsupported_settings: Vec<RawText>,
     /// MATERIALIZED values (`computed`).
     pub computed: Vec<Computed>,
     /// The attached filter's verdict, present only with an attached filter.
     pub verdict: Option<Verdict>,
     /// The filter's error code for this row.
     pub verdict_code: i32,
+    /// The catalog id of a declined verdict (`verdict_reason`), present
+    /// exactly where [`RowResult::verdict_code`] is `CHS_CODE_DECLINED`
+    /// (-2). ASCII.
+    pub verdict_reason: Option<String>,
     /// The filter's message for this row.
     pub verdict_err: RawText,
     /// The row's partition id, when the schema has a partition key.
@@ -206,6 +217,16 @@ pub struct BatchResult {
     pub err_code: i32,
     /// ClickHouse's message (`err`).
     pub err_msg: RawText,
+    /// The catalog id of a declined batch (`reason`), present exactly where
+    /// [`BatchResult::err_code`] is `CHS_CODE_DECLINED` (-2). ASCII.
+    pub reason: Option<String>,
+    /// Where a refusal or decline sits (`refused_at`), present whenever the
+    /// outcome is not accepted. One the description does not list is
+    /// [`RefusalSite::Unknown`] (rule r3).
+    pub refused_at: Option<RefusalSite>,
+    /// The row a refusal sits at (`refused_row`), for [`RefusalSite::Row`];
+    /// below [`BatchResult::rows_read`].
+    pub refused_row: Option<u64>,
     /// Each row, decoded as a [`RowResult`].
     pub rows: Vec<RowResult>,
     /// Rows the reader read.
@@ -229,10 +250,17 @@ pub struct BatchResult {
     /// The export bytes: present only for an export that ran (possibly empty);
     /// `None` when none was asked for or it was declined ([`BatchResult::export_declined`]).
     pub payload: Option<Vec<u8>>,
-    /// Each exported row's place in [`BatchResult::payload`].
-    pub spans: Option<Vec<Span>>,
+    /// Each exported row's place in [`BatchResult::payload`] (`row_spans`):
+    /// one entry per [`BatchResult::rows`] entry, index-aligned, `None` for a
+    /// row that was not exported.
+    pub spans: Option<Vec<Option<Span>>>,
+    /// The export's one column list (`export_columns`, name objects); `None`
+    /// when the document carries none.
+    pub export_columns: Option<Vec<RawText>>,
     /// Why an export was declined; empty when it was not.
     pub export_declined: RawText,
+    /// The catalog id of a declined export (`export_declined_reason`). ASCII.
+    pub export_declined_reason: Option<String>,
     /// Rows an attached filter passed.
     pub rows_passed: u64,
     /// Rows an attached filter cut.
@@ -258,6 +286,9 @@ pub struct FilterRowError {
     pub row: u64,
     /// ClickHouse's error code for the row.
     pub code: i32,
+    /// The catalog id of a declined row (`reason`), present exactly where
+    /// [`FilterRowError::code`] is `CHS_CODE_DECLINED` (-2). ASCII.
+    pub reason: Option<String>,
     /// ClickHouse's message for the row (from `err`).
     pub msg: RawText,
 }
@@ -272,6 +303,13 @@ pub struct FilterResult {
     pub err_code: i32,
     /// ClickHouse's message (`err`).
     pub err_msg: RawText,
+    /// The catalog id of a declined evaluation (`reason`), present exactly
+    /// where [`FilterResult::err_code`] is `CHS_CODE_DECLINED` (-2). ASCII.
+    pub reason: Option<String>,
+    /// Where a refusal or decline sits (`refused_at`), as the batch's.
+    pub refused_at: Option<RefusalSite>,
+    /// The row a refusal sits at (`refused_row`), as the batch's.
+    pub refused_row: Option<u64>,
     /// Rows the evaluation read.
     pub rows_read: u64,
     /// Settings this build does not support (name objects), as bytes.
@@ -299,6 +337,15 @@ pub struct Column {
     pub default_kind: DefaultKind,
     /// The DEFAULT expression; empty when there is none.
     pub default_expr: RawText,
+    /// What a build does with the column's DEFAULT (`default_support`).
+    /// Reserved: `None` while the library does not write it.
+    pub default_support: Option<DefaultSupport>,
+    /// The catalog id behind [`Column::default_support`]
+    /// (`default_support_reason`). ASCII. Reserved.
+    pub default_support_reason: Option<String>,
+    /// The columns the DEFAULT expression reads (`reads`, name objects).
+    /// Reserved: `None` while the library does not write it.
+    pub reads: Option<Vec<RawText>>,
 }
 
 /// A schema's columns, from `chs_schema_describe`.
@@ -307,6 +354,9 @@ pub struct Column {
 pub struct SchemaDescription {
     /// The columns, in declared order.
     pub columns: Vec<Column>,
+    /// How the statement was compiled (`posture`): present only for
+    /// [`Posture::Load`]; `None` is create (ABI v2).
+    pub posture: Option<Posture>,
     /// The settings the schema compiles under that this build's filters do
     /// not honor in a WHERE, over every layer known at schema compile (the
     /// defaults `setup` set, the server profile and the schema's own
@@ -335,7 +385,9 @@ pub struct SchemaServer {
     /// (`setup`'s), exactly as `chs_initialize` spelled it.
     pub timezone: String,
     /// The server's settings as the profile gave them; empty when it gave none.
-    pub settings: BTreeMap<String, String>,
+    /// A value is bytes: one that is not valid UTF-8 comes back from its
+    /// `{"b64": ...}` form as exactly those bytes.
+    pub settings: BTreeMap<String, RawText>,
     /// The server's macro set: `None` exactly when the profile carried no
     /// macros (unknown), and `Some`, even of an empty map, when it did (the
     /// complete set).

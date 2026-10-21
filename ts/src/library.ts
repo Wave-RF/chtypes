@@ -18,7 +18,7 @@ import type { Resolved } from './ocifetch/index.js';
 import { Schema, type CompileOptions } from './schema.js';
 import { commitSetup, latchSetup, settleFailedOpen, setupGeneration } from './setup.js';
 import { Server, serverHandleOf } from './server.js';
-import { type BytesIn, bytesIn, encodeServerProfile, encodeSettings, type ServerProfile } from './settings.js';
+import { type BytesIn, bytesIn, encodeSchemaOptions, encodeServerProfile, encodeSettings, type ServerProfile } from './settings.js';
 
 export class Library {
   readonly #image: LoadedImage;
@@ -115,12 +115,13 @@ export class Library {
     // exactly as before the server profile existed. A closed server is refused
     // before the call by its handle's guard (its `ptr` raises a UsageError),
     // because a freed handle would cross as NULL and the library would compile
-    // on the image's server instead of refusing. No schema option is defined
-    // yet: length 0, which the library reads as `{}`.
+    // on the image's server instead of refusing. The schema options document
+    // is built from the members set (`posture`, and any other as JSON text);
+    // with none set it is length 0, which the library reads as `{}`.
     const server = options.server === undefined || options.server === null ? null : serverHandleOf(options.server);
     return new Schema(
       this.#calls,
-      this.#calls.schemaCreate(server, bytesIn(createTable), encodeSettings(options.settings, options.sessionTimezone), Buffer.alloc(0)),
+      this.#calls.schemaCreate(server, bytesIn(createTable), encodeSettings(options.settings, options.sessionTimezone), encodeSchemaOptions(options)),
     );
   }
 }

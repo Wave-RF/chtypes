@@ -415,8 +415,8 @@ def _declined_cases(model) -> list[dict]:
     whose list holds one schema-layer setting, a filter compile surfaces as the
     binding's declined error (sdk.json's class for CHS_DECLINED) carrying the
     stub's status, ch_code and message; on a schema whose list is empty, the
-    same compile succeeds. Last, describe's deep-input refusal surfaces as the
-    binding's rejected error (sdk.json's class for CHS_REJECTED), ch_code 306."""
+    same compile succeeds. Last, the deep input's refusal at compile surfaces as
+    the binding's rejected error (sdk.json's class for CHS_REJECTED), ch_code 306."""
     if model.major < 2:  # generation 1 is frozen and has no server
         return []
     rule = _stubshared.DECLINED
@@ -489,14 +489,15 @@ def _declined_cases(model) -> list[dict]:
     }
     cases.append(
         {
-            "id": "schema.describe_rejects_a_deep_input_306",
+            "id": "schema.compile_rejects_a_deep_input_306",
             "variant": DECLINED_VARIANT,
             "steps": [
                 {"op": "open", "expect": OK},
-                {"op": "compile", "statement": rule["prefix"] + deep["id"], "as": "schema", "expect": OK},
-                {"op": "describe", "schema": "schema", "expect": rejected},
-                # The control: the same describe of a schema the deep input
-                # did not select answers its document.
+                # A schema chs_schema_create returned describes (F21): the statement's depth is judged
+                # at compile, so the deep input is refused here and never at describe.
+                {"op": "compile", "statement": rule["prefix"] + deep["id"], "as": "schema", "expect": rejected},
+                # The control: a schema the deep input did not select compiles
+                # and describes as its document.
                 *_declined_steps(model, "none", "plain", open_first=False),
             ],
         }

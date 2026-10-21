@@ -328,7 +328,10 @@ describe.skipIf(!stubsAvailable)('the registry with a fetch in flight (public is
       const installed = await bounded(registry.for('26.8'), "for('26.8'), installed, waiting for 26.3's fetch held at the gate");
       expect(installed.version).toBe('26.8.15.10');
       expect(settled).toBe(false); // 26.3's request is still parked
-      expect(await waitParked('flight-held', 1)).toBe(1);
+      // 26.8's installed-build revocation check also parks at the closed gate (its
+      // listing request) until its own 5 s deadline passes; that is no fetch, and the
+      // open answered without it.
+      expect(await waitParked('flight-held', 1)).toBeGreaterThanOrEqual(1);
       await openGate('flight-held');
       expect(await bounded(held, "for('26.3') after the gate opened")).toBeInstanceOf(ArtifactError);
     } finally {

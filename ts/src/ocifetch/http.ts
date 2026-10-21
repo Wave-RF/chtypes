@@ -32,8 +32,9 @@ import {
   RETRY_MULTIPLIER,
   RETRY_STATUSES,
 } from './constants.gen.js';
-import { ArtifactCorruptError, SourceForbiddenError, SourceRetiredError, SourceUnauthorizedError, SourceUnreachableError } from './errors.js';
-import { isRetiredStatus, readRetiredBody, retiredText } from './retired.js';
+import { activeChannel } from './channel.js';
+import { ArtifactCorruptError, SourceForbiddenError, SourceUnauthorizedError, SourceUnreachableError } from './errors.js';
+import { goneError, isRetiredStatus, readRetiredBody } from './retired.js';
 import type { Clock } from './types.js';
 
 /**
@@ -73,6 +74,13 @@ export interface RequestOptions {
    * call.
    */
   readonly retryOn404?: boolean;
+  /**
+   * One attempt and no sleep, whatever the retry table says: the installed-build
+   * revocation check's budget (`revocation.ts`), never the retry table.
+   */
+  readonly single?: boolean;
+  /** Aborts the request (the installed-build revocation check's one deadline). */
+  readonly signal?: AbortSignal;
 }
 
 /** One GET/HEAD attempt's outcome, before the retry loop decides what to do with it. */
@@ -97,13 +105,15 @@ interface AttemptOutcome {
 export async function withRetry<T>(
   clock: Clock,
   attempt: (attemptNumber: number) => Promise<{ outcome: AttemptOutcome; value?: T }>,
+  single = false,
 ): Promise<T> {
   let last: AttemptOutcome | undefined;
-  for (let n = 1; n <= RETRY_ATTEMPTS; n++) {
+  const attempts = single ? 1 : RETRY_ATTEMPTS;
+  for (let n = 1; n <= attempts; n++) {
     const { outcome, value } = await attempt(n);
     if (outcome.ok) return value as T;
     last = outcome;
-    const isLast = n === RETRY_ATTEMPTS;
+    const isLast = n === attempts;
     if (!outcome.retryable || isLast) break;
     let waitSeconds = RETRY_FIRST_WAIT_S * RETRY_MULTIPLIER ** (n - 1);
     if (outcome.retryAfterSeconds !== undefined) {
@@ -118,7 +128,7 @@ export async function withRetry<T>(
   }
   const statusPart = last?.status !== undefined ? `, last status ${last.status}` : '';
   throw new SourceUnreachableError(
-    `chtypes: ${last?.message ?? 'request failed'} (after ${RETRY_ATTEMPTS} attempts${statusPart})`,
+    `chtypes: ${last?.message ?? 'request failed'} (after ${attempts} attempt${attempts === 1 ? '' : 's'}${statusPart})`,
   );
 }
 
@@ -239,7 +249,7 @@ interface RawResponse {
 }
 
 /** One connection attempt with no retry and no redirect following — the unit `requestBuffered`/`requestToSink` build on. */
-function rawRequest(url: URL, method: 'GET' | 'HEAD', callerHeaders: Record<string, string>): Promise<RawResponse> {
+function rawRequest(url: URL, method: 'GET' | 'HEAD', callerHeaders: Record<string, string>, signal?: AbortSignal): Promise<RawResponse> {
   // The one place a request is made: manifests, blobs, referrers, tag lists,
   // token exchanges and every redirect hop come through here, so the agent is
   // set here and nowhere else. It replaces any caller-supplied one.
@@ -256,6 +266,7 @@ function rawRequest(url: URL, method: 'GET' | 'HEAD', callerHeaders: Record<stri
         agent,
         headers,
         timeout: CONNECT_TIMEOUT_S * 1000,
+        ...(signal !== undefined ? { signal } : {}),
       },
       (res) => {
         resolve({ status: res.statusCode ?? 0, headers: flattenHeaders(res.headers), stream: res });
@@ -388,7 +399,7 @@ export async function requestBuffered(startUrl: string, options: RequestOptions)
           options.tokenHosts,
           bearerToken,
         );
-        res = await rawRequest(url, method, headers);
+        res = await rawRequest(url, method, headers, options.signal);
       } catch (err) {
         return {
           outcome: {
@@ -425,10 +436,11 @@ export async function requestBuffered(startUrl: string, options: RequestOptions)
         continue;
       }
       if (isRetiredStatus(res.status)) {
-        // A retired repository (guide §2): permanent, so thrown rather than
-        // returned, which skips the retry loop and every base loop above it.
+        // A 410 (guide §2): permanent, so thrown rather than returned, which
+        // skips the retry loop and every base loop above it. Under generation 2
+        // one whose body says the tag is revoked is `ArtifactRevokedError`.
         const body = await readRetiredBody(res.stream, RETIRED_BODY_MAX_BYTES);
-        throw new SourceRetiredError(`chtypes: ${retiredText(url.toString(), res.status, body)}`);
+        throw goneError(url.toString(), res.status, body, activeChannel().revocation);
       }
       if (res.status === 401) {
         const challenge = parseBearerChallenge(res.headers['www-authenticate']);
@@ -483,7 +495,7 @@ export async function requestBuffered(startUrl: string, options: RequestOptions)
         value: { status: res.status, headers: res.headers, url: url.toString(), body },
       };
     }
-  });
+  }, options.single === true);
 }
 
 export interface ToSinkResult extends HttpResult {
@@ -522,7 +534,7 @@ export async function requestToSink(
           options.tokenHosts,
           bearerToken,
         );
-        res = await rawRequest(url, 'GET', headers);
+        res = await rawRequest(url, 'GET', headers, options.signal);
       } catch (err) {
         return {
           outcome: {
@@ -558,10 +570,11 @@ export async function requestToSink(
         continue;
       }
       if (isRetiredStatus(res.status)) {
-        // A retired repository (guide §2): permanent, so thrown rather than
-        // returned, which skips the retry loop and every base loop above it.
+        // A 410 (guide §2): permanent, so thrown rather than returned, which
+        // skips the retry loop and every base loop above it. Under generation 2
+        // one whose body says the tag is revoked is `ArtifactRevokedError`.
         const body = await readRetiredBody(res.stream, RETIRED_BODY_MAX_BYTES);
-        throw new SourceRetiredError(`chtypes: ${retiredText(url.toString(), res.status, body)}`);
+        throw goneError(url.toString(), res.status, body, activeChannel().revocation);
       }
       if (res.status === 401) {
         const challenge = parseBearerChallenge(res.headers['www-authenticate']);
@@ -638,7 +651,7 @@ export async function requestToSink(
         value: { status: res.status, headers: res.headers, url: url.toString(), size },
       };
     }
-  });
+  }, options.single === true);
 }
 
 /**

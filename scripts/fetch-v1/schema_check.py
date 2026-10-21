@@ -21,6 +21,13 @@ WHAT IT VALIDATES, and the one deliberate exclusion:
                                                   (the foreign, schema-2 and 0.x layouts exist to
                                                   FAIL it and are deliberately not validated)
 
+and, from the generation-2 corpus (tests/fixtures/fetch-v2, the same case
+builders run with --abi=2, which alone carries the revocation cases), its
+cases.json and http/*.json, whose schemas are generation-neutral. Its locks and
+records are not checked here: lock3.schema.json and verified.schema.json pin
+generation 1 (`abi` 1, `schema` 1), and the fetch-v2 runners refuse anything
+else themselves.
+
 `locks/inputs/invalid-*.json` is DELIBERATELY NOT validated here. Those
 fixtures exist to prove a wrong-schema or wrong-ABI lock is refused
 (frozen-lock-abi-2, lock-schema-2-refused) — they are supposed to fail
@@ -51,6 +58,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent.parent.parent
 SCHEMA_DIR = ROOT / "spec" / "fetch-v1" / "schema"
 FIXTURES_DIR = ROOT / "tests" / "fixtures" / "fetch-v1"
+FIXTURES_V2_DIR = ROOT / "tests" / "fixtures" / "fetch-v2"
 
 
 class SchemaError(Exception):
@@ -194,17 +202,17 @@ def run_checks() -> list[str]:
     problems: list[str] = []
 
     cases_schema = load_schema("cases.schema.json")
-    cases_path = FIXTURES_DIR / "cases.json"
-    if cases_path.exists():
-        problems += validate_file(cases_path, cases_schema)
-    else:
-        problems.append(f"{cases_path}: does not exist")
-
     http_schema = load_schema("http-script.schema.json")
-    http_dir = FIXTURES_DIR / "http"
-    if http_dir.is_dir():
-        for p in sorted(http_dir.glob("*.json")):
-            problems += validate_file(p, http_schema)
+    for corpus in (FIXTURES_DIR, FIXTURES_V2_DIR):
+        cases_path = corpus / "cases.json"
+        if cases_path.exists():
+            problems += validate_file(cases_path, cases_schema)
+        else:
+            problems.append(f"{cases_path}: does not exist")
+        http_dir = corpus / "http"
+        if http_dir.is_dir():
+            for p in sorted(http_dir.glob("*.json")):
+                problems += validate_file(p, http_schema)
 
     lock_schema = load_schema("lock3.schema.json")
     for sub in ("inputs", "expected"):

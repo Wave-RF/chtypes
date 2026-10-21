@@ -17,7 +17,7 @@
  * call is ever in flight while `close` runs.
  */
 
-import type { BlockHandle, Calls, FilterHandle, SchemaHandle } from './abi2/index.js';
+import type { BlockHandle, Calls, FilterHandle, Posture, SchemaHandle } from './abi2/index.js';
 import { DocFlags, EXPORT_NONE, type Format } from './abi2/index.js';
 import {
   type BatchResult,
@@ -30,13 +30,27 @@ import {
   type SchemaDescription,
 } from './documents.js';
 import type { Server } from './server.js';
-import { type BytesIn, bytesIn, encodeColumns, encodeParams, encodeSettings, type Settings } from './settings.js';
+import {
+  type BytesIn,
+  bytesIn,
+  encodeColumns,
+  encodeFilterOptions,
+  encodeInsertOptions,
+  encodeParams,
+  encodeSettings,
+  type ColumnDefault,
+  type DeferDefaults,
+  type ParamEncoding,
+  type SettingValue,
+  type Settings,
+  type VerdictBasis,
+} from './settings.js';
 
 /** Options of `Library.compileTable`: the profile settings a schema compiles under, and the zone that profile defaults to. */
 export interface CompileOptions {
   readonly settings?: Settings | undefined;
-  /** In a compile profile it is a default for later calls on the schema; a compiled type always takes the image zone, never the profile's. */
-  readonly sessionTimezone?: string | undefined;
+  /** In a compile profile it is a default for later calls on the schema; a compiled type always takes the image zone, never the profile's. Bytes that are not valid UTF-8 are sent in the `{"b64": ...}` object form. */
+  readonly sessionTimezone?: SettingValue | undefined;
   /**
    * Compile on this server (`Library.newServer`): the schema's home zone is the
    * server's timezone, the server's settings layer under the schema's own, and a
@@ -46,15 +60,29 @@ export interface CompileOptions {
    * Absent (or `undefined`) is no server: the schema is on the image's own server.
    */
   readonly server?: Server | undefined;
+  /** `schema_options.posture` (ABI v2): how the statement is compiled, `Posture.Create` (the default) as a server's CREATE TABLE, or `Posture.Load` as a server loads the stored definition of a table it holds. */
+  readonly posture?: Posture | undefined;
+  /** Any other member of `schema_options`: key to its value as JSON text, passed through as given (rule r1; a key also named above keeps this value). Text that is not valid JSON is a `UsageError` before any call. */
+  readonly schemaOptionsExtra?: Readonly<Record<string, string>> | undefined;
 }
 
-/** Options of `Schema.row` and `Schema.parseBlock`. */
+/** Options of `Schema.row` and `Schema.parseBlock`: the settings, the zone, the INSERT column list and the `insert_options` members (ABI v2). */
 export interface RowOptions {
   readonly settings?: Settings | undefined;
   /** The per-call zone: written into the settings as `session_timezone`, verbatim. */
-  readonly sessionTimezone?: string | undefined;
+  readonly sessionTimezone?: SettingValue | undefined;
   /** The INSERT column list. */
   readonly columns?: readonly BytesIn[] | undefined;
+  /** `insert_options.insertable_columns` (ABI v2): the columns an INSERT may supply. Absent leaves the member out (every column); `[]` is sent as `[]` (no column). */
+  readonly insertableColumns?: readonly BytesIn[] | undefined;
+  /** `insert_options.column_defaults`: per-call DEFAULT overrides. Absent leaves the member out; `[]` is sent as `[]`. */
+  readonly columnDefaults?: readonly ColumnDefault[] | undefined;
+  /** `insert_options.verdict_basis`. */
+  readonly verdictBasis?: VerdictBasis | undefined;
+  /** `insert_options.defer_defaults`. */
+  readonly deferDefaults?: DeferDefaults | undefined;
+  /** Any other member of `insert_options`: key to its value as JSON text, passed through as given (rule r1; a key also named above keeps this value). Text that is not valid JSON is a `UsageError` before any call. */
+  readonly insertOptionsExtra?: Readonly<Record<string, string>> | undefined;
 }
 
 /** Options of `Schema.rows`. */
@@ -73,13 +101,33 @@ export interface FilterOptions {
   readonly params?: Settings | undefined;
   /** The filter's own zone and profile: fixed when it is compiled, and every evaluation of it runs its WHERE under them. */
   readonly settings?: Settings | undefined;
-  readonly sessionTimezone?: string | undefined;
+  readonly sessionTimezone?: SettingValue | undefined;
+  /** `filter_options.param_encoding` (ABI v2): how a query parameter's value is read. */
+  readonly paramEncoding?: ParamEncoding | undefined;
+  /** Any other member of `filter_options`, as `insertOptionsExtra` is for `insert_options`. */
+  readonly filterOptionsExtra?: Readonly<Record<string, string>> | undefined;
 }
 
-/** Options of `Filter.rows`. The settings are PARSE settings only: they decide how the body is parsed, never the filter's WHERE. */
+/**
+ * Options of `Filter.rows`. The settings are the body's INSERT settings: they decide how the body is parsed and the
+ * expressions the INSERT evaluates, never the filter's WHERE.
+ * `columns` and the `insert_options` members model the same INSERT as on `Schema.rows` (ABI v2).
+ */
 export interface EvalOptions {
   readonly settings?: Settings | undefined;
-  readonly sessionTimezone?: string | undefined;
+  readonly sessionTimezone?: SettingValue | undefined;
+  /** The INSERT column list. */
+  readonly columns?: readonly BytesIn[] | undefined;
+  /** `insert_options.insertable_columns` (ABI v2): the columns an INSERT may supply. Absent leaves the member out (every column); `[]` is sent as `[]` (no column). */
+  readonly insertableColumns?: readonly BytesIn[] | undefined;
+  /** `insert_options.column_defaults`: per-call DEFAULT overrides. Absent leaves the member out; `[]` is sent as `[]`. */
+  readonly columnDefaults?: readonly ColumnDefault[] | undefined;
+  /** `insert_options.verdict_basis`. */
+  readonly verdictBasis?: VerdictBasis | undefined;
+  /** `insert_options.defer_defaults`. */
+  readonly deferDefaults?: DeferDefaults | undefined;
+  /** Any other member of `insert_options`: key to its value as JSON text, passed through as given (rule r1; a key also named above keeps this value). Text that is not valid JSON is a `UsageError` before any call. */
+  readonly insertOptionsExtra?: Readonly<Record<string, string>> | undefined;
 }
 
 function bodyIn(body: Uint8Array): Uint8Array {
@@ -104,7 +152,14 @@ export class Filter {
   /** Evaluate over a body. */
   rows(format: Format, body: Uint8Array, options: EvalOptions = {}): FilterResult {
     return decodeFilterResult(
-      this.#calls.filterEvalBody(this.#h, format, bodyIn(body), encodeSettings(options.settings, options.sessionTimezone)),
+      this.#calls.filterEvalBody(
+        this.#h,
+        format,
+        bodyIn(body),
+        encodeSettings(options.settings, options.sessionTimezone),
+        encodeColumns(options.columns),
+        encodeInsertOptions(options),
+      ),
     );
   }
 
@@ -170,6 +225,7 @@ export class Schema {
         bodyIn(body),
         encodeSettings(options.settings, options.sessionTimezone),
         encodeColumns(options.columns),
+        encodeInsertOptions(options),
       ),
     );
   }
@@ -187,6 +243,7 @@ export class Schema {
       filter,
       exporting ? (options.exportFormat as number) : EXPORT_NONE,
       options.docFlags ?? DocFlags.All,
+      encodeInsertOptions(options),
     );
     return decodeBatch(out.out, exporting ? out.outExport : undefined);
   }
@@ -200,6 +257,7 @@ export class Schema {
         bytesIn(expr),
         encodeParams(options.params),
         encodeSettings(options.settings, options.sessionTimezone),
+        encodeFilterOptions(options),
       ),
     );
   }
@@ -213,6 +271,7 @@ export class Schema {
         bodyIn(body),
         encodeSettings(options.settings, options.sessionTimezone),
         encodeColumns(options.columns),
+        encodeInsertOptions(options),
       ),
     );
   }

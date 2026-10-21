@@ -67,7 +67,7 @@ The crate ships a `chtypes` binary over the fetch layer (`cargo install chtypes`
 
 Every option struct has public fields and `Default`, and is built as `RowOptions { session_timezone: Some(z), ..Default::default() }`. Settings are `Vec<(String, String)>`: values are strings, and only strings, and are never rewritten. The per-call zone is the `session_timezone` key of the settings; passing the option and a settings key of the same name is `Error::Usage`.
 
-A filter's zone is its own, fixed when it is compiled (`FilterOptions::session_timezone`); an evaluation's settings (`EvalOptions`, or a block's `RowOptions`) are the body's parse settings only.
+A filter's zone is its own, fixed when it is compiled (`FilterOptions::session_timezone`); an evaluation's settings (`EvalOptions`, or a block's `RowOptions`) are the body's INSERT settings: they govern its parse and the expressions the INSERT evaluates, never the WHERE.
 
 ## Generated defaults
 

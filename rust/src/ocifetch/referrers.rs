@@ -73,7 +73,7 @@ fn try_referrers_api(source: &Source<'_>, subject_digest: &str) -> Result<Option
             // A retired repository (a 410, §2) is permanent: never read as
             // "nothing here", and never a reason to try the next base or the
             // fallback tag.
-            Err(e @ Error::SourceRetired(_)) => return Err(e),
+            Err(e) if e.is_gone() => return Err(e),
             Ok(_) | Err(_) => continue,
         }
     }
@@ -109,23 +109,18 @@ fn try_fallback_tag(source: &Source<'_>, subject_digest: &str) -> Result<Option<
             // A retired repository (a 410, §2) is permanent: never read as
             // "nothing here", and never a reason to try the next base or the
             // fallback tag.
-            Err(e @ Error::SourceRetired(_)) => return Err(e),
+            Err(e) if e.is_gone() => return Err(e),
             Ok(_) | Err(_) => continue,
         }
     }
     Ok(None)
 }
 
-/// Fetch and verify one signature-bundle referrer descriptor: GET its
-/// manifest, check it has exactly one layer of `constants::MEDIA_TYPE_BUNDLE`,
-/// GET that layer, and verify the DSSE envelope. Returns `Err(ArtifactUntrusted)`
-/// when the bundle is well-formed but no signature verifies (the caller may
-/// then try another candidate); any other `Err` is structural and final.
-pub fn verify_one(
-    source: &Source<'_>,
-    descriptor: &Descriptor,
-    trust: &[TrustedKey],
-) -> Result<VerifiedStatement> {
+/// Fetch one signature-bundle (or revocation-bundle) referrer descriptor's
+/// bundle: GET its manifest, check it has exactly one layer of
+/// `constants::MEDIA_TYPE_BUNDLE`, and GET that layer. Returns the layer's
+/// bytes and its digest.
+pub fn fetch_bundle(source: &Source<'_>, descriptor: &Descriptor) -> Result<(Vec<u8>, String)> {
     let manifest_fetched =
         oci::fetch_by_digest(source, &descriptor.digest, constants::MANIFEST_MAX_BYTES)?;
     let manifest: oci::Manifest = serde_json::from_slice(&manifest_fetched.bytes)
@@ -146,10 +141,152 @@ pub fn verify_one(
         )));
     }
     let blob = oci::fetch_blob_by_digest(source, &layer.digest, constants::BUNDLE_MAX_BYTES)?;
-    let mut stmt = dsse::verify_bundle(&blob.bytes, trust, constants::STATEMENT_TYPE)?;
+    Ok((blob.bytes, layer.digest.clone()))
+}
+
+/// Fetch and verify one signature-bundle referrer descriptor: its bundle
+/// ([`fetch_bundle`]), then the DSSE envelope. Returns `Err(ArtifactUntrusted)`
+/// when the bundle is well-formed but no signature verifies (the caller may
+/// then try another candidate); any other `Err` is structural and final.
+pub fn verify_one(
+    source: &Source<'_>,
+    descriptor: &Descriptor,
+    trust: &[TrustedKey],
+) -> Result<VerifiedStatement> {
+    let (bytes, layer_digest) = fetch_bundle(source, descriptor)?;
+    let mut stmt = dsse::verify_bundle(&bytes, trust, constants::STATEMENT_TYPE)?;
     stmt.bundle_manifest_digest = descriptor.digest.clone();
-    stmt.bundle_layer_digest = layer.digest.clone();
+    stmt.bundle_layer_digest = layer_digest;
     Ok(stmt)
+}
+
+/// One platform manifest's referrers listing, as the signature lookup reads
+/// it (docs/guides/fetch-v1.md §4, "Build-level revocation"): the first answer
+/// that names a signature referrer (the referrers API on the bases in order,
+/// then the fallback tag), its signature and revocation referrers, each capped
+/// at `constants::MAX_REFERRERS`, and, when no answer named a signature, the
+/// last failure that kept a base from answering (`None` when every base
+/// answered 404, or with a listing that names none).
+pub struct Listing {
+    /// Whether an answer named a signature referrer.
+    pub found: bool,
+    /// The signature referrers (`constants::MEDIA_TYPE_BUNDLE`).
+    pub signatures: Vec<Descriptor>,
+    /// The revocation referrers (`constants::REVOCATION_ARTIFACT_TYPE`).
+    pub revocations: Vec<Descriptor>,
+    /// Why a base did not answer, when none did.
+    pub failure: Option<Error>,
+}
+
+/// Read `subject_digest`'s listing exactly as the signature lookup does. Its
+/// error is only ever a 410's ([`Error::is_gone`]): every other failure is
+/// recorded on the listing. The source's budget is the call's: the retry
+/// table, or the installed-build check's single attempt.
+pub fn read_listing(source: &Source<'_>, subject_digest: &str) -> Result<Listing> {
+    let mut listing = Listing {
+        found: false,
+        signatures: Vec::new(),
+        revocations: Vec::new(),
+        failure: None,
+    };
+    let Some(hex) = subject_digest.strip_prefix("sha256:") else {
+        return Err(Error::InvalidInput(format!(
+            "subject digest {subject_digest:?} is not sha256:<hex>"
+        )));
+    };
+    // The referrers API is not a manifests/<ref> GET, so it sends no Accept.
+    let steps = [
+        (format!("referrers/{subject_digest}"), Vec::new()),
+        (
+            format!("manifests/sha256-{hex}"),
+            oci::manifest_accept_header(),
+        ),
+    ];
+    for (suffix, accept) in &steps {
+        let Some(index) = listing_index(source, suffix, accept, &mut listing.failure)? else {
+            continue;
+        };
+        let signatures = filter(&index, constants::MEDIA_TYPE_BUNDLE);
+        if signatures.is_empty() {
+            // Not a listing of this manifest's signature: try the fallback tag.
+            continue;
+        }
+        listing.found = true;
+        listing.signatures = signatures;
+        listing.revocations = filter(&index, constants::REVOCATION_ARTIFACT_TYPE);
+        return Ok(listing);
+    }
+    Ok(listing)
+}
+
+/// The first base that serves a 200 with a parsable index, recording on
+/// `failure` why a base did not answer.
+fn listing_index(
+    source: &Source<'_>,
+    suffix: &str,
+    accept: &[(String, String)],
+    failure: &mut Option<Error>,
+) -> Result<Option<Vec<Descriptor>>> {
+    for base in source.bases {
+        let Ok(url) = oci::wire_url(base, suffix) else {
+            continue;
+        };
+        match oci::get_from_base(source, base, suffix, accept, constants::MANIFEST_MAX_BYTES) {
+            Ok((200, bytes)) => match serde_json::from_slice::<Index>(&bytes) {
+                Ok(index) => return Ok(Some(index.manifests)),
+                Err(e) => {
+                    *failure = Some(Error::SourceUnreachable(format!(
+                        "{url} is not a referrers listing: {e}"
+                    )));
+                }
+            },
+            Ok((404, _)) => {}
+            Ok((401, _)) => {
+                *failure = Some(Error::SourceUnauthorized(format!("{url} returned 401")));
+            }
+            Ok((403, _)) => {
+                *failure = Some(Error::SourceForbidden(format!("{url} returned 403")));
+            }
+            Ok((status, _)) => {
+                *failure = Some(Error::SourceUnreachable(format!(
+                    "{url} returned unexpected status {status}"
+                )));
+            }
+            Err(e) if e.is_gone() => return Err(e),
+            Err(e) => *failure = Some(e),
+        }
+    }
+    Ok(None)
+}
+
+/// [`find_trusted_statement`] over a listing read once ([`read_listing`]),
+/// which it returns beside the statement: an install, a lock and an update read
+/// their revocation candidates from it at no extra listing request.
+pub fn trusted_statement_with_listing(
+    source: &Source<'_>,
+    subject_digest: &str,
+    trust: &[TrustedKey],
+) -> Result<(VerifiedStatement, Listing)> {
+    let listing = read_listing(source, subject_digest)?;
+    let mut verified = None;
+    for d in &listing.signatures {
+        match verify_one(source, d, trust) {
+            Ok(stmt) => {
+                verified = Some(stmt);
+                break;
+            }
+            Err(Error::ArtifactUntrusted(_)) => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    match verified {
+        Some(stmt) => Ok((stmt, listing)),
+        None => Err(Error::ArtifactUntrusted(format!(
+            "no referrer of {subject_digest} (checked the referrers API and the fallback tag) \
+             carries a {} signature that verifies under a trusted key",
+            constants::MEDIA_TYPE_BUNDLE
+        ))),
+    }
 }
 
 /// Find a referrer of `subject_digest` whose bundle verifies under a

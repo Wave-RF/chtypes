@@ -3,7 +3,7 @@
   "reuse_v0_names": true,
   "provisional_markers": {},
   "errors": {
-    "fields": ["status", "ch_code", "ch_name", "message", "column"],
+    "fields": ["status", "ch_code", "ch_name", "message", "column", "reason"],
     "codes": {
       "artifact_incompatible": "CHTYPES_ARTIFACT_INCOMPATIBLE",
       "artifact_corrupt": "CHTYPES_ARTIFACT_CORRUPT"
@@ -20,7 +20,8 @@
       "CHTYPES_SOURCE_INCOMPATIBLE": 7,
       "CHTYPES_ARTIFACT_INCOMPATIBLE": 8,
       "CHTYPES_CACHE_UNUSABLE": 9,
-      "CHTYPES_SOURCE_RETIRED": 10
+      "CHTYPES_SOURCE_RETIRED": 10,
+      "CHTYPES_ARTIFACT_REVOKED": 11
     },
     "classes": {
       "schema": {"go": "*SchemaError", "python": "SchemaError", "ts": "SchemaError", "rust": "Error::Schema", "new": false},

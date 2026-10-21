@@ -1,5 +1,10 @@
 package chtypes
 
+import (
+	"encoding/base64"
+	"unicode/utf8"
+)
+
 // options.go — the call options (bindings-v1.md section 2, "The call options").
 // One entry point per operation, with its optional inputs as Go functional
 // options. Each operation takes its own option interface, and an option
@@ -16,6 +21,8 @@ type callConfig struct {
 	docFlags    DocFlags
 	params      map[string]string
 	server      *Server
+	// The three options documents (rule r1), built member by member.
+	schemaOpts, insertOpts, filterOpts optionDoc
 }
 
 func newCallConfig() *callConfig {
@@ -51,12 +58,23 @@ type SettingsOption interface {
 	EvalOption
 }
 
-// ColumnsOption is an option that applies to the three calls that parse an
-// INSERT body.
+// ColumnsOption is an option that applies to the four calls that model an
+// INSERT of a body: Row, Rows, ParseBlock and Filter.Rows.
 type ColumnsOption interface {
 	RowOption
 	RowsOption
 	BlockOption
+	EvalOption
+}
+
+// InsertOption is an option of the insert_options document: it applies to
+// the four calls that model an INSERT of a body, Row, Rows, ParseBlock and
+// Filter.Rows, and means the same at each.
+type InsertOption interface {
+	RowOption
+	RowsOption
+	BlockOption
+	EvalOption
 }
 
 // The options are small named types, one per option, rather than closures: a
@@ -90,12 +108,11 @@ func (o timezoneOpt) applyEval(c *callConfig)    { o.apply(c) }
 
 type columnsOpt []string
 
-func (o columnsOpt) apply(c *callConfig)     { c.columns, c.haveColumns = o, true }
-func (o columnsOpt) applyRow(c *callConfig)  { o.apply(c) }
-func (o columnsOpt) applyRows(c *callConfig) { o.apply(c) }
-func (o columnsOpt) applyBlock(c *callConfig) {
-	o.apply(c)
-}
+func (o columnsOpt) apply(c *callConfig)      { c.columns, c.haveColumns = o, true }
+func (o columnsOpt) applyRow(c *callConfig)   { o.apply(c) }
+func (o columnsOpt) applyRows(c *callConfig)  { o.apply(c) }
+func (o columnsOpt) applyBlock(c *callConfig) { o.apply(c) }
+func (o columnsOpt) applyEval(c *callConfig)  { o.apply(c) }
 
 type rowFilterOpt struct{ f *Filter }
 
@@ -118,7 +135,8 @@ type serverOpt struct{ s *Server }
 func (o serverOpt) applyCompile(c *callConfig) { c.server = o.s }
 
 // WithSettings sets the call's settings: a map of strings to strings,
-// serialized as a JSON object and passed verbatim. No value is ever rewritten.
+// serialized as a JSON object and passed verbatim. No value is ever rewritten:
+// a value that is not valid UTF-8 is sent as {"b64": ...}, the object form.
 // On a compile it is the profile; on a filter compile the filter's own profile;
 // on the calls that parse a body, the body's parse settings.
 func WithSettings(settings map[string]string) SettingsOption {
@@ -133,7 +151,8 @@ func WithSessionTimezone(name string) SettingsOption {
 	return timezoneOpt(name)
 }
 
-// WithColumns sets the INSERT column list.
+// WithColumns sets the INSERT column list. It applies to every call that models
+// an INSERT of a body, Filter.Rows included.
 func WithColumns(names []string) ColumnsOption {
 	return columnsOpt(names)
 }
@@ -232,4 +251,178 @@ func evalConfig(opts []EvalOption) *callConfig {
 		}
 	}
 	return c
+}
+
+// ---- the options documents (rule r1). Each member is its own option, and a
+// key the binding has no name for goes through WithInsertOption, WithFilterOption
+// or WithSchemaOption as raw JSON. The binding builds the document from the
+// members the caller set, sends nothing when none was set, and never validates a
+// member: the library refuses a key it does not know, or a value that is not one
+// of the member's, with CHS_INVALID_ARGUMENT, naming it.
+
+// VerdictBasis is insert_options' verdict_basis: what row a filter verdict answers
+// for.
+type VerdictBasis string
+
+const (
+	// VerdictBasisInput is the default: the verdict answers for the input row.
+	VerdictBasisInput VerdictBasis = "input"
+	// VerdictBasisExport answers for the row the export would store. A build
+	// that does not implement it declines it.
+	VerdictBasisExport VerdictBasis = "export"
+)
+
+// DeferDefaults is insert_options' defer_defaults.
+type DeferDefaults string
+
+const (
+	// DeferDefaultsNone is the default: no DEFAULT is deferred.
+	DeferDefaultsNone DeferDefaults = "none"
+	// DeferDefaultsServer defers to the server each DEFAULT the build would
+	// otherwise decline. A build that does not implement it declines it.
+	DeferDefaultsServer DeferDefaults = "server"
+)
+
+// ParamEncoding is filter_options' param_encoding: how a query parameter's value
+// is read.
+type ParamEncoding string
+
+const (
+	// ParamEncodingEscaped is the default: ClickHouse's escaped-text reader.
+	ParamEncodingEscaped ParamEncoding = "escaped"
+	// ParamEncodingRaw takes the bytes as the value. A build that does not
+	// implement it declines it.
+	ParamEncodingRaw ParamEncoding = "raw"
+)
+
+// ColumnDefault is one entry of insert_options' column_defaults: the value the
+// call uses in a cell the server would fill from the column's DEFAULT. Both
+// fields are byte strings: a Name or Value that is not valid UTF-8 is sent in
+// its _b64 form.
+type ColumnDefault struct {
+	Name  string
+	Value string
+}
+
+type insertableColumnsOpt []string
+
+func (o insertableColumnsOpt) apply(c *callConfig) {
+	c.insertOpts.set("insertable_columns", nameObjects(o))
+}
+func (o insertableColumnsOpt) applyRow(c *callConfig)   { o.apply(c) }
+func (o insertableColumnsOpt) applyRows(c *callConfig)  { o.apply(c) }
+func (o insertableColumnsOpt) applyBlock(c *callConfig) { o.apply(c) }
+func (o insertableColumnsOpt) applyEval(c *callConfig)  { o.apply(c) }
+
+type columnDefaultsOpt []ColumnDefault
+
+func (o columnDefaultsOpt) apply(c *callConfig) {
+	list := make([]map[string]string, 0, len(o))
+	for _, d := range o {
+		e := nameObjects([]string{d.Name})[0]
+		if utf8.ValidString(d.Value) {
+			e["value"] = d.Value
+		} else {
+			e["value_b64"] = base64.StdEncoding.EncodeToString([]byte(d.Value))
+		}
+		list = append(list, e)
+	}
+	c.insertOpts.set("column_defaults", list)
+}
+func (o columnDefaultsOpt) applyRow(c *callConfig)   { o.apply(c) }
+func (o columnDefaultsOpt) applyRows(c *callConfig)  { o.apply(c) }
+func (o columnDefaultsOpt) applyBlock(c *callConfig) { o.apply(c) }
+func (o columnDefaultsOpt) applyEval(c *callConfig)  { o.apply(c) }
+
+// insertMember is any other member of insert_options: a key and its value.
+type insertMember struct {
+	key string
+	v   any
+}
+
+func (o insertMember) apply(c *callConfig) {
+	if o.key != "" { // the zero insertMember is an option that sets nothing
+		c.insertOpts.set(o.key, o.v)
+	}
+}
+func (o insertMember) applyRow(c *callConfig)   { o.apply(c) }
+func (o insertMember) applyRows(c *callConfig)  { o.apply(c) }
+func (o insertMember) applyBlock(c *callConfig) { o.apply(c) }
+func (o insertMember) applyEval(c *callConfig)  { o.apply(c) }
+
+type filterMember struct {
+	key string
+	v   any
+}
+
+func (o filterMember) applyFilter(c *callConfig) { c.filterOpts.set(o.key, o.v) }
+
+type schemaMember struct {
+	key string
+	v   any
+}
+
+func (o schemaMember) applyCompile(c *callConfig) { c.schemaOpts.set(o.key, o.v) }
+
+// WithInsertableColumns sets insert_options' insertable_columns: the columns an
+// INSERT may supply (the server's column-level INSERT grant), checked on the
+// INSERT's header before any byte of the body is read. nil leaves the member out
+// (every column); a non-nil empty slice is sent as [] (no column).
+func WithInsertableColumns(names []string) InsertOption {
+	if names == nil {
+		return insertMember{}
+	}
+	return insertableColumnsOpt(names)
+}
+
+// WithColumnDefaults sets insert_options' column_defaults: per-call DEFAULT
+// overrides. nil leaves the member out; a non-nil empty slice is sent as [].
+func WithColumnDefaults(defaults []ColumnDefault) InsertOption {
+	if defaults == nil {
+		return insertMember{}
+	}
+	return columnDefaultsOpt(defaults)
+}
+
+// WithVerdictBasis sets insert_options' verdict_basis.
+func WithVerdictBasis(b VerdictBasis) InsertOption {
+	return insertMember{"verdict_basis", string(b)}
+}
+
+// WithDeferDefaults sets insert_options' defer_defaults.
+func WithDeferDefaults(d DeferDefaults) InsertOption {
+	return insertMember{"defer_defaults", string(d)}
+}
+
+// WithInsertOption sets a member of insert_options this binding has no name
+// for, with its value as JSON text, passed through as given. The library
+// refuses a key it does not know (CHS_INVALID_ARGUMENT, naming it); a value that
+// is not valid JSON is a *UsageError raised before any call.
+func WithInsertOption(key string, valueJSON []byte) InsertOption {
+	return insertMember{key, rawMember(valueJSON)}
+}
+
+// WithParamEncoding sets filter_options' param_encoding.
+func WithParamEncoding(e ParamEncoding) FilterOption {
+	return filterMember{"param_encoding", string(e)}
+}
+
+// WithFilterOption sets a member of filter_options this binding has no name
+// for, as WithInsertOption does for insert_options.
+func WithFilterOption(key string, valueJSON []byte) FilterOption {
+	return filterMember{key, rawMember(valueJSON)}
+}
+
+// WithPosture sets schema_options' posture: how the statement is compiled,
+// PostureCreate (the default) as a server's CREATE TABLE, or PostureLoad as a
+// server loads the stored definition of a table it holds. The caller's
+// obligation under PostureLoad is spec/abi-v2/docs.md's (input:schema_options).
+func WithPosture(p Posture) CompileOption {
+	return schemaMember{"posture", string(p)}
+}
+
+// WithSchemaOption sets a member of schema_options this binding has no name
+// for, as WithInsertOption does for insert_options.
+func WithSchemaOption(key string, valueJSON []byte) CompileOption {
+	return schemaMember{key, rawMember(valueJSON)}
 }

@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "source": {
-    "generator_commit": "9742de758ca2f721e0c6a7482a5a950151969c0e",
+    "generator_commit": "d66b28749e3c8cd825b9ed89ddb200ae208c844d",
     "go_sum_sha256": "e998462ee1660f7d0b42c45fd0e16ddef8c688e81aaa22c466ada3c69565eec9"
   },
   "cases": [
@@ -34,7 +34,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -57,7 +60,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -88,7 +93,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -111,7 +119,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -143,7 +153,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -166,7 +179,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -197,7 +212,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -220,7 +238,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -251,7 +271,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -274,7 +297,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -305,7 +330,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -328,7 +356,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -359,7 +389,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -382,7 +415,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -413,7 +448,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -436,7 +474,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -467,7 +507,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -490,7 +533,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -521,7 +566,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -544,7 +592,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -575,7 +625,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -598,7 +651,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -629,7 +684,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -652,7 +710,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -682,7 +742,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -705,7 +768,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -735,7 +800,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -758,7 +826,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -789,7 +859,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -812,7 +885,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -843,7 +918,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -866,7 +944,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -897,7 +977,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -920,7 +1003,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -951,7 +1036,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -974,7 +1062,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -1005,7 +1095,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -1028,7 +1121,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -1059,7 +1154,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -1082,7 +1180,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -1113,7 +1213,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -1136,7 +1239,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -1167,7 +1272,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -1190,7 +1298,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -1221,7 +1331,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -1244,7 +1357,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -1275,7 +1390,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -1298,7 +1416,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -1329,7 +1449,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -1352,7 +1475,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -1383,7 +1508,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -1408,7 +1536,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -1440,7 +1570,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -1463,7 +1596,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -1494,7 +1629,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -1517,7 +1655,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -1548,7 +1688,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -1571,7 +1714,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -1602,7 +1747,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -1625,7 +1773,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -1656,7 +1806,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -1679,7 +1832,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -1710,7 +1865,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -1733,7 +1891,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -1764,7 +1924,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -1787,7 +1950,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -1818,7 +1983,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -1841,7 +2009,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -1872,7 +2042,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -1895,7 +2068,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -1926,7 +2101,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -1949,7 +2127,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -1980,7 +2160,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -2003,7 +2186,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -2034,7 +2219,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -2057,7 +2245,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -2088,7 +2278,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -2111,7 +2304,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -2142,7 +2337,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -2165,7 +2363,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -2196,7 +2396,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -2219,7 +2422,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -2250,7 +2455,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -2273,7 +2481,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -2304,7 +2514,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -2327,7 +2540,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -2358,7 +2573,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -2381,7 +2599,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -2412,7 +2632,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -2435,7 +2658,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -2466,7 +2691,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -2489,7 +2717,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -2520,7 +2750,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -2543,7 +2776,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -2574,7 +2809,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -2599,7 +2837,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -2630,7 +2870,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -2655,7 +2898,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -2688,7 +2933,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -2711,7 +2959,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -2742,7 +2992,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -2765,7 +3018,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -2796,7 +3051,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -2819,7 +3077,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -2850,7 +3110,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -2873,7 +3136,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -2904,7 +3169,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -2927,7 +3195,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -2958,7 +3228,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -2981,7 +3254,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -3012,7 +3287,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -3035,7 +3313,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -3066,7 +3346,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -3089,7 +3372,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -3120,7 +3405,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -3143,7 +3431,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -3174,7 +3464,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -3197,7 +3490,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -3228,7 +3523,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -3251,7 +3549,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -3282,7 +3582,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -3305,7 +3608,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -3336,7 +3641,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -3359,7 +3667,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -3390,7 +3700,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -3413,7 +3726,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -3444,7 +3759,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -3467,7 +3785,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -3498,7 +3818,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -3521,7 +3844,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -3552,7 +3877,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -3575,7 +3903,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -3606,7 +3936,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -3629,7 +3962,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -3660,7 +3995,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -3683,7 +4021,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -3714,7 +4054,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -3737,7 +4080,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -3768,7 +4113,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -3791,7 +4139,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -3822,7 +4172,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -3845,7 +4198,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -3876,7 +4231,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -3899,7 +4257,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -3930,7 +4290,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -3953,7 +4316,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -3984,7 +4349,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -4007,7 +4375,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -4038,7 +4408,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -4061,7 +4434,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -4092,7 +4467,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -4115,7 +4493,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -4146,7 +4526,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -4171,7 +4554,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -4202,7 +4587,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -4225,7 +4613,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -4256,7 +4646,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -4281,7 +4674,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -4312,7 +4707,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -4335,7 +4733,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -4366,7 +4766,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -4389,7 +4792,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -4420,7 +4825,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -4443,7 +4851,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -4474,7 +4884,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -4497,7 +4910,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -4528,7 +4943,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -4551,7 +4969,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -4582,7 +5002,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -4605,7 +5028,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -4636,7 +5061,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -4659,7 +5087,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -4690,7 +5120,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -4713,7 +5146,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -4744,7 +5179,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -4767,7 +5205,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -4798,7 +5238,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -4821,7 +5264,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -4852,7 +5297,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -4875,7 +5323,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -4906,7 +5356,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -4929,7 +5382,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -4960,7 +5415,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -4983,7 +5441,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -5014,7 +5474,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -5037,7 +5500,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -5068,7 +5533,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -5091,7 +5559,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -5122,7 +5592,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -5145,7 +5618,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -5178,7 +5653,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -5201,7 +5679,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -5234,7 +5714,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -5257,7 +5740,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -5290,7 +5775,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -5313,7 +5801,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -5346,7 +5836,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -5369,7 +5862,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -5401,7 +5896,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -5412,7 +5910,9 @@
         "library_sha256": "c0b1880cbf5bc5b80c34e8691d617996c3faa47e462a82c927b8c2b05a9da7ef",
         "code": null,
         "sleeps": [],
-        "warnings": [],
+        "warnings": [
+          "revocation status not checked for manifest sha256:ff58ce1a1a0df276afe54867fe94b27d58f85d17f5fa5ccf5865ac3983b6d7d8"
+        ],
         "requests": {
           "max": null,
           "none_matching": [],
@@ -5424,7 +5924,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": 1,
+        "stored_revocations": []
       }
     },
     {
@@ -5455,7 +5957,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -5478,7 +5983,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -5509,7 +6016,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -5532,7 +6042,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -5563,7 +6075,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -5586,7 +6101,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -5618,7 +6135,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -5644,7 +6164,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -5675,7 +6197,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -5698,7 +6223,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -5730,7 +6257,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -5753,7 +6283,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -5784,7 +6316,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -5807,7 +6342,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -5838,7 +6375,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -5851,8 +6391,10 @@
         "sleeps": [],
         "warnings": [],
         "requests": {
-          "max": 0,
-          "none_matching": [],
+          "max": 1,
+          "none_matching": [
+            "GET .*/blobs/sha256:fb22d4a5d6761eec80f4ebd42e9f2c72094cc6bdde1d3f5c8329a4c1bfdfb9fc"
+          ],
           "auth_on_second_origin": false
         },
         "lock_after": null,
@@ -5861,7 +6403,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -5892,7 +6436,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -5915,7 +6462,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -5946,7 +6495,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -5969,7 +6521,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -6000,7 +6554,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -6023,7 +6580,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -6053,7 +6612,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -6079,7 +6641,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -6109,7 +6673,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -6134,7 +6701,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -6164,7 +6733,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -6189,7 +6761,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -6219,7 +6793,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -6244,7 +6821,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -6274,7 +6853,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -6299,7 +6881,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -6329,7 +6913,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -6352,7 +6939,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -6382,7 +6971,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -6410,7 +7002,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -6440,7 +7034,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -6463,7 +7060,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -6493,7 +7092,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -6516,7 +7118,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -6546,7 +7150,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -6569,7 +7176,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -6599,7 +7208,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {
         "CHTYPES_DOWNLOAD_TOKEN": "test-static-token"
@@ -6624,7 +7236,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -6654,7 +7268,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {
         "CHTYPES_DOWNLOAD_TOKEN": "wrong-token"
@@ -6679,7 +7296,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -6709,7 +7328,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {
         "CHTYPES_DOWNLOAD_TOKEN": "forbidden-token"
@@ -6734,7 +7356,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -6764,7 +7388,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {
         "CHTYPES_DOWNLOAD_TOKEN": "test-static-token"
@@ -6789,7 +7416,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -6819,7 +7448,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -6842,7 +7474,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -6873,7 +7507,10 @@
           "{base2}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -6901,7 +7538,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -6932,7 +7571,10 @@
           "{base2}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -6955,7 +7597,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -6986,7 +7630,10 @@
           "{base}-never-contacted"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -7011,7 +7658,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -7042,7 +7691,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -7065,7 +7717,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -7095,7 +7749,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -7120,7 +7777,255 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
+      }
+    },
+    {
+      "id": "body-cut-off-then-ok",
+      "tree": "http-basic",
+      "transports": [
+        "http"
+      ],
+      "http_script": "body-cut-off-then-ok",
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "26.12",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
+      },
+      "env": {},
+      "expect": {
+        "ok": true,
+        "version": "26.12.1.1",
+        "build": "20261201.000001",
+        "manifest": "sha256:280dd1ee6a6f928b43cd3199979da6c84efd88e273ed3e89cd510d3ca6458b21",
+        "library_sha256": "0c36252b2f024a3e2ff282efe3f57ce6ed17c7720b42ad82f96b51aca12a19fc",
+        "code": null,
+        "sleeps": [
+          4
+        ],
+        "warnings": [],
+        "requests": {
+          "max": null,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
+      }
+    },
+    {
+      "id": "body-cut-off-exhausted",
+      "tree": "http-basic",
+      "transports": [
+        "http"
+      ],
+      "http_script": "body-cut-off-exhausted",
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "26.12",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_SOURCE_UNREACHABLE",
+        "sleeps": [
+          4,
+          8,
+          16,
+          32
+        ],
+        "warnings": [],
+        "requests": {
+          "max": null,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
+      }
+    },
+    {
+      "id": "body-cut-off-chunked-then-ok",
+      "tree": "http-basic",
+      "transports": [
+        "http"
+      ],
+      "http_script": "body-cut-off-chunked-then-ok",
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "26.12",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
+      },
+      "env": {},
+      "expect": {
+        "ok": true,
+        "version": "26.12.1.1",
+        "build": "20261201.000001",
+        "manifest": "sha256:280dd1ee6a6f928b43cd3199979da6c84efd88e273ed3e89cd510d3ca6458b21",
+        "library_sha256": "0c36252b2f024a3e2ff282efe3f57ce6ed17c7720b42ad82f96b51aca12a19fc",
+        "code": null,
+        "sleeps": [
+          4
+        ],
+        "warnings": [],
+        "requests": {
+          "max": null,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
+      }
+    },
+    {
+      "id": "body-cut-off-chunked-exhausted",
+      "tree": "http-basic",
+      "transports": [
+        "http"
+      ],
+      "http_script": "body-cut-off-chunked-exhausted",
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "26.12",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_SOURCE_UNREACHABLE",
+        "sleeps": [
+          4,
+          8,
+          16,
+          32
+        ],
+        "warnings": [],
+        "requests": {
+          "max": null,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -7150,7 +8055,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -7173,7 +8081,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -7204,7 +8114,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -7227,7 +8140,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -7258,7 +8173,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -7281,7 +8199,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -7312,7 +8232,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -7335,7 +8258,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -7366,7 +8291,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -7389,7 +8317,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -7420,7 +8350,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -7443,7 +8376,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -7474,7 +8409,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -7497,7 +8435,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -7528,7 +8468,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -7551,7 +8494,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -7582,7 +8527,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -7605,7 +8553,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -7636,7 +8586,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -7659,7 +8612,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -7690,7 +8645,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -7715,7 +8673,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -7746,7 +8706,10 @@
           "{base}"
         ],
         "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d",
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -7771,7 +8734,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -7802,7 +8767,10 @@
           "{base}"
         ],
         "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d",
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -7827,7 +8795,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -7858,7 +8828,10 @@
           "{base}"
         ],
         "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d",
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -7905,7 +8878,9 @@
             "manifest": "sha256:30a12a7217fb2dcd20c29ccfa0fc075e6e5a7c068813e75f7d9bbe9fa09b4df8"
           }
         ],
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -7936,7 +8911,10 @@
           "{base}"
         ],
         "own_fingerprint": "b60d9a4c4b6577df1dbfe62cf497d7e7f16868fe1701b993a28a754af57b0886",
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -7959,7 +8937,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -7990,7 +8970,10 @@
           "{base}"
         ],
         "own_fingerprint": "6b9cf343c1a27657ae1abb846b206d5a4abcd0e220cf98cef2538cc09e7cc9df",
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -8015,7 +8998,9 @@
         "message_contains": "no published build for this SDK's fingerprint 6b9cf343c1a27657ae1abb846b206d5a4abcd0e220cf98cef2538cc09e7cc9df; newest published on this channel is b60d9a4c4b6577df1dbfe62cf497d7e7f16868fe1701b993a28a754af57b0886 (build 20261005.120000)",
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -8046,7 +9031,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -8071,7 +9059,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -8102,7 +9092,10 @@
           "{base}"
         ],
         "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d",
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -8127,7 +9120,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -8158,7 +9153,10 @@
           "{base}"
         ],
         "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d",
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -8183,7 +9181,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -8213,7 +9213,10 @@
           "{base}"
         ],
         "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d",
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -8243,7 +9246,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -8274,7 +9279,10 @@
           "{base2}"
         ],
         "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d",
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -8299,7 +9307,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -8330,7 +9340,10 @@
           "{base2}"
         ],
         "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d",
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -8360,7 +9373,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -8391,7 +9406,10 @@
           "{base}"
         ],
         "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d",
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -8418,7 +9436,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -8449,7 +9469,10 @@
           "{base}"
         ],
         "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d",
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -8474,7 +9497,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -8505,7 +9530,10 @@
           "{base}"
         ],
         "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d",
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -8530,7 +9558,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -8561,7 +9591,10 @@
           "{base}"
         ],
         "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d",
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -8586,7 +9619,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -8617,7 +9652,10 @@
           "{base}"
         ],
         "own_fingerprint": "6b9cf343c1a27657ae1abb846b206d5a4abcd0e220cf98cef2538cc09e7cc9df",
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -8644,7 +9682,9 @@
         "message_contains": "no published build for this SDK's fingerprint 6b9cf343c1a27657ae1abb846b206d5a4abcd0e220cf98cef2538cc09e7cc9df; newest published on this channel is b60d9a4c4b6577df1dbfe62cf497d7e7f16868fe1701b993a28a754af57b0886 (build 20261005.120000)",
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -8675,7 +9715,10 @@
           "{base}"
         ],
         "own_fingerprint": "6b9cf343c1a27657ae1abb846b206d5a4abcd0e220cf98cef2538cc09e7cc9df",
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -8702,7 +9745,9 @@
         "message_contains": "no published build for this SDK's fingerprint 6b9cf343c1a27657ae1abb846b206d5a4abcd0e220cf98cef2538cc09e7cc9df; newest published on this channel is b60d9a4c4b6577df1dbfe62cf497d7e7f16868fe1701b993a28a754af57b0886 (build 20261005.120000); a cached build for this fingerprint (build 20260910.120000) is still usable by open; upgrade the SDK to get newer builds",
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -8733,7 +9778,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -8756,7 +9804,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -8787,7 +9837,10 @@
           "{base}"
         ],
         "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d",
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -8813,7 +9866,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -8844,7 +9899,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -8871,7 +9929,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -8901,7 +9961,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -8924,7 +9987,9 @@
         "message_contains": "chtypes/v1 is retired: use chtypes/v2 (this registry no longer serves chtypes/v1)",
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -8955,7 +10020,10 @@
           "{base}/mirror"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -8980,7 +10048,9 @@
         "message_contains": "chtypes/v1 is retired: use chtypes/v2 (this registry no longer serves chtypes/v1)",
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -9010,7 +10080,10 @@
           "{base}"
         ],
         "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d",
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -9035,7 +10108,9 @@
         "message_contains": "chtypes/v1 is retired: use chtypes/v2 (this registry no longer serves chtypes/v1)",
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -9065,7 +10140,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -9088,7 +10166,9 @@
         "message_contains": "chtypes/v1 is retired: use chtypes/v2 (this registry no longer serves chtypes/v1)",
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -9118,7 +10198,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -9141,7 +10224,9 @@
         "message_contains": "chtypes/v1 is retired: use chtypes/v2 (this registry no longer serves chtypes/v1)",
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -9171,7 +10256,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -9194,7 +10282,9 @@
         "message_contains": "[1;31mchtypes/v1 is retired[0m: use chtypes/v2 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------…",
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -9224,7 +10314,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -9252,7 +10345,9 @@
           "\u003cnil\u003e"
         ],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -9283,7 +10378,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -9329,7 +10427,9 @@
             "manifest": "sha256:b3c5666f8a537a2c27a3091f39892f8a8b56fbd0476efb3ce78e04fe61de8c44"
           }
         ],
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -9360,7 +10460,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -9406,7 +10509,9 @@
             "manifest": "sha256:4e6f4f67e07f7dafa1d1526720c578abcc3fc1338f9f163a7f20012f910d676e"
           }
         ],
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -9437,7 +10542,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -9476,7 +10584,9 @@
             "manifest": "sha256:7af49b6f60bff0773af61584defd760307377a6184c257d72ae73b35b4a1f78a"
           }
         ],
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -9507,7 +10617,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -9532,7 +10645,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -9563,7 +10678,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -9586,7 +10704,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -9617,7 +10737,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -9647,7 +10770,9 @@
             "manifest": "sha256:9516833de67f77abfeeb49fcb1fd0ae7f88822e133016e06ad3f5646fa860524"
           }
         ],
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -9678,7 +10803,10 @@
           "{base}"
         ],
         "own_fingerprint": null,
-        "prune": null
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -9701,7 +10829,9 @@
         "message_contains": null,
         "message_excludes": [],
         "resolutions": null,
-        "prune": null
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -9735,7 +10865,10 @@
           "line": null,
           "keep": 1,
           "dry_run": false
-        }
+        },
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -9794,7 +10927,9 @@
             "sha256:1e7c4955eb5e5aef369801475fff377f1af33f79f146fce8334dd0d4870026fd",
             "sha256:e664d3c920ad5318aed6e83e34cade3d497c8c87719cbd6eb8c06e48b6f080d4"
           ]
-        }
+        },
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -9828,7 +10963,10 @@
           "line": null,
           "keep": 2,
           "dry_run": false
-        }
+        },
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -9877,7 +11015,9 @@
             "sha256:7caa0c6e97f64ba9ce5b0365bb7043075a56b846f33a7b545bd2b55515cdfa64",
             "sha256:e664d3c920ad5318aed6e83e34cade3d497c8c87719cbd6eb8c06e48b6f080d4"
           ]
-        }
+        },
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -9911,7 +11051,10 @@
           "line": "26.9",
           "keep": 1,
           "dry_run": false
-        }
+        },
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -9960,7 +11103,9 @@
             "sha256:1e7c4955eb5e5aef369801475fff377f1af33f79f146fce8334dd0d4870026fd",
             "sha256:e664d3c920ad5318aed6e83e34cade3d497c8c87719cbd6eb8c06e48b6f080d4"
           ]
-        }
+        },
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -9994,7 +11139,10 @@
           "line": null,
           "keep": 1,
           "dry_run": true
-        }
+        },
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -10040,7 +11188,9 @@
             "sha256:7caa0c6e97f64ba9ce5b0365bb7043075a56b846f33a7b545bd2b55515cdfa64",
             "sha256:e664d3c920ad5318aed6e83e34cade3d497c8c87719cbd6eb8c06e48b6f080d4"
           ]
-        }
+        },
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -10076,7 +11226,10 @@
           "line": null,
           "keep": 1,
           "dry_run": false
-        }
+        },
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -10132,7 +11285,9 @@
             "sha256:1e7c4955eb5e5aef369801475fff377f1af33f79f146fce8334dd0d4870026fd",
             "sha256:e664d3c920ad5318aed6e83e34cade3d497c8c87719cbd6eb8c06e48b6f080d4"
           ]
-        }
+        },
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -10168,7 +11323,10 @@
           "line": null,
           "keep": 1,
           "dry_run": false
-        }
+        },
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -10196,7 +11354,9 @@
           "in_use": [],
           "gone": [],
           "index_after": []
-        }
+        },
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -10230,7 +11390,10 @@
           "line": null,
           "keep": 1,
           "dry_run": false
-        }
+        },
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -10273,7 +11436,9 @@
             "sha256:b9f7bb0380fd2cc726a45e2cf5dd8830c5b075e0bbe0ba5bff58473e1e90a9b6",
             "sha256:b12668a6c3b388384249448d3647d8793ea0d5513eda17bf37126e739f642bd6"
           ]
-        }
+        },
+        "warnings_max": null,
+        "stored_revocations": []
       }
     },
     {
@@ -10307,7 +11472,10 @@
           "line": null,
           "keep": 1,
           "dry_run": false
-        }
+        },
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
       },
       "env": {},
       "expect": {
@@ -10355,7 +11523,1786 @@
           "index_after": [
             "sha256:b12668a6c3b388384249448d3647d8793ea0d5513eda17bf37126e739f642bd6"
           ]
-        }
+        },
+        "warnings_max": null,
+        "stored_revocations": []
+      }
+    },
+    {
+      "id": "install-revoked",
+      "tree": "revocation",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "26.13.1.1",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_ARTIFACT_REVOKED",
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": null,
+          "none_matching": [
+            "GET .*/blobs/sha256:7f43355820fb2b05bf8e66a60f4b34e8124186ec0013bb988dba8af328f0bf37"
+          ],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": "26.13.1.1 linux-arm64 build 20261013.000001 (manifest sha256:cdf3237d36ed56a365994bc636aa326f109b9b331f961ea7ded4d64235bfc4cb) is revoked: GHSA-fx01-test-0101 https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0101 (over-accept); superseded by build 20261019.000001: fixture revocation 1: a filter over-accepts a value the server refuses",
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
+      }
+    },
+    {
+      "id": "frozen-revoked",
+      "tree": "revocation",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": "revocation-pinned",
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "26.13.2.1",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": true,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_ARTIFACT_REVOKED",
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": null,
+          "none_matching": [
+            "GET .*/blobs/sha256:799e04eccc8126847b2242b3b4bd99b77a3eef15c38d2af439b3c7fc66a4601c"
+          ],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": "26.13.2.1 linux-arm64 build 20261013.000002 (manifest sha256:b84bbec1f288fcaf8444258fc91391ab98bb7ebfc158c5b35b287be691003459) is revoked: GHSA-fx01-test-0102 https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0102 (crash); superseded by build 20261019.000002: fixture revocation 2: a filter over-accepts a value the server refuses",
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
+      }
+    },
+    {
+      "id": "frozen-warm-revoked",
+      "tree": "revocation",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "revocation-pinned-installed",
+        "system_dirs": [],
+        "lock": "revocation-pinned",
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "26.13.2.1",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": true,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_ARTIFACT_REVOKED",
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": 3,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": "26.13.2.1 linux-arm64 build 20261013.000002 (manifest sha256:b84bbec1f288fcaf8444258fc91391ab98bb7ebfc158c5b35b287be691003459) is revoked: GHSA-fx01-test-0102 https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0102 (crash); superseded by build 20261019.000002: fixture revocation 2: a filter over-accepts a value the server refuses",
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": [
+          {
+            "manifest": "sha256:b84bbec1f288fcaf8444258fc91391ab98bb7ebfc158c5b35b287be691003459",
+            "bundle": "sha256:146152c0c58f15f4da2c6ef6129075f361bdcb79e07bba4352925ea859025df4"
+          }
+        ]
+      }
+    },
+    {
+      "id": "allow-revoked",
+      "tree": "revocation",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "revocation-pinned-installed",
+        "system_dirs": [],
+        "lock": "revocation-pinned",
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "26.13.2.1",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": true,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null,
+        "allow_revoked": true,
+        "require_revocation_check": false,
+        "opens": null
+      },
+      "env": {},
+      "expect": {
+        "ok": true,
+        "version": "26.13.2.1",
+        "build": "20261013.000002",
+        "manifest": "sha256:b84bbec1f288fcaf8444258fc91391ab98bb7ebfc158c5b35b287be691003459",
+        "library_sha256": "d69c4ecf85e583513d5b46849fb6bfb30296944f4823c00b85f6c6328f703808",
+        "code": null,
+        "sleeps": [],
+        "warnings": [
+          "allowing a revoked build: 26.13.2.1 linux-arm64 build 20261013.000002 (manifest sha256:b84bbec1f288fcaf8444258fc91391ab98bb7ebfc158c5b35b287be691003459) is revoked: GHSA-fx01-test-0102 https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0102 (crash); superseded by build 20261019.000002: fixture revocation 2: a filter over-accepts a value the server refuses"
+        ],
+        "requests": {
+          "max": 3,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null,
+        "warnings_max": 1,
+        "stored_revocations": [
+          {
+            "manifest": "sha256:b84bbec1f288fcaf8444258fc91391ab98bb7ebfc158c5b35b287be691003459",
+            "bundle": "sha256:146152c0c58f15f4da2c6ef6129075f361bdcb79e07bba4352925ea859025df4"
+          }
+        ]
+      }
+    },
+    {
+      "id": "offline-revoked-record",
+      "tree": "revocation",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "revocation-stored",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "26.13.2.1",
+        "platform": "linux-arm64",
+        "offline": true,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_ARTIFACT_REVOKED",
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": 0,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": "26.13.2.1 linux-arm64 build 20261013.000002 (manifest sha256:b84bbec1f288fcaf8444258fc91391ab98bb7ebfc158c5b35b287be691003459) is revoked: GHSA-fx01-test-0102 https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0102 (crash); superseded by build 20261019.000002: fixture revocation 2: a filter over-accepts a value the server refuses",
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
+      }
+    },
+    {
+      "id": "frozen-offline-revoked-record",
+      "tree": "revocation",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "revocation-stored",
+        "system_dirs": [],
+        "lock": "revocation-pinned",
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "26.13.2.1",
+        "platform": "linux-arm64",
+        "offline": true,
+        "frozen": true,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_ARTIFACT_REVOKED",
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": 0,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": "26.13.2.1 linux-arm64 build 20261013.000002 (manifest sha256:b84bbec1f288fcaf8444258fc91391ab98bb7ebfc158c5b35b287be691003459) is revoked: GHSA-fx01-test-0102 https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0102 (crash); superseded by build 20261019.000002: fixture revocation 2: a filter over-accepts a value the server refuses",
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
+      }
+    },
+    {
+      "id": "open-revoked-record",
+      "tree": "revocation",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "revocation-stored",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "26.13.2.1",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": 1
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_ARTIFACT_REVOKED",
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": 0,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": "26.13.2.1 linux-arm64 build 20261013.000002 (manifest sha256:b84bbec1f288fcaf8444258fc91391ab98bb7ebfc158c5b35b287be691003459) is revoked: GHSA-fx01-test-0102 https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0102 (crash); superseded by build 20261019.000002: fixture revocation 2: a filter over-accepts a value the server refuses",
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
+      }
+    },
+    {
+      "id": "revocation-unverifiable-ignored",
+      "tree": "revocation",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "revocation-unverifiable-installed",
+        "system_dirs": [],
+        "lock": "revocation-unverifiable",
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "26.13.3.1",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": true,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
+      },
+      "env": {},
+      "expect": {
+        "ok": true,
+        "version": "26.13.3.1",
+        "build": "20261013.000003",
+        "manifest": "sha256:f3bac560f12f7434cbc7672b4e26cdd4ff81c653e0987bd3562d3e07bca06c74",
+        "library_sha256": "92e74e6b7bdf7c2d678dbbd35965fb451af654bb0456ef2b040dae4363e65674",
+        "code": null,
+        "sleeps": [],
+        "warnings": [
+          "revocation sha256:fa735e62b7c6d67ed9626ec84a404fd1126315524c310fb3e895c28e7534306b for manifest sha256:f3bac560f12f7434cbc7672b4e26cdd4ff81c653e0987bd3562d3e07bca06c74 does not verify and is ignored",
+          "revocation sha256:4544c37437bd66d56c95f64785add7e87bb85a1c79f333e68105e886277b9f90 for manifest sha256:f3bac560f12f7434cbc7672b4e26cdd4ff81c653e0987bd3562d3e07bca06c74 does not verify and is ignored",
+          "revocation sha256:e278d6e95ef2c4b40eed3b91ffe2868925cb246bb33f19a96e0cc589e4bf07aa for manifest sha256:f3bac560f12f7434cbc7672b4e26cdd4ff81c653e0987bd3562d3e07bca06c74 does not verify and is ignored",
+          "revocation sha256:270598864e91e96a1bd64ad336befc01b41b66501def6e035f8717890ae15e3e for manifest sha256:f3bac560f12f7434cbc7672b4e26cdd4ff81c653e0987bd3562d3e07bca06c74 does not verify and is ignored",
+          "revocation sha256:8aea14ecca7ac03229d24719f1b1f05d9a403ee64bc1a65a0b4740d3cbb8d7dd for manifest sha256:f3bac560f12f7434cbc7672b4e26cdd4ff81c653e0987bd3562d3e07bca06c74 does not verify and is ignored",
+          "revocation sha256:7fa9fef0c3bcb3e0dcfc2e284de8110a762bfb65c881763f6f997be0299f8ad9 for manifest sha256:f3bac560f12f7434cbc7672b4e26cdd4ff81c653e0987bd3562d3e07bca06c74 does not verify and is ignored",
+          "revocation sha256:3febcfebac5c8d34c77cf07119fa583d7a2275c742aa6888aaba4bb409d93971 for manifest sha256:f3bac560f12f7434cbc7672b4e26cdd4ff81c653e0987bd3562d3e07bca06c74 does not verify and is ignored",
+          "revocation sha256:fe553f3ca68401426b2494b85c2fb517fdc29d707ab6a26f57e5cd7ba2fa17f0 for manifest sha256:f3bac560f12f7434cbc7672b4e26cdd4ff81c653e0987bd3562d3e07bca06c74 does not verify and is ignored",
+          "revocation sha256:61f53712169f5380e9a7edccef5c0bef1b07f480ddf7624981aefa1de2dcc6d6 for manifest sha256:f3bac560f12f7434cbc7672b4e26cdd4ff81c653e0987bd3562d3e07bca06c74 does not verify and is ignored",
+          "revocation sha256:0f9747583a2db1daea3f8cedcdd3fcd1118672a2f388f34cae77b16df5add8e1 for manifest sha256:f3bac560f12f7434cbc7672b4e26cdd4ff81c653e0987bd3562d3e07bca06c74 does not verify and is ignored",
+          "revocation sha256:dc8d31a160d56f281bc8ac4363ab607793dd8cdf05152948d70ba11bd1d22d91 for manifest sha256:f3bac560f12f7434cbc7672b4e26cdd4ff81c653e0987bd3562d3e07bca06c74 does not verify and is ignored",
+          "revocation sha256:eb4947557e4ba943ca2f06aa9bc1a0170a3162452624b2b7913870860189e708 for manifest sha256:f3bac560f12f7434cbc7672b4e26cdd4ff81c653e0987bd3562d3e07bca06c74 does not verify and is ignored",
+          "revocation sha256:8713b9b2ff0e9a9957752f7fc4dd1b4457d6ddc1ef56c885f84c176eb6b2fd9c for manifest sha256:f3bac560f12f7434cbc7672b4e26cdd4ff81c653e0987bd3562d3e07bca06c74 does not verify and is ignored"
+        ],
+        "requests": {
+          "max": null,
+          "none_matching": [
+            "GET .*/blobs/sha256:28d9e90235eabf4cf2a2836adda99c9a1fbc914ccef0ea36c6e7f1d70b9fe0ef"
+          ],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null,
+        "warnings_max": 13,
+        "stored_revocations": []
+      }
+    },
+    {
+      "id": "revocation-unreachable-warns",
+      "tree": "revocation",
+      "transports": [
+        "http"
+      ],
+      "http_script": "revocation-unreachable-warns",
+      "setup": {
+        "cache": "revocation-unreachable-installed",
+        "system_dirs": [],
+        "lock": "revocation-unreachable",
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "26.13.4.1",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": true,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
+      },
+      "env": {},
+      "expect": {
+        "ok": true,
+        "version": "26.13.4.1",
+        "build": "20261013.000004",
+        "manifest": "sha256:b12716082e380a2d15fc175fde58a846cd7580c4c1a1ed69a2a59aa64c3129ce",
+        "library_sha256": "97d1280b9cf2e881a00d49d43537a3a73cb49c9405bdf04fd138caba6f3e0788",
+        "code": null,
+        "sleeps": [
+          4,
+          8,
+          16,
+          32,
+          4,
+          8,
+          16,
+          32
+        ],
+        "warnings": [
+          "revocation status not checked for manifest sha256:b12716082e380a2d15fc175fde58a846cd7580c4c1a1ed69a2a59aa64c3129ce"
+        ],
+        "requests": {
+          "max": 10,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null,
+        "warnings_max": 1,
+        "stored_revocations": []
+      }
+    },
+    {
+      "id": "revocation-strict-fails",
+      "tree": "revocation",
+      "transports": [
+        "http"
+      ],
+      "http_script": "revocation-strict-fails",
+      "setup": {
+        "cache": "revocation-unreachable-installed",
+        "system_dirs": [],
+        "lock": "revocation-unreachable",
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "26.13.4.1",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": true,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": true,
+        "opens": null
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_SOURCE_UNREACHABLE",
+        "sleeps": [
+          4,
+          8,
+          16,
+          32,
+          4,
+          8,
+          16,
+          32
+        ],
+        "warnings": [],
+        "requests": {
+          "max": 10,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": "revocation status not checked for manifest sha256:b12716082e380a2d15fc175fde58a846cd7580c4c1a1ed69a2a59aa64c3129ce",
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
+      }
+    },
+    {
+      "id": "lock-refuses-revoked",
+      "tree": "revocation",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "26.13.5.1",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": true,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_ARTIFACT_REVOKED",
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": null,
+          "none_matching": [
+            "GET .*/blobs/sha256:32135d0530213e6b79dbbdcc1ca908b7a59306ba54cc30bdbce3d4fa8fc57d87"
+          ],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": "26.13.5.1 linux-amd64 build 20261013.000005 (manifest sha256:3451b2d4a47e59e3464efbbfeda7a7fc28f45cb81974f640371235c2d1a0dc62) is revoked: GHSA-fx01-test-0105 https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0105 (over-accept); superseded by build 20261019.000005: fixture revocation 5: a filter over-accepts a value the server refuses",
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
+      }
+    },
+    {
+      "id": "update-refuses-revoked",
+      "tree": "revocation",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": "revocation-update-before",
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "26.13.5",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": true,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_ARTIFACT_REVOKED",
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": null,
+          "none_matching": [
+            "GET .*/blobs/sha256:32135d0530213e6b79dbbdcc1ca908b7a59306ba54cc30bdbce3d4fa8fc57d87"
+          ],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": "26.13.5.1 linux-amd64 build 20261013.000005 (manifest sha256:3451b2d4a47e59e3464efbbfeda7a7fc28f45cb81974f640371235c2d1a0dc62) is revoked: GHSA-fx01-test-0105 https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0105 (over-accept); superseded by build 20261019.000005: fixture revocation 5: a filter over-accepts a value the server refuses",
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
+      }
+    },
+    {
+      "id": "tag-410-revoked",
+      "tree": "revocation",
+      "transports": [
+        "http"
+      ],
+      "http_script": "tag-410-revoked",
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "26.13.6.1",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_ARTIFACT_REVOKED",
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": 1,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": "answered 410 Gone: revoked: GHSA-fx01-test-0001 https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0001 (over-accept) build 20261012.000002, superseded by build 20261019.000001: filter over-accept in fixture advisory 1; GHSA-fx01-test-0002 https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0002 (crash) build 20261001.000001, superseded by build 20261019.000001: a crash on a malformed DateTime64 in fixture advisory 2",
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
+      }
+    },
+    {
+      "id": "tag-410-revoked-patch",
+      "tree": "revocation",
+      "transports": [
+        "http"
+      ],
+      "http_script": "tag-410-revoked-patch",
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "26.13.6",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_ARTIFACT_REVOKED",
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": 1,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": "answered 410 Gone: revoked: GHSA-fx01-test-0001 https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0001 (over-accept) build 20261012.000002, superseded by build 20261019.000001: filter over-accept in fixture advisory 1; GHSA-fx01-test-0002 https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0002 (crash) build 20261001.000001, superseded by build 20261019.000001: a crash on a malformed DateTime64 in fixture advisory 2",
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
+      }
+    },
+    {
+      "id": "tag-410-revoked-other-platform",
+      "tree": "revocation",
+      "transports": [
+        "http"
+      ],
+      "http_script": "tag-410-revoked-other-platform",
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "26.13.6.1",
+        "platform": "darwin-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_ARTIFACT_REVOKED",
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": 1,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": "answered 410 Gone: revoked: GHSA-fx01-test-0001 https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0001 (over-accept) build 20261012.000002, superseded by build 20261019.000001: filter over-accept in fixture advisory 1; GHSA-fx01-test-0002 https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0002 (crash) build 20261001.000001, superseded by build 20261019.000001: a crash on a malformed DateTime64 in fixture advisory 2",
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
+      }
+    },
+    {
+      "id": "tag-410-retired-not-revoked",
+      "tree": "revocation",
+      "transports": [
+        "http"
+      ],
+      "http_script": "tag-410-retired-not-revoked",
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "26.13.6.1",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_SOURCE_RETIRED",
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": 1,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": "chtypes/v1 is retired: use chtypes/v2 (this registry no longer serves chtypes/v1)",
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
+      }
+    },
+    {
+      "id": "tag-410-neither",
+      "tree": "revocation",
+      "transports": [
+        "http"
+      ],
+      "http_script": "tag-410-neither",
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "26.13.6.1",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_SOURCE_RETIRED",
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": 1,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": "the repository is retired",
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
+      }
+    },
+    {
+      "id": "tag-410-revoked-not-object",
+      "tree": "revocation",
+      "transports": [
+        "http"
+      ],
+      "http_script": "tag-410-revoked-not-object",
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "26.13.6.1",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_SOURCE_RETIRED",
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": 1,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": "the repository is retired",
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
+      }
+    },
+    {
+      "id": "list-tags-omits-revoked",
+      "tree": "revocation-listing",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
+      },
+      "env": {},
+      "expect": {
+        "ok": true,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": null,
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": null,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": [
+          "26.13",
+          "26.15"
+        ],
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
+      }
+    },
+    {
+      "id": "tag-410-revoked-line",
+      "tree": "revocation-listing",
+      "transports": [
+        "http"
+      ],
+      "http_script": "tag-410-revoked-line",
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "26.14",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_ARTIFACT_REVOKED",
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": 1,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": "answered 410 Gone: revoked: GHSA-fx01-test-0001 https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0001 (over-accept) build 20261012.000002, superseded by build 20261019.000001: filter over-accept in fixture advisory 1; GHSA-fx01-test-0002 https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0002 (crash) build 20261001.000001, superseded by build 20261019.000001: a crash on a malformed DateTime64 in fixture advisory 2",
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
+      }
+    },
+    {
+      "id": "frozen-unrevoked-platform-ok",
+      "tree": "revocation",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": "frozen-unrevoked-platform-ok",
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": "revocation-unrevoked-platform",
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "26.13.7.1",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": true,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
+      },
+      "env": {},
+      "expect": {
+        "ok": true,
+        "version": "26.13.7.1",
+        "build": "20261013.000007",
+        "manifest": "sha256:87a7a1a4ca50bcfc17f59d07335c1d137c6d0944d1400185b6dfd02a53dcdac7",
+        "library_sha256": "4a7989cd63dd83c8171870133c281b9c92c2d72620fc1a9ee15218aefc6381a2",
+        "code": null,
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": null,
+          "none_matching": [
+            "GET .*/manifests/26.13.7.1$"
+          ],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
+      }
+    },
+    {
+      "id": "dev-alias-all-revoked-404",
+      "tree": "dev-alias",
+      "transports": [
+        "http"
+      ],
+      "http_script": "dev-alias-all-revoked-404",
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "26.8",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": "0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d",
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_ARTIFACT_UNPUBLISHED",
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": null,
+          "none_matching": [
+            "GET .*/blobs/sha256:583bded76f0cb85b4d1b5cc8d455b29942e4d6d335fd67a92c8c19acce2c02ce"
+          ],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": "no published build for this SDK's fingerprint 0ceb2e19b0668a7dd38ed4eb0cc24eef0fec38fd970fa6654a048f4f2f5faf9d; newest published on this channel is b60d9a4c4b6577df1dbfe62cf497d7e7f16868fe1701b993a28a754af57b0886 (build 20261005.120000)",
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
+      }
+    },
+    {
+      "id": "open-warm-revoked",
+      "tree": "revocation",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "revocation-open-revoked",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "26.13.10.1",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": 2
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_ARTIFACT_REVOKED",
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": 3,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": "26.13.10.1 linux-arm64 build 20261013.000010 (manifest sha256:625f9e4a82d3867beff2b99f4ef666da648b5b20d5188a97eaa9f43998b5eb2b) is revoked: GHSA-fx01-test-0110 https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0110 (over-accept); superseded by build 20261019.000010: fixture revocation 10: a filter over-accepts a value the server refuses",
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": [
+          {
+            "manifest": "sha256:625f9e4a82d3867beff2b99f4ef666da648b5b20d5188a97eaa9f43998b5eb2b",
+            "bundle": "sha256:f2f4de0a02b0c5a388a05946d7d9dac1b820383a9f0ee771dceb3aada7c682c9"
+          }
+        ]
+      }
+    },
+    {
+      "id": "open-warm-offline-zero",
+      "tree": "revocation",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "revocation-open-revoked",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "26.13.10.1",
+        "platform": "linux-arm64",
+        "offline": true,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": 1
+      },
+      "env": {},
+      "expect": {
+        "ok": true,
+        "version": "26.13.10.1",
+        "build": "20261013.000010",
+        "manifest": "sha256:625f9e4a82d3867beff2b99f4ef666da648b5b20d5188a97eaa9f43998b5eb2b",
+        "library_sha256": "5554dbe7735fb75de33ebf4a0f42ef8b3c8bd19638d59effc96541b3c08ac9f2",
+        "code": null,
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": 0,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null,
+        "warnings_max": 0,
+        "stored_revocations": []
+      }
+    },
+    {
+      "id": "fetch-installed-revoked",
+      "tree": "revocation",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "revocation-open-revoked",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "26.13.10.1",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_ARTIFACT_REVOKED",
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": null,
+          "none_matching": [
+            "GET .*/blobs/sha256:80efd0c28e506aa3707832104c7041a2a8f03be2265808b0a014f2301575b654"
+          ],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": "26.13.10.1 linux-arm64 build 20261013.000010 (manifest sha256:625f9e4a82d3867beff2b99f4ef666da648b5b20d5188a97eaa9f43998b5eb2b) is revoked: GHSA-fx01-test-0110 https://github.com/Wave-RF/chtypes/security/advisories/GHSA-fx01-test-0110 (over-accept); superseded by build 20261019.000010: fixture revocation 10: a filter over-accepts a value the server refuses",
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": [
+          {
+            "manifest": "sha256:625f9e4a82d3867beff2b99f4ef666da648b5b20d5188a97eaa9f43998b5eb2b",
+            "bundle": "sha256:f2f4de0a02b0c5a388a05946d7d9dac1b820383a9f0ee771dceb3aada7c682c9"
+          }
+        ]
+      }
+    },
+    {
+      "id": "open-warm-checks-once",
+      "tree": "revocation",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "revocation-open-ok",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "26.13.11.1",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": 2
+      },
+      "env": {},
+      "expect": {
+        "ok": true,
+        "version": "26.13.11.1",
+        "build": "20261013.000011",
+        "manifest": "sha256:25780faf14e9c1854477786ed99f191567ec8825db6aa5991a367a1563db1175",
+        "library_sha256": "bc29c53b858d04114feeb012b8b55dc0d13eaada37e21ade9efd4857ba80fbd7",
+        "code": null,
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": 1,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null,
+        "warnings_max": 0,
+        "stored_revocations": []
+      }
+    },
+    {
+      "id": "open-warm-unreachable-warns",
+      "tree": "revocation",
+      "transports": [
+        "http"
+      ],
+      "http_script": "open-warm-unreachable-warns",
+      "setup": {
+        "cache": "revocation-open-unreachable",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "26.13.12.1",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": 1
+      },
+      "env": {},
+      "expect": {
+        "ok": true,
+        "version": "26.13.12.1",
+        "build": "20261013.000012",
+        "manifest": "sha256:b35b474ede433d3c2491d4c7eb86e63bc4b8fd0b046e62edf0a98913257c8b5d",
+        "library_sha256": "f2f22edce0df6425a24f46b39f018f8185e7157047718c9c1ff9bbea4d843a6f",
+        "code": null,
+        "sleeps": [],
+        "warnings": [
+          "revocation status not checked for manifest sha256:b35b474ede433d3c2491d4c7eb86e63bc4b8fd0b046e62edf0a98913257c8b5d"
+        ],
+        "requests": {
+          "max": 2,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null,
+        "warnings_max": 1,
+        "stored_revocations": []
+      }
+    },
+    {
+      "id": "open-warm-warns-once",
+      "tree": "revocation",
+      "transports": [
+        "http"
+      ],
+      "http_script": "open-warm-warns-once",
+      "setup": {
+        "cache": "revocation-open-unreachable",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "26.13.12.1",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": 2
+      },
+      "env": {},
+      "expect": {
+        "ok": true,
+        "version": "26.13.12.1",
+        "build": "20261013.000012",
+        "manifest": "sha256:b35b474ede433d3c2491d4c7eb86e63bc4b8fd0b046e62edf0a98913257c8b5d",
+        "library_sha256": "f2f22edce0df6425a24f46b39f018f8185e7157047718c9c1ff9bbea4d843a6f",
+        "code": null,
+        "sleeps": [],
+        "warnings": [
+          "revocation status not checked for manifest sha256:b35b474ede433d3c2491d4c7eb86e63bc4b8fd0b046e62edf0a98913257c8b5d"
+        ],
+        "requests": {
+          "max": 2,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null,
+        "warnings_max": 1,
+        "stored_revocations": []
+      }
+    },
+    {
+      "id": "open-warm-strict-fails",
+      "tree": "revocation",
+      "transports": [
+        "http"
+      ],
+      "http_script": "open-warm-strict-fails",
+      "setup": {
+        "cache": "revocation-open-unreachable",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "26.13.12.1",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": true,
+        "opens": 1
+      },
+      "env": {},
+      "expect": {
+        "ok": false,
+        "version": null,
+        "build": null,
+        "manifest": null,
+        "library_sha256": null,
+        "code": "CHTYPES_SOURCE_UNREACHABLE",
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": 2,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": "revocation status not checked for manifest sha256:b35b474ede433d3c2491d4c7eb86e63bc4b8fd0b046e62edf0a98913257c8b5d",
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
       }
     }
   ]

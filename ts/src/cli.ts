@@ -9,6 +9,7 @@
  * usage status before anything else, and keeps its cache under `v2-dev`:
  *
  *   chtypes fetch <version>... | --all  [--frozen] [--offline] [--lock <file>] [--update] [--strict]
+ *                                       [--allow-revoked] [--require-revocation-check]
  *   chtypes verify                      re-hash every installed library against its verified record
  *   chtypes list                        what is installed, and the lines the registry publishes
  *   chtypes where [--all]               the v1 cache root; --all: every directory searched
@@ -17,7 +18,7 @@
  *                                       remove the builds of each line newer ones supersede, keeping the newest n
  *
  * Options per cli-common: `fetch` takes `--platform`, `--cache`, `--lock`, `--frozen`,
- * `--offline`, `--update`; `verify`, `list` and `where` take `--cache` (`list` also
+ * `--offline`, `--update`, `--allow-revoked`, `--require-revocation-check`; `verify`, `list` and `where` take `--cache` (`list` also
  * `--offline`); `resolve` takes `--cache`, `--offline` and `--json`; `prune` takes
  * `--cache`, `--line`, `--keep` and `--dry-run`; every command takes `--strict`;
  * `-h/--help` anywhere, `--version` at top level. The registry base comes only from
@@ -42,7 +43,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { ChtypesError, UsageError } from './abi2/index.js';
 import { withEnvironment } from './env.js';
-import { CODE_ARTIFACT_CORRUPT, ERROR_EXIT_CODES } from './ocifetch/constants.gen.js';
+import { CODE_ARTIFACT_CORRUPT, CODE_ARTIFACT_REVOKED, ERROR_EXIT_CODES } from './ocifetch/constants.gen.js';
 import { strictMode } from './ocifetch/faults.js';
 import {
   activeChannel,
@@ -92,6 +93,7 @@ export interface CliIo {
 const USAGE = `usage: chtypes <command> [options]
 
   chtypes fetch <version>... | --all  [--frozen] [--offline] [--lock <file>] [--update] [--strict]
+                                      [--allow-revoked] [--require-revocation-check]
   chtypes verify [--strict]
   chtypes list [--strict]
   chtypes where [--strict] [--all]
@@ -113,6 +115,8 @@ const USAGE = `usage: chtypes <command> [options]
   --platform  <os>-<arch>: linux-amd64, linux-arm64 or darwin-arm64 (default: this host, or CHTYPES_TARGET)
   --cache     a cache, used through its ${DEV_CACHE_DIR} subroot (default: CHTYPES_CACHE/${DEV_CACHE_DIR}, else \${XDG_CACHE_HOME:-~/.cache}/chtypes/${DEV_CACHE_DIR})
   --strict    a cache that cannot be read is CHTYPES_CACHE_UNUSABLE, never not-installed (default: CHTYPES_CACHE_STRICT=1)
+  --allow-revoked             use a revoked build anyway, with a warning (this call only; never a lock or an update)
+  --require-revocation-check  a revocation status that cannot be read is an error, not a warning
   -h, --help  this text;  --version  "chtypes <version>"
 
 this is a 2.0.0-dev CLI (UNSTABLE, staging only, not for production): it fetches only from
@@ -142,6 +146,8 @@ const CONFIG = {
     platform: { type: 'string' },
     cache: { type: 'string' },
     strict: { type: 'boolean' },
+    'allow-revoked': { type: 'boolean' },
+    'require-revocation-check': { type: 'boolean' },
     json: { type: 'boolean' },
     line: { type: 'string' },
     keep: { type: 'string' },
@@ -153,6 +159,9 @@ const CONFIG = {
 
 /** The options only `resolve` and `prune` take: every other command refuses them as a usage error, as it did before they existed. */
 const RESOLVE_AND_PRUNE_OPTIONS = ['json', 'line', 'keep', 'dry-run'] as const;
+
+/** The options only `fetch` takes (build-level revocation): every other command refuses them. */
+const FETCH_ONLY_REVOCATION_OPTIONS = ['allow-revoked', 'require-revocation-check'] as const;
 
 type Parsed = ReturnType<typeof parseArgs<typeof CONFIG>>;
 type Values = Parsed['values'];
@@ -203,13 +212,13 @@ export async function runCli(argv: readonly string[], io: CliIo = defaultIo): Pr
         refuseOptions(command, values, RESOLVE_AND_PRUNE_OPTIONS);
         return await cmdFetch(rest, values, io);
       case 'verify':
-        refuseOptions(command, values, RESOLVE_AND_PRUNE_OPTIONS);
+        refuseOptions(command, values, [...RESOLVE_AND_PRUNE_OPTIONS, ...FETCH_ONLY_REVOCATION_OPTIONS]);
         return await cmdVerify(rest, values, io);
       case 'list':
-        refuseOptions(command, values, RESOLVE_AND_PRUNE_OPTIONS);
+        refuseOptions(command, values, [...RESOLVE_AND_PRUNE_OPTIONS, ...FETCH_ONLY_REVOCATION_OPTIONS]);
         return await cmdList(rest, values, io);
       case 'where':
-        refuseOptions(command, values, RESOLVE_AND_PRUNE_OPTIONS);
+        refuseOptions(command, values, [...RESOLVE_AND_PRUNE_OPTIONS, ...FETCH_ONLY_REVOCATION_OPTIONS]);
         return await cmdWhere(rest, values, io);
       case 'resolve':
         return await cmdResolve(rest, values, io);
@@ -252,6 +261,8 @@ function fetchOptions(values: Values, forFetch: boolean): FetchV1Options {
           frozen: values.frozen === true,
           update: values.update === true,
           lockWrite: lockPath !== undefined && values.frozen !== true && values.update !== true,
+          ...(values['allow-revoked'] === true ? { allowRevoked: true } : {}),
+          ...(values['require-revocation-check'] === true ? { requireRevocationCheck: true } : {}),
         }
       : {}),
   });
@@ -327,11 +338,21 @@ async function cmdVerify(rest: readonly string[], values: Values, io: CliIo): Pr
   }
   await sayNotes(io, options);
   let bad = 0;
+  let revoked = 0;
   for (const r of results) {
-    if (!r.ok) {
+    if (r.revocation !== undefined) {
+      // A build a stored revocation refuses (fetch-v1.md, "Build-level revocation"); it is reported whatever its bytes say.
+      revoked += 1;
+      io.stderr(`REVOKED ${r.version} ${r.platform} ${r.dir}: ${r.detail}\n`);
+    } else if (!r.ok) {
       bad += 1;
       io.stderr(`BAD  ${r.platform}  ${r.dir}  ${r.detail}\n`);
     }
+  }
+  if (revoked > 0) {
+    // Exit 11 wins over a mismatch's 1: a revocation is the more specific finding.
+    io.stderr(`chtypes: ${revoked} of ${results.length} installed build(s) under ${root} are revoked [${CODE_ARTIFACT_REVOKED}]\n`);
+    return ERROR_EXIT_CODES[CODE_ARTIFACT_REVOKED] ?? EXIT_OTHER;
   }
   if (bad > 0) io.stderr(`${bad} of ${results.length} build(s) FAILED verification in ${root}\n`);
   return bad === 0 ? EXIT_OK : (ERROR_EXIT_CODES[CODE_ARTIFACT_CORRUPT] ?? EXIT_OTHER);
@@ -364,7 +385,7 @@ async function cmdWhere(rest: readonly string[], values: Values, io: CliIo): Pro
 
 /** `chtypes resolve` (public issue #493): what one spelling resolves to on every platform, verified, and nothing installed. */
 async function cmdResolve(rest: readonly string[], values: Values, io: CliIo): Promise<number> {
-  refuseOptions('resolve', values, ['all', 'frozen', 'update', 'lock', 'platform', 'line', 'keep', 'dry-run']);
+  refuseOptions('resolve', values, ['all', 'frozen', 'update', 'lock', 'platform', 'line', 'keep', 'dry-run', ...FETCH_ONLY_REVOCATION_OPTIONS]);
   const [spelling] = rest;
   if (spelling === undefined || rest.length !== 1) throw new CliUsageError(`resolve takes exactly one version spelling (got ${rest.length})`);
   const options: FetchV1Options = { ...fetchOptions(values, false), ...(values.offline === true ? { offline: true } : {}) };
@@ -382,7 +403,7 @@ async function cmdResolve(rest: readonly string[], values: Values, io: CliIo): P
 
 /** `chtypes prune` (public issue #494): remove the builds of each line newer installed builds supersede, keeping the newest n per platform, never one in use. */
 async function cmdPrune(rest: readonly string[], values: Values, io: CliIo): Promise<number> {
-  refuseOptions('prune', values, ['all', 'frozen', 'update', 'lock', 'platform', 'offline', 'json']);
+  refuseOptions('prune', values, ['all', 'frozen', 'update', 'lock', 'platform', 'offline', 'json', ...FETCH_ONLY_REVOCATION_OPTIONS]);
   if (rest.length > 0) throw new CliUsageError(`prune takes no positional arguments (${rest.join(' ')}); a line is --line <line>`);
   const keepText = values.keep ?? '1';
   if (!/^[+-]?[0-9]+$/.test(keepText)) throw new CliUsageError(`--keep takes a number of builds, at least 1, not ${JSON.stringify(keepText)}`);

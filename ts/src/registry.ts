@@ -50,6 +50,7 @@ import {
   ArtifactMissingError,
   cacheRoot as fetchCacheRoot,
   ensure,
+  checkInstalled,
   type FetchV1Options,
   hold,
   hostPlatformKey,
@@ -101,6 +102,10 @@ export interface FetchOptions {
   readonly update?: boolean | undefined;
   /** Strict mode (public issue #486): every fault of the cache and of an existing system dir is a `CacheUnusableError`. Unset reads `CHTYPES_CACHE_STRICT`. */
   readonly strictCache?: boolean | undefined;
+  /** Use a build a verified revocation refuses, with one warning naming the advisory (fetch-v1.md, "Build-level revocation"). Per call, never an environment variable, and never with a lock or an update. */
+  readonly allowRevoked?: boolean | undefined;
+  /** A revocation status that cannot be read is the transport's error rather than one warning. */
+  readonly requireRevocationCheck?: boolean | undefined;
 }
 
 /** The public options as the fetch layer's own: each set field copied, and the trusted keys read from hex. */
@@ -122,6 +127,8 @@ function fetchLayerOptions(options: FetchOptions = {}): FetchV1Options {
   if (options.lockWrite !== undefined) out.lockWrite = options.lockWrite;
   if (options.update !== undefined) out.update = options.update;
   if (options.strictCache !== undefined) out.strictCache = options.strictCache;
+  if (options.allowRevoked !== undefined) out.allowRevoked = options.allowRevoked;
+  if (options.requireRevocationCheck !== undefined) out.requireRevocationCheck = options.requireRevocationCheck;
   return out;
 }
 
@@ -323,6 +330,12 @@ export class Registry {
     for (let attempt = 0; attempt < 2; attempt++) {
       const resolved = await resolveInstalled(request, platform, this.#fetch);
       if (resolved === undefined) return undefined;
+      // The installed-build revocation check (check_installed; fetch-v1.md,
+      // "Build-level revocation"), before anything reads the library: at most one
+      // per build per process, its warnings printed once on stderr.
+      const checked = await checkInstalled(resolved, this.#fetch);
+      for (const w of checked.warnings) process.stderr.write(`${w}\n`);
+      if (checked.error !== undefined) throw checked.error;
       if (hold(resolved.dir) !== 'vanished') return resolved;
     }
     return undefined;

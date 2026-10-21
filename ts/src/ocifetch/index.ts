@@ -24,6 +24,7 @@ export {
 export { keyIdOfRawKey } from './dsse.js';
 export { cacheRoot, isFilesystemError } from './layout.js';
 export {
+  checkInstalled,
   ensure,
   fetchSigned,
   listInstalled,
@@ -36,7 +37,8 @@ export {
   verifyInstalled,
   withNotes,
 } from './ensure.js';
-export type { FetchSignedResult } from './ensure.js';
+export type { FetchSignedResult, InstalledCheck } from './ensure.js';
+export { resetRevocationMemoForTests } from './revocation.js';
 export { hold, type HoldState, removedWhileHeld } from './hold.js';
 export { SpellingRefusedError } from './oci.js';
 export { isLine, lineOf, prune, type PruneOptions, type Superseded } from './prune.js';
@@ -45,6 +47,7 @@ export {
   ArtifactCorruptError,
   ArtifactMissingError,
   ArtifactPinnedError,
+  ArtifactRevokedError,
   ArtifactUnpublishedError,
   ArtifactUntrustedError,
   CacheUnusableError,
@@ -53,6 +56,7 @@ export {
   CODE_ARTIFACT_INCOMPATIBLE,
   CODE_ARTIFACT_MISSING,
   CODE_ARTIFACT_PINNED,
+  CODE_ARTIFACT_REVOKED,
   CODE_ARTIFACT_UNPUBLISHED,
   CODE_ARTIFACT_UNTRUSTED,
   CODE_CACHE_UNUSABLE,
@@ -69,7 +73,7 @@ export {
   SourceUnauthorizedError,
   SourceUnreachableError,
 } from './errors.js';
-export type { CacheFault, ErrorCode, FetchV1ErrorCode, RefusalFields } from './errors.js';
+export type { Advisory, CacheFault, ErrorCode, FetchV1ErrorCode, RefusalFields, Revocation } from './errors.js';
 export type {
   ArtifactPredicate,
   Clock,

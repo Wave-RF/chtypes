@@ -3,7 +3,7 @@ package main
 // httpscript.go — the Go-side shape of
 // spec/fetch-v1/schema/http-script.schema.json. Field tags with
 // `omitempty` on every variant-specific field are deliberate: the schema's
-// `response` is a `oneOf` of four shapes, each `additionalProperties:
+// `response` is a `oneOf` of five shapes, each `additionalProperties:
 // false`, so a response object must carry EXACTLY the keys its one active
 // variant uses — `omitempty` is what makes a flat Go struct emit that.
 
@@ -22,16 +22,23 @@ type httpRoute struct {
 }
 
 // httpResponse is exactly one oneOf variant, selected by which field is
-// set: FromTree, Stall, Close, or Status (with optional Headers /
+// set: FromTree, Stall, Close, Truncate (with FromTree, and optionally Chunked), or Status (with optional Headers /
 // BodyFromTree). server.py documents the two header-value placeholders it
 // substitutes at serve time: `{origin}`/`{second-origin}` in a Location
 // header (the actual ephemeral port is not known until the server binds
 // it), and the literal string "@date+N" in a Retry-After header (N
 // seconds after that response's own Date header, for the HTTP-date form).
 type httpResponse struct {
-	FromTree     bool              `json:"from_tree,omitempty"`
-	Stall        bool              `json:"stall,omitempty"`
-	Close        bool              `json:"close,omitempty"`
+	FromTree bool `json:"from_tree,omitempty"`
+	Stall    bool `json:"stall,omitempty"`
+	Close    bool `json:"close,omitempty"`
+	// Truncate, with FromTree, is a body cut off part way: the full
+	// Content-Length is declared and only the first *Truncate bytes sent.
+	// With Chunked, the head is Transfer-Encoding: chunked with no
+	// Content-Length, the first *Truncate bytes go out as one complete chunk,
+	// and the connection closes without the terminating zero-length chunk.
+	Truncate     *int              `json:"truncate,omitempty"`
+	Chunked      bool              `json:"chunked,omitempty"`
 	Status       *int              `json:"status,omitempty"`
 	Headers      map[string]string `json:"headers,omitempty"`
 	BodyFromTree bool              `json:"body_from_tree,omitempty"`

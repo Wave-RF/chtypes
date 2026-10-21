@@ -41,8 +41,10 @@ from chtypes._ocifetch._ensure import (
     Clock,
     Options,
     Request,
+    check_installed,
     ensure,
     fetch_signed,
+    reset_revocation_memo_for_tests,
     resolve_installed,
 )
 from chtypes._ocifetch._errors import ArtifactMissingError, FetchError
@@ -392,6 +394,9 @@ def _preinstall_from_layout(
         subject = doc.get("subject") or {}
         if subject.get("digest") != manifest_digest:
             continue
+        # A signature referrer only (a revocation carries the bundle media type too).
+        if doc.get("artifactType") != C.MEDIA_TYPE_BUNDLE:
+            continue
         try:
             referrer_layer = manifest_single_layer(doc, expected_media_type=C.MEDIA_TYPE_BUNDLE)
         except Exception:
@@ -583,6 +588,10 @@ def _run_case(
 
     clock = _FakeClock()
     request_log.clear()
+    # Every case starts as a new process would: no kept revocation outcome (the
+    # cases reuse manifests across cache directories, which one process never
+    # sees in use).
+    reset_revocation_memo_for_tests()
     options = Options(
         platform=req["platform"],
         bases=bases,
@@ -594,9 +603,13 @@ def _run_case(
         lock_path=lock_path if (setup.get("lock") or req.get("lock_write")) else None,
         lock_write=req["lock_write"],
         update=req["update"],
+        allow_revoked=req.get("allow_revoked", False),
+        require_revocation_check=req.get("require_revocation_check", False),
         clock=clock,
         before_index_rename=before_index_rename,
     )
+    opens = req.get("opens")
+    open_warnings: list[str] = []
 
     mismatches: list[str] = []
     resolved = None
@@ -624,7 +637,20 @@ def _run_case(
 
         _ensure_module.search_roots = _fake_search_roots
     try:
-        if case["id"].startswith("resolve-build-"):
+        if opens is not None:
+            # The registry-open driver (docs/guides/fetch-v1.md §10): the two calls a
+            # registry makes before it loads a build, resolve_installed then
+            # check_installed, N times in one process; the last open is judged and
+            # every open's warnings are counted. A miss is CHTYPES_ARTIFACT_MISSING.
+            for _ in range(opens):
+                resolved = None  # each open is judged on its own
+                opened = resolve_installed(Request(req["spelling"]), req["platform"], options)
+                if opened is None:
+                    raise ArtifactMissingError(f"no installed artifact satisfies {req['spelling']}")
+                open_warnings.extend(opened.warnings)
+                open_warnings.extend(check_installed(opened, options))
+                resolved = opened
+        elif case["id"].startswith("resolve-build-"):
             # What a request resolves to on every platform, never a layer
             # (docs/guides/fetch-v1.md §10).
             resolutions, _warnings = resolve(Request(req["spelling"]), options)
@@ -710,11 +736,27 @@ def _run_case(
                 actual = resolved.predicate.get("library_sha256")
                 if actual != expect["library_sha256"]:
                     mismatches.append(f"library_sha256 {actual!r} != {expect['library_sha256']!r}")
+            all_warnings = open_warnings if opens is not None else list(resolved.warnings)
             for keyword in expect["warnings"]:
-                if not any(keyword in w for w in resolved.warnings):
-                    mismatches.append(
-                        f"warnings: no warning contains {keyword!r}: {resolved.warnings}"
-                    )
+                if not any(keyword in w for w in all_warnings):
+                    mismatches.append(f"warnings: no warning contains {keyword!r}: {all_warnings}")
+            warnings_max = expect.get("warnings_max")
+            if warnings_max is not None and len(all_warnings) > warnings_max:
+                mismatches.append(
+                    f"{len(all_warnings)} warnings, want at most {warnings_max}: {all_warnings}"
+                )
+
+    for stored in expect.get("stored_revocations") or []:
+        path = (
+            layout_dir
+            / "unpacked"
+            / "sha256"
+            / parse_digest(stored["manifest"])
+            / "revocation.json"
+        )
+        got = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
+        if got != stored["bundle"]:
+            mismatches.append(f"stored_revocations: {path} holds {got!r}, want {stored['bundle']}")
 
     for d, snap in intact_before.items():
         after = _snapshot_install(layout_dir, d)

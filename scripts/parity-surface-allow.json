@@ -35,6 +35,26 @@
       "binding": "go",
       "kind": "extra",
       "names": [
+        "ArtifactError.Revocation",
+        "Revocation",
+        "Revocation.Signed",
+        "Revocation.Manifest",
+        "Revocation.Advisories",
+        "Advisory",
+        "Advisory.ID",
+        "Advisory.URL",
+        "Advisory.Class",
+        "Advisory.Summary",
+        "Advisory.Build",
+        "Advisory.SupersededBy",
+        "Advisory.RevokedAt"
+      ],
+      "reason": "§4's 'a revocation' bullet: a CHTYPES_ARTIFACT_REVOKED (fetch-v1.md, Build-level revocation; public issue #625) carries whether it is signed, the manifest a signed one revokes, and each advisory's id, URL, class, summary, build, superseded_by and revoked_at, which the doc names in prose and does not spell per language. Go re-exports the fetch layer's Revocation and Advisory, as it does Resolved."
+    },
+    {
+      "binding": "go",
+      "kind": "extra",
+      "names": [
         "FetchOptions.Bases",
         "FetchOptions.CacheDir",
         "FetchOptions.SystemDirs",
@@ -46,7 +66,9 @@
         "FetchOptions.LockPath",
         "FetchOptions.LockWrite",
         "FetchOptions.Update",
-        "FetchOptions.StrictCache"
+        "FetchOptions.StrictCache",
+        "FetchOptions.AllowRevoked",
+        "FetchOptions.RequireRevocationCheck"
       ],
       "reason": "§6: the fetch options carry everything fetch-v1.md configures (bases, cache directory, system directories, trusted keys, token, allow-unsigned, offline, frozen, the lock path) 'under the fetch module's own names', which the doc names in prose and does not spell per language. LockWrite and Update are the lock's write and update modes of fetch-v1.md §6."
     },
@@ -68,7 +90,10 @@
         "DefaultKind.of",
         "MergeReason.of",
         "DeclinedTier.of",
-        "DeclinedLayer.of"
+        "DeclinedLayer.of",
+        "RefusalSite.of",
+        "Posture.of",
+        "DefaultSupport.of"
       ],
       "reason": "Generated from the description by scripts/abi-v1/gen.py: each string vocabulary's decoder from a document's text, with the description's fallback. The decoders use it; §3 names the vocabularies and their facts, not their decoders."
     },
@@ -87,7 +112,8 @@
         "SourceUnauthorizedError.code",
         "SourceUnreachableError.code",
         "CacheUnusableError.code",
-        "SourceRetiredError.code"
+        "SourceRetiredError.code",
+        "ArtifactRevokedError.code"
       ],
       "reason": "Each artifact class's own code, a class attribute set on every class the binding raises (Python's spelling of one code per class); §4's codes give ArtifactError.code, which every class has, and each binding's CODE_* constants."
     },
@@ -101,7 +127,8 @@
         "ArtifactError(got=)",
         "CacheUnusableError(path=)",
         "CacheUnusableError(reason=)",
-        "CacheUnusableError(os_error=)"
+        "CacheUnusableError(os_error=)",
+        "ArtifactRevokedError(revocation=)"
       ],
       "reason": "Keyword-only constructor parameters of error classes the binding raises: they set §4's refusal fields (reason, path, want, got) and a cache fault's. A caller catches these classes and does not construct them."
     },
@@ -128,9 +155,31 @@
         "FetchOptions.lock_path",
         "FetchOptions.lock_write",
         "FetchOptions.update",
-        "FetchOptions.strict_cache"
+        "FetchOptions.strict_cache",
+        "FetchOptions.allow_revoked",
+        "FetchOptions.require_revocation_check"
       ],
       "reason": "§6: the fetch options carry everything fetch-v1.md configures (bases, cache directory, system directories, trusted keys, token, allow-unsigned, offline, frozen, the lock path) 'under the fetch module's own names', which the doc names in prose and does not spell per language. lock_write and update are the lock's write and update modes of fetch-v1.md §6."
+    },
+    {
+      "binding": "python",
+      "kind": "extra",
+      "names": [
+        "ArtifactRevokedError.revocation",
+        "Revocation",
+        "Revocation.signed",
+        "Revocation.manifest",
+        "Revocation.advisories",
+        "Advisory",
+        "Advisory.id",
+        "Advisory.url",
+        "Advisory.class_",
+        "Advisory.summary",
+        "Advisory.build",
+        "Advisory.superseded_by",
+        "Advisory.revoked_at"
+      ],
+      "reason": "§4's 'a revocation' bullet: a CHTYPES_ARTIFACT_REVOKED (fetch-v1.md, Build-level revocation; public issue #625) carries whether it is signed, the manifest a signed one revokes, and each advisory's id, URL, class, summary, build, superseded_by and revoked_at, which the doc names in prose and does not spell per language. Python's Revocation and Advisory are frozen dataclasses, the error's `revocation` attribute holds one, and an advisory's `class` is `class_` (a keyword)."
     },
     {
       "binding": "python",
@@ -163,7 +212,10 @@
         "MergeReason.as_str",
         "DeclinedTier.as_str",
         "DeclinedLayer.as_str",
-        "DiscoverQueryParam.as_str"
+        "DiscoverQueryParam.as_str",
+        "RefusalSite.as_str",
+        "Posture.as_str",
+        "DefaultSupport.as_str"
       ],
       "reason": "A string vocabulary's document spelling. Rust's vocabularies are enums, so the text is a method, where Python's StrEnum member and TypeScript's const-object value are the string itself and Go's type is a string. Generated from the description by scripts/abi-v1/gen.py."
     },
@@ -232,9 +284,30 @@
         "FetchOptions.lock_path",
         "FetchOptions.lock_write",
         "FetchOptions.update",
-        "FetchOptions.strict_cache"
+        "FetchOptions.strict_cache",
+        "FetchOptions.allow_revoked",
+        "FetchOptions.require_revocation_check"
       ],
       "reason": "§6: the fetch options carry everything fetch-v1.md configures (bases, cache directory, system directories, trusted keys, token, allow-unsigned, offline, frozen, the lock path) 'under the fetch module's own names', which the doc names in prose and does not spell per language. lock_write and update are the lock's write and update modes of fetch-v1.md §6."
+    },
+    {
+      "binding": "rust",
+      "kind": "extra",
+      "names": [
+        "Revocation.signed",
+        "Revocation.manifest",
+        "Revocation.advisories",
+        "Revocation.message",
+        "Advisory",
+        "Advisory.id",
+        "Advisory.url",
+        "Advisory.class",
+        "Advisory.summary",
+        "Advisory.build",
+        "Advisory.superseded_by",
+        "Advisory.revoked_at"
+      ],
+      "reason": "§4's 'a revocation' bullet: a CHTYPES_ARTIFACT_REVOKED (fetch-v1.md, Build-level revocation; public issue #625) carries whether it is signed, the manifest a signed one revokes, and each advisory's id, URL, class, summary, build, superseded_by and revoked_at, which the doc names in prose and does not spell per language. Rust's variant holds them in its Revocation struct, as Error::CacheUnusable holds a CacheFault."
     },
     {
       "binding": "ts",
@@ -268,6 +341,26 @@
       "binding": "ts",
       "kind": "extra",
       "names": [
+        "ArtifactRevokedError.revocation",
+        "Revocation",
+        "Revocation.signed",
+        "Revocation.manifest",
+        "Revocation.advisories",
+        "Advisory",
+        "Advisory.id",
+        "Advisory.url",
+        "Advisory.class",
+        "Advisory.summary",
+        "Advisory.build",
+        "Advisory.supersededBy",
+        "Advisory.revokedAt"
+      ],
+      "reason": "§4's 'a revocation' bullet: a CHTYPES_ARTIFACT_REVOKED (fetch-v1.md, Build-level revocation; public issue #625) carries whether it is signed, the manifest a signed one revokes, and each advisory's id, URL, class, summary, build, superseded_by and revoked_at, which the doc names in prose and does not spell per language. TypeScript's class carries them as its revocation field, an interface of readonly members spelled in camel case (supersededBy, revokedAt), and Advisory is the shape of each advisory."
+    },
+    {
+      "binding": "ts",
+      "kind": "extra",
+      "names": [
         "CacheUnusableError.path",
         "CacheUnusableError.reason",
         "CacheUnusableError.osError",
@@ -293,7 +386,9 @@
         "FetchOptions.lockPath",
         "FetchOptions.lockWrite",
         "FetchOptions.update",
-        "FetchOptions.strictCache"
+        "FetchOptions.strictCache",
+        "FetchOptions.allowRevoked",
+        "FetchOptions.requireRevocationCheck"
       ],
       "reason": "§6: the fetch options carry everything fetch-v1.md configures (bases, cache directory, system directories, trusted keys, token, allow-unsigned, offline, frozen, the lock path) 'under the fetch module's own names', which the doc names in prose and does not spell per language. lockWrite and update are the lock's write and update modes of fetch-v1.md §6. An interface since public issue #500, so the gate reads its fields as it reads the other bindings'."
     },
@@ -306,9 +401,31 @@
         "CallErrorFields.chCode",
         "CallErrorFields.chName",
         "CallErrorFields.messageBytes",
-        "CallErrorFields.column"
+        "CallErrorFields.column",
+        "CallErrorFields.reason"
       ],
-      "reason": "The interface of §4's five call-error fields, which CallError implements and its constructors take: a type-level name for the same fields, so it adds no field. The other bindings spell the fields once, on CallError (Go's struct, Python's class, Rust's struct)."
+      "reason": "The interface of §4's six call-error fields, which CallError implements and its constructors take: a type-level name for the same fields, so it adds no field. The other bindings spell the fields once, on CallError (Go's struct, Python's class, Rust's struct)."
+    },
+    {
+      "binding": "ts",
+      "kind": "extra",
+      "names": [
+        "VerdictBasis",
+        "VerdictBasis.Input",
+        "VerdictBasis.Export",
+        "DeferDefaults",
+        "DeferDefaults.None",
+        "DeferDefaults.Server",
+        "ParamEncoding",
+        "ParamEncoding.Escaped",
+        "ParamEncoding.Raw",
+        "ColumnDefault",
+        "ColumnDefault.name",
+        "ColumnDefault.value",
+        "SettingValue"
+      ],
+      "reason": "§2's options-documents table names the three option fields that take a closed set (verdictBasis, deferDefaults, paramEncoding) and the column_defaults entry, and Go gives each set a named type (VerdictBasis, DeferDefaults, ParamEncoding, ColumnDefault), which the doc's TypeScript column does not spell. TypeScript spells the three sets as const objects with a type of the same name (the language's idiom for a vocabulary, as Format is), ColumnDefault as the interface of an entry, and SettingValue as the type of one settings or query-parameter value (a string, or the bytes of a value that is not UTF-8, which is sent in the {\"b64\": ...} object form). The ABI v2 dev surface document lands with the other dev bindings (public issue #511), and this entry goes with it.",
+      "issue": 511
     },
     {
       "binding": "ts",
@@ -341,7 +458,10 @@
         "MergeReason.Known",
         "DeclinedTier.Known",
         "DeclinedLayer.Known",
-        "DiscoverQueryParam.Known"
+        "DiscoverQueryParam.Known",
+        "RefusalSite.Known",
+        "Posture.Known",
+        "DefaultSupport.Known"
       ],
       "issue": 511,
       "reason": "The ABI v2 dev binding's rule r3 (spec/abi-v2/docs.md): every vocabulary has an unknown(n) member, an unlisted value kept per field, which Go spells as the raw value plus Known() false. docs/reference/bindings-v1.md is the 1.x surface and names none of them; the v2 surface document lands with the other three dev bindings (public issue #511), and this entry goes with it."
@@ -362,7 +482,10 @@
         "DeclinedTier.known",
         "DeclinedLayer.known",
         "DiscoverQueryParam.known",
-        "DiscoverQueryParam.of"
+        "DiscoverQueryParam.of",
+        "RefusalSite.known",
+        "Posture.known",
+        "DefaultSupport.known"
       ],
       "issue": 511,
       "reason": "The ABI v2 dev binding's rule r3 (spec/abi-v2/docs.md), as Python spells it: an unlisted value of an enum class is that class's unknown(n) member (`Outcome(\"x\")`, named `unknown(x)`), and every vocabulary gains `known`, False for exactly that member (a property on the enum classes, a function on the plain-string Reason and Source); DiscoverQueryParam has `of`, as the other document vocabularies have (their own entry). docs/reference/bindings-v1.md is the 1.x surface and names neither; the v2 surface document lands with the other dev bindings (public issue #511), and this entry goes with it."
@@ -384,10 +507,31 @@
         "declinedTierKnown",
         "declinedLayerKnown",
         "discoverQueryParamKnown",
+        "refusalSiteKnown",
+        "postureKnown",
+        "defaultSupportKnown",
         "Unknown"
       ],
       "issue": 511,
       "reason": "The ABI v2 dev binding's rule r3 (spec/abi-v2/docs.md): every vocabulary has an unknown(n) member, an unlisted value kept per field, which TypeScript spells as the raw value (each vocabulary's type is its listed values or Unknown<string | number>) plus a free <vocabulary>Known function, false for it (the same shape as reasonLossy: a const object cannot carry a member); statusName spells an unlisted status unknown(<n>). docs/reference/bindings-v1.md is the 1.x surface and names none of them; the v2 surface document lands with the other dev bindings (public issue #511), and this entry goes with it."
+    },
+    {
+      "binding": "rust",
+      "kind": "extra",
+      "names": [
+        "VerdictBasis.Input",
+        "VerdictBasis.Export",
+        "VerdictBasis.as_str",
+        "DeferDefaults.None",
+        "DeferDefaults.Server",
+        "DeferDefaults.as_str",
+        "ParamEncoding.Escaped",
+        "ParamEncoding.Raw",
+        "ParamEncoding.as_str",
+        "ColumnDefault.name",
+        "ColumnDefault.value"
+      ],
+      "reason": "\u00a72, the call options: the options documents' hand-written value types (spec batch 2, ABI v2). The doc names VerdictBasis, DeferDefaults, ParamEncoding and ColumnDefault in the Rust option fields' types and gives Go's members (VerdictBasisInput, DeferDefaultsNone, ParamEncodingEscaped, ColumnDefault{Name, Value}) in its Go column; Rust spells each as the enum variant or struct field of the same word, and as_str is the wire spelling the options document is built from (the same fact the generated vocabularies' as_str gives)."
     },
     {
       "binding": "rust",
@@ -428,10 +572,72 @@
         "DiscoverQueryParam.Unknown",
         "DiscoverQueryParam.from_wire",
         "DiscoverQueryParam.is_known",
-        "DiscoverQueryParam.ch_type"
+        "DiscoverQueryParam.ch_type",
+        "RefusalSite.Unknown",
+        "RefusalSite.from_wire",
+        "RefusalSite.is_known",
+        "Posture.Unknown",
+        "Posture.from_wire",
+        "Posture.is_known",
+        "DefaultSupport.Unknown",
+        "DefaultSupport.from_wire",
+        "DefaultSupport.is_known"
       ],
       "issue": 511,
       "reason": "The ABI v2 dev binding's rule r3 (spec/abi-v2/docs.md): every vocabulary has an explicit unknown(n) member, an unlisted value kept per field, which Rust spells as an Unknown variant carrying the raw value, with is_known() false and from_wire/from_code to read one; the call status, the transform reasons and the value sources gain types of their own (Status, Reason, Source; the 1.x status, reason and source modules stay beside them). DiscoverQueryParam.ch_type is the description's ch_type fact of the discovery query's parameters, which Rust alone exposes; the v2 surface document settles it. Refusal.dev_message is rule r6's exact fingerprint message. docs/reference/bindings-v1.md is the 1.x surface and names none of them; the v2 surface document lands with the other dev bindings (public issue #511), and this entry goes with it."
+    },
+    {
+      "binding": "python",
+      "kind": "extra",
+      "names": [
+        "Schema.row(insertable_columns=)",
+        "Schema.row(column_defaults=)",
+        "Schema.row(verdict_basis=)",
+        "Schema.row(defer_defaults=)",
+        "Schema.row(insert_options_extra=)",
+        "Schema.rows(insertable_columns=)",
+        "Schema.rows(column_defaults=)",
+        "Schema.rows(verdict_basis=)",
+        "Schema.rows(defer_defaults=)",
+        "Schema.rows(insert_options_extra=)",
+        "Schema.parse_block(insertable_columns=)",
+        "Schema.parse_block(column_defaults=)",
+        "Schema.parse_block(verdict_basis=)",
+        "Schema.parse_block(defer_defaults=)",
+        "Schema.parse_block(insert_options_extra=)",
+        "Filter.rows(insertable_columns=)",
+        "Filter.rows(column_defaults=)",
+        "Filter.rows(verdict_basis=)",
+        "Filter.rows(defer_defaults=)",
+        "Filter.rows(insert_options_extra=)",
+        "Filter.rows(columns=)",
+        "Schema.compile_filter(param_encoding=)",
+        "Schema.compile_filter(filter_options_extra=)",
+        "Library.compile_table(posture=)",
+        "Library.compile_table(schema_options_extra=)"
+      ],
+      "reason": "ABI v2's options documents and the filter column list (bindings-v1.md §2, the call options table): the table names each option once, by its Python keyword, and the gate reads that as 'some call takes it'. These are the per-call spellings: the five insert_options members on the four calls that model an INSERT of a body (row, rows, parse_block, and Filter.rows, which also takes the columns list), param_encoding and filter_options_extra on compile_filter, posture and schema_options_extra on compile_table. Keyword-only, as every Python call option is.",
+      "issue": 511
+    },
+    {
+      "binding": "python",
+      "kind": "extra",
+      "names": [
+        "ColumnDefault",
+        "ColumnDefault.name",
+        "ColumnDefault.value",
+        "VerdictBasis",
+        "VerdictBasis.INPUT",
+        "VerdictBasis.EXPORT",
+        "DeferDefaults",
+        "DeferDefaults.NONE",
+        "DeferDefaults.SERVER",
+        "ParamEncoding",
+        "ParamEncoding.ESCAPED",
+        "ParamEncoding.RAW"
+      ],
+      "reason": "The option value types of ABI v2's options documents (bindings-v1.md §2): the hand-written enums VerdictBasis, DeferDefaults and ParamEncoding (Go's VerdictBasis, DeferDefaults and ParamEncoding, spelled as StrEnum members) and the ColumnDefault record of a column_defaults entry. The call options table names the values (`WithVerdictBasis(VerdictBasis)`) and not the Python types; the v2 surface document lands with the other dev bindings (public issue #511), and this entry goes with it.",
+      "issue": 511
     }
   ]
 }

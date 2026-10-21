@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "id": "revocation-unreachable-warns",
+  "tree": "revocation",
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/v2/chtypes/v1/referrers/sha256:b12716082e380a2d15fc175fde58a846cd7580c4c1a1ed69a2a59aa64c3129ce",
+      "responses": [
+        {
+          "status": 503
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v2/chtypes/v1/manifests/sha256-b12716082e380a2d15fc175fde58a846cd7580c4c1a1ed69a2a59aa64c3129ce",
+      "responses": [
+        {
+          "status": 503
+        }
+      ]
+    }
+  ],
+  "second_origin_routes": []
+}

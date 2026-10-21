@@ -362,8 +362,11 @@ func TestRegistryAnInstalledLineNeverWaitsForAnotherLinesFetch(t *testing.T) {
 		t.Fatalf("For(26.3) returned while its fetch was held at the gate: %v", err)
 	default:
 	}
-	if parked := fx.waitParked(t, "flight-held", 1); parked != 1 {
-		t.Fatalf("%d requests parked at the gate, want 26.3's one", parked)
+	// 26.8's installed-build revocation check also parks at the closed gate (its
+	// listing request) until its own 5 s deadline passes; that is no fetch, and
+	// the open answered without it.
+	if parked := fx.waitParked(t, "flight-held", 1); parked < 1 {
+		t.Fatalf("%d requests parked at the gate, want at least 26.3's one", parked)
 	}
 
 	fx.openGate(t, "flight-held")

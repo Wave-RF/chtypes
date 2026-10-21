@@ -27,6 +27,7 @@ use crate::abi2::loader::{self, LoadError, LoadInput, Refusal};
 use crate::decode;
 use crate::error::{Error, Result};
 use crate::ocifetch::ensure::Resolved;
+use crate::options;
 use crate::raw::RawText;
 use crate::result::{BuildInfo, Discovery, ErrorCodeTable};
 use crate::schema::{CompileOptions, Schema, settings_object};
@@ -296,11 +297,14 @@ impl Library {
     ) -> Result<Schema> {
         let settings = settings_object(&options.settings, options.session_timezone.as_deref())?;
         // No server (NULL) puts the schema on the image's own server, exactly as
-        // before the server profile existed. No schema option is defined yet,
-        // so the options document is empty (length 0).
+        // before the server profile existed. The schema options document is
+        // empty (length 0) unless a member was set.
         let server = options.server.as_ref().map(Server::handle);
-        let handle: SchemaHandle =
-            self.call(|api| api.schema_create(server, create_table.as_ref(), &settings, &[]))?;
+        let schema_options =
+            options::schema_options(options.posture.as_ref(), &options.schema_options_extra)?;
+        let handle: SchemaHandle = self.call(|api| {
+            api.schema_create(server, create_table.as_ref(), &settings, &schema_options)
+        })?;
         Ok(Schema::new(Arc::clone(self), handle))
     }
 

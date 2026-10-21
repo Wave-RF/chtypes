@@ -16,6 +16,7 @@ was a tag or a digest (layout-v2 spec §7.5/§10 A5).
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import ssl
@@ -28,19 +29,22 @@ from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
+from chtypes._advisory import Revocation
 from chtypes._ocifetch import _constants as C
-from chtypes._ocifetch._retired import retired_text
+from chtypes._ocifetch._retired import retired_text, revoked_410, revoked_410_text
 
 __all__ = [
     "USER_AGENT",
     "Clock",
     "ForbiddenHttpError",
     "FetchPolicy",
+    "GoneHttpError",
     "HttpResponse",
     "NotFoundHttpError",
     "OversizeHttpError",
     "RetiredHttpError",
     "RetryPolicy",
+    "RevokedHttpError",
     "TransportError",
     "UnauthorizedHttpError",
     "UnreachableHttpError",
@@ -122,11 +126,49 @@ class OversizeHttpError(TransportError):
     """A response body exceeded the caller's declared size cap."""
 
 
-class RetiredHttpError(TransportError):
+class GoneHttpError(TransportError):
+    """A 410 (`RETIRED_STATUSES`; docs/guides/fetch-v1.md §2): permanent, so
+    never retried and never a reason to try the next base, the referrers
+    fallback tag or the plain tag after an alias. Every loop over bases or
+    candidates lets it through at once."""
+
+
+class RetiredHttpError(GoneHttpError):
     """A retired repository (`RETIRED_STATUSES`, a 410; docs/guides/fetch-v1.md
-    §2): permanent, so never retried and never a reason to try the next base.
-    Its text names the URL that answered and carries the registry's message,
-    made safe to print (`_retired.retired_message`)."""
+    §2). Its text names the URL that answered and carries the registry's
+    message, made safe to print (`_retired.retired_message`)."""
+
+
+class RevokedHttpError(GoneHttpError):
+    """A 410 whose body says the tag is revoked (generation 2; docs/guides/
+    fetch-v1.md, "Build-level revocation"). Its text names the URL that
+    answered and the advisories, made safe to print; `revocation` carries them
+    (unsigned: the body is not signed)."""
+
+    def __init__(self, message: str, *, revocation: Revocation) -> None:
+        super().__init__(message)
+        self.revocation = revocation
+
+
+class DeadlineExceededError(UnreachableHttpError):
+    """The installed-build revocation check passed its one deadline
+    (`FetchPolicy.deadline`)."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, retryable=False)
+
+
+def gone_error(url: str, status: int, body: bytes, *, revocation: bool) -> GoneHttpError:
+    """The error for a 410: `RevokedHttpError` when revocation is on and the
+    body's `errors[0].detail.revoked` is an object, else a retired repository's."""
+    if revocation:
+        advisories = revoked_410(body)
+        if advisories is not None:
+            return RevokedHttpError(
+                f"{url} answered {status} Gone: {revoked_410_text(advisories)}",
+                revocation=Revocation(signed=False, manifest="", advisories=advisories),
+            )
+    return RetiredHttpError(retired_text(url, status, body))
 
 
 class Clock:
@@ -168,15 +210,31 @@ class RetryPolicy:
         return sum(self.wait_before_attempt(i) for i in range(attempt_index, self.attempts - 1))
 
 
+def _channel_revocation() -> bool:
+    # Read when a policy is made, so the contract a test selected is the one a
+    # policy built inside it speaks. Imported late: _channel imports the fetch
+    # layer's other modules.
+    from chtypes._ocifetch import _channel
+
+    return _channel.active().revocation
+
+
 @dataclass(frozen=True)
 class FetchPolicy:
-    """Per-request configuration: auth, timeouts, redirect and proxy limits."""
+    """Per-request configuration: auth, timeouts, redirect and proxy limits.
+
+    `revocation` reads a 410 whose body says the tag is revoked as
+    `RevokedHttpError` (generation 2; off, every 410 is a retired repository's).
+    `deadline`, a `time.monotonic()` time, bounds every request made under this
+    policy: the installed-build revocation check's one deadline."""
 
     token: str | None = None
     max_redirects: int = C.MAX_REDIRECTS
     connect_timeout_s: float = C.CONNECT_TIMEOUT_S
     idle_timeout_s: float = C.IDLE_READ_TIMEOUT_S
     clock: Clock = field(default_factory=Clock)
+    revocation: bool = field(default_factory=_channel_revocation)
+    deadline: float | None = None
 
 
 @dataclass(frozen=True)
@@ -229,9 +287,16 @@ def _single_request(
     sent["User-Agent"] = USER_AGENT
     req = urllib.request.Request(url, method="GET", headers=sent)
     timeout = policy.connect_timeout_s + policy.idle_timeout_s
+    if policy.deadline is not None:
+        remaining = policy.deadline - time.monotonic()
+        if remaining <= 0:
+            raise DeadlineExceededError(f"{url}: the deadline had passed")
+        timeout = min(timeout, remaining)
     try:
         with _opener(url).open(req, timeout=timeout) as resp:
-            body = _read_capped(resp, max_bytes)
+            body = _read_capped(resp, max_bytes, url)
+            if policy.deadline is not None and time.monotonic() > policy.deadline:
+                raise DeadlineExceededError(f"{url}: the deadline passed while reading it")
             return HttpResponse(
                 status=resp.status, headers=dict(resp.headers), body=body, url=resp.geturl()
             )
@@ -246,7 +311,7 @@ def _single_request(
                 except (OSError, ValueError, AttributeError):
                     body = b""
             else:
-                body = _read_capped(e, max_bytes) if e.code not in _REDIRECT_CODES else b""
+                body = _read_capped(e, max_bytes, url) if e.code not in _REDIRECT_CODES else b""
         finally:
             e.close()
         return HttpResponse(status=e.code, headers=dict(e.headers or {}), body=body, url=url)
@@ -267,12 +332,27 @@ def _single_request(
         raise UnreachableHttpError(f"{url}: {e}", retryable=retryable) from e
 
 
-def _read_capped(fp, max_bytes: int | None) -> bytes:  # noqa: ANN001
-    if max_bytes is None:
-        return fp.read()
-    chunk = fp.read(max_bytes + 1)
-    if len(chunk) > max_bytes:
+def _read_capped(fp, max_bytes: int | None, url: str = "") -> bytes:  # noqa: ANN001
+    """Read a body, at most `max_bytes` of it. Only an oversize body is
+    `OversizeHttpError`. A body that ends before its declared Content-Length
+    (CPython hands back the short bytes without raising when the peer closes
+    cleanly), or `IncompleteRead`, is a transport failure: a retryable
+    `UnreachableHttpError` (docs/guides/fetch-v1.md §7)."""
+    try:
+        chunk = fp.read() if max_bytes is None else fp.read(max_bytes + 1)
+    except http.client.IncompleteRead as e:
+        raise UnreachableHttpError(
+            f"{url}: response body cut off after {len(e.partial)} bytes", retryable=True
+        ) from e
+    if max_bytes is not None and len(chunk) > max_bytes:
         raise OversizeHttpError(f"response exceeded {max_bytes} bytes")
+    headers = getattr(fp, "headers", None)
+    declared = headers.get("Content-Length") if headers is not None else None
+    if declared is not None and declared.strip().isdigit() and len(chunk) < int(declared):
+        raise UnreachableHttpError(
+            f"{url}: response body cut off after {len(chunk)} of {int(declared)} bytes",
+            retryable=True,
+        )
     return chunk
 
 
@@ -401,7 +481,7 @@ def _http_get_once(
         if resp.status in C.RETIRED_STATUSES:
             # A retired repository: permanent, never retried, and the
             # exception ends fetch_from_bases's loop over bases.
-            raise RetiredHttpError(retired_text(current_url, resp.status, resp.body))
+            raise gone_error(current_url, resp.status, resp.body, revocation=policy.revocation)
 
         if resp.status == 401:
             if not tried_anon_flow and not policy.token:
@@ -547,7 +627,8 @@ def fetch_from_bases(
     bases are an explicit preference order and the last one is the final
     word a caller configured.
 
-    In every mode a retired repository (`RetiredHttpError`, a 410) ends the
+    In every mode a 410 (`GoneHttpError`: a retired repository, or under
+    generation 2 a revoked tag) ends the
     loop on the base that answered it: it is permanent, never a reason to try
     the next base, and in `alias` mode never a reason to fall back to the tag.
     """

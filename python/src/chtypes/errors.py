@@ -22,10 +22,12 @@ display form, with invalid UTF-8 replaced for printing only.
 from __future__ import annotations
 
 __all__ = [
+    "Advisory",
     "CODE_ARTIFACT_CORRUPT",
     "CODE_ARTIFACT_INCOMPATIBLE",
     "CODE_ARTIFACT_MISSING",
     "CODE_ARTIFACT_PINNED",
+    "CODE_ARTIFACT_REVOKED",
     "CODE_ARTIFACT_UNPUBLISHED",
     "CODE_ARTIFACT_UNTRUSTED",
     "CODE_CACHE_UNUSABLE",
@@ -39,12 +41,14 @@ __all__ = [
     "ArtifactIncompatibleError",
     "ArtifactMissingError",
     "ArtifactPinnedError",
+    "ArtifactRevokedError",
     "ArtifactUnpublishedError",
     "ArtifactUntrustedError",
     "CacheUnusableError",
     "CallError",
     "ChtypesError",
     "InternalError",
+    "Revocation",
     "SchemaError",
     "SourceForbiddenError",
     "SourceIncompatibleError",
@@ -55,12 +59,15 @@ __all__ = [
     "UsageError",
 ]
 
+from ._advisory import Advisory, Revocation
+
 # The codes are generated from spec/fetch-v1/constants.json (public issue #500).
 from ._codes import (
     CODE_ARTIFACT_CORRUPT,
     CODE_ARTIFACT_INCOMPATIBLE,
     CODE_ARTIFACT_MISSING,
     CODE_ARTIFACT_PINNED,
+    CODE_ARTIFACT_REVOKED,
     CODE_ARTIFACT_UNPUBLISHED,
     CODE_ARTIFACT_UNTRUSTED,
     CODE_CACHE_UNUSABLE,
@@ -96,6 +103,7 @@ class CallError(ChtypesError):
         message: ClickHouse's own message for a refusal, the library's
             otherwise; bytes.
         column: the column concerned, empty if none; bytes.
+        reason: the catalog id (`chs_error_reason`), ASCII; empty if none.
     """
 
     def __init__(
@@ -105,6 +113,7 @@ class CallError(ChtypesError):
         ch_name: str = "",
         message: bytes = b"",
         column: bytes = b"",
+        reason: str = "",
     ) -> None:
         super().__init__(message.decode("utf-8", "replace"))
         self.status = status
@@ -112,6 +121,7 @@ class CallError(ChtypesError):
         self.ch_name = ch_name
         self.message = message
         self.column = column
+        self.reason = reason
 
 
 class SchemaError(CallError):
@@ -254,6 +264,25 @@ class SourceRetiredError(ArtifactError):
     message, made safe to print."""
 
     code = CODE_SOURCE_RETIRED
+
+
+class ArtifactRevokedError(ArtifactError):
+    """A build a verified revocation refuses, or a 410 whose body says the tag is
+    revoked (generation 2; docs/guides/fetch-v1.md, "Build-level revocation").
+
+    Attributes:
+        revocation: for programs: `signed` (a verified, signed revocation) or
+            not (a 410's body), the `manifest` a signed one revokes, and its
+            `advisories`, each with its `id`, `url`, `class_`, `summary`, `build`,
+            `superseded_by` and `revoked_at`, every string made safe to print.
+            A signed revocation carries exactly one advisory.
+    """
+
+    code = CODE_ARTIFACT_REVOKED
+
+    def __init__(self, message: str = "", *, revocation: Revocation | None = None) -> None:
+        super().__init__(message)
+        self.revocation = revocation
 
 
 class CacheUnusableError(ArtifactError):

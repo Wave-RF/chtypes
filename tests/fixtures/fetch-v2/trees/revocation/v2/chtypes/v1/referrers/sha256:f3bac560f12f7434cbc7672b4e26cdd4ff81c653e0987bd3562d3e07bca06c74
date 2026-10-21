@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 2,
+  "mediaType": "application/vnd.oci.image.index.v1+json",
+  "manifests": [
+    {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:eb12eeb6141a90727fde9f17533c2fbb963d1f8d1c725548d0894817dfa73dda",
+      "size": 746,
+      "artifactType": "application/vnd.dev.sigstore.bundle.v0.3+json"
+    },
+    {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:fa735e62b7c6d67ed9626ec84a404fd1126315524c310fb3e895c28e7534306b",
+      "size": 748,
+      "artifactType": "application/vnd.wavehouse.chtypes.revocation.v1"
+    },
+    {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:4544c37437bd66d56c95f64785add7e87bb85a1c79f333e68105e886277b9f90",
+      "size": 746,
+      "artifactType": "application/vnd.wavehouse.chtypes.revocation.v1"
+    },
+    {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:e278d6e95ef2c4b40eed3b91ffe2868925cb246bb33f19a96e0cc589e4bf07aa",
+      "size": 747,
+      "artifactType": "application/vnd.wavehouse.chtypes.revocation.v1"
+    },
+    {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:270598864e91e96a1bd64ad336befc01b41b66501def6e035f8717890ae15e3e",
+      "size": 748,
+      "artifactType": "application/vnd.wavehouse.chtypes.revocation.v1"
+    },
+    {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:8aea14ecca7ac03229d24719f1b1f05d9a403ee64bc1a65a0b4740d3cbb8d7dd",
+      "size": 748,
+      "artifactType": "application/vnd.wavehouse.chtypes.revocation.v1"
+    },
+    {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:7fa9fef0c3bcb3e0dcfc2e284de8110a762bfb65c881763f6f997be0299f8ad9",
+      "size": 748,
+      "artifactType": "application/vnd.wavehouse.chtypes.revocation.v1"
+    },
+    {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:3febcfebac5c8d34c77cf07119fa583d7a2275c742aa6888aaba4bb409d93971",
+      "size": 748,
+      "artifactType": "application/vnd.wavehouse.chtypes.revocation.v1"
+    },
+    {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:fe553f3ca68401426b2494b85c2fb517fdc29d707ab6a26f57e5cd7ba2fa17f0",
+      "size": 748,
+      "artifactType": "application/vnd.wavehouse.chtypes.revocation.v1"
+    },
+    {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:61f53712169f5380e9a7edccef5c0bef1b07f480ddf7624981aefa1de2dcc6d6",
+      "size": 748,
+      "artifactType": "application/vnd.wavehouse.chtypes.revocation.v1"
+    },
+    {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:0f9747583a2db1daea3f8cedcdd3fcd1118672a2f388f34cae77b16df5add8e1",
+      "size": 748,
+      "artifactType": "application/vnd.wavehouse.chtypes.revocation.v1"
+    },
+    {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:dc8d31a160d56f281bc8ac4363ab607793dd8cdf05152948d70ba11bd1d22d91",
+      "size": 748,
+      "artifactType": "application/vnd.wavehouse.chtypes.revocation.v1"
+    },
+    {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:eb4947557e4ba943ca2f06aa9bc1a0170a3162452624b2b7913870860189e708",
+      "size": 748,
+      "artifactType": "application/vnd.wavehouse.chtypes.revocation.v1"
+    },
+    {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:8713b9b2ff0e9a9957752f7fc4dd1b4457d6ddc1ef56c885f84c176eb6b2fd9c",
+      "size": 748,
+      "artifactType": "application/vnd.wavehouse.chtypes.revocation.v1"
+    }
+  ]
+}

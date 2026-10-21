@@ -103,7 +103,7 @@ describe.skipIf(!stubsAvailable)('the public API over the stub library', () => {
     expect(() => library.errorCodes()).toThrow(InternalError);
   });
 
-  it('maps each call status to its class, with the five fields verbatim; the classes are peers, never subtypes', () => {
+  it('maps each call status to its class, with the six fields verbatim; the classes are peers, never subtypes', () => {
     const { library } = openStub('ok');
     const cases: [string, new (...a: never[]) => CallError, number][] = [
       ['CHS_REJECTED', SchemaError, Status.Rejected],
@@ -127,6 +127,7 @@ describe.skipIf(!stubsAvailable)('the public API over the stub library', () => {
       expect(e.chName).toBe('TEST_CODE');
       expect(e.messageBytes.toString()).toBe(`forced ${status}`);
       expect(e.column).toHaveLength(0);
+      expect(e.reason).toBe(''); // the stub's error object carries no catalog id
       for (const [, other] of cases) {
         if (other !== cls) expect(caught).not.toBeInstanceOf(other);
       }

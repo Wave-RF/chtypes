@@ -44,6 +44,36 @@ Each of these is `unsupported` — an `UnsupportedError`, `Error::Unsupported`, 
 - **MergeTree settings declared at a non-default value.** An unknown _name_ is the server's own 115, a rejection; a known name at a value this build does not model is a decline, never a silent ignore.
 - **Server- and session-property DEFAULTs** — `hostName()`, `currentUser()` and the rest. Their value is a property of the server, and there is no server here.
 - **DEFAULT expressions past the admission budgets** — 256 MiB and one second by default, both adjustable through the process-wide settings in [`guides/settings.md`](guides/settings.md). This is what bounds a blocking DEFAULT: `sleep` and `sleepEachRow` are not declined by name, so `DEFAULT sleep(0)` is admitted, while `DEFAULT sleep(1.5)` exceeds the one-second budget and is declined when the schema compiles.
+- **Functions that need a server, in a column expression.** A `DEFAULT`, `MATERIALIZED`, `ALIAS` or `EPHEMERAL` expression that calls a function whose resolver cannot be built outside a running server declines the whole schema at create (`unsupported`; `CHS_DECLINED` at `chs_schema_create`). The message names the expression kind, the column and the function, and says the function "cannot be resolved without a server". Whether a server accepts such a `CREATE` depends on its own settings, resources and environment, so chtypes does not judge it. On build `20261012.142240` (v2-dev.13) the functions are, by line:
+
+  - **all four lines (26.3, 26.7, 26.8, 26.9):** `fuzzQuery`; `neighbor`; `runningAccumulate`, `runningDifference`, `runningDifferenceStartingWithFirstValue`; `showCertificate`; `transactionLatestSnapshot`, `transactionOldestSnapshot`; the ten `region*` functions (`regionHierarchy`, `regionIn`, `regionToArea`, `regionToCity`, `regionToContinent`, `regionToCountry`, `regionToDistrict`, `regionToName`, `regionToPopulation`, `regionToTopContinent`); `serverUUID`; and the `timeSeries*` functions `timeSeriesCopyTag`, `timeSeriesCopyTags`, `timeSeriesExtractTag`, `timeSeriesGroupToTags`, `timeSeriesIdToGroup`, `timeSeriesIdToTags`, `timeSeriesIdToTagsGroup`, `timeSeriesJoinTags`, `timeSeriesRemoveAllTagsExcept`, `timeSeriesRemoveTag`, `timeSeriesRemoveTags`, `timeSeriesReplaceTag`, `timeSeriesStoreTags`, `timeSeriesTagsGroupToTags`, `timeSeriesTagsToGroup`, `timeSeriesThrowDuplicateSeriesIf` (16 names);
+  - **26.7, 26.8 and 26.9 also:** `timeSeriesGroupToSamplingKey` (17 `timeSeries*` names in all);
+  - **26.7 also:** `AIClassify`, `AIExtract`, `AIGenerate`, `AITranslate`, `aiClassify`, `aiEmbed`, `aiExtract`, `aiGenerate`, `aiTranslate`.
+
+  That is 35 names on 26.3, 45 on 26.7, and 36 on 26.8 and 26.9.
+
+  **On 26.8 and 26.9 the `AI*` and `ai*` functions are not in this group.** A schema that calls one compiles there: a row that needs its value in a `DEFAULT` or `MATERIALIZED` column is declined, and with an `ALIAS` or `EPHEMERAL` column rows are accepted. What a stock 26.8 or 26.9 server does with such a `CREATE` is not measured, so do not treat a successful compile there as proof that a server accepts it.
+
+  **Two groups are declined that a stock server's `CREATE` accepts** (over-declines, deliberate, fail-closed): `serverUUID` on every line, and the `timeSeries*` functions: 13 names on 26.3 (a stock 26.3 server refuses the three `timeSeriesIdTo*` functions with error 36) and all 17 on 26.7, 26.8 and 26.9. A schema that uses one is declined here even though the server creates the table: fall back to the server for it, and do not treat the decline as a rejection. The rest are functions whose `CREATE` a stock server refuses at default settings: `fuzzQuery` and, on 26.7, the `AI*` and `ai*` functions (344), `neighbor`, `runningAccumulate` and `runningDifference*` (721), the `region*` functions (156), `showCertificate` (1000), and `transactionLatestSnapshot` and `transactionOldestSnapshot` (48).
+
+  `getClientHTTPHeader` is not in this group. At default settings a server refuses it in a column expression with error 446, and so does this library (a rejection, as for the server). A `CHECK` constraint that calls it, for example `CHECK isNotNull(getClientHTTPHeader('X-A'))`, is declined at create: a stock server's `CREATE` accepts that constraint and refuses only at INSERT.
+
+  Builds `20261009.145808` and `20261010.180314` compiled schemas calling the functions above that a stock server refuses, and accepted rows for their `ALIAS` and `EPHEMERAL` forms (measured by the artifact producer).
+
+  **Measured**: the server half by the artifact producer, against stock servers of 26.3, 26.7, 26.8 and 26.9 on linux-amd64 and of 26.9 on linux-arm64, on a pre-release build of this change: for the functions listed above and the `getClientHTTPHeader` control, in the four column expressions and a `CHECK`, with constant and non-constant arguments (1805 cells), every cell agreed or declined, with zero over-accepts and zero over-rejects. The library half on build `20261012.142240` by this repository, through the Python SDK on darwin-arm64, on all four lines: every function listed above declines the schema in all four column expressions on each line it is listed for, and `getClientHTTPHeader` is refused with 446 in all four and declined in a `CHECK`.
+
+- **A body the server may read either serially or in parallel, when the error budget is non-zero.** A server's INSERT reads a CSV, TSV (and their `WithNames` forms), JSONEachRow or JSONCompactEachRow body in parallel segments when `max_parsing_threads` is above 1 and `input_format_parallel_parsing` is on. Each segment's reader starts its error count at zero, so `input_format_allow_errors_num` holds **per segment**, while the ratio (`input_format_allow_errors_ratio`) runs over the whole body. A single reader over the whole body stops at a different row. The library reads such a body in segments as the server does, each with the vendored reader, and declines it (`unsupported`, `CHS_DECLINED`, with a message naming both answers) when both of these hold:
+
+  - the body would be cut into more than one segment, which with default settings needs about 10 MiB or a million rows, or a lowered `max_insert_block_size` or `min_chunk_bytes_for_parallel_parsing`; and
+  - `max_parsing_threads` is not named, per call or in the server profile (it defaults to `auto`, the server's CPU count, which the library cannot see; a one-CPU server reads serially), and one reader and the segments would answer the body differently. Where both readings agree, the body is answered either way.
+
+  With `input_format_connection_handling` on, such a body is declined even when `max_parsing_threads` is named. A body is also declined when its segments after the first fail with different codes: the server's code then depends on which segment's parser throws first (the artifact producer measured one such body answering 38 on a 26.3 server and 27 on a 26.9 server).
+
+  **To get an exact answer, name the threads:** set `max_parsing_threads` in the server profile or per call (`1` reads serially, as does `input_format_parallel_parsing=0`; a number above 1 reads in segments). The answer is then the way that server reads the body. With default settings and a body under about 10 MiB and a million rows, there is one segment and nothing changes.
+
+  Treat the decline as no answer, never as a rejection.
+
+  **Measured** on build `20261012.142240` (v2-dev.13) by this repository, through the Python SDK on darwin-arm64, on all four lines: `k UInt32, x Date`, one good row, four bad, one good, under `input_format_allow_errors_num=2` and `max_insert_block_size=2`, in CSV, TSV, JSONEachRow and JSONCompactEachRow, is declined with the threads not named, refused with 38 under `max_parsing_threads=1` or `input_format_parallel_parsing=0`, and accepted with the two good rows stored under `max_parsing_threads=4` (per call, and for CSV also in the server profile). The artifact producer measured servers of all four lines storing the two good rows of that body.
 
 ## Constants are not payloads
 
@@ -225,25 +255,6 @@ The decline catalog (`spec/abi-v2/declines/declines.json`) gives two reasons, an
 
 **Measured** by the artifact producer: direct server `SELECT`s against the library at artifact build `20261009.074908` for the divergence, and the producer's differential on build `20261010.180314` as published for the decline (zero over-accepts, zero over-rejects on every pair). **Safe forms**, which answer on every line: a typed `{p:DateTime}` parameter, and canonical `YYYY-MM-DD hh:mm:ss` text. On a build before `20261010.180314`, RFC 3339 spellings (`…T00:00:00Z`, or with an offset), compact forms and unix timestamps are not safe. The filter enforcement gate for the eleven covered pairs is lifted from build `20261010.180314`; on earlier builds the gate stays on.
 
-### A column default expression that calls a function needing a server compiles here; a stock server refuses the CREATE
-
-**Over-accept, at schema creation, on builds `20261009.145808` and `20261010.180314`.** A column whose `DEFAULT`, `MATERIALIZED`, `ALIAS` or `EPHEMERAL` expression calls a function that needs a server compiles in chtypes, where a stock server's `CREATE TABLE` refuses it. The functions, by family:
-
-- `showCertificate`;
-- the `region*` functions;
-- `neighbor`, `runningAccumulate` and the `runningDifference*` functions;
-- `transactionLatestSnapshot` and `transactionOldestSnapshot`;
-- `fuzzQuery`;
-- the `ai*` functions.
-
-On the `ALIAS` and `EPHEMERAL` forms, rows are accepted for such a schema.
-
-**Who is exposed.** Only a consumer that validates a proposed `CREATE` with chtypes. Such a table cannot exist on a stock server, so the filter enforcement gate, which covers tables that exist, is unaffected by this entry; the lift above stands apart from it.
-
-**Measured**: by the artifact producer, on builds `20261009.145808` and `20261010.180314`. A later build declines these at create. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the build that ships the fix, never on a CI result.
-
-Until then, do not treat a successful compile as proof that a server will accept the `CREATE`. Check the function names in the `DEFAULT`, `MATERIALIZED`, `ALIAS` and `EPHEMERAL` expressions against the list above, or run the `CREATE` against a server.
-
 ## Known gaps in 1.0
 
 Each item is a place where 1.0 does less than you might expect, or answers differently from a server. None of them returns a wrong answer without saying so, and every one is planned. Each entry says what happens, what to do today, and that a fix is planned.
@@ -292,9 +303,9 @@ On the first 1.0 build, `20261003.231921`, which stays fetchable by digest and t
 
 ### `lossy` on a String holding a raw NUL in TSV
 
-For a TSV `String` that contains a raw NUL byte, the third detector can report `value_changed` with `lossy: true` although the bytes are preserved.
+**Fixed on build `20261012.142240` (v2-dev.13); still present in the 1.0 libraries.** For a TSV `String` that contains a raw NUL byte, the third detector reported `value_changed` with `lossy: true` although the bytes are preserved. On build `20261012.142240` it reports no change for a raw NUL in a `String`, an `Array(String)` or an exact-length `FixedString`, nor for a TSV `\x41` escape, and it still reports real changes: a `[NULL]` into `Array(String)` and a `DateTime` reformat (`value_changed`), and a `FixedString` pad (`fixedstring_pad`). On the 1.0 production build `20261007.162307`, a raw NUL in a TSV `String` still reports `value_changed` with `lossy: true`. Both measured by this repository through the Python SDK on darwin-arm64, on all four lines.
 
-**Workaround:** compare `value`, the raw bytes, with your input; the bindings never second-guess `lossy`. **Planned:** fixed in 1.0.x.
+On a 1.0 library, **workaround:** compare `value`, the raw bytes, with your input; the bindings never second-guess `lossy`.
 
 ### No call for a server's version or settings
 

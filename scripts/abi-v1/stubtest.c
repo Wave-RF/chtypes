@@ -73,15 +73,47 @@ typedef chs_status (*fn_schema_create)(const uint8_t *, size_t, const uint8_t *,
     (l)->schema_create((sql), (n), (settings), (settings_n), (out), (err))
 #endif
 typedef void (*fn_schema_free)(chs_schema *);
+#if CHS_ABI_VERSION >= 2
+/* Generation 2: chs_filter_create takes an options document after the settings,
+   chs_preview_row one after the columns, and chs_filter_eval_body a columns list
+   and an options document after the settings. Every call below passes none,
+   which is generation 1's behavior. */
+typedef chs_status (*fn_filter_create)(
+    const chs_schema *, const uint8_t *, size_t, const uint8_t *, size_t, const uint8_t *, size_t, const uint8_t *,
+    size_t, chs_filter **, chs_error **);
+#define FILTER_CREATE(l, schema, expr, n, params, params_n, settings, settings_n, out, err)                          \
+    (l)->filter_create((schema), (expr), (n), (params), (params_n), (settings), (settings_n), NULL, 0, (out), (err))
+#else
 typedef chs_status (*fn_filter_create)(
     const chs_schema *, const uint8_t *, size_t, const uint8_t *, size_t, const uint8_t *, size_t, chs_filter **,
     chs_error **);
+#define FILTER_CREATE(l, schema, expr, n, params, params_n, settings, settings_n, out, err)                          \
+    (l)->filter_create((schema), (expr), (n), (params), (params_n), (settings), (settings_n), (out), (err))
+#endif
 typedef void (*fn_filter_free)(chs_filter *);
+#if CHS_ABI_VERSION >= 2
+typedef chs_status (*fn_filter_eval_body)(
+    const chs_filter *, chs_format, const uint8_t *, size_t, const uint8_t *, size_t, const uint8_t *, size_t,
+    const uint8_t *, size_t, chs_buf **, chs_error **);
+typedef chs_status (*fn_preview_row)(
+    const chs_schema *, chs_format, const uint8_t *, size_t, const uint8_t *, size_t, const uint8_t *, size_t,
+    const uint8_t *, size_t, chs_buf **, chs_error **);
+#define FILTER_EVAL_BODY(l, f, format, body, n, settings, settings_n, out, err)                                      \
+    (l)->filter_eval_body((f), (format), (body), (n), (settings), (settings_n), NULL, 0, NULL, 0, (out), (err))
+#define PREVIEW_ROW(l, schema, format, body, n, settings, settings_n, columns, columns_n, out, err)                  \
+    (l)->preview_row((schema), (format), (body), (n), (settings), (settings_n), (columns), (columns_n), NULL, 0,      \
+                     (out), (err))
+#else
 typedef chs_status (*fn_filter_eval_body)(
     const chs_filter *, chs_format, const uint8_t *, size_t, const uint8_t *, size_t, chs_buf **, chs_error **);
 typedef chs_status (*fn_preview_row)(
     const chs_schema *, chs_format, const uint8_t *, size_t, const uint8_t *, size_t, const uint8_t *, size_t,
     chs_buf **, chs_error **);
+#define FILTER_EVAL_BODY(l, f, format, body, n, settings, settings_n, out, err)                                      \
+    (l)->filter_eval_body((f), (format), (body), (n), (settings), (settings_n), (out), (err))
+#define PREVIEW_ROW(l, schema, format, body, n, settings, settings_n, columns, columns_n, out, err)                  \
+    (l)->preview_row((schema), (format), (body), (n), (settings), (settings_n), (columns), (columns_n), (out), (err))
+#endif
 
 typedef struct {
     void *handle;
@@ -245,8 +277,8 @@ static void test_long_echo_not_truncated(lib_t *l) {
     const char *columns = "[\"col_a\",\"col_b\",\"col_c\",\"col_d\",\"col_e\"]";
 
     chs_buf *out = NULL;
-    chs_status st = l->preview_row(
-        schema, CHS_JSON_EACH_ROW, (const uint8_t *) body, strlen(body), (const uint8_t *) settings,
+    chs_status st = PREVIEW_ROW(
+        l, schema, CHS_JSON_EACH_ROW, (const uint8_t *) body, strlen(body), (const uint8_t *) settings,
         strlen(settings), (const uint8_t *) columns, strlen(columns), &out, &err);
     CHECK(st == CHS_OK, "chs_preview_row for the long-echo test: status %d", (int) st);
     if (out != NULL) {
@@ -348,7 +380,7 @@ static void test_holds_and_live(lib_t *l) {
     CHECK(live_count(l, "chs_schema") == schema_before + 1, "live chs_schema did not increase by one on create");
 
     chs_filter *filter = NULL;
-    CHECK(l->filter_create(schema, (const uint8_t *) "1", 1, NULL, 0, NULL, 0, &filter, &err) == CHS_OK, "chs_filter_create");
+    CHECK(FILTER_CREATE(l, schema, (const uint8_t *) "1", 1, NULL, 0, NULL, 0, &filter, &err) == CHS_OK, "chs_filter_create");
     CHECK(live_count(l, "chs_filter") == filter_before + 1, "live chs_filter did not increase by one on create");
 
     l->schema_free(schema); /* the caller's own reference; the filter still holds one */
@@ -356,7 +388,7 @@ static void test_holds_and_live(lib_t *l) {
           "live chs_schema dropped after freeing the schema while a filter still holds it");
 
     chs_buf *out = NULL;
-    CHECK(l->filter_eval_body(filter, CHS_JSON_EACH_ROW, (const uint8_t *) "{}", 2, NULL, 0, &out, &err) == CHS_OK,
+    CHECK(FILTER_EVAL_BODY(l, filter, CHS_JSON_EACH_ROW, (const uint8_t *) "{}", 2, NULL, 0, &out, &err) == CHS_OK,
           "chs_filter_eval_body after its schema was freed by the caller");
     if (out != NULL) l->buf_free(out);
 
@@ -407,20 +439,20 @@ static void *conc_worker(void *p) {
     for (int i = 0; i < CONC_CALLS; i++) {
         chs_buf *out = NULL;
         chs_error *err = NULL;
-        if (a->l->preview_row(a->schema, CHS_JSON_EACH_ROW, (const uint8_t *) body, sizeof body - 1,
-                              (const uint8_t *) settings, sizeof settings - 1, NULL, 0, &out, &err) != CHS_OK) {
+        if (PREVIEW_ROW(a->l, a->schema, CHS_JSON_EACH_ROW, (const uint8_t *) body, sizeof body - 1,
+                        (const uint8_t *) settings, sizeof settings - 1, NULL, 0, &out, &err) != CHS_OK) {
             a->failures++;
         }
         if (out != NULL) a->l->buf_free(out);
         chs_filter *f = NULL;
-        if (a->l->filter_create(a->schema, (const uint8_t *) "x = 1", 5, NULL, 0, (const uint8_t *) settings,
-                                sizeof settings - 1, &f, &err) != CHS_OK) {
+        if (FILTER_CREATE(a->l, a->schema, (const uint8_t *) "x = 1", 5, NULL, 0, (const uint8_t *) settings,
+                          sizeof settings - 1, &f, &err) != CHS_OK) {
             a->failures++;
         }
         if (f != NULL) a->l->filter_free(f);
         out = NULL;
-        if (a->l->filter_eval_body(a->filter, CHS_JSON_EACH_ROW, (const uint8_t *) body, sizeof body - 1, NULL, 0,
-                                   &out, &err) != CHS_OK) {
+        if (FILTER_EVAL_BODY(a->l, a->filter, CHS_JSON_EACH_ROW, (const uint8_t *) body, sizeof body - 1, NULL, 0,
+                             &out, &err) != CHS_OK) {
             a->failures++;
         }
         if (out != NULL) a->l->buf_free(out);
@@ -437,7 +469,7 @@ static void test_concurrent_shared(lib_t *l) {
     chs_error *err = NULL;
     CHECK(SCHEMA_CREATE(l, (const uint8_t *) "x", 1, NULL, 0, &schema, &err) == CHS_OK, "chs_schema_create");
     chs_filter *filter = NULL;
-    CHECK(l->filter_create(schema, (const uint8_t *) "1", 1, NULL, 0, NULL, 0, &filter, &err) == CHS_OK,
+    CHECK(FILTER_CREATE(l, schema, (const uint8_t *) "1", 1, NULL, 0, NULL, 0, &filter, &err) == CHS_OK,
           "chs_filter_create");
 
     pthread_t threads[CONC_THREADS];
@@ -498,7 +530,7 @@ static void test_document_mode(lib_t *l) {
         memcpy(body, "!D:", 3);
         memcpy(body + 3, cases[i].value, cases[i].len);
         chs_buf *out = NULL;
-        chs_status st = l->preview_row(schema, CHS_JSON_EACH_ROW, body, 3 + cases[i].len, NULL, 0, NULL, 0, &out, &err);
+        chs_status st = PREVIEW_ROW(l, schema, CHS_JSON_EACH_ROW, body, 3 + cases[i].len, NULL, 0, NULL, 0, &out, &err);
         CHECK(st == CHS_OK && out != NULL, "document mode, %s: status %d", cases[i].what, (int) st);
         if (out == NULL) continue;
         const char *doc = (const char *) l->buf_data(out);
@@ -529,7 +561,7 @@ static void test_cross_image(lib_t *a, lib_t *b) {
     chs_schema *schema = NULL;
     CHECK(SCHEMA_CREATE(a, (const uint8_t *) "x", 1, NULL, 0, &schema, &err) == CHS_OK, "chs_schema_create on lib a");
     chs_filter *filter = NULL;
-    chs_status st = b->filter_create(schema, (const uint8_t *) "1", 1, NULL, 0, NULL, 0, &filter, &err);
+    chs_status st = FILTER_CREATE(b, schema, (const uint8_t *) "1", 1, NULL, 0, NULL, 0, &filter, &err);
     CHECK(st == CHS_INVALID_ARGUMENT, "lib b's chs_filter_create over lib a's schema gave %d, want CHS_INVALID_ARGUMENT",
           (int) st);
     if (err != NULL) b->error_free(err);

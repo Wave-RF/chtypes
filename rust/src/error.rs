@@ -1,6 +1,6 @@
 //! The error classes (`docs/reference/bindings-v1.md` §4).
 //!
-//! Four **call** classes carry the five fields of the library's own error
+//! Four **call** classes carry the six fields of the library's own error
 //! ([`CallError`]); two **artifact** classes carry a loader [`Refusal`]; the
 //! fetch layer's own codes are one variant each. They are one family: a caller
 //! matching [`Error::ArtifactCorrupt`] sees the fetch layer's corruption and
@@ -21,6 +21,7 @@ use crate::ocifetch::constants::code;
 use crate::raw::RawText;
 
 pub use crate::abi2::loader::Refusal;
+pub use crate::ocifetch::revocation::{Advisory, Revocation};
 
 /// What a [`Error::CacheUnusable`] names: a cache directory or entry the
 /// fetch layer could not read or write, or one strict mode refuses
@@ -46,10 +47,11 @@ impl fmt::Display for CacheFault {
     }
 }
 
-/// The five fields of one `chs_error`, verbatim, and nothing synthesized.
+/// The six fields of one `chs_error`, verbatim, and nothing synthesized.
 ///
 /// A misuse the binding detects itself carries the same shape: `status`
-/// `CHS_INVALID_ARGUMENT`, `ch_code` 0, an empty `ch_name` and `column`, and a
+/// `CHS_INVALID_ARGUMENT`, `ch_code` 0, an empty `ch_name`, `column` and
+/// `reason`, and a
 /// message naming the misuse, so a handler sees one shape whichever side
 /// caught it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,6 +67,8 @@ pub struct CallError {
     pub message: RawText,
     /// The column concerned, empty if none. Bytes.
     pub column: RawText,
+    /// The catalog id of the error (`chs_error_reason`). ASCII; empty if none.
+    pub reason: String,
 }
 
 impl CallError {
@@ -86,6 +90,7 @@ impl CallError {
             ch_name: String::new(),
             message: RawText::from(message.into()),
             column: RawText::default(),
+            reason: String::new(),
         }
     }
 }
@@ -98,6 +103,7 @@ impl From<RawCallError> for CallError {
             ch_name: e.ch_name,
             message: RawText::from(e.message),
             column: RawText::from(e.column),
+            reason: e.reason,
         }
     }
 }
@@ -171,6 +177,12 @@ pub enum Error {
     /// never sent to the next source; the message names the URL that
     /// answered and carries the registry's own message, made safe to print.
     SourceRetired(String),
+    /// `CHTYPES_ARTIFACT_REVOKED` (generation 2): a build a verified, signed
+    /// revocation refuses, whether found in its referrers listing or stored in
+    /// its cache entry, or a `410 Gone` whose body says the tag is revoked. The
+    /// message names the advisory, made safe to print; the [`Revocation`]
+    /// carries it for programs.
+    ArtifactRevoked(Revocation),
 }
 
 /// A `Result` whose error is this crate's [`Error`].
@@ -183,7 +195,7 @@ impl Error {
         matches!(self, Error::Unsupported(_))
     }
 
-    /// The five fields of the library's error, from any of the four call
+    /// The six fields of the library's error, from any of the four call
     /// classes; `None` for an artifact or fetch error.
     pub fn call_error(&self) -> Option<&CallError> {
         match self {
@@ -210,6 +222,7 @@ impl Error {
             Error::SourceIncompatible(_) => code::SOURCE_INCOMPATIBLE,
             Error::CacheUnusable(_) => code::CACHE_UNUSABLE,
             Error::SourceRetired(_) => code::SOURCE_RETIRED,
+            Error::ArtifactRevoked(_) => code::ARTIFACT_REVOKED,
             _ => return None,
         })
     }
@@ -280,6 +293,7 @@ impl fmt::Display for Error {
                 write!(f, "{}: {m}", self.code().unwrap_or_default())
             }
             Error::CacheUnusable(c) => write!(f, "{}: {c}", self.code().unwrap_or_default()),
+            Error::ArtifactRevoked(r) => write!(f, "{}: {r}", self.code().unwrap_or_default()),
         }
     }
 }
@@ -302,6 +316,7 @@ impl From<crate::ocifetch::error::Error> for Error {
             F::SourceForbidden(m) => Error::SourceForbidden(m),
             F::SourceIncompatible(m) => Error::SourceIncompatible(m),
             F::SourceRetired(m) => Error::SourceRetired(m),
+            F::ArtifactRevoked(r) => Error::ArtifactRevoked(r),
             // A refused version spelling, an unreadable cache or lock file:
             // misuse, which carries no fetch code of its own.
             F::InvalidInput(m) => Error::usage(m),
@@ -326,11 +341,12 @@ mod tests {
             ch_name: "CANNOT_PARSE_INPUT_ASSERTION_FAILED".to_string(),
             message: b"boom".to_vec(),
             column: b"c".to_vec(),
+            reason: "cannot-parse-input".to_string(),
         }
     }
 
     #[test]
-    fn each_status_maps_to_its_own_class_and_the_five_fields_survive() {
+    fn each_status_maps_to_its_own_class_and_the_six_fields_survive() {
         assert!(matches!(
             Error::from_call(raw(status::REJECTED)),
             Error::Schema(_)
@@ -354,6 +370,10 @@ mod tests {
         assert_eq!(c.ch_name, "CANNOT_PARSE_INPUT_ASSERTION_FAILED");
         assert_eq!(c.message.as_bytes(), b"boom");
         assert_eq!(c.column.as_bytes(), b"c");
+        // The library's catalog id, copied from the generated RawCallError.
+        assert_eq!(c.reason, "cannot-parse-input");
+        // A misuse this binding detects itself carries no reason.
+        assert_eq!(CallError::usage("x").reason, "");
     }
 
     #[test]

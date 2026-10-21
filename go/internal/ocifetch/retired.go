@@ -11,7 +11,6 @@ package ocifetch
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"unicode/utf8"
@@ -25,13 +24,6 @@ func isRetiredStatus(status int) bool {
 		}
 	}
 	return false
-}
-
-// isRetired reports whether err is a CHTYPES_SOURCE_RETIRED, which every
-// loop over bases or candidates returns at once instead of moving on.
-func isRetired(err error) bool {
-	var fe *FetchError
-	return errors.As(err, &fe) && fe.Code == CodeSourceRetired
 }
 
 // retiredError is the error for a retired repository's response: the status

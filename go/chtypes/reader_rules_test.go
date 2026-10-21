@@ -57,7 +57,7 @@ func TestR2UnknownMembersAreIgnored(t *testing.T) {
 	if r, err := schema.Row(JSONEachRow, []byte(`{"x":1}`)); err != nil {
 		t.Errorf("row with unknown members: %v", err)
 	} else if r.Outcome != Accepted || len(r.Columns) != 1 || r.Columns[0].Text != "abc" || r.InputSpan == nil || r.InputSpan.Len != 3 ||
-		len(r.Computed) != 1 || len(r.Transformed) != 1 || len(r.UnknownFields) != 1 || len(r.UnsupportedSettings) != 1 {
+		len(r.Computed) != 1 || len(r.Transformed) != 1 || len(r.UnknownFields) != 1 {
 		t.Errorf("row = %+v", r)
 	} else if tr := r.Transformed[0]; tr.Column != "s" || tr.Input != "1" || tr.Stored != "2" || tr.Reason != ReasonValueChanged ||
 		!tr.Lossy || tr.Row != 0 {

@@ -12,6 +12,7 @@
 //!
 //! ```text
 //! chtypes fetch <spelling>... | --all  [--platform <key>] [--cache <dir>] [--lock <file>] [--frozen] [--offline] [--update] [--strict]
+//!                                      [--allow-revoked] [--require-revocation-check]
 //! chtypes verify [--cache <dir>] [--strict]       re-verify the installed cache
 //! chtypes list [--cache <dir>] [--offline] [--strict]   installed builds, and the published lines unless --offline
 //! chtypes where [--cache <dir>] [--strict] [--all]  the cache root (the v2-dev one); --all: every directory searched
@@ -44,7 +45,9 @@ const USAGE: &str = "\
 chtypes: fetch, verify, list, resolve and prune ClickHouse artifacts for the chtypes SDKs
 
   chtypes fetch <spelling>... [--platform <os-arch>] [--cache <dir>] [--lock <file>] [--frozen] [--offline] [--update] [--strict]
+                              [--allow-revoked] [--require-revocation-check]
   chtypes fetch --all         [--platform <os-arch>] [--cache <dir>] [--lock <file>] [--frozen] [--offline] [--update] [--strict]
+                              [--allow-revoked] [--require-revocation-check]
   chtypes verify [--cache <dir>] [--strict]            re-verify the installed cache
   chtypes list [--cache <dir>] [--offline] [--strict]  installed builds; without --offline, published lines too
   chtypes where [--cache <dir>] [--strict] [--all]     the cache root (<dir>/v2-dev); --all: every directory searched
@@ -68,6 +71,9 @@ builds of each line and platform that n newer ones supersede, never one a
 running process holds (`in-use`); --dry-run prints what would go.
 --strict (or CHTYPES_CACHE_STRICT=1): a cache that cannot be read is
 CHTYPES_CACHE_UNUSABLE, never not-installed.
+--allow-revoked: use a revoked build anyway, with a warning (this call only;
+never a lock or an update). --require-revocation-check: a revocation status
+that cannot be read is an error, not a warning.
 
 Environment: CHTYPES_CACHE (this 2.0.0-dev SDK uses its subroot
 <CHTYPES_CACHE>/v2-dev), CHTYPES_DOWNLOAD_TOKEN, CHTYPES_CACHE_STRICT,
@@ -94,6 +100,10 @@ struct Args {
     offline: bool,
     update: bool,
     strict: bool,
+    /// `fetch --allow-revoked`.
+    allow_revoked: bool,
+    /// `fetch --require-revocation-check`.
+    require_revocation_check: bool,
     /// `resolve --json`.
     json: bool,
     /// `prune --dry-run`.
@@ -107,6 +117,10 @@ struct Args {
 /// The flags of `resolve` and `prune` alone, which every other command
 /// refuses.
 const RESOLVE_AND_PRUNE_FLAGS: &[&str] = &["--json", "--dry-run", "--line", "--keep"];
+
+/// The flags of `fetch` alone, which every other command refuses
+/// (build-level revocation).
+const REVOCATION_FLAGS: &[&str] = &["--allow-revoked", "--require-revocation-check"];
 
 fn parse(argv: &[String]) -> Result<Args, Usage> {
     let mut args = Args::default();
@@ -122,6 +136,8 @@ fn parse(argv: &[String]) -> Result<Args, Usage> {
             "--offline" => args.offline = true,
             "--update" => args.update = true,
             "--strict" => args.strict = true,
+            "--allow-revoked" => args.allow_revoked = true,
+            "--require-revocation-check" => args.require_revocation_check = true,
             "--json" => args.json = true,
             "--dry-run" => args.dry_run = true,
             "--platform" | "--lock" | "--cache" | "--line" | "--keep" => {
@@ -161,6 +177,8 @@ fn options(args: &Args) -> Options {
         lock_write: args.lock.is_some() && !args.frozen,
         lock_path,
         strict_cache: args.strict.then_some(true),
+        allow_revoked: args.allow_revoked,
+        require_revocation_check: args.require_revocation_check,
         ..Options::default()
     }
 }
@@ -170,6 +188,14 @@ fn exit_for(err: &Error) -> u8 {
     // The table has an entry for every code this module can raise; a drift
     // between the two reads as a plain failure, never as success.
     err.exit_code().unwrap_or(1)
+}
+
+/// The exit status the generated table gives `code`.
+fn exit_for_code(code: &str) -> u8 {
+    constants::ERROR_EXIT_CODES
+        .iter()
+        .find(|entry| entry.code == code)
+        .map_or(1, |entry| entry.exit_code)
 }
 
 fn report(err: &Error) -> u8 {
@@ -261,11 +287,12 @@ fn refuse_flags(command: &str, args: &Args, refused: &[&str]) -> Result<(), Usag
         ("--dry-run", args.dry_run),
         ("--line", args.line.is_some()),
         ("--keep", args.keep.is_some()),
+        ("--allow-revoked", args.allow_revoked),
+        ("--require-revocation-check", args.require_revocation_check),
     ];
-    match set
-        .into_iter()
-        .find(|&(flag, on)| on && refused.contains(&flag))
-    {
+    match set.into_iter().find(|&(flag, on)| {
+        on && (refused.contains(&flag) || (command != "fetch" && REVOCATION_FLAGS.contains(&flag)))
+    }) {
         Some((flag, _)) => Err(Usage(format!("{flag} does not apply to {command}"))),
         None => Ok(()),
     }
@@ -359,13 +386,28 @@ fn cmd_verify(args: &Args) -> Result<u8, Usage> {
     }
     print_notes(args);
     let mut bad = 0usize;
+    let mut revoked = 0usize;
     for r in &results {
-        if !r.ok {
+        if r.revocation.is_some() {
+            // A build a stored revocation refuses (docs/guides/fetch-v1.md,
+            // "Build-level revocation"); it is reported whatever its bytes say.
+            revoked += 1;
+            eprintln!(
+                "REVOKED {} {} {}: {}",
+                r.version,
+                r.platform,
+                r.dir.display(),
+                r.detail
+            );
+        } else if !r.ok {
             bad += 1;
             eprintln!("chtypes: CORRUPT {}: {}", r.dir.display(), r.detail);
         }
     }
-    Ok(if bad == 0 {
+    // Exit 11 wins over a mismatch's: a revocation is the more specific finding.
+    Ok(if revoked > 0 {
+        exit_for_code(constants::code::ARTIFACT_REVOKED)
+    } else if bad == 0 {
         0
     } else {
         exit_for(&Error::ArtifactCorrupt(String::new()))

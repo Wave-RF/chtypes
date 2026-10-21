@@ -83,6 +83,14 @@ A gate named in the **compile profile** binds at compile. A refusing value fails
 
 This is the one place the precedence table above does not hold, and it holds the way it does because a table that exists is a table that exists: the gate settled at CREATE, and no later INSERT reopens the question.
 
+## The compile profile at the INSERT (ABI v2)
+
+On ABI v2 the order above has a second limit, and it is the server's own too: a server's CREATE-time settings never reach its INSERT. At the INSERT that a row, batch or filter-evaluation call models, the compile profile reaches only the parse. The settings that shape how a body is read (the ones ClickHouse's own `FormatFactory::getFormatSettings` reads, such as `input_format_*`, `input_format_allow_errors_*` and `date_time_input_format`) keep the order above, with the server profile's `settings` under the compile profile, except a type gate among them, which binds the compile only. A filter's `WHERE` is not the INSERT, and keeps its own layers ([`filters.md`](filters.md#a-servers-settings-and-the-ones-a-filter-declines-abi-v2)).
+
+Everything else the INSERT does runs under the per-call settings, the server profile's `settings` and the setup defaults only, over ClickHouse's own defaults, with every type gate at ClickHouse's default unless one of those three sets it. That covers every expression the INSERT evaluates (a `DEFAULT` or `MATERIALIZED` fill, a `CHECK`, a TTL, a partition key, a projection, an expression in a `Values` body) and its limits, `max_partitions_per_insert_block` and `throw_on_max_partitions_per_insert_block` among them. The sorting key and the skip indices take the server profile and the setup defaults only.
+
+So a gated `CAST` or a gated aggregate function whose gate is only in the compile profile is refused as the server refuses it (455, 44 or 63), and a partition limit only in the compile profile does not reach the INSERT. If your real INSERT session carries such a setting, pass it per call or in the server profile, as that session does. The full rule is the "Settings." paragraph of the [ABI v2 reference](../reference/abi-v2.md)'s preamble.
+
 ## Values cross as strings. Always
 
 This has cost real bugs, so v1 makes it one rule in all four bindings: **a settings value is a string, and only a string.** The binding serializes the map into a JSON object of string values with the language's stock encoder and passes it verbatim, and it never rewrites a value: no boolean or integer spelling, no float. A non-string value is the language's own type error.
@@ -98,7 +106,16 @@ This has cost real bugs, so v1 makes it one rule in all four bindings: **a setti
 
 The reason is one setting in particular. `chtypes_now_epoch_nanos` is a 19-digit nanosecond epoch, and 19 digits do not survive an IEEE double: `1700000000123456789` becomes `1.7e+18`. Sent as a JSON number, the setting would be **silently ignored** — the batch keeps stamping the real wall clock, and nothing anywhere says so. A loud `TypeError` is the whole point.
 
-A value whose bytes are not valid UTF-8 cannot be passed as a setting or a query parameter in 1.0. Inline it in the SQL as `unhex('<hex>')`, built from hex digits only ([`limitations.md`](../limitations.md#binary-input-parameters-must-be-utf-8)).
+A value whose bytes are not valid UTF-8 is sent in the object form `{"b64": "<standard base64, padded>"}` (ABI v2): a setting value, a query-parameter value, a `Setup` default and a value of a server profile's `settings`. The binding writes it in place of the string, so the library sees the exact bytes; a value that is valid UTF-8 stays a plain string. Three of the bindings can send one:
+
+| Binding    | How a non-UTF-8 value is passed                                                                    |
+| ---------- | -------------------------------------------------------------------------------------------------- |
+| Go         | a `string` holding the bytes (a Go `string` is a byte string)                                      |
+| Python     | a `str` carrying the bytes with `surrogateescape`                                                  |
+| TypeScript | a `Uint8Array` (a `string` holding a lone surrogate has no bytes and is refused, as a key is)      |
+| Rust       | **cannot**: settings and query parameters take `String`, so a non-UTF-8 value is unreachable there |
+
+A key that is not valid UTF-8 cannot be carried in any binding (a JSON object has no byte form for a key), and neither can a macro's name or value. Each is refused before any call. Where a binding cannot send the bytes, inline them in the SQL as `unhex('<hex>')`, built from hex digits only ([`limitations.md`](../limitations.md#binary-input-parameters-must-be-utf-8)).
 
 ## An unknown name refuses the whole call
 
@@ -150,7 +167,7 @@ A zone name is valid exactly when ClickHouse's own `DateLUT` loads it, and a nam
 
 The zone follows the settings precedence above: a per-call `session_timezone` beats the one in the compile profile, which beats the one in the setup defaults, which beats the image zone. A zone in the compile profile is a default for later calls on that schema; a compiled type always takes the image zone, never the profile's.
 
-**A filter's zone is its own**, fixed when it is compiled: its `WHERE` runs in the zone of the settings the filter was compiled with, and an evaluation's settings decide only how the body is parsed. [`reference/bindings-v1.md` §2](../reference/bindings-v1.md#the-call-options) has the rule and the per-binding spellings.
+**A filter's zone is its own**, fixed when it is compiled: its `WHERE` runs in the zone of the settings the filter was compiled with, and an evaluation's settings are the INSERT's: they decide how the body is parsed and the expressions the INSERT evaluates, never the `WHERE`. [`reference/bindings-v1.md` §2](../reference/bindings-v1.md#the-call-options) has the rule and the per-binding spellings.
 
 0.x declined a per-call `session_timezone` that named a different zone than the process's, because zone was resolved once at `chs_init`. That decline is gone with the model it protected.
 

@@ -157,7 +157,7 @@ The violation's message matches the server's in its code, the constraint's name 
 
 ### Too many partitions: a batch-shape 252
 
-A schema whose `CREATE TABLE` declares a `PARTITION BY` answers which partition each stored row lands in (`partition_id` on each row) and how many partitions the batch spans (`partition_count`). There is no separate partition setter in 1.0: the key is part of the one statement you compile ([`reference/bindings-v1.md` §7](../reference/bindings-v1.md#7-what-v0-api-is-deleted-and-why)). A body that would split into more partitions than the call's `max_partitions_per_insert_block` allows — `100` unless a setting says otherwise, `0` meaning unlimited — is refused the way the server refuses it: the batch `outcome` is `rejected` with ClickHouse's own **code 252**, and the rows stay itemized, exactly the shape a `CHECK` violation has. Nothing in any row is wrong; the batch is. The remedy is to split the body by partition, and grouping an accepted batch's export spans by `partition_id` gives exactly those per-partition bodies.
+A schema whose `CREATE TABLE` declares a `PARTITION BY` answers which partition each stored row lands in (`partition_id` on each row) and how many partitions the batch spans (`partition_count`). There is no separate partition setter in 1.0: the key is part of the one statement you compile ([`reference/bindings-v1.md` §7](../reference/bindings-v1.md#7-what-v0-api-is-deleted-and-why)). A body that would split into more partitions than the call's `max_partitions_per_insert_block` allows — `100` unless a setting says otherwise, `0` meaning unlimited — is refused the way the server refuses it: the batch `outcome` is `rejected` with ClickHouse's own **code 252**, and the rows stay itemized, exactly the shape a `CHECK` violation has. Nothing in any row is wrong; the batch is. The remedy is to split the body by partition, and grouping an accepted batch's export spans by `partition_id` gives exactly those per-partition bodies. On ABI v2 the limit, and `throw_on_max_partitions_per_insert_block`, come from the per-call settings, the server profile and the setup defaults only: one in the compile profile does not reach the INSERT, as a server's CREATE-time settings never reach its INSERT ([`settings.md`](settings.md#the-compile-profile-at-the-insert-abi-v2)).
 
 **Branch on code 252, never on the message text.** The message is ClickHouse's own wording and moves between lines; the code is the stable part. And the name a code carries is the loaded build's own, so if you want it for a log line, ask the library rather than writing it down: its error-code table (`lib.ErrorCodes()` in Go, `lib.error_codes()` in Python and Rust, `lib.errorCodes()` in TypeScript) answers the name for 252 on that line ([`ErrorCodeTable`](../reference/bindings-v1.md#errorcodetable-from-the-error_code_table-document)).
 
@@ -290,6 +290,71 @@ Three payload states, and they are distinct: absent means no export was requeste
 **Document flags** thin the _description_ without ever changing the _verdict_. In 1.0 an absent flag set means **all** groups, with or without an export: the 0.x rule that an export defaulted to lean is gone. To get the lean, verdicts-only shape when you only want to forward bytes, ask for it: `WithDocFlags` in Go, `doc_flags=` in Python, `docFlags` in TypeScript, `doc_flags` in Rust, built from `DocValues` / `DocTransforms` / `DocDefaults` in Go, `DocFlags.VALUES` / `.TRANSFORMS` / `.DEFAULTS` in Python and TypeScript, `DocFlags::VALUES` / `TRANSFORMS` / `DEFAULTS` in Rust, or `DocAll` for everything.
 
 Attaching a compiled filter to this same call narrows the export further, to the rows the filter admits, from the same one parse: [`filters.md` → Exporting only the rows a filter admits](filters.md#exporting-only-the-rows-a-filter-admits).
+
+## Overriding a column's DEFAULT for one call (ABI v2)
+
+`column_defaults` is a per-call list of `{name, value}`. In a cell the server would have filled from the column's DEFAULT, the call uses your `value` instead. The library decides which cells those are, by ClickHouse's own reader and the call's format settings: a field the record omits, a `null` for a non-Nullable column under `input_format_null_as_default`, an empty CSV field under `input_format_csv_empty_as_default`. A field the record supplied is never overridden, and `""` is a value like any other. A cell an override fills reads `default_override` (`Source` in each binding), which is stored, and the export carries it as a present value, so inserting the export needs no override.
+
+The binding only passes the list: `name` and `value` are byte strings (UTF-8, else the `name_b64` and `value_b64` forms), the order is kept, and an empty list is sent as `[]`. It validates nothing. An entry that names an unknown, non-insertable, MATERIALIZED or ALIAS column, or a value that does not read as the column's type, is `CHS_INVALID_ARGUMENT` at the call, naming `column_defaults[i]`. A build that does not implement the member declines it. The option exists on the four calls that model an INSERT of a body: row, rows, parse a block and filter rows.
+
+<details open><summary><b>Go</b></summary>
+
+```go
+batch, err := schema.Rows(chtypes.JSONEachRow, body,
+	chtypes.WithColumnDefaults([]chtypes.ColumnDefault{{Name: "region", Value: "eu"}}))
+// a cell filled from the override: batch.Rows[i].Columns[j].Source == chtypes.SourceDefaultOverride
+```
+
+</details>
+
+<details><summary><b>Python</b></summary>
+
+```python
+batch = schema.rows(
+    Format.JSON_EACH_ROW, body, column_defaults=[ColumnDefault("region", "eu")]
+)
+# a cell filled from the override has source == Source.DEFAULT_OVERRIDE
+```
+
+</details>
+
+<details><summary><b>TypeScript</b></summary>
+
+```ts
+const batch = schema.rows(Format.JSONEachRow, body, {
+  columnDefaults: [{ name: 'region', value: 'eu' }],
+});
+// a cell filled from the override has source Source.DefaultOverride
+```
+
+</details>
+
+<details><summary><b>Rust</b></summary>
+
+```rust
+let options = RowsOptions {
+    column_defaults: Some(vec![ColumnDefault { name: b"region".to_vec(), value: b"eu".to_vec() }]),
+    ..Default::default()
+};
+let batch = schema.rows(Format::JsonEachRow, body, &options)?;
+// a cell filled from the override has source Source::DefaultOverride
+```
+
+</details>
+
+### How a `value` is read
+
+The library reads a `value` with the same reader that reads that column's field in the body: **the body format's own field encoding**, including its quoting and escapes. Measured by a downstream user on build `20261021.025722` (darwin-arm64):
+
+| body format                | `value`             | result                                                               |
+| -------------------------- | ------------------- | -------------------------------------------------------------------- |
+| CSV                        | `"a,""b"`           | read: the string `a,"b`                                              |
+| CSV                        | `a,b` (unquoted)    | refused: ClickHouse error 27 (`CANNOT_PARSE_INPUT_ASSERTION_FAILED`) |
+| TSV                        | `a\tb` (the escape) | read: `a`, a tab, `b`                                                |
+| TSV                        | `a`, a raw tab, `b` | refused: error 27                                                    |
+| JSONEachRow, into `UInt32` | `"42"` or `42`      | both read as 42                                                      |
+
+A value that doesn't read is refused when the call starts, as a usage error, before any byte of the body is read. So write each `value` exactly as it would appear in a field of the body you send.
 
 ## Next
 
