@@ -25,7 +25,7 @@ per-call settings  >  handle compile profile  >  setup defaults  >  ClickHouse's
 
 ```go
 _ = chtypes.Setup(chtypes.SetupOptions{ // once, first
-	Defaults: map[string]string{"chtypes_default_eval_wall_nanos": "2000000000"},
+	Defaults: map[string]string{"chtypes_default_eval_cpu_nanos": "2000000000"},
 })
 schema, _ := lib.CompileTable(ddl, chtypes.WithSettings(profile)) // handle
 batch, _ := schema.Rows(chtypes.JSONEachRow, body,
@@ -37,7 +37,7 @@ batch, _ := schema.Rows(chtypes.JSONEachRow, body,
 <details><summary><b>Python</b></summary>
 
 ```python
-chtypes.setup(defaults={"chtypes_default_eval_wall_nanos": "2000000000"})   # process, once, first
+chtypes.setup(defaults={"chtypes_default_eval_cpu_nanos": "2000000000"})   # process, once, first
 schema = library.compile_table(ddl, settings=profile)                       # handle
 batch = schema.rows(Format.JSON_EACH_ROW, body, settings={"date_time_input_format": "best_effort"})
 ```
@@ -47,7 +47,7 @@ batch = schema.rows(Format.JSON_EACH_ROW, body, settings={"date_time_input_forma
 <details><summary><b>TypeScript</b></summary>
 
 ```ts
-setup({ defaults: { chtypes_default_eval_wall_nanos: '2000000000' } });   // process, once, first
+setup({ defaults: { chtypes_default_eval_cpu_nanos: '2000000000' } });   // process, once, first
 const schema = lib.compileTable(ddl, { settings: profile });              // handle
 const batch = schema.rows(Format.JSONEachRow, body, { settings: { date_time_input_format: 'best_effort' } });
 ```
@@ -58,7 +58,7 @@ const batch = schema.rows(Format.JSONEachRow, body, { settings: { date_time_inpu
 
 ```rust
 chtypes::setup(SetupOptions {                                             // process, once, first
-    defaults: vec![("chtypes_default_eval_wall_nanos".into(), "2000000000".into())],
+    defaults: vec![("chtypes_default_eval_cpu_nanos".into(), "2000000000".into())],
     ..Default::default()
 })?;
 let schema = lib.compile_table(ddl, &CompileOptions { settings: profile.clone(), ..Default::default() })?; // handle
@@ -138,11 +138,13 @@ Three are **per-call**, and they control the clock:
 
 Three are **per-process**, settable only through the `defaults` of `setup`:
 
-| key                                 | does                                  | default |
-| ----------------------------------- | ------------------------------------- | ------- |
-| `chtypes_default_eval_memory_bytes` | DEFAULT-expression admission ceiling  | 256 MiB |
-| `chtypes_default_eval_wall_nanos`   | DEFAULT-expression wall-clock ceiling | 1 s     |
-| `chtypes_custom_settings_prefixes`  | mirror the server's own               | `SQL_`  |
+| key                                 | does                                                                       | default |
+| ----------------------------------- | -------------------------------------------------------------------------- | ------- |
+| `chtypes_default_eval_memory_bytes` | DEFAULT-expression admission ceiling                                       | 256 MiB |
+| `chtypes_default_eval_cpu_nanos`    | DEFAULT-expression admission time budget, the evaluating thread's CPU time | 1 s     |
+| `chtypes_custom_settings_prefixes`  | mirror the server's own                                                    | `SQL_`  |
+
+On ABI v2 the time budget is CPU time, `chtypes_default_eval_cpu_nanos`. The 1.x name, `chtypes_default_eval_wall_nanos`, counted wall-clock time in the same nanoseconds. On v2 it is refused with `CHS_INVALID_ARGUMENT`, and the message names the new one. `0` disables either budget. A budget is detected, not interrupted: an evaluation that exceeds one is declined, each budget with its own reason id.
 
 The functions a DEFAULT expression cannot use at all are listed, with the reason for each, in [`declined-functions.md`](../reference/declined-functions.md).
 
