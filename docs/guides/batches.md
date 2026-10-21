@@ -342,6 +342,20 @@ let batch = schema.rows(Format::JsonEachRow, body, &options)?;
 
 </details>
 
+### How a `value` is read
+
+The library reads a `value` with the same reader that reads that column's field in the body: **the body format's own field encoding**, including its quoting and escapes. Measured by a downstream user on build `20261021.025722` (darwin-arm64):
+
+| body format                | `value`             | result                                                               |
+| -------------------------- | ------------------- | -------------------------------------------------------------------- |
+| CSV                        | `"a,""b"`           | read: the string `a,"b`                                              |
+| CSV                        | `a,b` (unquoted)    | refused: ClickHouse error 27 (`CANNOT_PARSE_INPUT_ASSERTION_FAILED`) |
+| TSV                        | `a\tb` (the escape) | read: `a`, a tab, `b`                                                |
+| TSV                        | `a`, a raw tab, `b` | refused: error 27                                                    |
+| JSONEachRow, into `UInt32` | `"42"` or `42`      | both read as 42                                                      |
+
+A value that doesn't read is refused when the call starts, as a usage error, before any byte of the body is read. So write each `value` exactly as it would appear in a field of the body you send.
+
 ## Next
 
 - [`transformations.md`](transformations.md) — what the accepted rows were silently changed into.
