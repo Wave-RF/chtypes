@@ -493,9 +493,9 @@ extern "C" {
  *   `call`, naming `column_defaults[i]`. When `insertable_columns` is given, an entry's column MUST
  *   be in it, because the INSERT the override models names the column in its header; one outside it
  *   is the same `CHS_INVALID_ARGUMENT`. `value` is read in the body format's own field encoding, as
- *   if the record supplied this field (the implementing build confirms); a value that does not read
- *   as the column's type is `CHS_INVALID_ARGUMENT` at `call`, naming `column_defaults[i]`, before
- *   any byte of the body is read. Built before the lock: the build that implements it lists
+ *   if the record supplied this field; a value that does not read as the column's type is
+ *   `CHS_INVALID_ARGUMENT` at `call`, naming `column_defaults[i]`, before any byte of the body is
+ *   read. Built before the lock: the build that implements it lists
  *   `insert_options.column_defaults` in `capabilities.features` (rule r9), and a build that does
  *   not declines it as Input documents (in the Preamble) says.
  * - `verdict_basis`: `input`, the default, or `export`: what row a filter verdict answers for.
@@ -1491,7 +1491,7 @@ CHS_API chs_status chs_preview_batch(
  * parameters (a JSON object of string values) by ClickHouse's own substitution, so a value is never
  * SQL text. A parameter's value is decoded by ClickHouse's escaped-text reader, exactly as a server
  * decodes an HTTP `param_` value (`input:filter_options`' `param_encoding`, `escaped`): `\b` is an
- * escape, so the parameter `a\b` reads as `a`, the byte 0x08 and `b`, and a literal backslash is
+ * escape, so the parameter `a\b` reads as two bytes, `a` and 0x08, and a literal backslash is
  * written `\\`; `\N` reads as the empty value; `\x41`, `\'` and `\0` decode as that reader decodes
  * them; a raw tab or newline is `CHS_REJECTED` with 457 and a trailing backslash with 25, as a
  * server refuses them; and the bytes an escape produces are kept, valid UTF-8 or not. The object
