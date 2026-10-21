@@ -8,6 +8,7 @@ The four bindings in this repository are released together and give one answer, 
 
 ### Added
 
+- Tests: the shared revocation-statement table (`tests/fixtures/revocation-statement/cases.json`) runs against `verify_revocation` and `check_installed`: `superseded_by` must be a string (`""` = no fix), and the first verifying revocation in a listing wins. No behavior changed.
 - `column_defaults` is covered by unit tests (ABI v2): the exact `insert_options` JSON for a UTF-8 value, a non-UTF-8 value (`value_b64`), an empty value (sent as `""`) and two entries in order, and the decode of a `default_override` cell (`Source.DEFAULT_OVERRIDE`, stored). The batches guide gains a usage section. No behavior changed.
 - Docs: `docs/guides/batches.md` shows how a `column_defaults` value is read, in the body format's own field encoding (CSV quoting, TSV escapes, a JSON string or number), with a value that doesn't read refused at the call before any body byte.
 - `CODE_DECLINED` (ABI v2, -2): the code a declined row, outcome or verdict carries, generated from the description and exported from `chtypes`, as `bindings-v1.md` section 3 promises.
