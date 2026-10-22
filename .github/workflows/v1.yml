@@ -36,8 +36,8 @@
 # (spec/abi-v2/docs.md r5, r6) run beside them. v1-cache-interop derives its
 # mode from the same map: the 1.x rows run over the bindings at ABI v1 (the
 # loopback fixture registry), the ABI v2 matrix over the bindings at ABI v2
-# (their real CLIs against the staging dev channel, which is the only source
-# a dev CLI honors), each skipped by name when it has no participant, and it
+# (their real CLIs against their channel's real registry, production
+# `chtypes/v2` since the lock), each skipped by name when it has no participant, and it
 # proves every v2 binding's cache isolation (r5) with its real CLI.
 name: v1
 
@@ -72,7 +72,7 @@ on:
         type: string
         default: "https://registry-staging.wavehouse.dev/chtypes/v2-dev"
       interop_published_version:
-        description: "v1-cache-interop's ABI v2 matrix over the PUBLISHED dev CLIs: a channel version (2.0.0-dev.N). Go, TypeScript, Python and Rust are installed from their registries at it; any binding at ABI v1 is built from this ref. Empty: all four are built from this ref."
+        description: "v1-cache-interop's ABI v2 matrix over the PUBLISHED CLIs: a released version (2.N.N; a 2.0.0-dev.N CLI speaks the dev channel, not the matrix's). Go, TypeScript, Python and Rust are installed from their registries at it; any binding at ABI v1 is built from this ref. Empty: all four are built from this ref."
         required: false
         type: string
         default: ""
@@ -796,12 +796,13 @@ jobs:
     # cache fault must get the same answer from every reader in the default
     # mode and with --strict (public issue #486).
     #
-    # THE ABI v2 MATRIX (public issue #511). A 2.0.0-dev CLI fetches only from
-    # the staging dev channel and honors no source or trust override
-    # (spec/abi-v2/docs.md r6), so no fixture server can feed it: the four real
-    # CLIs run against the real staging `chtypes/v2-dev` repository, as the
-    # examples job's do, through one explicit cache each and so its v2-dev
-    # subroot (r5), with the real ~300 MB library in every cell. 4 x 4 over
+    # THE ABI v2 MATRIX (public issue #511). The four real CLIs run with no
+    # override, as a user's install does, so they read their channel's real
+    # registry: since the lock, the production `chtypes/v2` repository (a
+    # 2.0.0-dev CLI read the staging `chtypes/v2-dev` one and honored no
+    # override, spec/abi-v2/docs.md r6). They run as the examples job's do,
+    # through one explicit cache each and so its v2 subroot (r5), with the
+    # real ~300 MB library in every cell. 4 x 4 over
     # schema-2 records, writer x reader x line over the registry's two newest
     # lines, 8 concurrent installs per set (each binding alone and mixed) at
     # the natural clock and again under an in-repo LD_PRELOAD shim that makes
@@ -965,8 +966,8 @@ jobs:
             --other-user nobody \
             --system-dir /opt/chtypes/v1
       # The ABI v2 matrix (scripts/fetch-v1/cache-interop.py, "ABI v2 MODE"):
-      # the bindings at ABI v2, their real CLIs, the staging dev channel.
-      - name: "ABI v2: 4 x 4 through each writer's v2-dev subroot from the staging registry; writer x reader x line (#481); concurrent installs at the natural and a coarse clock (#482, #516); read-only commands, cross-uid reads and writer x reader x fault x mode (#486, #558)"
+      # the bindings at ABI v2, their real CLIs, their channel's registry.
+      - name: "ABI v2: 4 x 4 through each writer's v2 subroot from the channel's registry; writer x reader x line (#481); concurrent installs at the natural and a coarse clock (#482, #516); read-only commands, cross-uid reads and writer x reader x fault x mode (#486, #558)"
         env:
           X: /tmp/cli-prefix
           V2: ${{ steps.mode.outputs.v2 }}
@@ -982,19 +983,21 @@ jobs:
             case "$ROUNDS" in *[!0-9]* | 0*) echo "::error::interop_rounds must be a positive integer, got: $ROUNDS"; exit 1 ;; esac
             clis+=(--rounds "$ROUNDS" --coarse-rounds "$ROUNDS")
           fi
-          # One of the v2-dev CLIs' default system dirs (r5): the fault rows
-          # fill it with a readable build to prove the default mode answers
-          # from it and strict mode never falls through to it, and leave it
-          # empty again.
-          sudo install -d -m 0755 -o "$(id -u)" -g "$(id -g)" /opt/chtypes/v2-dev
+          # One of the v2 CLIs' default system dirs (r5), /opt/chtypes/<the
+          # channel's cache subroot>, read from the file cache-interop.py reads
+          # the channel from: the fault rows fill it with a readable build to
+          # prove the default mode answers from it and strict mode never falls
+          # through to it, and leave it empty again.
+          sysdir="/opt/chtypes/$(bash scripts/release-channel.sh get CACHE_SUBROOT)"
+          sudo install -d -m 0755 -o "$(id -u)" -g "$(id -g)" "$sysdir"
           python3 scripts/fetch-v1/cache-interop.py --abi 2 "${clis[@]}" \
             --other-user nobody \
-            --system-dir /opt/chtypes/v2-dev \
+            --system-dir "$sysdir" \
             --coarse-clock
       # r5, with the real CLIs: a cache a 1.x binding wrote (the committed
       # cache-record-canonical layout) is listed by every 1.x CLI (the
       # control) and by no ABI v2 CLI, whether CHTYPES_CACHE names it (a v2
-      # CLI reads <CHTYPES_CACHE>/v2-dev) or --cache does; an offline fetch
+      # CLI reads <CHTYPES_CACHE>/v2) or --cache does; an offline fetch
       # from it is CHTYPES_ARTIFACT_MISSING (exit 1); and the tree is
       # byte-for-byte unchanged afterwards.
       - name: "r5 isolation: no ABI v2 CLI reads a 1.x cache, which every 1.x CLI reads"
@@ -1183,11 +1186,11 @@ jobs:
           for b in go python ts rust; do sudo -n -u nobody "$X/bin/cli-$b" --version; done
       - name: "selftest — the interop driver's own logic: the 1.x comparisons and tables, the ABI v2 matrix over stand-in CLIs with three planted defects, and the coarse-clock shim's control both ways"
         run: python3 scripts/fetch-v1/cache-interop.py --selftest
-      # /opt/chtypes/v2-dev is one of the v2-dev CLIs' default system dirs
-      # (r5), as the required job's step fills it. The work directory is made
+      # /opt/chtypes/<the channel's cache subroot> is one of the v2 CLIs'
+      # default system dirs (r5), as the required job's step fills it. The work directory is made
       # under /tmp so the other uid can reach it (macOS's per-user temp
       # directory is mode 0700, which no other uid can traverse).
-      - name: "ABI v2 on ${{ matrix.platform }}: 4 x 4 through each writer's v2-dev subroot from the staging registry; writer x reader x line (#481); concurrent installs (#482, #516); read-only commands, cross-uid reads and writer x reader x fault x mode (#486, #558)"
+      - name: "ABI v2 on ${{ matrix.platform }}: 4 x 4 through each writer's v2 subroot from the channel's registry; writer x reader x line (#481); concurrent installs (#482, #516); read-only commands, cross-uid reads and writer x reader x fault x mode (#486, #558)"
         env:
           X: /tmp/cli-prefix
           V2: ${{ steps.mode.outputs.v2 }}
@@ -1212,11 +1215,12 @@ jobs:
               echo "v1-cache-interop ($PLATFORM): SKIPPED the coarse-clock leg by name: it is an LD_PRELOAD shim (scripts/fetch-v1/coarse-clock.c), which macOS does not have; the natural-clock concurrency rows run" | tee -a "$GITHUB_STEP_SUMMARY"
               ;;
           esac
-          sudo install -d -m 0755 -o "$(id -u)" -g "$(id -g)" /opt/chtypes/v2-dev
+          sysdir="/opt/chtypes/$(bash scripts/release-channel.sh get CACHE_SUBROOT)"
+          sudo install -d -m 0755 -o "$(id -u)" -g "$(id -g)" "$sysdir"
           python3 scripts/fetch-v1/cache-interop.py --abi 2 "${clis[@]}" \
             --platform "$PLATFORM" \
             --other-user nobody \
-            --system-dir /opt/chtypes/v2-dev \
+            --system-dir "$sysdir" \
             ${coarse[@]+"${coarse[@]}"}
 
   v1-refcheck:

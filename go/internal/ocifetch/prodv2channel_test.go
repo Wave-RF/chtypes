@@ -1,9 +1,10 @@
 package ocifetch
 
 // prodv2channel_test.go — the production generation-2 channel (channel.go,
-// prodV2Channel; docs/guides/fetch-v1.md, "Generation 2 after the lock"), built
-// and tested but not the default. The fetch conformance cases run under it in
-// TestConformanceProdV2; these are the pins the cases do not reach.
+// prodV2Channel; docs/guides/fetch-v1.md, "Generation 2 after the lock"), the
+// default every non-test binary speaks since the lock. The fetch conformance
+// cases run under it in TestConformanceProdV2; these are the pins the cases do
+// not reach.
 
 import (
 	"encoding/hex"
@@ -92,13 +93,16 @@ func TestProdV2ChannelCacheRoots(t *testing.T) {
 	}
 }
 
-// A non-test binary still speaks the dev channel: with no test seam selected,
-// active() is devChannel, and prodV2Channel is reachable only through
-// UseProdV2ForTests.
-func TestProdV2IsNotTheDefault(t *testing.T) {
+// A non-test binary speaks the production channel: with no test seam
+// selected, active() is prodV2Channel, and the dev channel is reachable only
+// through a test seam (UseDevChannelForTests, AllowOverridesForTests).
+func TestProdV2IsTheDefault(t *testing.T) {
 	prev := current.Swap(nil)
 	t.Cleanup(func() { current.Store(prev) })
-	if active() != &devChannel || ChannelName() != "v2-dev" {
-		t.Fatalf("the default channel is %q, want v2-dev", ChannelName())
+	if active() != &prodV2Channel || ChannelName() != "v2" {
+		t.Fatalf("the default channel is %q, want v2", ChannelName())
+	}
+	if c := active(); c.bases[0] != ProdV2Bases[0] || c.keys[0].KeyID != ReleaseKeys[0].KeyID || c.ownFingerprint != "" || !c.pinnable || !c.overridable {
+		t.Errorf("the default channel = %+v, want the production one", *c)
 	}
 }

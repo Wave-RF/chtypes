@@ -1,7 +1,11 @@
 /**
- * The fetch contract this build speaks. A 2.0.0-dev SDK speaks the ABI v2 dev
- * channel (`spec/abi-v2/docs.md`, rules r5 and r6), which is the v1 fetch
- * contract (`docs/guides/fetch-v1.md`) narrowed in five ways:
+ * The fetch contract this build speaks. Every process outside a test speaks
+ * the production generation-2 channel (`PROD_V2_CHANNEL`;
+ * `docs/guides/fetch-v1.md`, "Generation 2 after the lock"): the v1 fetch
+ * contract with v2 values. A 2.0.0-dev SDK spoke the ABI v2 dev channel
+ * (`spec/abi-v2/docs.md`, rules r5 and r6), which stays here, reachable only
+ * from a test (`useDevChannelForTests`, `allowOverridesForTests`), and is the
+ * v1 fetch contract (`docs/guides/fetch-v1.md`) narrowed in five ways:
  *
  *   - it fetches ONLY from `DEV_CHANNEL_BASE` and trusts ONLY the staging key
  *     (`DEV_KEY_HEX`, id `DEV_KEY_ID`); the release key is not in its trust
@@ -123,7 +127,7 @@ export interface Channel {
   readonly revocation: boolean;
 }
 
-/** What a 2.0.0-dev SDK speaks, and what every process speaks unless a test selected another contract. */
+/** What a 2.0.0-dev SDK spoke. Since the lock only a test selects it (`useDevChannelForTests`, `allowOverridesForTests`). */
 const DEV_CHANNEL: Channel = {
   name: DEV_CACHE_DIR,
   abi: DEV_ABI_GENERATION,
@@ -160,9 +164,8 @@ const FETCH_V1_CHANNEL: Channel = {
  * The production generation-2 channel a 2.0.0 SDK speaks after the lock: the v1
  * contract with v2 values, from the generated constants (`docs/guides/fetch-v1.md`,
  * "Generation 2 after the lock"). It trusts the release key, honors every
- * override and pin, and has no alias step. NOT the default: only
- * `useProdV2ForTests` selects it, until the lock change makes it
- * `activeChannel()`'s fallback.
+ * override and pin, and has no alias step. It is `activeChannel()`'s fallback:
+ * what every process speaks since the lock unless a test selected another.
  */
 const PROD_V2_CHANNEL: Channel = {
   name: PROD_V2_NAME,
@@ -181,12 +184,12 @@ const PROD_V2_CHANNEL: Channel = {
 
 let current: Channel | undefined;
 
-/** The contract this process fetches under: the dev channel, unless a test selected another. */
+/** The contract this process fetches under: the production generation-2 channel, unless a test selected another. */
 export function activeChannel(): Channel {
-  return current ?? DEV_CHANNEL;
+  return current ?? PROD_V2_CHANNEL;
 }
 
-/** The fetch contract this process speaks: `v2-dev` in every process but a test that selected another. */
+/** The fetch contract this process speaks: `v2` in every process but a test that selected another. */
 export function channelName(): string {
   return activeChannel().name;
 }
@@ -198,7 +201,7 @@ function inTestRunner(): boolean {
 
 export function testOnly(what: string): void {
   if (!inTestRunner()) {
-    throw new Error(`chtypes: ${what} is test-only; a 2.0.0-dev SDK has no override (spec/abi-v2/docs.md, rule r6)`);
+    throw new Error(`chtypes: ${what} is test-only: a non-test process speaks only the production channel`);
   }
 }
 

@@ -1241,8 +1241,8 @@ def section17(lib: chtypes.Library) -> None:
 # DEFAULT, and binds a zone-less DateTime, differently. Without a server the
 # library refuses timezone() as a server constant it cannot know.
 # LOOK FOR: the row fed only `k`, and `tz` filled by the server's own zone; the
-# description naming the server. A build that does not compile on a server yet
-# DECLINES, and this section then says SKIPPED by name.
+# description naming the server. A library that declines a server
+# profile makes this section say SKIPPED by name; a library that supports it compiles on one.
 # C API: chs_server_create, chs_server_free, and chs_schema_create's server.
 # ---------------------------------------------------------------------------
 def section18(lib: chtypes.Library) -> None:

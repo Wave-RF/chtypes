@@ -3,12 +3,14 @@
 //! named, and a read-only command writes nothing.
 //!
 //! The real binary is a build no test seam reaches, so every case here sees the
-//! ABI v2 dev channel exactly as a user's 2.0.0-dev CLI speaks it
-//! (spec/abi-v2/docs.md, rules r5 and r6): an explicit cache is read through its
-//! `v2-dev` subroot, the default root is `${XDG_CACHE_HOME}/chtypes/v2-dev`,
-//! `--lock`, `--frozen` and `--update` are refused before any network call, and
-//! each ignored override is named exactly once. Nothing here reaches the
-//! network.
+//! production generation-2 channel exactly as a user's CLI speaks it
+//! (docs/guides/fetch-v1.md, "Generation 2 after the lock"): an explicit cache
+//! is read through its `v2` subroot, the default root is
+//! `${XDG_CACHE_HOME}/chtypes/v2`, `--lock`, `--frozen` and `--update` are
+//! honored (never refused with the dev channel's message), and no override is
+//! ignored. The dev channel, which a 2.0.0-dev CLI spoke, is no longer
+//! reachable from the binary; its rules are proven in process by
+//! tests/devchannel.rs. Nothing here reaches the network.
 
 // The fingerprint this binary speaks, from the generated constant itself, so
 // the hand-written records below are the binary's own fingerprint's.
@@ -18,9 +20,9 @@ mod abi_fingerprint;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// The dev channel's cache directory: the default root's last element and an
-/// explicit cache's subroot (rule r5).
-const DEV: &str = "v2-dev";
+/// The production channel's cache directory: the default root's last element
+/// and an explicit cache's subroot.
+const V2: &str = "v2";
 
 fn scratch(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("cli-v1-test-{name}-{}", std::process::id()));
@@ -36,6 +38,8 @@ fn run(args: &[&str]) -> (i32, String, String) {
 /// base, no trust and no unsigned fetch of its own.
 fn run_env(args: &[&str], env: &[(&str, &str)]) -> (i32, String, String) {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_chtypes"));
+    // An empty working directory, so no stray `chtypes.lock` is ever read.
+    cmd.current_dir(scratch("cwd"));
     cmd.args(args);
     for name in [
         "CHTYPES_CACHE",
@@ -72,17 +76,17 @@ fn verify_of_nothing_says_so_and_names_a_zero_x_registry() {
     assert!(
         err.contains(&format!(
             "chtypes: verified 0 builds under {}\n",
-            empty.join(DEV).display()
+            empty.join(V2).display()
         )),
         "{err}"
     );
 
-    // A 0.x registry where this CLI reads the explicit cache: its v2-dev subroot.
+    // A 0.x registry where this CLI reads the explicit cache: its v2 subroot.
     let zero_x = base.join("zero-x");
-    zero_x_registry(&zero_x.join(DEV));
+    zero_x_registry(&zero_x.join(V2));
     let hint = format!(
         "{} holds a 0.x registry (26.1/manifest.json); chtypes 1.x uses an OCI layout at",
-        zero_x.join(DEV).display()
+        zero_x.join(V2).display()
     );
     let (code, _, err) = run(&["verify", "--cache", zero_x.to_str().unwrap()]);
     assert!(code == 0 && err.contains(&hint), "{code} {err}");
@@ -100,8 +104,8 @@ fn verify_of_nothing_says_so_and_names_a_zero_x_registry() {
         "{code} {err}"
     );
     assert!(
-        !zero_x.join(DEV).join("oci-layout").exists()
-            && !zero_x.join(DEV).join("index.json").exists(),
+        !zero_x.join(V2).join("oci-layout").exists()
+            && !zero_x.join(V2).join("index.json").exists(),
         "a read-only command wrote into the 0.x registry"
     );
     let _ = std::fs::remove_dir_all(&base);
@@ -129,13 +133,13 @@ fn strict_flag() {
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
     let (code, out, _) = run(&["where", "--strict", "--cache", e]);
-    assert_eq!((code, out.trim()), (0, empty.join(DEV).to_str().unwrap()));
+    assert_eq!((code, out.trim()), (0, empty.join(V2).to_str().unwrap()));
     let zero_x = base.join("zero-x");
-    zero_x_registry(&zero_x.join(DEV));
+    zero_x_registry(&zero_x.join(V2));
     let z = zero_x.to_str().unwrap();
     let want = format!(
         "{} is unusable as a cache: layout_0x",
-        zero_x.join(DEV).display()
+        zero_x.join(V2).display()
     );
     for argv in [
         vec!["where", "--strict"],
@@ -164,73 +168,89 @@ fn strict_flag() {
     let _ = std::fs::remove_dir_all(&base);
 }
 
-/// Rule r5: the default root, and an explicit cache from the environment or
-/// `--cache`, each used through the v2-dev subroot, never as a whole layout.
+/// The default root, and an explicit cache from the environment or `--cache`,
+/// each used through the v2 subroot, never as a whole layout.
 #[test]
-fn where_is_the_v2_dev_root_and_subroot() {
+fn where_is_the_v2_root_and_subroot() {
     let base = scratch("where");
     let xdg = base.join("xdg");
     let cache = base.join("cache");
     let (code, out, err) = run_env(&["where"], &[("XDG_CACHE_HOME", xdg.to_str().unwrap())]);
     assert_eq!(
         (code, out.trim()),
-        (0, xdg.join("chtypes").join(DEV).to_str().unwrap()),
+        (0, xdg.join("chtypes").join(V2).to_str().unwrap()),
         "the default root: {err}"
     );
     let (code, out, err) = run_env(&["where"], &[("CHTYPES_CACHE", cache.to_str().unwrap())]);
     assert_eq!(
         (code, out.trim()),
-        (0, cache.join(DEV).to_str().unwrap()),
+        (0, cache.join(V2).to_str().unwrap()),
         "CHTYPES_CACHE: {err}"
     );
     let (code, out, err) = run(&["where", "--cache", cache.to_str().unwrap()]);
     assert_eq!(
         (code, out.trim()),
-        (0, cache.join(DEV).to_str().unwrap()),
+        (0, cache.join(V2).to_str().unwrap()),
         "--cache: {err}"
     );
     let _ = std::fs::remove_dir_all(&base);
 }
 
-/// Rule r6: `--lock`, `--frozen` and `--update` are refused, exit 2, before
-/// anything else: no lock is written and no cache is made.
+/// `--lock`, `--frozen` and `--update` are honored: none is refused with the
+/// dev channel's message (exit 2, "refused by a 2.0.0-dev SDK"). `--frozen`
+/// with no lock file reads the lock and fails on it, naming it, without a
+/// network call; a refused `--update` without `--lock` is the ordinary usage
+/// error.
 #[test]
-fn lock_frozen_and_update_are_refused() {
+fn lock_frozen_and_update_are_honored() {
     let base = scratch("pinning");
-    let lock = base.join("chtypes.lock");
-    let l = lock.to_str().unwrap();
     let cache = base.join("cache");
-    for args in [
-        vec!["fetch", "26.8", "--lock", l],
-        vec!["fetch", "26.8", "--frozen"],
-        vec!["fetch", "26.8", "--frozen", "--lock", l],
-        vec!["fetch", "--update", "--lock", l],
-        vec!["fetch", "--all", "--frozen"],
-    ] {
-        let (code, out, err) = run_env(&args, &[("CHTYPES_CACHE", cache.to_str().unwrap())]);
-        assert!(
-            code == 2
-                && out.is_empty()
-                && err.contains("refused by a 2.0.0-dev SDK")
-                && err.contains("14 days"),
-            "{args:?}: {code} stdout {out:?} stderr {err}"
-        );
-    }
-    assert!(!lock.exists(), "a refused --lock wrote {}", lock.display());
+    let c = cache.to_str().unwrap();
+    let (code, out, err) = run_env(&["fetch", "26.8", "--frozen"], &[("CHTYPES_CACHE", c)]);
     assert!(
-        !cache.exists(),
-        "a refused fetch made the cache {}",
-        cache.display()
+        code != 0
+            && out.is_empty()
+            && !err.contains("refused by a 2.0.0-dev SDK")
+            && err.contains("chtypes.lock"),
+        "fetch --frozen with no lock: {code} stdout {out:?} stderr {err}"
+    );
+    let missing = base.join("missing.lock");
+    let (code, out, err) = run_env(
+        &[
+            "fetch",
+            "26.8",
+            "--frozen",
+            "--lock",
+            missing.to_str().unwrap(),
+        ],
+        &[("CHTYPES_CACHE", c)],
+    );
+    assert!(
+        code != 0
+            && out.is_empty()
+            && !err.contains("refused by a 2.0.0-dev SDK")
+            && err.contains("missing.lock"),
+        "fetch --frozen --lock <missing>: {code} stdout {out:?} stderr {err}"
+    );
+    let (code, _, err) = run_env(&["fetch", "26.8", "--update"], &[("CHTYPES_CACHE", c)]);
+    assert!(
+        code == 2 && err.contains("--update requires --lock") && !err.contains("2.0.0-dev"),
+        "fetch --update without --lock: {code} {err}"
+    );
+    assert!(
+        !missing.exists(),
+        "a frozen fetch wrote {}",
+        missing.display()
     );
     let _ = std::fs::remove_dir_all(&base);
 }
 
-/// Rule r6: every override in the environment is ignored and named exactly
-/// once, and an offline fetch from an empty dev cache is
+/// The environment's overrides are honored, never ignored: nothing warns
+/// "is set and IGNORED", and an offline fetch from an empty cache is
 /// CHTYPES_ARTIFACT_MISSING (exit 1), whatever base, key or unsigned opt-in
 /// the environment names.
 #[test]
-fn every_override_is_ignored_and_named_once() {
+fn no_override_is_ignored() {
     let base = scratch("overrides");
     let cache = base.join("cache");
     // The fixture key (tests/fixtures/fetch-v1/test-key/public.hex).
@@ -239,46 +259,32 @@ fn every_override_is_ignored_and_named_once() {
         &["fetch", "26.8", "--offline", "--platform", "linux-amd64"],
         &[
             ("CHTYPES_CACHE", cache.to_str().unwrap()),
-            ("CHTYPES_ARTIFACTS_URL", "http://127.0.0.1:9/chtypes/v1"),
+            ("CHTYPES_ARTIFACTS_URL", "http://127.0.0.1:9/chtypes/v2"),
             ("CHTYPES_TRUSTED_KEYS", test_key),
             ("CHTYPES_ALLOW_UNSIGNED", "1"),
         ],
     );
     assert!(
         code == 1 && out.is_empty() && err.contains("CHTYPES_ARTIFACT_MISSING"),
-        "an offline fetch from an empty dev cache: {code} {out:?} {err}"
+        "an offline fetch from an empty cache: {code} {out:?} {err}"
     );
-    for name in [
-        "CHTYPES_ARTIFACTS_URL",
-        "CHTYPES_TRUSTED_KEYS",
-        "CHTYPES_ALLOW_UNSIGNED",
-    ] {
-        let n = err
-            .matches(&format!("WARNING: {name} is set and IGNORED"))
-            .count();
-        assert_eq!(
-            n, 1,
-            "{name} was warned about {n} times, want exactly once:\n{err}"
-        );
-    }
     assert!(
-        err.contains("https://registry-staging.wavehouse.dev/chtypes/v2-dev")
-            && err.contains("824345f9bcf8e5bf"),
-        "the warning does not name the base and the key it uses instead:\n{err}"
+        !err.contains("is set and IGNORED"),
+        "the binary ignored an override, as only the dev channel does:\n{err}"
     );
     let _ = std::fs::remove_dir_all(&base);
 }
 
 /// `where --all` lists every directory searched, the cache root through its
-/// v2-dev subroot first, one per line; the default output stays the root alone
+/// v2 subroot first, one per line; the default output stays the root alone
 /// (public issues #530 and #527).
 #[test]
 fn where_all_lists_the_search_dirs() {
     let base = scratch("where-all");
     let c = base.to_str().unwrap();
-    let root = base.join(DEV);
+    let root = base.join(V2);
     let want = format!(
-        "{}\n/usr/local/share/chtypes/{DEV}\n/opt/chtypes/{DEV}\n",
+        "{}\n/usr/local/share/chtypes/{V2}\n/opt/chtypes/{V2}\n",
         root.display()
     );
     let (code, out, err) = run(&["where", "--all", "--cache", c]);
@@ -353,11 +359,11 @@ fn hex(n: u64) -> String {
     format!("{n:064x}")
 }
 
-/// One record of this binary's own fingerprint, written by hand where the dev
-/// CLI reads the explicit cache `cache` (its v2-dev subroot), as an install
+/// One record of this binary's own fingerprint, written by hand where the
+/// CLI reads the explicit cache `cache` (its v2 subroot), as an install
 /// leaves it; `n` names its manifest. Returns the entry directory.
 fn install_record(cache: &Path, n: u64, version: &str, build: &str) -> PathBuf {
-    let entry = cache.join(DEV).join("unpacked/sha256").join(hex(n));
+    let entry = cache.join(V2).join("unpacked/sha256").join(hex(n));
     std::fs::create_dir_all(&entry).unwrap();
     let record = serde_json::json!({
         "schema": 2,
@@ -395,10 +401,10 @@ fn install_record(cache: &Path, n: u64, version: &str, build: &str) -> PathBuf {
 /// installed it is CHTYPES_ARTIFACT_MISSING (exit 1). `prune` removes the
 /// builds of a line newer ones supersede: a dry run names them and removes
 /// nothing, `--line` and `--keep` narrow it (public issues #493 and #494). The
-/// real binary reaches only the staging registry, so the online answer is the
+/// real binary reaches only the production registry, so the online answer is the
 /// conformance suite's (`resolve-build-*`).
 #[test]
-fn resolve_offline_and_prune_over_a_dev_cache() {
+fn resolve_offline_and_prune_over_a_v2_cache() {
     let base = scratch("resolve-prune");
     let cache = base.join("cache");
     let c = cache.to_str().unwrap();
@@ -428,7 +434,7 @@ fn resolve_offline_and_prune_over_a_dev_cache() {
     let (code, out, err) = run(&["prune", "--dry-run", "--cache", c]);
     let summary = format!(
         "chtypes: would prune 1 build(s) under {}",
-        cache.join(DEV).display()
+        cache.join(V2).display()
     );
     assert!(
         code == 0 && out == would && err.contains(&summary),

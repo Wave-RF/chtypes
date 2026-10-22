@@ -1,7 +1,7 @@
 name: v1-abi
 
 # ABI v1's generated FFI layer, on pull requests into main and v2 and in the merge queue (docs/reference/abi-v1.md).
-# On v2 its v1-abi-gen job also checks ABI v2 (UNSTABLE), the same way (docs/reference/abi-v2.md).
+# On v2 its v1-abi-gen job also checks ABI v2 (locked), the same way (docs/reference/abi-v2.md).
 #
 # spec/abi-v1/abi.json describes the whole ABI and scripts/abi-v1/gen.py
 # generates every file that states it: the C header, the export list, the
@@ -168,7 +168,7 @@ jobs:
             "$cxx" -std=c++20 -Wall -Wextra -Werror -pedantic -fsyntax-only -x c++ include/chtypes.h
           done
           echo "include/chtypes.h: C11 and C++20, gcc and clang, -Wall -Wextra -Werror -pedantic"
-      # ABI v2 (UNSTABLE, docs/reference/abi-v2.md): the same generator, run
+      # ABI v2 (locked, docs/reference/abi-v2.md): the same generator, run
       # with --major 2, checks spec/abi-v2/ and its own outputs. ABI v1's steps
       # above never read them, and these never read ABI v1's outputs.
       - name: every ABI v2 generated file matches spec/abi-v2/ (gen.py --major 2 --check)
@@ -218,7 +218,7 @@ jobs:
           sys.exit(1 if bad else 0)
           PY
           {
-            echo "### ABI v2 (UNSTABLE)"
+            echo "### ABI v2 (locked)"
             echo
             echo "\`CHS_ABI_FINGERPRINT\` = \`$ours\`"
           } >> "$GITHUB_STEP_SUMMARY"

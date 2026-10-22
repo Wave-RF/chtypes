@@ -1,6 +1,7 @@
 /**
  * Public issue #530: `cacheRoot` and `searchDirs` report the resolution the fetch layer runs, from the one table
- * every binding's test reads (`tests/fixtures/cache-roots/cases.json`, with the v2 dev channel's `v2-dev` subroots), and create nothing.
+ * every binding's test reads (`tests/fixtures/cache-roots/cases.json`, with the production generation-2 channel's `v2` subroots, the
+ * default since the lock), and create nothing.
  */
 
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
@@ -9,6 +10,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cacheRoot, searchDirs } from '../src/index.js';
+import { channelName } from '../src/ocifetch/channel.js';
+
+// The shared table is the production channel's, the default: this file selects no channel, and says so.
+if (channelName() !== 'v2') throw new Error(`cache-roots-api: the default channel is ${channelName()}, not v2`);
 
 interface Case {
   readonly name: string;
@@ -51,9 +56,9 @@ describe('the shared table', () => {
 describe('the defaults and the no-create rule', () => {
   it('no options is the defaults, and an empty cacheDir counts as unset', () => {
     vi.stubEnv('CHTYPES_CACHE', path.join(tmp, 'env'));
-    expect(cacheRoot()).toBe(path.join(tmp, 'env', 'v2-dev'));
-    expect(searchDirs()[0]).toBe(path.join(tmp, 'env', 'v2-dev'));
-    expect(cacheRoot({ cacheDir: '' })).toBe(path.join(tmp, 'env', 'v2-dev'));
+    expect(cacheRoot()).toBe(path.join(tmp, 'env', 'v2'));
+    expect(searchDirs()[0]).toBe(path.join(tmp, 'env', 'v2'));
+    expect(cacheRoot({ cacheDir: '' })).toBe(path.join(tmp, 'env', 'v2'));
   });
 
   it('creates nothing', () => {

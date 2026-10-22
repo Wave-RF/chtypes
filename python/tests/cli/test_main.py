@@ -185,8 +185,8 @@ def _is_error(obj) -> bool:
 
 
 def test_python_dash_m_runs_the_same_cli(tmp_path) -> None:
-    # A child process: no test seam reaches it, so it speaks the dev channel,
-    # which reads an explicit cache through its v2-dev subroot (rule r5).
+    # A child process: no test seam reaches it, so it speaks the production
+    # channel, which reads an explicit cache through its v2 subroot.
     result = subprocess.run(
         [sys.executable, "-m", "chtypes", "where"],
         capture_output=True,
@@ -195,7 +195,7 @@ def test_python_dash_m_runs_the_same_cli(tmp_path) -> None:
         timeout=60,
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == str(tmp_path / "c" / "v2-dev")
+    assert result.stdout.strip() == str(tmp_path / "c" / "v2")
 
 
 def _zero_x_registry(root: Path) -> None:

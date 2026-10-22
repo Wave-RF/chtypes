@@ -155,7 +155,8 @@ export interface ServerProfile {
   readonly settings?: Settings | undefined;
   /**
    * The server's `<macros>`, which a Replicated engine's ZooKeeper path and
-   * replica name expand. ABSENT is not `{}`: absent means the server's macros
+   * replica name read (validated, and applied only by a build that advertises
+   * `server_profile.macros`). ABSENT is not `{}`: absent means the server's macros
    * are UNKNOWN, and a schema whose engine reads one is declined; present, even
    * `{}`, is the server's COMPLETE set. A macro's name and value are text: they
    * have no byte form.

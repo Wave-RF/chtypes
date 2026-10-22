@@ -29,11 +29,12 @@
  * concurrent prune removed between the lookup and the hold is looked up (or
  * fetched) again, once.
  *
- * This is the 2.0.0-dev registry: its fetch layer speaks the ABI v2 dev channel
- * (`./ocifetch/channel.ts`; `spec/abi-v2/docs.md`, rules r5 and r6). A pinning
- * option (`frozen`, `lockPath`, `lockWrite`, `update`) is refused at
- * construction, as misuse, and a base or trust option is ignored with one
- * warning.
+ * This registry's fetch layer speaks ABI v2's production channel
+ * (`./ocifetch/channel.ts`; `docs/guides/fetch-v1.md`, "Generation 2 after the
+ * lock"): it honors the base, trust and pinning options. (Under the dev channel,
+ * which a 2.0.0-dev SDK spoke and a test can select, a pinning option is
+ * refused at construction, as misuse, and a base or trust option is ignored
+ * with one warning.)
  *
  * Construction opens nothing: `Registry.open` is asynchronous only because the
  * fetch layer is, and nothing opens an artifact except a request for a version
@@ -134,7 +135,7 @@ function fetchLayerOptions(options: FetchOptions = {}): FetchV1Options {
 
 /**
  * The cache root a fetch, list or `chtypes where` with `options` would use: `options.cacheDir`, else
- * `CHTYPES_CACHE` (each used through its `v2-dev` subroot, rule r5 of `spec/abi-v2/docs.md`), else `${XDG_CACHE_HOME:-~/.cache}/chtypes/v2-dev`. It is the
+ * `CHTYPES_CACHE` (each used through its `v2` subroot), else `${XDG_CACHE_HOME:-~/.cache}/chtypes/v2`. It is the
  * fetch layer's own resolution and the first entry of {@link searchDirs}; it creates nothing and reads no cache.
  */
 export function cacheRoot(options: FetchOptions = {}): string {

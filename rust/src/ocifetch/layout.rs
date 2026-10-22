@@ -195,11 +195,11 @@ impl VerifiedRecord {
 }
 
 /// Resolve the layout root. An explicit cache (`cache_env_override`, else
-/// `CHTYPES_CACHE`) is used through the contract's subroot: under the dev
-/// channel `<cache>/v2-dev`, never `<cache>` itself, which a 1.x binding uses
-/// as its whole layout (rule r5, a MUST). Otherwise
-/// `${XDG_CACHE_HOME:-$HOME/.cache}/chtypes/<leaf>`, `v2-dev` under the dev
-/// channel.
+/// `CHTYPES_CACHE`) is used through the contract's subroot: under the
+/// production channel `<cache>/v2` (the dev channel's is `<cache>/v2-dev`),
+/// never `<cache>` itself, which a 1.x binding uses as its whole layout (rule
+/// r5, a MUST). Otherwise `${XDG_CACHE_HOME:-$HOME/.cache}/chtypes/<leaf>`,
+/// `v2` under the production channel.
 pub fn cache_root(cache_env_override: Option<&str>) -> Result<PathBuf> {
     let contract = channel::active();
     let explicit = cache_env_override

@@ -4,6 +4,8 @@ Every item here is a deliberate decline or a stated boundary, not a bug queue. T
 
 When you get one, fall back to the server: validate cautiously, forward the row unpreviewed, and never tell a user they are wrong on the strength of a decline.
 
+The builds this page names by id were measured while v2 was in development, on its pre-release channel. The SDK 2.0.0 libraries on the production channel are build `20261021.191313`: a claim tied to an earlier build id holds for that build once it is re-checked on it, and this page then names it.
+
 <a id="macos-is-a-development-floor-not-an-oracle"></a>
 
 ## macOS artifacts match ClickHouse on macOS; on 26.3, match the server's platform
@@ -20,20 +22,13 @@ The darwin artifacts give exactly the answers ClickHouse itself gives on macOS, 
 
 (An earlier version of this page said every macOS float parse diverged from a server. That was measured on 25.8 and no longer holds on any supported line.)
 
-## EPHEMERAL columns cannot be previewed through a format stream
+<a id="ephemeral-columns-cannot-be-previewed-through-a-format-stream"></a>
 
-An INSERT whose explicit column list names an EPHEMERAL column cannot be previewed here, because a format stream carries no column list. There is no way to tell, from the body alone, that the caller meant the ephemeral form.
+## EPHEMERAL columns are previewed through the call's column list
 
-Detect the intersection at compile time and decline it rather than mispreview:
+An INSERT whose column list names an EPHEMERAL column is previewed by passing that list as `columns`: the value is read (`src` `ephemeral_input`, `is_stored` false) and feeds the DEFAULT and MATERIALIZED expressions that read it, but is not stored. With no `columns`, a body field naming it is an unknown field (`src` `skipped`).
 
-|            |                                                          |
-| ---------- | -------------------------------------------------------- |
-| Go         | `schema.Columns`, `DefaultKind == chtypes.KindEphemeral` |
-| Python     | `schema.columns`, `DefaultKind.EPHEMERAL`                |
-| TypeScript | `schema.columns`, `defaultKind === 'EPHEMERAL'`          |
-| Rust       | `schema.columns()`, `DefaultKind::Ephemeral`             |
-
-A gateway that previews the intersection anyway shows a row that cannot exist.
+**Measured** by the artifact producer on the 2.0.0 libraries (build `20261021.191313`) of all four lines, through the batch preview, in JSON and CSV, with and without a column list; a 26.8 server stores the same rows. (An earlier version of this page said such an INSERT cannot be previewed, because a format stream carries no column list. The v2 calls take that list as `columns`.)
 
 ## Declined by design
 
@@ -127,7 +122,7 @@ The parse-once block twin sits under the same guarantee. For the rule a filter's
 
 ## Some formats depend on the artifact, not the binding
 
-Which input formats a library reads is a property of the **loaded artifact**, not of your binding's version: every 1.0 build lists them in its `build_info`. Probe that rather than assuming from the package version. A format the loaded library does not read is refused with 73 or 117, exactly as its own server would refuse it.
+Which input formats a library reads is a property of the **loaded artifact**, not of your binding's version: every build lists them in its `build_info` (`capabilities.input_formats`). Probe that rather than assuming from the package version. A format the loaded library does not read is refused with 73 or 117, exactly as its own server would refuse it.
 
 ## The error model is normative
 
@@ -255,9 +250,11 @@ The decline catalog (`spec/abi-v2/declines/declines.json`) gives two reasons, an
 
 **Measured** by the artifact producer: direct server `SELECT`s against the library at artifact build `20261009.074908` for the divergence, and the producer's differential on build `20261010.180314` as published for the decline (zero over-accepts, zero over-rejects on every pair). **Safe forms**, which answer on every line: a typed `{p:DateTime}` parameter, and canonical `YYYY-MM-DD hh:mm:ss` text. On a build before `20261010.180314`, RFC 3339 spellings (`…T00:00:00Z`, or with an offset), compact forms and unix timestamps are not safe. The filter enforcement gate for the eleven covered pairs is lifted from build `20261010.180314`; on earlier builds the gate stays on.
 
-## Known gaps in 1.0
+<a id="known-gaps-in-10"></a>
 
-Each item is a place where 1.0 does less than you might expect, or answers differently from a server. None of them returns a wrong answer without saying so, and every one is planned. Each entry says what happens, what to do today, and that a fix is planned.
+## Known gaps
+
+Each item is a place where the library does less than you might expect, or answers differently from a server. None of them returns a wrong answer without saying so, and every one is planned. Each entry says what happens, what to do today, and that a fix is planned.
 
 ### Nested String values carry no raw bytes
 
@@ -265,11 +262,13 @@ A `String` value nested inside `Array(String)`, `Map` or `Tuple` carries no raw 
 
 **Workaround:** read the rendering for a nested value, or select the nested element as its own scalar column when you need the bytes. **Planned.**
 
-### Binary input parameters must be UTF-8
+<a id="binary-input-parameters-must-be-utf-8"></a>
 
-The values of `settings` and `query_params` must be UTF-8. A value that is not valid UTF-8 is refused.
+### Binary input parameters: Rust and the 1.x SDKs need UTF-8
 
-**Workaround:** inline the value as `unhex('<hex>')`, built from hex digits only. **Planned:** a byte-safe object form.
+**Fixed in ABI v2 for Go, Python and TypeScript.** A `settings` or `query_params` value whose bytes are not valid UTF-8 is carried in the object form `{"b64": "<standard base64, padded>"}` (Input values, in the Preamble of [`spec/abi-v2/docs.md`](../spec/abi-v2/docs.md)), and those three bindings send it in place of the string ([`guides/settings.md`](guides/settings.md)). Rust's settings and query parameters take `String`, so a value that is not valid UTF-8 cannot be expressed there, and on ABI v1 (the 1.x SDKs) such a value is refused.
+
+**Workaround** where the binding cannot send the bytes: inline the value as `unhex('<hex>')`, built from hex digits only.
 
 ### Zone names outside ClickHouse's embedded table follow the host
 
@@ -285,9 +284,7 @@ Where the host lacks the file, the library refuses the name with ClickHouse's er
 
 ### `SHOW CREATE` of a Memory table is declined
 
-`SHOW CREATE TABLE` text from live 26.3, 26.7, 26.8 and 26.9 servers compiles with the schema call for every MergeTree-family shape measured, which is 28 of the 32 shapes. The 4 `ENGINE = Memory` tables are declined, not mis-compiled.
-
-**Workaround:** use the discovery calls for those tables. **Planned.**
+**Fixed in the 2.0.0 libraries** (build `20261021.191313`, measured by the artifact producer). `SHOW CREATE TABLE` text from live 26.3, 26.7, 26.8 and 26.9 servers compiles with the schema call for all 32 shapes measured (8 per line, `ENGINE = Memory` included), under `posture` `create` and `load`. Compiling means the call succeeds; the compiled columns were not compared with the server's. The 28 of 32, with the 4 `ENGINE = Memory` tables declined, was measured on the 1.x libraries.
 
 ### A batch preview with a filter in a different zone than the batch is declined
 
@@ -309,7 +306,7 @@ On a 1.0 library, **workaround:** compare `value`, the raw bytes, with your inpu
 
 ### No call for a server's version or settings
 
-1.0 has no call that queries a server's version or its changed settings, and no settings reader. The caller supplies both.
+The library has no call that queries a server's version or its changed settings, and no settings reader. The caller supplies both.
 
 **Workaround:** read the version and settings from your own connection and pass them in. **Planned.**
 
@@ -319,10 +316,12 @@ On ABI v2, a table a server already holds was created under that CREATE's own se
 
 `TTL now() + INTERVAL 1 DAY` in a `CREATE TABLE` returns an `InternalError` (`CHS_INTERNAL`) where a server refuses the statement with its own error. Measured against the 26.9.8.3 library (`measured`).
 
-**Workaround:** treat an internal error from a CREATE whose TTL does not reference a column as that refusal. **Planned:** fixed in 1.0.x.
+**Workaround:** treat an internal error from a CREATE whose TTL does not reference a column as that refusal. **Planned.**
 
-## Pre-1.0
+<a id="pre-10"></a>
 
-How a library and the SDK opening it are matched before 1.0 is in [`support-v1.md`](support-v1.md#pre-10).
+## Matching a library to an SDK
 
-Anything else may still move before 1.0. Each binding's own CHANGELOG carries its list.
+A v2 library is matched to the SDK that opens it by the ABI fingerprint its signed statement carries, and the loader refuses a mismatch naming both sides ([`support-v2.md`](support-v2.md#sdk-and-abi)). ABI v2 is locked: it changes only by reserve and decline (rule r9 in [`spec/abi-v2/docs.md`](../spec/abi-v2/docs.md)), so an option a build does not implement is declined, never ignored. Each binding's own CHANGELOG carries what each release changes.
+
+How a 1.x library and SDK were matched before 1.0 is in [`support-v1.md`](support-v1.md#pre-10).

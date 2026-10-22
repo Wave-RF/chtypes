@@ -134,7 +134,8 @@ class Options:
     `bases`, `trusted_keys` and `allow_unsigned` (and their environment
     variables) are ignored, each named once, and `frozen`, `lock_path`,
     `lock_write` and `update` are refused before any request (rule r6);
-    `cache_dir` is used through its `v2-dev` subroot (rule r5).
+    `cache_dir` is used through its channel's subroot, `v2` (or `v2-dev` on the
+    dev channel, rule r5).
     """
 
     platform: str | None = None

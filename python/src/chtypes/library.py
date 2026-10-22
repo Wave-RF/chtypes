@@ -504,7 +504,8 @@ class Library:
         `server` (from `new_server`) compiles the table on that server: the
         schema's home zone is the server's timezone, the server's settings layer
         under the schema's own, and a Replicated engine's ZooKeeper path and
-        replica name expand the server's macros. A closed server is a
+        replica name read the server's macros (validated, and applied only by a
+        build that advertises `server_profile.macros`). A closed server is a
         `UsageError`, raised before any call; a server from another library is
         that library's own refusal, also a `UsageError`. `None` is no server: the
         schema is on the image's own server.

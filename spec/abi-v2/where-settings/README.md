@@ -38,12 +38,6 @@ A `result-truncate` setting never makes a consumer refuse: it is outside a row v
 
 **The lists are documentation of which settings matter. They are not the refuse key.** What the library declines is decided by the library, by name, and listed in `filter_declined_settings`.
 
-<!-- remove-at-v2-lock -->
-
-**Dev-only note.** v2-dev builds before the first one at fingerprint `sha256:d60a681ea0e249ab9e2c83b50640ad9cef040261ddf61805106c93e2c68774e4` write no top-level `filter_declined_settings`. From fingerprint `sha256:28c7445ce6b5c6d0ae33177fd60eb7b3b5654a966c842b8d812aea622824dc72` they list the server profile's declined settings only, under `server.filter_declined_settings`, and name a declined setting from the defaults or the schema's own settings only at evaluation; before it they list none. A dev SDK at `sha256:d60a681e…` or later refuses every one of them (rule r6). A consumer testing those builds treats a setting at any layer whose `tier` is `predicate`, `predicate-unflipped` or `result-content` as a reason to refuse.
-
-<!-- /remove-at-v2-lock -->
-
 ## The method
 
 The lists are an over-approximation by source scope, which is the safe direction: a setting is listed when the server reads it in a scope a WHERE can reach. The lists were then validated against real servers by a flip test (`measured`): each listed setting was set to other values and the WHERE's row verdicts compared. Of a random sample of unlisted settings, 0 changed a verdict (`measured`). The known positives are listed.

@@ -17,7 +17,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/wave-rf/chtypes/go/chtypes"
+	"github.com/wave-rf/chtypes/go/v2/chtypes"
 )
 
 const ddl = "CREATE TABLE t (x UInt8, ts DateTime DEFAULT now()) ENGINE = MergeTree ORDER BY tuple()"
