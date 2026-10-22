@@ -39,10 +39,10 @@ Take the reason a call returned (`chs_error_reason`, or a document's `reason`, `
 
 ## Provenance and changes
 
-Produced by the artifact producer at its commit `c3dde1a4`, generator `chtypes filter-declines generator`. The file has 138 entries over the lines 26.3, 26.7, 26.8 and 26.9.
+Produced by the artifact producer at its commit `7a354eed`, generator `chtypes filter-declines generator`. The file has 138 entries over the lines 26.3, 26.7, 26.8 and 26.9.
 
 The sha256 of the file, computed by `scripts/abi-v2/check-declines.py --print-table` and checked by `--check`:
 
-- `declines.json`: `37302c80c66da878ed36ce39358da7cd819091d2d58b057d770a8f96614fc417`
+- `declines.json`: `147dff4a6c665e75bfd8c123f9694259df85fdbc66bfb7af600ed1caec81041a`
 
 The producer regenerates the catalog. A changed set of entries is a new copy here, with this hash updated in the same change.

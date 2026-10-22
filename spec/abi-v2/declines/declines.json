@@ -887,8 +887,7 @@
     "chs_filter_create",
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch",
-    "chs_schema_describe"
+    "chs_preview_batch"
    ],
    "retirement": "none",
    "description": "Each recursive walk the library itself writes runs the server's own stack check first: once the calling thread has used half its stack, the call is refused with the server's code and message (TOO_DEEP_RECURSION) instead of overflowing the stack. The depth this allows depends on the calling thread's stack size; on a small stack it is less than a server's."
