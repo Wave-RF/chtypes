@@ -1150,6 +1150,17 @@ class Channel:
     abi: int
 
 
+def own_fingerprint() -> str:
+    """The ABI v2 fingerprint this tree's CLIs speak, from the generator
+    itself (`gen.py --major 2 --fingerprint`), never typed here."""
+    out = subprocess.run([sys.executable, "-I", str(ROOT / "scripts" / "abi-v1" / "gen.py"), "--major", "2", "--fingerprint"],
+                         capture_output=True, text=True, timeout=120, check=False)
+    fp = out.stdout.strip().removeprefix("sha256:")
+    if out.returncode != 0 or not re.fullmatch(r"[0-9a-f]{64}", fp):
+        raise RuntimeError(f"gen.py --fingerprint exited {out.returncode}: {out.stderr.strip()[-200:]!r}")
+    return fp
+
+
 def channel_from_script(script: Path = CHANNEL_SCRIPT) -> Channel:
     """The channel, read from the ONE file that defines it for this branch's
     releases (`scripts/release-channel.sh get <NAME>`), never typed here."""
@@ -1176,17 +1187,31 @@ def channel_from_script(script: Path = CHANNEL_SCRIPT) -> Channel:
     return ch
 
 
+class NotFound(RuntimeError):
+    """The registry answered 404 for a reference."""
+
+
 class Registry:
     """What the channel's registry serves, read anonymously over its OCI API:
     its lines, and each line's manifest digest for a platform. Every writer is
-    judged against this, never against another CLI's answer."""
+    judged against this, never against another CLI's answer.
 
-    def __init__(self, base: str) -> None:
+    `alias_fp` is the fingerprint the CLIs under test speak, on a channel whose
+    CLIs resolve a line through its alias tag `<line>--fp-<fp>` before the tag
+    itself (the dev channel, rule r6). A repository may then hold builds of
+    more than one fingerprint, and the line's own tag names the newest of any
+    of them, so the expected manifest is the alias's, exactly as the CLIs
+    resolve it."""
+
+    def __init__(self, base: str, alias_fp: str | None = None) -> None:
         scheme, _, rest = base.partition("://")
         host, _, repo = rest.partition("/")
         if scheme != "https" or not host or not repo:
             raise ValueError(f"not an https registry base with a repository path: {base!r}")
+        if alias_fp is not None and not re.fullmatch(r"[0-9a-f]{64}", alias_fp):
+            raise ValueError(f"not a fingerprint (64 lowercase hex): {alias_fp!r}")
         self.api = f"{scheme}://{host}/v2/{repo}"
+        self.alias_fp = alias_fp
 
     def _get(self, url: str, accept: str) -> Any:
         req = urllib.request.Request(url, headers={"Accept": accept, "User-Agent": V2_USER_AGENT})
@@ -1197,6 +1222,8 @@ class Registry:
                     return json.loads(resp.read().decode("utf-8"))
             except urllib.error.HTTPError as e:
                 last = e
+                if e.code == 404:
+                    raise NotFound(f"GET {url}: {e}") from e
                 if e.code < 500 and e.code != 429:
                     break
             except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
@@ -1210,10 +1237,22 @@ class Registry:
         two = [t for t in tags if re.fullmatch(r"[0-9]+\.[0-9]+", t)]
         return sorted(two, key=lambda t: tuple(int(x) for x in t.split(".")), reverse=True)
 
+    def index_for(self, line: str) -> Any:
+        """The index the CLIs resolve for `line`: the alias tag's when this
+        channel has one and it is published, else the line's own tag (an
+        absent alias falls back, as the CLIs' does)."""
+        accept = "application/vnd.oci.image.index.v1+json"
+        if self.alias_fp is not None:
+            try:
+                return self._get(f"{self.api}/manifests/{line}--fp-{self.alias_fp}", accept)
+            except NotFound:
+                pass
+        return self._get(f"{self.api}/manifests/{line}", accept)
+
     def digest(self, line: str, platform: str) -> str:
         """The digest of the platform manifest the line's index names."""
         osname, _, arch = platform.partition("-")
-        index = self._get(f"{self.api}/manifests/{line}", "application/vnd.oci.image.index.v1+json")
+        index = self.index_for(line)
         found = [
             m.get("digest", "")
             for m in index.get("manifests", [])
@@ -1719,7 +1758,7 @@ def main_run_v2(
     at the start."""
     names = [b for b in BINDINGS if b in clis]
     channel = channel or channel_from_script()
-    registry = registry or Registry(channel.base)
+    registry = registry or Registry(channel.base, alias_fp=own_fingerprint() if channel.name.endswith("-dev") else None)
     platform = platform or host_platform()
     if platform is None:
         print("cache-interop: --platform is required on a host the registry has no build for (it serves linux-amd64, linux-arm64 and darwin-arm64)", file=sys.stderr)
@@ -2068,6 +2107,34 @@ def selftest_v2() -> None:
     except RuntimeError:
         pass
     assert Registry("https://r.example/chtypes/v2-dev").api == "https://r.example/v2/chtypes/v2-dev"
+    # The dev channel's expected manifest is its alias tag's, read first; the
+    # line's own tag only when no alias is published (a NotFound, never retried).
+    fp = "ab" * 32
+    asked: list[str] = []
+
+    def probe(served: dict[str, Any]) -> Registry:
+        r = Registry("https://r.example/chtypes/v2-dev", alias_fp=fp)
+
+        def fake_get(url: str, accept: str) -> Any:
+            asked.append(url.rsplit("/", 1)[1])
+            if url.rsplit("/", 1)[1] in served:
+                return served[url.rsplit("/", 1)[1]]
+            raise NotFound(url)
+
+        r._get = fake_get  # type: ignore[method-assign]
+        return r
+
+    def idx(d: str) -> dict[str, Any]:
+        return {"manifests": [{"digest": "sha256:" + d * 64, "platform": {"os": "linux", "architecture": "amd64"}}]}
+
+    assert probe({f"26.9--fp-{fp}": idx("1"), "26.9": idx("2")}).digest("26.9", "linux-amd64") == "sha256:" + "1" * 64, "the alias wins"
+    assert asked == [f"26.9--fp-{fp}"], asked
+    asked.clear()
+    assert probe({"26.9": idx("2")}).digest("26.9", "linux-amd64") == "sha256:" + "2" * 64, "an absent alias falls back"
+    assert asked == [f"26.9--fp-{fp}", "26.9"], asked
+    asked.clear()
+    assert Registry("https://r.example/chtypes/v2").alias_fp is None
+    assert re.fullmatch(r"[0-9a-f]{64}", own_fingerprint())
     schema = record_schema_for(ch)
     assert schema["properties"]["schema"] == {"const": ch.record_schema}
     assert json.loads(VERIFIED_SCHEMA.read_text(encoding="utf-8"))["properties"]["schema"] == {"const": 1}, "the file is never edited"
