@@ -163,7 +163,7 @@ Three axes — the language you call from, the platform you run on, and the Clic
 
 ## Known gaps in 1.0
 
-A short list of places where 1.0 does less than you might expect, each with what happens, a workaround and a note that a fix is planned: nested `String` values carry no raw bytes, binary `settings` and `query_params` values must be UTF-8, zone names follow the host's zone files, `SHOW CREATE` of a Memory table is declined, a batch preview with a filter in another zone is declined, per-call settings values are not validated like `SET`, `lossy` on a raw NUL in TSV, and no call for a server's version or settings. The full text is in **[docs/limitations.md](docs/limitations.md#known-gaps-in-10)**.
+A short list of places where the library does less than you might expect, each with what happens, a workaround and a note that a fix is planned: nested `String` values carry no raw bytes, binary `settings` and `query_params` values must be UTF-8 in Rust and the 1.x SDKs, zone names follow the host's zone files, a batch preview with a filter in another zone is declined, per-call settings values are not validated like `SET`, `lossy` on a raw NUL in TSV, and no call for a server's version or settings. The full text is in **[docs/limitations.md](docs/limitations.md#known-gaps-in-10)**.
 
 ## Documentation
 

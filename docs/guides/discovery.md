@@ -24,8 +24,8 @@ Three things, once per connection, cached per deployment (or per tenant, on brin
 1. **The version.** `SELECT version()` on your connection, then ask the registry for it. A request is a bare two, three or four-part spelling; a `v` prefix or a `-lts` suffix is a `UsageError`, so pass the numeric parts only. The registry fetches a version it does not have if `autofetch` is on ([`guides/artifacts.md`](artifacts.md#lazy-fetch-is-opt-in)).
 2. **The changed settings.** Your own query over `system.settings`. They become the profile you declare at every compile and every call.
 3. **The table.** Either of two ways:
-   - **Compile the server's own `SHOW CREATE TABLE` text.** Compile takes exactly one `CREATE TABLE` statement, and the text a server prints is one. This is measured on live 26.3, 26.7, 26.8 and 26.9 servers for every MergeTree-family shape tried (28 of 32); `ENGINE = Memory` tables are declined ([`limitations.md`](../limitations.md#show-create-of-a-memory-table-is-declined)).
-   - **Use the discovery calls** below, which also cover those Memory tables.
+   - **Compile the server's own `SHOW CREATE TABLE` text.** Compile takes exactly one `CREATE TABLE` statement, and the text a server prints is one. On the 2.0.0 libraries this is measured on live 26.3, 26.7, 26.8 and 26.9 servers for all 32 shapes tried, `ENGINE = Memory` included ([`limitations.md`](../limitations.md#show-create-of-a-memory-table-is-declined)).
+   - **Use the discovery calls** below.
 
 ## The shape of it
 

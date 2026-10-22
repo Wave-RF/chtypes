@@ -41,8 +41,11 @@
  * other negative or library-private number is ever written. Every decline and library-side refusal
  * also names its reason, the catalog id, in the error and in the document (`reason`,
  * `verdict_reason`), and ids and the sentinel are stable once published (rule r4). A message is
- * informative: once a reason is structured no message text is normative, the pinned texts of
- * generation 2's earlier drafts included.
+ * informative: a caller keys on the status, the code and the reason, never on message text. Exact
+ * text is guaranteed only where this description quotes it: the decline of a member this build does
+ * not implement (Input documents, reason `option-not-implemented`), an `ATTACH TABLE` statement
+ * under `create` (`chs_schema_create`), and a dev SDK's fingerprint refusal (rule r6). No other
+ * message text is normative, the pinned texts of generation 2's earlier drafts included.
  *
  * Conditional members. A document's schema states the members it always carries (`required`). These
  * members are present under a condition the schema cannot see, and each condition is a MUST on the
@@ -465,8 +468,11 @@ extern "C" {
  *   INSERT's header and never on the fields a body supplies. The header is the call's `columns`
  *   list, or with none the server's own no-list header: every ordinary and DEFAULT column, in
  *   declaration order (so a positional CSV, TSV, Values or JSONCompactEachRow body with no list
- *   supplies all of them). The check runs after the list's own refusals (an unknown or ALIAS
- *   column, 16; a duplicate, 15; a MATERIALIZED column, 44, unless
+ *   supplies all of them). A `columns` list may name an EPHEMERAL column, as an INSERT's column
+ *   list may: its value is read (`value_src` `ephemeral_input`, `is_stored` false) and feeds the
+ *   DEFAULT and MATERIALIZED expressions that read it, but is not stored; with no list, a body
+ *   field naming it is an unknown field. The check runs after the list's own refusals (an unknown
+ *   or ALIAS column, 16; a duplicate, 15; a MATERIALIZED column, 44, unless
  *   `insert_allow_materialized_columns` is set, when it needs the grant like any other) and before
  *   any byte of the body is read. A header naming a column outside the set is refused 497
  *   (ACCESS_DENIED), with `refused_at` `call`, in every format and whatever the body holds, an
@@ -508,9 +514,8 @@ extern "C" {
  *   is the same `CHS_INVALID_ARGUMENT`. `value` is read in the body format's own field encoding, as
  *   if the record supplied this field; a value that does not read as the column's type is
  *   `CHS_INVALID_ARGUMENT` at `call`, naming `column_defaults[i]`, before any byte of the body is
- *   read. Built before the lock: the build that implements it lists
- *   `insert_options.column_defaults` in `capabilities.features` (rule r9), and a build that does
- *   not declines it as Input documents (in the Preamble) says.
+ *   read. Implemented: the build advertises it as `insert_options.column_defaults` in
+ *   `chs_build_info`'s `capabilities.features` (rule r9).
  * - `verdict_basis`: `input`, the default, or `export`: what row a filter verdict answers for.
  *   Under `input`, a filter that reads a value the library drew or resolved itself is `d`
  *   (`drawn-value`), because the server would draw its own. Under `export`, the verdict answers for
@@ -539,7 +544,8 @@ extern "C" {
  *   `unsupported`, `refused_at` `body_step`, `reason` `defer-defaults-mixed-body`; with no export
  *   asked for no line omits anything, and the batch is answered. A body whose rows all defer the
  *   same columns, or none, is never mixed: its export omits those columns from every line and from
- *   `export_columns`. Declined until implemented.
+ *   `export_columns`. Implemented: the build advertises it as `insert_options.defer_defaults` in
+ *   `chs_build_info`'s `capabilities.features` (rule r9).
  *
  * An options document (rule r1). Its members, as JSON Schema:
  *
@@ -1077,21 +1083,23 @@ CHS_API chs_status chs_initialize(const uint8_t *timezone, size_t timezone_len, 
  * name `chtypes_default_eval_wall_nanos` is refused on v2 with `CHS_INVALID_ARGUMENT` naming this
  * one); `chtypes_custom_settings_prefixes` (process, string, default this version's shipped server
  * config value, `SQL_` on every supported line, and no prefix for a version whose shipped config
- * names none: the server's `custom_settings_prefixes`, comma-separated). A process knob in a call's
- * settings is declined, named in `unsupported_settings` (`call-setting-process-only-key`), and a
- * clock knob whose value is not an integer likewise (`call-setting-clock-value`). An evaluation
- * that exceeds a budget is declined with that budget's own reason id, never answered:
- * `admission-memory-budget` for the memory budget and `admission-time-budget` for the time budget;
- * the earlier single id `admission-envelope` is retired, its catalog entry naming both successors
- * (rule r4). The time budget is the evaluating thread's CPU time, not wall time. Each catalog entry
- * states its load dependence. A memory-budget decline is deterministic (`measured`). A time-budget
- * decline depends on load only near the budget: CPU time rose up to x1.03 under load on linux-arm64
- * and up to x2.0 on linux-amd64 when two busy hardware threads share a core, so a time-budget
- * decline is retry-stable when the evaluation costs more than the budget on an idle core and never
- * happens under about half of it; between half and one times the budget the host's load can decide.
- * Normal evaluations cost about 1000 times less than the 1 s default. a schema whose DEFAULT
- * exceeds a budget at admission is declined at compile. The defaults are this description's, not a
- * build's: a build reports nothing about them.
+ * names none: the server's `custom_settings_prefixes`, comma-separated). The three clock knobs are
+ * per call only: `chs_set_defaults` and a schema's settings refuse them with 115, as a server
+ * profile does. A process knob in a call's settings is declined, named in `unsupported_settings`
+ * (`call-setting-process-only-key`), and a clock knob whose value is not an integer likewise
+ * (`call-setting-clock-value`). An evaluation that exceeds a budget is declined with that budget's
+ * own reason id, never answered: `admission-memory-budget` for the memory budget and
+ * `admission-time-budget` for the time budget; the earlier single id `admission-envelope` is
+ * retired, its catalog entry naming both successors (rule r4). The time budget is the evaluating
+ * thread's CPU time, not wall time. Each catalog entry states its load dependence. A memory-budget
+ * decline is deterministic (`measured`). A time-budget decline depends on load only near the
+ * budget: CPU time rose up to x1.03 under load on linux-arm64 and up to x2.0 on linux-amd64 when
+ * two busy hardware threads share a core, so a time-budget decline is retry-stable when the
+ * evaluation costs more than the budget on an idle core and never happens under about half of it;
+ * between half and one times the budget the host's load can decide. Normal evaluations cost about
+ * 1000 times less than the 1 s default. a schema whose DEFAULT exceeds a budget at admission is
+ * declined at compile. The defaults are this description's, not a build's: a build reports nothing
+ * about them.
  *
  * Setup only. The defaults are immutable once this image has created its first `chs_schema` (a
  * filter or a block needs one): from then on the call changes nothing and answers
@@ -1218,13 +1226,14 @@ CHS_API chs_status chs_quote_string(
  * a wrong answer. The one decline foreseen is a setting outside the set that shapes an input, at a
  * value other than its default, once that set is generated from the vendored source.
  *
- * The macros are the server's whole `system.macros` when `macros` is present, even as `{}`: a macro
- * a Replicated engine's arguments name that the set lacks is then the server's own refusal
- * (`CHS_REJECTED`, 139, NO_ELEMENTS_IN_CONFIG). When `macros` is absent the server's macros are
- * unknown, and a schema whose engine reads one is declined, as it is without a server, except under
- * `schema_options`' `posture` `load`, where a stored Replicated definition compiles without
- * expanding them (`input:schema_options`). A build that validates a profile's macros but does not
- * yet apply them declines such a schema in both cases.
+ * This build validates a profile's `macros` but does not apply them: a schema whose engine
+ * arguments or expressions read a macro is `CHS_DECLINED` (reason `server-macros-required`, or
+ * `server-dependent-function` for `getMacro`) whether `macros` is absent, `{}` or names the macro,
+ * as it is without a server, except under `schema_options`' `posture` `load`, where a stored
+ * Replicated definition compiles without expanding them (`input:schema_options`). A later build
+ * that applies them reads `macros`, when present, even as `{}`, as the server's whole
+ * `system.macros`, so a macro a Replicated engine's arguments name that the set lacks is then the
+ * server's own refusal (`CHS_REJECTED`, 139, NO_ELEMENTS_IN_CONFIG).
  *
  * A setting this build's filters do not honor in a WHERE is no decline here, and the call succeeds.
  * So does `chs_schema_create` on the server: it lists the setting in the schema's
@@ -1288,11 +1297,12 @@ CHS_API void chs_server_free(chs_server *server);
  * home zone is the server's `timezone`: its zone-less `DateTime` and `DateTime64` columns bind it,
  * as a restarted server binds its own, and every call on the schema that names no
  * `session_timezone` runs in it. The server's `settings` layer under the schema's own, and a
- * Replicated engine's ZooKeeper path and replica name expand the server's `macros`. With `server`
- * NULL the schema is on the image's own server, exactly as before servers existed: the image zone,
- * no server settings layer, and macros unknown. A freed server, a handle of another kind or a
- * server from another library image is `CHS_INVALID_ARGUMENT`. The schema holds a counted reference
- * to its server, so the caller may free the server at any time.
+ * Replicated engine's ZooKeeper path and replica name read the server's `macros` (which this build
+ * does not apply: `chs_server_create`). With `server` NULL the schema is on the image's own server,
+ * exactly as before servers existed: the image zone, no server settings layer, and macros unknown.
+ * A freed server, a handle of another kind or a server from another library image is
+ * `CHS_INVALID_ARGUMENT`. The schema holds a counted reference to its server, so the caller may
+ * free the server at any time.
  *
  * `timezone()` (and its alias `timeZone()`) in a DEFAULT, MATERIALIZED or CHECK expression is
  * admitted on a schema created on a server whose profile names a `timezone`. On a server schema,
@@ -1316,9 +1326,8 @@ CHS_API void chs_server_free(chs_server *server);
  * schema_options {"posture":"load"}; declined rather than answered`, and under `load` it compiles
  * as the same definition spelled `CREATE TABLE`.
  *
- * A build that does not yet compile on a server declines a non-NULL `server`, and a schema whose
- * compile needs its server's zone is declined on a host thread that already runs a ClickHouse query
- * of its own. Each is `CHS_DECLINED`, which is never a wrong answer.
+ * A schema whose compile needs its server's zone is declined on a host thread that already runs a
+ * ClickHouse query of its own: `CHS_DECLINED`, which is never a wrong answer.
  *
  * The result is immutable: nothing changes a schema after this call, so it replaces v0's
  * column-list compile and its engine, TTL and partition-key setters, and any number of threads may
@@ -1726,11 +1735,13 @@ CHS_API chs_status chs_filter_eval_block(
 /*
  * chs_discover_query: The query a caller runs against a server to read a table's `system.columns`
  * rows, so that no binding holds SQL of its own. It is the connect-time way to rebuild a table's
- * columns from a server; whether a server's `SHOW CREATE TABLE` output compiles under
- * `chs_schema_create` instead is not yet measured. It takes no input. The SQL names the table
- * through the query parameters in `discover_query_param` (`{database:String}` and
- * `{table:String}`), which the caller binds when it runs the query; it selects exactly the
- * `system.columns` fields `chs_discover_columns` reads, `FORMAT JSONEachRow`.
+ * columns from a server. A server's `SHOW CREATE TABLE` output also compiles under
+ * `chs_schema_create`: from live 26.3, 26.7, 26.8 and 26.9 servers, all 32 shapes measured (8 per
+ * line, `ENGINE = Memory` included) compile under `posture` `create` and `load` (`measured`;
+ * compiling is `CHS_OK`, and the compiled columns were not compared with the server's). It takes no
+ * input. The SQL names the table through the query parameters in `discover_query_param`
+ * (`{database:String}` and `{table:String}`), which the caller binds when it runs the query; it
+ * selects exactly the `system.columns` fields `chs_discover_columns` reads, `FORMAT JSONEachRow`.
  *
  * Class: api. Thread: any. Init: required. Returns one of: CHS_OK, CHS_INVALID_ARGUMENT,
  * CHS_INTERNAL.
