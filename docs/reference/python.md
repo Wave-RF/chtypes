@@ -101,4 +101,4 @@ Safe across threads at every level ([§3](bindings-v1.md)). `ctypes` releases th
 
 ## Known gaps in 1.0
 
-What the 1.0 binding does not do, what happens instead, and the workaround for each are in [`limitations.md`](../limitations.md#known-gaps-in-10).
+What the binding does not do, what happens instead, and the workaround for each are in [`limitations.md`](../limitations.md#known-gaps-in-10).

@@ -177,7 +177,7 @@ A short list of places where the library does less than you might expect, each w
 
 ## Project status
 
-The `v1` line is the 1.0 release in progress, and the ABI stays provisional until it is confirmed. The badges above read the live version from each registry. What that means for you is in [`docs/support-v1.md`](docs/support-v1.md#pre-10).
+The current major is v2; 1.x is the frozen previous major. The badges above read the live version from each registry. What that means for you is in [`docs/support-v1.md`](docs/support-v1.md#pre-10).
 
 This repository is the **SDK half** of chtypes, Apache 2.0. The other half — the C++ wrapper, the per-version vendoring and build pipeline, the libraries themselves, and the differential proof (tens of thousands of cases scored against real ClickHouse servers on every supported version) — belongs to the artifact producer, under its own license. The bindings here contain no ClickHouse code: they load a library and speak the ABI. Libraries carry their own license; see the `LICENSE` inside each one.
 

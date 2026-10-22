@@ -104,7 +104,8 @@ pub struct CompileOptions {
     /// The server to compile on (`chs_schema_create`'s `server`, ABI v2): the
     /// schema's home zone is the server's `timezone`, the server's `settings`
     /// layer under the schema's own, and a Replicated engine's ZooKeeper path
-    /// and replica name expand its `macros`. `None` compiles on the image's own
+    /// and replica name read its `macros` (validated, and applied only by a build
+    /// that advertises `server_profile.macros`). `None` compiles on the image's own
     /// server, exactly as before the server profile existed. A server from
     /// another library is that library's own refusal ([`Error::Usage`]).
     pub server: Option<crate::server::Server>,

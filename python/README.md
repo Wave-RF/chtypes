@@ -75,7 +75,7 @@ A bad **row** is a verdict, not an exception: `outcome` becomes `Outcome.REJECTE
 
 **The INSERT column list is a keyword-only `columns`** on `schema.row`, `schema.rows`, `schema.parse_block` and `filter.rows`: `schema.row(Format.JSON_EACH_ROW, body, columns=["id", "e"])`. `None` or an empty sequence is the no-list shape; a list makes the data supply exactly those columns, with a listed `EPHEMERAL` value read and in scope for the DEFAULTs that reference it but never stored.
 
-**Known gaps in 1.0** are listed, with workarounds, in [`docs/limitations.md`](https://github.com/wave-rf/chtypes/blob/main/docs/limitations.md#known-gaps-in-10).
+**Known gaps** are listed, with workarounds, in [`docs/limitations.md`](https://github.com/wave-rf/chtypes/blob/main/docs/limitations.md#known-gaps-in-10).
 
 ## Tests
 

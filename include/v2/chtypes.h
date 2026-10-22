@@ -355,9 +355,11 @@ extern "C" {
  *   of them (`chs_set_defaults`). The library accepts exactly what the server's own SET check
  *   accepts. `session_timezone` here is the default session zone of the server's user.
  * - `macros`: the server's macros, as its `system.macros` lists them (`macro`, `substitution`).
- *   Absent, they are unknown; present, even as `{}`, they are the complete set (see
- *   `chs_server_create`). A macro name that ClickHouse's own macro reader refuses (for example
- *   `a.b`) is refused with `CHS_INVALID_ARGUMENT` naming it.
+ *   Absent, they are unknown; present, even as `{}`, they are the complete set where a build
+ *   applies macros (it advertises `server_profile.macros`; see `chs_server_create`). A build that
+ *   does not apply them validates the member and declines a macro-reading schema. A macro name that
+ *   ClickHouse's own macro reader refuses (for example `a.b`) is refused with
+ *   `CHS_INVALID_ARGUMENT` naming it.
  *
  * An input document of fixed purpose. Its members, as JSON Schema:
  *
@@ -1230,10 +1232,13 @@ CHS_API chs_status chs_quote_string(
  * arguments or expressions read a macro is `CHS_DECLINED` (reason `server-macros-required`, or
  * `server-dependent-function` for `getMacro`) whether `macros` is absent, `{}` or names the macro,
  * as it is without a server, except under `schema_options`' `posture` `load`, where a stored
- * Replicated definition compiles without expanding them (`input:schema_options`). A later build
- * that applies them reads `macros`, when present, even as `{}`, as the server's whole
- * `system.macros`, so a macro a Replicated engine's arguments name that the set lacks is then the
- * server's own refusal (`CHS_REJECTED`, 139, NO_ELEMENTS_IN_CONFIG).
+ * Replicated definition compiles without expanding them (`input:schema_options`). Applying them is
+ * reserved behavior (rule r9): a build that applies them advertises `server_profile.macros` in
+ * `chs_build_info`'s `capabilities.features`, and this build does not. For a build that advertises
+ * it, `macros`, when present, even as `{}`, is the server's whole `system.macros`
+ * (`input:server_profile`), so a macro a Replicated engine's arguments name that the set lacks is
+ * then the server's own refusal (`CHS_REJECTED`, 139, NO_ELEMENTS_IN_CONFIG). A build that does not
+ * advertise it declines as described above.
  *
  * A setting this build's filters do not honor in a WHERE is no decline here, and the call succeeds.
  * So does `chs_schema_create` on the server: it lists the setting in the schema's
@@ -1297,12 +1302,12 @@ CHS_API void chs_server_free(chs_server *server);
  * home zone is the server's `timezone`: its zone-less `DateTime` and `DateTime64` columns bind it,
  * as a restarted server binds its own, and every call on the schema that names no
  * `session_timezone` runs in it. The server's `settings` layer under the schema's own, and a
- * Replicated engine's ZooKeeper path and replica name read the server's `macros` (which this build
- * does not apply: `chs_server_create`). With `server` NULL the schema is on the image's own server,
- * exactly as before servers existed: the image zone, no server settings layer, and macros unknown.
- * A freed server, a handle of another kind or a server from another library image is
- * `CHS_INVALID_ARGUMENT`. The schema holds a counted reference to its server, so the caller may
- * free the server at any time.
+ * Replicated engine's ZooKeeper path and replica name read the server's `macros` (which a build
+ * applies only when it advertises `server_profile.macros`; this one does not: `chs_server_create`).
+ * With `server` NULL the schema is on the image's own server, exactly as before servers existed:
+ * the image zone, no server settings layer, and macros unknown. A freed server, a handle of another
+ * kind or a server from another library image is `CHS_INVALID_ARGUMENT`. The schema holds a counted
+ * reference to its server, so the caller may free the server at any time.
  *
  * `timezone()` (and its alias `timeZone()`) in a DEFAULT, MATERIALIZED or CHECK expression is
  * admitted on a schema created on a server whose profile names a `timezone`. On a server schema,

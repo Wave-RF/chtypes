@@ -191,4 +191,4 @@ A library you built yourself, for example the artifact producer's own unpublishe
 
 ## Next
 
-[`quickstart.md`](quickstart.md) — one artifact, one schema, one row, in whichever of the four you just installed. What 1.0 does not do yet is in [`limitations.md`](limitations.md#known-gaps-in-10).
+[`quickstart.md`](quickstart.md) — one artifact, one schema, one row, in whichever of the four you just installed. What the SDK does not do yet is in [`limitations.md`](limitations.md#known-gaps-in-10).

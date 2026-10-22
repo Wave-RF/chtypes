@@ -94,7 +94,7 @@ fmt.Println(row.Values[1].Text) // Asia/Tokyo    the server's timezone(), not th
 - **A `Server` is immutable** and safe for concurrent use. A schema holds its own reference to its server, so `srv.Close()` and `schema.Close()` run in any order; a closed server passed to `OnServer` is a `*UsageError`.
 - **`Schema.Describe` reports the server.** `SchemaDescription.Server` is nil exactly when the schema was compiled without one, and `SchemaDescription.Replicated` carries a Replicated engine's resolved ZooKeeper path and replica name.
 
-A build that does not compile on a server yet declines `OnServer` with an `*UnsupportedError`.
+The library compiles on a server. A schema whose engine reads a macro is declined (`server-macros-required`), because the server's macros are validated, not applied.
 
 ## Errors
 
