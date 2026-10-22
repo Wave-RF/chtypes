@@ -223,14 +223,13 @@
  * `chs_shutdown` has run. The handshake, `chs_abi_revision`, `chs_shutdown`, the buffer and error
  * accessors and the frees answer at any time.
  *
- * Images. (Pending the confirmation runs with the time budget at 0, and the remaining arm64 cells
- * at the default budget and at 0.) Any number of library images, one per ClickHouse line, may be
- * loaded and used concurrently in one process, from any number of threads, each initialized once
- * with its own zone, and every answer is the one a single image on a single thread gives. The one
- * exception is the admission time budget (`chs_set_defaults`): it measures the evaluating thread's
- * CPU time, and an evaluation that costs more than about half of the budget on an idle core may be
- * declined (`CHS_CODE_DECLINED`, reason `admission-time-budget`) when the process's load raises its
- * CPU time, never answered differently: above the budget on an idle core it always declines, below
+ * Images. Any number of library images, one per ClickHouse line, may be loaded and used
+ * concurrently in one process, from any number of threads, each initialized once with its own zone,
+ * and every answer is the one a single image on a single thread gives. The one exception is the
+ * admission time budget (`chs_set_defaults`): it measures the evaluating thread's CPU time, and an
+ * evaluation that costs more than about half of the budget on an idle core may be declined
+ * (`CHS_CODE_DECLINED`, reason `admission-time-budget`) when the process's load raises its CPU
+ * time, never answered differently: above the budget on an idle core it always declines, below
  * about half of it never. Its catalog entry states this load dependence. A conformance case drives
  * two lines, then four, concurrently in one process.
  */
