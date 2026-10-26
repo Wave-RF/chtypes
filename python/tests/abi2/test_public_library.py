@@ -158,8 +158,25 @@ def test_rows_marshals_columns_filter_export_and_doc_flags(lib, monkeypatch) -> 
     assert fmt == 0 and body == b'{"a":1}\n' and settings is None and options is None
     assert json.loads(columns) == [{"name": "a"}, {"name_b64": "/w=="}]
     assert handle is not None and export == int(Format.CSV) and flags == 3
-    assert plain[5] is None and plain[6] == -1 and plain[7] == 7  # no export, all groups
+    assert plain[5] is None and plain[6] == -1 and plain[7] == 0  # no export, lean (0)
     assert plain[2] == b"1\n"  # a bytes-like body is copied to bytes
+
+
+def test_rows_doc_flags_default_is_lean_and_explicit_all_reaches_the_call(lib, monkeypatch) -> None:
+    calls: list[tuple] = []
+    real = lib._api.preview_batch
+
+    def spy(*args):
+        calls.append(args)
+        return real(*args)
+
+    monkeypatch.setattr(lib._api, "preview_batch", spy)
+    with lib.compile_table(CREATE) as schema:
+        schema.rows(Format.CSV, b"1\n")
+        schema.rows(Format.CSV, b"1\n", export=Format.CSV)
+        schema.rows(Format.CSV, b"1\n", doc_flags=DocFlags.ALL)
+    # Argument 7 of chs_preview_batch is doc_flags, as the real stub call received it.
+    assert [c[7] for c in calls] == [0, 0, int(DocFlags.ALL)]
 
 
 def test_no_export_means_no_payload(lib) -> None:

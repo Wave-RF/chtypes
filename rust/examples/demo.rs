@@ -5,7 +5,7 @@
 //! CHTYPES_AUTOFETCH=1 cargo run --example demo
 //! ```
 
-use chtypes::{CompileOptions, Format, Registry, RegistryOptions, RowsOptions};
+use chtypes::{CompileOptions, DocFlags, Format, Registry, RegistryOptions, RowsOptions};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let registry = Registry::new(RegistryOptions::default())?;
@@ -24,7 +24,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("  column {:<4} {}", c.name, c.r#type);
     }
     let body = br#"{"ts":"2026-01-15 10:30:00","seq":256}"#;
-    let batch = schema.rows(Format::JsonEachRow, body, &RowsOptions::default())?;
+    let all = RowsOptions {
+        doc_flags: Some(DocFlags::ALL),
+        ..RowsOptions::default()
+    };
+    let batch = schema.rows(Format::JsonEachRow, body, &all)?;
     println!("\n  outcome: {}", batch.outcome);
     for v in &batch.rows[0].values {
         println!("  stored   {:<4} {}", v.column, v.text);
