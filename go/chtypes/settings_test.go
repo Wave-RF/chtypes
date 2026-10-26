@@ -149,8 +149,8 @@ func TestOptionsApply(t *testing.T) {
 		t.Errorf("config = %+v", c)
 	}
 	d := rowsConfig(nil)
-	if d.export != ExportNone || d.docFlags != DocAll {
-		t.Errorf("defaults = export %d, doc flags %d: want ExportNone and DocAll", d.export, d.docFlags)
+	if d.export != ExportNone || d.docFlags != 0 {
+		t.Errorf("defaults = export %d, doc flags %d: want ExportNone and 0 (lean)", d.export, d.docFlags)
 	}
 	// One value implements all six interfaces; each of the six applies it.
 	o := WithSettings(map[string]string{"k": "v"})

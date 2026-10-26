@@ -780,7 +780,7 @@ func section8(lib *chtypes.Library) {
 		return
 	}
 	body := []byte(`{"day":"2026-01-01","key":1,"v":5}` + "\n" + `{"day":"2026-01-01","key":1,"v":7}`)
-	b, err := s.Rows(chtypes.JSONEachRow, body)
+	b, err := s.Rows(chtypes.JSONEachRow, body, chtypes.WithDocFlags(chtypes.DocAll))
 	if err != nil {
 		fatal("%v", err)
 	}
@@ -822,7 +822,7 @@ func section8(lib *chtypes.Library) {
 	}
 	defer s5.Close()
 	kv("(c) TTL", "ts + INTERVAL 1 DAY")
-	bt, err := s5.Rows(chtypes.JSONEachRow, []byte(`{"ts":"2020-01-01 00:00:00","v":9}`))
+	bt, err := s5.Rows(chtypes.JSONEachRow, []byte(`{"ts":"2020-01-01 00:00:00","v":9}`), chtypes.WithDocFlags(chtypes.DocAll))
 	if err != nil {
 		fatal("%v", err)
 	}
@@ -876,6 +876,8 @@ func section9(lib *chtypes.Library) {
 	probe := []byte(`{"n":1,"extra":2}`)
 	strict := chtypes.WithSettings(map[string]string{"input_format_skip_unknown_fields": "0"})
 	lenient := chtypes.WithSettings(map[string]string{"input_format_skip_unknown_fields": "1"})
+	// verdict() prints the first stored value, a per-value document.
+	all := chtypes.WithDocFlags(chtypes.DocAll)
 
 	plain, err := lib.CompileTable(tableOf("n UInt8"))
 	must(err)
@@ -885,18 +887,18 @@ func section9(lib *chtypes.Library) {
 	must(err)
 	defer profiled.Close()
 
-	r1, _ := plain.Rows(chtypes.JSONEachRow, probe)
+	r1, _ := plain.Rows(chtypes.JSONEachRow, probe, all)
 	kv("1. process default (0)", verdict(r1))
 	note("nothing declared on the table or the call: the Setup default decides")
-	r2, _ := profiled.Rows(chtypes.JSONEachRow, probe)
+	r2, _ := profiled.Rows(chtypes.JSONEachRow, probe, all)
 	kv("2. compile profile 1", verdict(r2))
 	note("the profile declared at COMPILE reaches every later call and")
 	note("overrides the process default beneath it")
-	r3, _ := profiled.Rows(chtypes.JSONEachRow, probe, strict)
+	r3, _ := profiled.Rows(chtypes.JSONEachRow, probe, strict, all)
 	kv("3.  + per-call 0", verdict(r3))
 	note("2 vs 3 is the requirement, measured: the same row PASSES under the")
 	note("profile and FAILS when the per-call value overrides it")
-	r4, _ := plain.Rows(chtypes.JSONEachRow, probe, lenient)
+	r4, _ := plain.Rows(chtypes.JSONEachRow, probe, lenient, all)
 	kv("4. default + per-call 1", verdict(r4))
 	note("a per-call value outranks the process default too")
 	blank()
@@ -1041,9 +1043,9 @@ func section11(reg *chtypes.Registry, base *chtypes.Library) {
 	defer sPlain.Close()
 	row := []byte(`{"ts":"2026-01-15T10:30:00Z","device_id":9,"reading c":21.5}`)
 	kv("the same row, twice", string(row))
-	bProf, _ := sProf.Rows(chtypes.JSONEachRow, row)
+	bProf, _ := sProf.Rows(chtypes.JSONEachRow, row, chtypes.WithDocFlags(chtypes.DocAll))
 	kv("  under the discovered profile", verdict(bProf))
-	bPlain, _ := sPlain.Rows(chtypes.JSONEachRow, row)
+	bPlain, _ := sPlain.Rows(chtypes.JSONEachRow, row, chtypes.WithDocFlags(chtypes.DocAll))
 	kv("  under a stock compile", verdict(bPlain))
 	note("the deployment declared date_time_input_format=best_effort, so ITS")
 	note("server takes the ISO-8601 timestamp; a stock compile answers for a")
@@ -1110,7 +1112,7 @@ func section12(reg *chtypes.Registry) {
 		if err != nil {
 			continue
 		}
-		b, err := s.Rows(chtypes.Buffers, unhex(buffersOK))
+		b, err := s.Rows(chtypes.Buffers, unhex(buffersOK), chtypes.WithDocFlags(chtypes.DocAll))
 		switch {
 		case err != nil:
 			kv("  "+v, "call failed: "+err.Error())
@@ -1550,9 +1552,10 @@ func must(err error) {
 }
 
 // feed runs one payload through Rows and prints the verdict on one line, plus
-// a "~" line per Transform (a silent change ClickHouse made).
+// a "~" line per Transform (a silent change ClickHouse made). It asks for every
+// document group: the values and transforms it prints are per-value documents.
 func feed(s *chtypes.Schema, label string, f chtypes.Format, body []byte) {
-	b, err := s.Rows(f, body)
+	b, err := s.Rows(f, body, chtypes.WithDocFlags(chtypes.DocAll))
 	if err != nil {
 		kv("  "+label, "call failed: "+err.Error())
 		return

@@ -482,3 +482,45 @@ func TestStubRealDocuments(t *testing.T) {
 		t.Errorf("discovery = %+v", d)
 	}
 }
+
+// TestRowsDocFlagsOnTheWire reads the doc_flags the batch call hands the C
+// function back out of the ABI stub's echo (a scalar is echoed as a bare
+// number, argument 7 of chs_preview_batch): none given is 0, the lean result,
+// and an explicit DocAll is 7. The flags come from the same rowsConfig that
+// Rows builds its call from.
+func TestRowsDocFlagsOnTheWire(t *testing.T) {
+	lib := openStub(t, "ok")
+	schema, err := lib.CompileTable("CREATE TABLE t (x UInt8) ENGINE = Memory")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer schema.Close()
+	for _, tc := range []struct {
+		name string
+		opts []RowsOption
+		want float64
+	}{
+		{"no flags", nil, 0},
+		{"export only", []RowsOption{WithExport(CSV)}, 0},
+		{"explicit DocAll", []RowsOption{WithDocFlags(DocAll)}, float64(DocAll)},
+		{"explicit DocValues", []RowsOption{WithDocFlags(DocValues)}, float64(DocValues)},
+	} {
+		c := rowsConfig(tc.opts)
+		docBuf, exportBuf, cerr := schema.lib.tbl.PreviewBatch(schema.h, int32(JSONEachRow), []byte(`{"x":1}`), nil, nil, nil, int32(c.export), uint32(c.docFlags), nil)
+		if cerr != nil {
+			t.Fatalf("%s: %v", tc.name, callError(cerr))
+		}
+		doc := schema.lib.tbl.Take(docBuf)
+		schema.lib.tbl.Take(exportBuf)
+		var e struct {
+			Fn   string `json:"fn"`
+			Args []any  `json:"args"`
+		}
+		if err := json.Unmarshal(doc, &e); err != nil || e.Fn != "chs_preview_batch" || len(e.Args) != 9 {
+			t.Fatalf("%s: echo %q: %v", tc.name, doc, err)
+		}
+		if got, _ := e.Args[7].(float64); got != tc.want {
+			t.Errorf("%s: doc_flags on the wire = %v, want %v", tc.name, e.Args[7], tc.want)
+		}
+	}
+}

@@ -38,6 +38,7 @@ The four bindings in this repository are released together and give one answer, 
 
 ### Changed
 
+- **Breaking (vs the 2.0.0-dev releases):** the batch preview's default `docFlags` is now 0 (the lean result): `schema.rows` without `docFlags` returns no per-value documents. Pass `docFlags: DocFlags.All` explicitly to get every column's per-value documents.
 - `chtypes list` and the tag listing name the published lines only (two-part, numeric order), as Go's always did; `chtypes resolve <line>` prints the exact version a line resolves to (#613).
 - `chtypes fetch` of a refused spelling (a `v` prefix, a `-lts`/`-stable` suffix) exits with the usage status, 2, as Go's does, and prints the refusal alone; it exited 1 and printed a stack trace.
 - **Breaking: the public surface the parity gate carried as exceptions is resolved, before the v2 lock (#500).** A convenience exists in every binding or in none (`docs/reference/bindings-v1.md` §1, principle 2). Migration, old → new:

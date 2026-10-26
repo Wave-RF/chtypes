@@ -37,6 +37,7 @@ The four bindings in this repository are released together and give one answer, 
 
 ### Changed
 
+- **Breaking (vs the 2.0.0-dev releases):** the batch preview's default `doc_flags` is now 0 (the lean result): `Schema::rows` with `RowsOptions::doc_flags` left `None` returns no per-value documents. Pass `doc_flags: Some(DocFlags::ALL)` explicitly to get every column's per-value documents.
 - **Breaking (ABI v2 dev): `BatchResult::spans` is `Option<Vec<Option<Span>>>`**, one entry per `rows` entry and index-aligned with it: `row_spans` carries `null` for a row the export did not carry (a skipped row, or a row a filter cut), which the entry reads as `None`. It was `Option<Vec<Span>>` of the exported rows only. The compiler makes you handle the `None` entry for a row not exported.
 - **Breaking (ABI v2 dev): `AtMergeEntry::row` is `AtMergeEntry::part_row`**, the document's `part_row`.
 - **Breaking (ABI v2 dev): `SchemaServer::settings` is `BTreeMap<String, RawText>`** (was `BTreeMap<String, String>`), because a server profile's setting value can be bytes that are not valid UTF-8.
