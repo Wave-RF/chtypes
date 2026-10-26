@@ -244,11 +244,9 @@ func run() error {
 		if bad.ErrMsg != "" {
 			fmt.Printf("   msg: %s\n", firstLine(bad.ErrMsg))
 		}
-		for _, r := range bad.Rows {
-			if len(r.UnsupportedSettings) > 0 {
-				fmt.Printf("   unsupported_settings: %v  (a DECLINE, not a rejection)\n",
-					r.UnsupportedSettings)
-			}
+		if len(bad.UnsupportedSettings) > 0 {
+			fmt.Printf("   unsupported_settings: %v  (a DECLINE, not a rejection)\n",
+				bad.UnsupportedSettings)
 		}
 	}
 
@@ -273,6 +271,9 @@ func reportRow(i int, want string, row chtypes.RowResult, transforms []chtypes.T
 		fmt.Printf("   DROP + 400: %s\n", firstLine(row.ErrMsg))
 	case chtypes.Unsupported:
 		fmt.Printf("   DECLINE — do not publish, do not call it a rejection\n")
+		if row.Reason != "" {
+			fmt.Printf("   reason: %s\n", row.Reason)
+		}
 	default:
 		fmt.Printf("   PUBLISH:\n")
 		for _, v := range row.Values {
@@ -316,9 +317,6 @@ func reportRow(i int, want string, row chtypes.RowResult, transforms []chtypes.T
 
 	if len(row.UnknownFields) > 0 {
 		fmt.Printf("   unknown fields: %v\n", row.UnknownFields)
-	}
-	if len(row.UnsupportedSettings) > 0 {
-		fmt.Printf("   unsupported settings: %v\n", row.UnsupportedSettings)
 	}
 	fmt.Println()
 }
