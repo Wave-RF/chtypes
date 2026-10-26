@@ -54,6 +54,8 @@ __all__ = ["Block", "Filter", "Library", "Schema", "Server", "open_unverified"]
 # One image per file, process-wide: keyed on the realpath's device and inode, so
 # two registries, two spellings or a hardlink of one artifact share one image
 # and one Library. Guarded by the setup lock, which an open holds throughout.
+# The batch preview's default `doc_flags`: 0, the lean result (no per-value documents).
+_LEAN_DOC_FLAGS = DocFlags(0)
 _IMAGES: dict[tuple[int, int], Library] = {}
 
 
@@ -305,11 +307,14 @@ class Schema(_Handle):
         insert_options_extra: Mapping[str, str] | None = None,
         row_filter: Filter | None = None,
         export: Format | int | None = None,
-        doc_flags: DocFlags = DocFlags.ALL,
+        doc_flags: DocFlags = _LEAN_DOC_FLAGS,
     ) -> BatchResult:
         """A whole body. `export` asks for the accepted rows serialized in that
         format (`payload`, and `spans`); to insert a body whose rows carry a
-        `default_generated` column, insert `payload`, never the original input."""
+        `default_generated` column, insert `payload`, never the original input.
+
+        `doc_flags` chooses the document groups; absent means 0, the lean result
+        (no per-value documents). Pass `DocFlags.ALL` for every group."""
         payload = body_bytes(body)
         settings_bytes = settings_json(settings, session_timezone)
         columns_bytes = columns_json(columns)

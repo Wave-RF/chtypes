@@ -591,7 +591,7 @@ function section8(lib: Library): void {
   withSchema(lib, 'CREATE TABLE t (day Date, key UInt32, v UInt64) ENGINE = SummingMergeTree ORDER BY (day, key)', (schema) => {
     kv('(a) the engine', 'SummingMergeTree ORDER BY (day, key)');
     const body = utf8('{"day":"2026-01-01","key":1,"v":5}\n{"day":"2026-01-01","key":1,"v":7}');
-    const batch = schema.rows(Format.JSONEachRow, body);
+    const batch = schema.rows(Format.JSONEachRow, body, { docFlags: DocFlags.All });
     kv('  rows in / rowsRead', `2 / ${batch.rowsRead}   (v=5 and v=7, same key)`);
     kv('  engineRows (stored)', renderEngineRows(batch));
   });
@@ -612,6 +612,7 @@ function section8(lib: Library): void {
     kv('(c) the TTL', 'MergeTree ORDER BY ts, TTL ts + INTERVAL 1 DAY');
     const batch = schema.rows(Format.JSONEachRow, utf8('{"ts":"2020-01-01 00:00:00","v":9}'), {
       settings: { chtypes_now_epoch_nanos: PINNED_CLOCK },
+      docFlags: DocFlags.All,
     });
     kv('  row fed', '{"ts":"2020-01-01 00:00:00","v":9}  with the clock pinned to 2023');
     kv('  row-level outcome', `${batch.rows[0]?.outcome}   <- the row PARSED fine`);
@@ -828,7 +829,7 @@ async function section12(registry: Registry, lines: readonly string[]): Promise<
     if (lib === undefined) continue;
     kv(`  ${v} lists Buffers`, String(lib.buildInfo.capabilities.inputFormats.includes(formatChName(Format.Buffers) ?? '')));
     withSchema(lib, 'CREATE TABLE t (x Int32) ENGINE = MergeTree ORDER BY tuple()', (schema) => {
-      const batch = schema.rows(Format.Buffers, unhex(BUFFERS_OK));
+      const batch = schema.rows(Format.Buffers, unhex(BUFFERS_OK), { docFlags: DocFlags.All });
       const first = batch.rows[0]?.values[0];
       if (batch.outcome === 'accepted' && first !== undefined) kv(`  ${v}`, `accepted  x = ${first.text.toString()}`);
       else kv(`  ${v}`, `${batch.outcome}  code=${batch.errCode}  ${truncate(batch.errMsg.toString(), 40)}`);

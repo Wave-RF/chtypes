@@ -24,7 +24,7 @@
 //! document.
 //!
 //! ```no_run
-//! use chtypes::{Format, Registry, RegistryOptions, RowsOptions, CompileOptions};
+//! use chtypes::{CompileOptions, DocFlags, Format, Registry, RegistryOptions, RowsOptions};
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! // Optional, and first: the image zone and the default settings are fixed
@@ -41,7 +41,8 @@
 //! let batch = schema.rows(
 //!     Format::JsonEachRow,
 //!     br#"{"ts":"2026-01-15 10:30:00","seq":256}"#,
-//!     &RowsOptions::default(),
+//!     // An absent `doc_flags` is 0, the lean result: ask for the per-value documents.
+//!     &RowsOptions { doc_flags: Some(DocFlags::ALL), ..Default::default() },
 //! )?;
 //! println!("{}", batch.outcome);
 //! for t in &batch.transformed {

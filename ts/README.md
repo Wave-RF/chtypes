@@ -19,14 +19,14 @@ pnpm add @wavehouse/chtypes
 ## Quickstart
 
 ```ts
-import { Format, Registry, setup } from '@wavehouse/chtypes';
+import { DocFlags, Format, Registry, setup } from '@wavehouse/chtypes';
 
 setup({ timezone: 'UTC' });                  // optional; once, before the first open
 const registry = await Registry.open({ autofetch: true });
 const lib = await registry.for('26.8');      // two, three or four parts; never a nearest match
 const schema = lib.compileTable('CREATE TABLE t (x UInt8, ts DateTime DEFAULT now()) ENGINE = Memory');
 
-const batch = schema.rows(Format.JSONEachRow, Buffer.from('{"x":256}\n'));
+const batch = schema.rows(Format.JSONEachRow, Buffer.from('{"x":256}\n'), { docFlags: DocFlags.All });
 const row = batch.rows[0];
 console.log(batch.outcome);                    // accepted
 console.log(row?.values[0]?.text.toString());  // 0             what would actually be stored

@@ -47,7 +47,7 @@ func main() {
 	}
 	defer schema.Close()
 
-	batch, err := schema.Rows(chtypes.JSONEachRow, []byte(`{"x":256}`))
+	batch, err := schema.Rows(chtypes.JSONEachRow, []byte(`{"x":256}`), chtypes.WithDocFlags(chtypes.DocAll))
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -21,7 +21,7 @@ chtypes fetch <line>      # a line the registry publishes (`chtypes list` names 
 ## Quickstart
 
 ```rust
-use chtypes::{CompileOptions, Format, Registry, RegistryOptions, RowsOptions};
+use chtypes::{CompileOptions, DocFlags, Format, Registry, RegistryOptions, RowsOptions};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Optional, and first: the image zone and default settings are fixed once per process.
@@ -34,7 +34,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &CompileOptions::default(),
     )?;
 
-    let batch = schema.rows(Format::JsonEachRow, br#"{"x":256}"#, &RowsOptions::default())?;
+    let all = RowsOptions { doc_flags: Some(DocFlags::ALL), ..Default::default() };
+    let batch = schema.rows(Format::JsonEachRow, br#"{"x":256}"#, &all)?;
     let row = &batch.rows[0];
     println!("{}", batch.outcome);                // accepted
     println!("{}", row.values[0].text);           // 0             what would actually be stored

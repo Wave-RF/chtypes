@@ -171,7 +171,7 @@ describe.skipIf(!stubsAvailable)('the public API over the stub library', () => {
     expect(err?.column).toHaveLength(0);
   });
 
-  it('passes the documented defaults to the one ABI call: no export, every document group, no filter, no settings', () => {
+  it('passes the documented defaults to the one ABI call: no export, the lean document groups (0), no filter, no settings', () => {
     const { image, library } = openStub('ok');
     const schema = library.compileTable(CREATE);
     const spy = vi.spyOn(image.calls, 'previewBatch');
@@ -183,7 +183,9 @@ describe.skipIf(!stubsAvailable)('the public API over the stub library', () => {
     expect((args[4] as Buffer).length).toBe(0); // columns: none
     expect(args[5]).toBeNull(); // no filter
     expect(args[6]).toBe(EXPORT_NONE);
-    expect(args[7]).toBe(DocFlags.All);
+    expect(args[7]).toBe(0);
+    schema.rows(Format.JSONEachRow, BODY, { docFlags: DocFlags.All });
+    expect((spy.mock.calls[1] as unknown[])[7]).toBe(DocFlags.All);
     spy.mockRestore();
     schema.close();
   });

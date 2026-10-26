@@ -205,7 +205,7 @@ pub struct RowsOptions {
     pub filter: Option<Filter>,
     /// An export format; `None` asks for no export.
     pub export: Option<Format>,
-    /// Which document groups to emit; `None` means all.
+    /// Which document groups to emit; `None` means 0, the lean result; pass `DocFlags::ALL` for every group.
     pub doc_flags: Option<DocFlags>,
 }
 
@@ -303,6 +303,12 @@ impl std::fmt::Debug for Block {
     }
 }
 
+/// The document groups a `rows` call asks for: `None` is 0, the lean result,
+/// never every group.
+fn effective_doc_flags(options: &RowsOptions) -> DocFlags {
+    options.doc_flags.unwrap_or(DocFlags::from_bits(0))
+}
+
 impl Schema {
     pub(crate) fn new(library: Arc<Library>, handle: SchemaHandle) -> Schema {
         Schema {
@@ -344,7 +350,7 @@ impl Schema {
         let insert = options.insert_options_document()?;
         let filter = options.filter.as_ref().map(|f| &*f.handle);
         let export = options.export.map_or(EXPORT_NONE, Format::code);
-        let flags = options.doc_flags.unwrap_or(DocFlags::ALL).bits();
+        let flags = effective_doc_flags(options).bits();
         let (doc, payload) = self.library.call(|api| {
             api.preview_batch(
                 &self.handle,
@@ -443,6 +449,18 @@ mod tests {
         p.iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect()
+    }
+
+    #[test]
+    fn an_absent_doc_flags_is_the_lean_zero_and_an_explicit_all_is_kept() {
+        // `rows` hands `effective_doc_flags(options).bits()` to the C call.
+        assert_eq!(effective_doc_flags(&RowsOptions::default()).bits(), 0);
+        let all = RowsOptions {
+            doc_flags: Some(DocFlags::ALL),
+            ..RowsOptions::default()
+        };
+        assert_eq!(effective_doc_flags(&all).bits(), DocFlags::ALL.bits());
+        assert_eq!(DocFlags::ALL.bits(), 7);
     }
 
     #[test]

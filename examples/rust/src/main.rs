@@ -819,7 +819,7 @@ fn section8(lib: &Arc<Library>) {
         Ok(schema) => {
             let body = br#"{"day":"2026-01-01","key":1,"v":5}
 {"day":"2026-01-01","key":1,"v":7}"#;
-            match schema.rows(Format::JsonEachRow, body, &RowsOptions::default()) {
+            match schema.rows(Format::JsonEachRow, body, &all_docs()) {
                 Ok(batch) => {
                     kv("  rows in / rows_read", &format!("2 / {}", batch.rows_read));
                     for (i, row) in batch.engine_rows.iter().flatten().enumerate() {
@@ -862,7 +862,7 @@ fn section8(lib: &Arc<Library>) {
         Ok(schema) => match schema.rows(
             Format::JsonEachRow,
             br#"{"ts":"2020-01-01 00:00:00","v":9}"#,
-            &RowsOptions::default(),
+            &all_docs(),
         ) {
             Ok(batch) => {
                 kv(
@@ -921,7 +921,14 @@ fn section9(lib: &Arc<Library>) {
     let run = |label: &str, options: &RowsOptions| {
         kv(
             label,
-            &match schema.rows(Format::JsonEachRow, iso, options) {
+            &match schema.rows(
+                Format::JsonEachRow,
+                iso,
+                &RowsOptions {
+                    doc_flags: Some(DocFlags::ALL),
+                    ..options.clone()
+                },
+            ) {
                 Ok(b) => verdict(&b),
                 Err(err) => err.to_string(),
             },
@@ -1191,6 +1198,7 @@ fn section15(lib: &Arc<Library>) {
     let options = RowsOptions {
         settings: pairs(&[("input_format_allow_errors_num", "10")]),
         export: Some(Format::JsonCompactEachRow),
+        doc_flags: Some(DocFlags::ALL),
         ..RowsOptions::default()
     };
     let batch = match schema.rows(Format::JsonEachRow, body, &options) {
@@ -1596,7 +1604,7 @@ fn fatal(message: &str) -> ! {
 /// Run one payload through rows() and print the verdict on one line, plus a
 /// "~" line per Transform (a silent change ClickHouse made).
 fn feed(schema: &chtypes::Schema, label: &str, format: Format, body: &[u8]) {
-    let batch = match schema.rows(format, body, &RowsOptions::default()) {
+    let batch = match schema.rows(format, body, &all_docs()) {
         Ok(b) => b,
         Err(err) => {
             kv(&format!("  {label}"), &format!("call failed: {err}"));
@@ -1692,6 +1700,15 @@ fn classify_unit(result: Result<(), Error>) -> String {
 
 fn classify_lib(result: Result<Arc<Library>, Error>) -> String {
     classify(result.map(|_| ()))
+}
+
+/// Options that ask for every document group: the values and transforms the
+/// tour prints are per-value documents, which an absent `doc_flags` leaves out.
+fn all_docs() -> RowsOptions {
+    RowsOptions {
+        doc_flags: Some(DocFlags::ALL),
+        ..RowsOptions::default()
+    }
 }
 
 fn verdict(batch: &BatchResult) -> String {

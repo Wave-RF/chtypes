@@ -491,7 +491,12 @@ def section6(lib: chtypes.Library) -> None:
     with lib.compile_table(
         table("id UInt32, token UUID DEFAULT generateUUIDv4()", order="id")
     ) as g:
-        batch = g.rows(Format.JSON_EACH_ROW, b'{"id":1}', export=Format.JSON_COMPACT_EACH_ROW)
+        batch = g.rows(
+            Format.JSON_EACH_ROW,
+            b'{"id":1}',
+            export=Format.JSON_COMPACT_EACH_ROW,
+            doc_flags=DocFlags.ALL,
+        )
         token = next(v for v in batch.rows[0].columns if v.column == b"token")
         kv(
             "  token.source",
@@ -621,7 +626,7 @@ def section8(lib: chtypes.Library) -> None:
     with lib.compile_table(summing) as schema:
         kv("(a) the engine", "SummingMergeTree ORDER BY (day, key)")
         body = b'{"day":"2026-01-01","key":1,"v":5}\n{"day":"2026-01-01","key":1,"v":7}'
-        batch = schema.rows(Format.JSON_EACH_ROW, body)
+        batch = schema.rows(Format.JSON_EACH_ROW, body, doc_flags=DocFlags.ALL)
         kv("  rows in / rows_read", f"2 / {batch.rows_read}   (v=5 and v=7, same key)")
         kv("  engine_rows (stored)", render_engine_rows(batch))
     note("two rows in, ONE row out, v summed: engine_rows is the post-merge preview")
@@ -642,7 +647,9 @@ def section8(lib: chtypes.Library) -> None:
     ttl_ddl = "CREATE TABLE ttl_t (ts DateTime, v UInt8) ENGINE = MergeTree ORDER BY ts TTL ts + INTERVAL 1 DAY"
     with lib.compile_table(ttl_ddl) as schema:
         kv("(c) TTL", "MergeTree ORDER BY ts, TTL ts + INTERVAL 1 DAY")
-        batch = schema.rows(Format.JSON_EACH_ROW, b'{"ts":"2020-01-01 00:00:00","v":9}')
+        batch = schema.rows(
+            Format.JSON_EACH_ROW, b'{"ts":"2020-01-01 00:00:00","v":9}', doc_flags=DocFlags.ALL
+        )
         kv("  row fed", '{"ts":"2020-01-01 00:00:00","v":9}  (long past the TTL)')
         kv("  row-level outcome", f"{batch.rows[0].outcome.value}   <- the row PARSED fine")
         kv("  engine_rows (stored)", render_engine_rows(batch))
@@ -671,7 +678,7 @@ def section8(lib: chtypes.Library) -> None:
     )
     with lib.compile_table(part_ddl) as schema:
         body = b'{"ts":"2026-01-15 00:00:00","v":1}\n{"ts":"2026-02-15 00:00:00","v":2}'
-        batch = schema.rows(Format.JSON_EACH_ROW, body)
+        batch = schema.rows(Format.JSON_EACH_ROW, body, doc_flags=DocFlags.ALL)
         kv("(e) PARTITION BY toYYYYMM(ts)", f"partition_count={batch.partition_count}")
         for i, r in enumerate(batch.rows):
             kv(
@@ -716,12 +723,20 @@ def section9(lib: chtypes.Library) -> None:
         lib.compile_table(table("ts DateTime", order="ts")) as plain,
         lib.compile_table(table("ts DateTime", order="ts"), settings=best_effort) as profiled,
     ):
-        kv("1. ClickHouse defaults", verdict(plain.rows(Format.JSON_EACH_ROW, iso)))
-        kv("2.  + per-call basic", verdict(plain.rows(Format.JSON_EACH_ROW, iso, settings=basic)))
-        kv("3. profile best_effort", verdict(profiled.rows(Format.JSON_EACH_ROW, iso)))
+        # verdict() prints the first stored value, a per-value document.
+        every = DocFlags.ALL
+        kv("1. ClickHouse defaults", verdict(plain.rows(Format.JSON_EACH_ROW, iso, doc_flags=every)))
+        kv(
+            "2.  + per-call basic",
+            verdict(plain.rows(Format.JSON_EACH_ROW, iso, settings=basic, doc_flags=every)),
+        )
+        kv(
+            "3. profile best_effort",
+            verdict(profiled.rows(Format.JSON_EACH_ROW, iso, doc_flags=every)),
+        )
         kv(
             "4.  + per-call basic",
-            verdict(profiled.rows(Format.JSON_EACH_ROW, iso, settings=basic)),
+            verdict(profiled.rows(Format.JSON_EACH_ROW, iso, settings=basic, doc_flags=every)),
         )
         note("3 vs 4 is the requirement, measured: the same row PASSES under the profile")
         note("and FAILS when the per-call value overrides it")
@@ -730,7 +745,9 @@ def section9(lib: chtypes.Library) -> None:
         # The per-call zone is a settings key and nothing more.
         local = b'{"ts":"2026-01-15 10:30:00"}'
         for zone in ("UTC", "Asia/Tokyo"):
-            batch = plain.rows(Format.JSON_EACH_ROW, local, session_timezone=zone)
+            batch = plain.rows(
+                Format.JSON_EACH_ROW, local, session_timezone=zone, doc_flags=every
+            )
             kv(f"5. session_timezone={zone}", verdict(batch))
         note("the per-call zone governs parsing, rendering and DEFAULT evaluation of that")
         note("call; a compiled type keeps the IMAGE zone (section 1's setup)")
@@ -876,7 +893,9 @@ def section11(lib: chtypes.Library) -> None:
     ddl = f"CREATE TABLE discovered ({show(found.columns_sql)}) ENGINE = MergeTree ORDER BY tuple()"
     try:
         with lib.compile_table(ddl) as schema:
-            batch = schema.rows(Format.JSON_EACH_ROW, b'{"device_id":9,"reading c":21.5}')
+            batch = schema.rows(
+                Format.JSON_EACH_ROW, b'{"device_id":9,"reading c":21.5}', doc_flags=DocFlags.ALL
+            )
             kv("compiled from the discovery", verdict(batch))
     except chtypes.CallError as err:
         kv("compile from the discovery", f"{type(err).__name__}: {truncate(show(err.message), 60)}")
@@ -932,7 +951,9 @@ def section12(registry: Registry) -> None:
     for lib in libs:
         listed = Format.BUFFERS.ch_name in lib.build_info.capabilities.input_formats
         with lib.compile_table(table("x Int32")) as schema:
-            batch = schema.rows(Format.BUFFERS, bytes.fromhex(BUFFERS_OK))
+            batch = schema.rows(
+                Format.BUFFERS, bytes.fromhex(BUFFERS_OK), doc_flags=DocFlags.ALL
+            )
             kv(f"  {lib.version}", f"listed={listed}  " + verdict(batch))
     note("what a build supports is its capabilities, not your version arithmetic")
 
@@ -1008,7 +1029,9 @@ def section15(lib: chtypes.Library) -> None:
     allow = {"input_format_allow_errors_num": "10"}
     with lib.compile_table(FORMAT_DDL) as schema:
         body = b'{"device_id":1,"label":"ok"}\n{"device_id":"zap"}\n{"device_id":3,"label":"hi"}\n'
-        batch = schema.rows(Format.JSON_EACH_ROW, body, settings=allow, export=export)
+        batch = schema.rows(
+            Format.JSON_EACH_ROW, body, settings=allow, export=export, doc_flags=DocFlags.ALL
+        )
         kv(
             "batch",
             f"{batch.outcome.value}  rows_read={batch.rows_read} rows_skipped={batch.rows_skipped}",
@@ -1352,7 +1375,7 @@ def feed(
 ) -> None:
     """Run one payload through rows() and print the verdict on one line, plus a "~"
     line per Transform (a silent change ClickHouse made)."""
-    batch = schema.rows(fmt, body, columns=columns)
+    batch = schema.rows(fmt, body, columns=columns, doc_flags=DocFlags.ALL)
     parts = [batch.outcome.value]
     if batch.err_code:
         parts.append(f"code={batch.err_code}")

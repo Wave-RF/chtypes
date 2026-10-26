@@ -20,7 +20,7 @@ uv add chtypes                           # or: pip install chtypes
 
 ```python
 import chtypes
-from chtypes import Format, Registry
+from chtypes import DocFlags, Format, Registry
 
 chtypes.setup(timezone="UTC")  # once, before the first open (optional)
 registry = Registry(autofetch=True)
@@ -28,7 +28,7 @@ library = registry.for_version("26.8")  # a release line or an exact version
 
 ddl = b"CREATE TABLE t (x UInt8, ts DateTime DEFAULT now()) ENGINE = Memory"
 with library.compile_table(ddl) as schema:
-    batch = schema.rows(Format.JSON_EACH_ROW, b'{"x":256}\n')
+    batch = schema.rows(Format.JSON_EACH_ROW, b'{"x":256}\n', doc_flags=DocFlags.ALL)
 
 row = batch.rows[0]
 print(batch.outcome)  # accepted

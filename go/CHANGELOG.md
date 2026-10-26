@@ -33,6 +33,7 @@ SDK 2.0.0 speaks ABI v2, locked, and fetches from the production `chtypes/v2` re
 ### Changed
 
 - **Breaking: migrating from 1.x.** 2.0.0 is a major release; each item is old → new.
+  - **The batch preview's default document groups.** The batch preview's default `doc_flags` is now 0 (the lean result): `(*Schema).Rows` without `WithDocFlags` returns no per-value documents. Pass `WithDocFlags(DocAll)` explicitly to get every column's per-value documents. 1.x and the 2.0.0-dev releases returned every group by default.
   - **The library.** SDK 2.x loads ABI v2 libraries only (`include/v2/chtypes.h`, `CHS_ABI_VERSION` 2, and the locked fingerprint, `docs/reference/abi-v2.md`), and refuses a 1.x library, or a `2.0.0-dev.N` build, as `CHTYPES_ARTIFACT_INCOMPATIBLE`, naming both fingerprints. Fetch the libraries again with this SDK's own `chtypes fetch`.
   - **The module path.** `github.com/wave-rf/chtypes/go` → `github.com/wave-rf/chtypes/go/v2`, as Go's major-version rule requires: `import "github.com/wave-rf/chtypes/go/v2/chtypes"`, and `go run github.com/wave-rf/chtypes/go/v2/cmd/chtypes@latest`. The 1.x path keeps resolving 1.x.
   - **The registry.** `https://registry.wavehouse.dev/chtypes/v1` → `https://registry.wavehouse.dev/chtypes/v2`, the production generation-2 channel, signed with the same release key (`docs/guides/fetch-v1.md`, "Generation 2 after the lock"). `CHTYPES_ARTIFACTS_URL`, `CHTYPES_TRUSTED_KEYS`, `CHTYPES_ALLOW_UNSIGNED`, their options, and `--lock`, `--frozen` and `--update` work as in 1.x; a mirror serves `chtypes/v2`.
