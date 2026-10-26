@@ -41,7 +41,7 @@ func main() {
 	}
 	defer schema.Close()
 
-	batch, err := schema.Rows(chtypes.JSONEachRow, []byte(`{"x":256}`))
+	batch, err := schema.Rows(chtypes.JSONEachRow, []byte(`{"x":256}`), chtypes.WithDocFlags(chtypes.DocAll))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func main() {
 
 ```python
 import chtypes
-from chtypes import Format, Registry, Source
+from chtypes import DocFlags, Format, Registry, Source
 
 DDL = "CREATE TABLE t (x UInt8, ts DateTime DEFAULT now()) ENGINE = MergeTree ORDER BY tuple()"
 
@@ -80,7 +80,8 @@ registry = Registry()                   # opens nothing
 library = registry.for_version("26.8")  # a line or an exact patch; never a nearest match
 
 with library.compile_table(DDL) as schema:
-    batch = schema.rows(Format.JSON_EACH_ROW, b'{"x":256}\n')
+    # An absent doc_flags is 0, the lean result: ask for the per-value documents.
+    batch = schema.rows(Format.JSON_EACH_ROW, b'{"x":256}\n', doc_flags=DocFlags.ALL)
     bad = schema.rows(Format.JSON_EACH_ROW, b'{"x":"abc"}\n')
 
 row = batch.rows[0]
@@ -99,7 +100,7 @@ print(bad.outcome, bad.err_code, bad.err_msg)  # rejected 27 b'Cannot parse inpu
 <details><summary><b>TypeScript</b></summary>
 
 ```ts
-import { Format, Registry, Source, setup } from '@wavehouse/chtypes';
+import { DocFlags, Format, Registry, Source, setup } from '@wavehouse/chtypes';
 
 const DDL = 'CREATE TABLE t (x UInt8, ts DateTime DEFAULT now()) ENGINE = MergeTree ORDER BY tuple()';
 
@@ -110,7 +111,8 @@ const registry = await Registry.open();      // opens nothing
 const lib = await registry.for('26.8');      // a line or an exact patch; never a nearest match
 const schema = lib.compileTable(DDL);
 
-const batch = schema.rows(Format.JSONEachRow, Buffer.from('{"x":256}'));
+// An absent docFlags is 0, the lean result: ask for the per-value documents.
+const batch = schema.rows(Format.JSONEachRow, Buffer.from('{"x":256}'), { docFlags: DocFlags.All });
 const row = batch.rows[0]!;                       // one record in, one row out
 console.log(batch.outcome);                       // accepted
 console.log(row.values[0]?.text.toString());       // 0             — what would actually be stored
@@ -132,7 +134,7 @@ schema.close();
 <details><summary><b>Rust</b></summary>
 
 ```rust
-use chtypes::{source, CompileOptions, Format, Registry, RegistryOptions, RowsOptions, SetupOptions};
+use chtypes::{source, CompileOptions, DocFlags, Format, Registry, RegistryOptions, RowsOptions, SetupOptions};
 
 const DDL: &str = "CREATE TABLE t (x UInt8, ts DateTime DEFAULT now()) ENGINE = MergeTree ORDER BY tuple()";
 
@@ -144,7 +146,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let lib = registry.for_version("26.8")?;  // a line or an exact patch; never a nearest match
     let schema = lib.compile_table(DDL, &CompileOptions::default())?;
 
-    let batch = schema.rows(Format::JsonEachRow, br#"{"x":256}"#, &RowsOptions::default())?;
+    // An absent doc_flags is 0, the lean result: ask for the per-value documents.
+    let all = RowsOptions { doc_flags: Some(DocFlags::ALL), ..Default::default() };
+    let batch = schema.rows(Format::JsonEachRow, br#"{"x":256}"#, &all)?;
     let row = &batch.rows[0];
     println!("{}", batch.outcome);              // accepted
     println!("{}", row.values[0].text);         // 0             — what would actually be stored

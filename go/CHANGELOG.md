@@ -35,6 +35,7 @@ The four bindings in this repository are released together and give one answer, 
 
 ### Changed
 
+- **Breaking (vs the 2.0.0-dev releases):** the batch preview's default `doc_flags` is now 0 (the lean result): `(*Schema).Rows` without `WithDocFlags` returns no per-value documents. Pass `WithDocFlags(DocAll)` explicitly to get every column's per-value documents.
 - **Breaking: the public surface the parity gate carried as exceptions is resolved, before the v2 lock (#499, #500).** A convenience exists in every binding or in none (`docs/reference/bindings-v1.md` §1, principle 2). Migration, old → new:
   - `ArtifactError.Msg` → `err.Error()`. `ArtifactError.Err` → `errors.Unwrap(err)`, `errors.Is` or `errors.As` (`Unwrap` stays).
   - `ArtifactError.Request`, `.Platform` and `.Source` → the message: every fetch error's `Error()` now names the request, the platform and the source it concerns, as `(request 26.8, platform linux-amd64, source https://…)` where its text does not already, with a source URL's password redacted.

@@ -26,7 +26,7 @@ type callConfig struct {
 }
 
 func newCallConfig() *callConfig {
-	return &callConfig{export: ExportNone, docFlags: DocAll}
+	return &callConfig{export: ExportNone, docFlags: 0}
 }
 
 // CompileOption configures CompileTable.
@@ -168,7 +168,8 @@ func WithExport(format Format) RowsOption {
 	return exportOpt(format)
 }
 
-// WithDocFlags chooses the document groups Rows returns; absent means DocAll.
+// WithDocFlags chooses the document groups Rows returns; absent means 0, the lean result
+// (no per-value documents); pass DocAll for every group.
 func WithDocFlags(flags DocFlags) RowsOption {
 	return docFlagsOpt(flags)
 }

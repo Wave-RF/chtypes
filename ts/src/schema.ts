@@ -18,7 +18,7 @@
  */
 
 import type { BlockHandle, Calls, FilterHandle, Posture, SchemaHandle } from './abi2/index.js';
-import { DocFlags, EXPORT_NONE, type Format } from './abi2/index.js';
+import { EXPORT_NONE, type Format } from './abi2/index.js';
 import {
   type BatchResult,
   decodeBatch,
@@ -91,7 +91,7 @@ export interface RowsOptions extends RowOptions {
   readonly rowFilter?: Filter | undefined;
   /** Ask for an export in this format; absent means none. */
   readonly exportFormat?: Format | undefined;
-  /** The document groups to carry; absent means all of them. */
+  /** The document groups to carry; absent means 0, the lean result; pass `DocFlags.All` for every group. */
   readonly docFlags?: number | undefined;
 }
 
@@ -242,7 +242,7 @@ export class Schema {
       encodeColumns(options.columns),
       filter,
       exporting ? (options.exportFormat as number) : EXPORT_NONE,
-      options.docFlags ?? DocFlags.All,
+      options.docFlags ?? 0,
       encodeInsertOptions(options),
     );
     return decodeBatch(out.out, exporting ? out.outExport : undefined);

@@ -236,7 +236,8 @@ func run() error {
 
 	bad, err := schema.Rows(chtypes.JSONEachRow,
 		[]byte(batch[0].json+"\n"),
-		chtypes.WithSettings(map[string]string{"totally_not_a_setting": "1"}))
+		chtypes.WithSettings(map[string]string{"totally_not_a_setting": "1"}),
+		chtypes.WithDocFlags(chtypes.DocAll))
 	if err != nil {
 		fmt.Printf("   Rows returned a Go error: %v\n", err)
 	} else {

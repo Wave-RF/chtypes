@@ -13,14 +13,15 @@ C ABI. Nothing here reimplements a coercion rule, which is why the answers are
 exact by construction rather than approximately right.
 
     import chtypes
-    from chtypes import Format, Registry
+    from chtypes import DocFlags, Format, Registry
 
     chtypes.setup(timezone="UTC")                # once, before the first open
     registry = Registry(autofetch=True)
     library = registry.for_version("26.8")       # a release line or an exact version
     ddl = b"CREATE TABLE t (ts DateTime, seq UInt8) ENGINE = Memory"
     with library.compile_table(ddl) as schema:
-        batch = schema.rows(Format.JSON_EACH_ROW, b'{"ts":"2026-01-15 10:30:00","seq":256}\\n')
+        body = b'{"ts":"2026-01-15 10:30:00","seq":256}\\n'
+        batch = schema.rows(Format.JSON_EACH_ROW, body, doc_flags=DocFlags.ALL)
 
     batch.outcome        # Outcome.ACCEPTED: the insert would succeed
     batch.transformed    # the changes ClickHouse makes and reports as success
