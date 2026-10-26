@@ -109,13 +109,15 @@
  * first of these that is set: the call's own `session_timezone` (a key in its settings, which
  * ClickHouse applies through its own query context); the `session_timezone` in the schema's own
  * settings; the one in its server's `settings`; the one set by `chs_set_defaults`; its server's
- * `timezone`; the image zone. An empty `session_timezone` at any of these means the server's zone,
- * the last two. The call's zone governs parsing and rendering a zone-less `DateTime` or
- * `DateTime64`, export, a DEFAULT literal's fold, `toDateTimeOrZero` and a filter's literals. A
- * `Date` partition id is the civil date in every zone. Every zone name is validated by ClickHouse's
- * own `DateLUT`, which reads the library host's time zone database, on every platform. On darwin
- * the file system is case-insensitive, so `DateLUT` there accepts a spelling such as `utc` that a
- * Linux server refuses; that difference is documented, not patched.
+ * `timezone`; the image zone. An empty `session_timezone` at any of these means the server's own
+ * `timezone`, else the image zone (the last two), never the profile's `session_timezone` or the
+ * home zone: a call naming `''` reads and renders in the server's `timezone` while the schema's
+ * bound types keep the home zone. The call's zone governs parsing and rendering a zone-less
+ * `DateTime` or `DateTime64`, export, a DEFAULT literal's fold, `toDateTimeOrZero` and a filter's
+ * literals. A `Date` partition id is the civil date in every zone. Every zone name is validated by
+ * ClickHouse's own `DateLUT`, which reads the library host's time zone database, on every platform.
+ * On darwin the file system is case-insensitive, so `DateLUT` there accepts a spelling such as
+ * `utc` that a Linux server refuses; that difference is documented, not patched.
  *
  * Settings. Every settings input is a JSON object whose values are JSON strings, or the object form
  * for bytes (Input values, below), and a binding never rewrites one. A call's settings are layered,
