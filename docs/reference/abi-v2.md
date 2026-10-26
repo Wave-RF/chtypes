@@ -2307,7 +2307,7 @@ A setting this build's filters do not honor in a WHERE, from the `chs_set_defaul
 
 A schema whose compile needs its server's zone is declined on a host thread that already runs a ClickHouse query of its own: `CHS_DECLINED`, which is never a wrong answer.
 
-The result is immutable: nothing changes a schema after this call, so it replaces v0's column-list compile and its engine, TTL and partition-key setters, and any number of threads may use it at once. Its types bind its home zone, never the `session_timezone` in its settings, which is the zone of this call and of the later calls on the schema that name none of their own.
+The result is immutable: nothing changes a schema after this call, so it replaces v0's column-list compile and its engine, TTL and partition-key setters, and any number of threads may use it at once. Its types bind its home zone (Zones, in the Preamble: its server's `session_timezone` when set, else its server's `timezone`, else the image zone), never the `session_timezone` in its own settings, which is the zone of this call and of the later calls on the schema that name none of their own.
 
 #### `chs_schema_free`
 

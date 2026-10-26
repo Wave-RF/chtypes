@@ -99,16 +99,19 @@
  * handshake always run on the calling thread.
  *
  * Time zones. A library image has one zone of its own, set once by `chs_initialize`: the image
- * zone. A schema has a home zone, its server's `timezone` (`chs_server_create`), or else the image
- * zone. The schema's types bind its home zone, as a server's table binds the server's zone after a
- * restart, and so do the functions its DEFAULT, MATERIALIZED, ALIAS and CHECK expressions apply to
- * its columns, its PARTITION BY expressions, and a Date-valued TTL under a merge. Each call runs in
- * a zone too, the first of these that is set: the call's own `session_timezone` (a key in its
- * settings, which ClickHouse applies through its own query context); the `session_timezone` in the
- * schema's own settings; the one in its server's `settings`; the one set by `chs_set_defaults`; its
- * server's `timezone`; the image zone. An empty `session_timezone` at any of these means the
- * server's zone, the last two. The call's zone governs parsing and rendering a zone-less `DateTime`
- * or `DateTime64`, export, a DEFAULT literal's fold, `toDateTimeOrZero` and a filter's literals. A
+ * zone. A schema has a home zone, the zone its server binds: the `session_timezone` in its server's
+ * `settings` (`chs_server_create`) when that is set, else its server's `timezone`, else the image
+ * zone, in both postures. The schema's types bind its home zone, as a server's table binds the
+ * server's zone after a restart (measured on a 26.8 server whose `timezone` and whose profile's
+ * `session_timezone` differ: its zone-less types bind the `session_timezone`), and so do the
+ * functions its DEFAULT, MATERIALIZED, ALIAS and CHECK expressions apply to its columns, its
+ * PARTITION BY expressions, and a Date-valued TTL under a merge. Each call runs in a zone too, the
+ * first of these that is set: the call's own `session_timezone` (a key in its settings, which
+ * ClickHouse applies through its own query context); the `session_timezone` in the schema's own
+ * settings; the one in its server's `settings`; the one set by `chs_set_defaults`; its server's
+ * `timezone`; the image zone. An empty `session_timezone` at any of these means the server's zone,
+ * the last two. The call's zone governs parsing and rendering a zone-less `DateTime` or
+ * `DateTime64`, export, a DEFAULT literal's fold, `toDateTimeOrZero` and a filter's literals. A
  * `Date` partition id is the civil date in every zone. Every zone name is validated by ClickHouse's
  * own `DateLUT`, which reads the library host's time zone database, on every platform. On darwin
  * the file system is case-insensitive, so `DateLUT` there accepts a spelling such as `utc` that a
@@ -1335,8 +1338,10 @@ CHS_API void chs_server_free(chs_server *server);
  *
  * The result is immutable: nothing changes a schema after this call, so it replaces v0's
  * column-list compile and its engine, TTL and partition-key setters, and any number of threads may
- * use it at once. Its types bind its home zone, never the `session_timezone` in its settings, which
- * is the zone of this call and of the later calls on the schema that name none of their own.
+ * use it at once. Its types bind its home zone (Zones, in the Preamble: its server's
+ * `session_timezone` when set, else its server's `timezone`, else the image zone), never the
+ * `session_timezone` in its own settings, which is the zone of this call and of the later calls on
+ * the schema that name none of their own.
  *
  * Class: api. Thread: shared. Init: required. Returns one of: CHS_OK, CHS_REJECTED, CHS_DECLINED,
  * CHS_INVALID_ARGUMENT, CHS_INTERNAL. Growable (rule r1): an input it gains is a new member of its
