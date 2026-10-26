@@ -441,6 +441,13 @@ jobs:
         with:
           go-version-file: go/go.mod
           cache: false          # the module is stdlib-only: there is no go.sum to cache
+      # Build-only, no library: every `main` package under examples/go, not just
+      # the tour at its root. The tour runs below; ingest-demo is a sub-package
+      # nothing ran, so an API change broke it unseen (issue 683).
+      - name: every Go example type-checks and builds (vet + build, all packages)
+        run: |
+          go -C examples/go vet ./...
+          go -C examples/go build ./...
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
