@@ -457,8 +457,9 @@ jobs:
           node-version: 22
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
       # A tour runs against a real library its binding fetches through its own
-      # CLI, so a binding at ABI v2 fetches from the staging dev channel only
-      # (spec/abi-v2/docs.md r6; examples/chplay.sh picks its line there).
+      # CLI, so a binding at ABI v2 fetches from its default, the production
+      # generation-2 channel since the lock (docs/guides/fetch-v1.md,
+      # "Generation 2 after the lock"; examples/chplay.sh picks its line there).
       - name: the ABI major each tour tests, derived and asserted against each binding's compiled-in layer
         run: |
           for b in go python ts rust; do

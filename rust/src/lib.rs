@@ -11,15 +11,14 @@
 //! repository; where this crate and that page disagree, the page wins and this
 //! is a bug.
 //!
-//! **2.0.0-dev: UNSTABLE, staging only, not for production.** This is the ABI v2
-//! dev binding (`spec/abi-v2/docs.md`, public issue #511): it loads only a
-//! library of its own dev fingerprint, fetches only from the staging dev
-//! channel `https://registry-staging.wavehouse.dev/chtypes/v2-dev` and trusts
-//! only the staging key, ignores `CHTYPES_ARTIFACTS_URL`,
-//! `CHTYPES_TRUSTED_KEYS` and `CHTYPES_ALLOW_UNSIGNED` (and the matching
-//! [`FetchOptions`] fields) with one warning each, refuses every lock, frozen
-//! and update request, and caches under
-//! `${XDG_CACHE_HOME:-~/.cache}/chtypes/v2-dev/` (or `<CHTYPES_CACHE>/v2-dev/`).
+//! This is the ABI v2 binding (`docs/reference/abi-v2.md`): it loads only a
+//! library of its own locked fingerprint, fetches from the production channel
+//! `https://registry.wavehouse.dev/chtypes/v2` under the release key
+//! (`docs/guides/fetch-v1.md`, "Generation 2 after the lock"), honors
+//! `CHTYPES_ARTIFACTS_URL`, `CHTYPES_TRUSTED_KEYS` and `CHTYPES_ALLOW_UNSIGNED`
+//! (and the matching [`FetchOptions`] fields) and every lock, frozen and update
+//! request, and caches under `${XDG_CACHE_HOME:-~/.cache}/chtypes/v2/` (or
+//! `<CHTYPES_CACHE>/v2/`).
 //! Every vocabulary has an explicit `Unknown` member (rule r3): a value the
 //! description does not list is kept, for that field alone, and never fails a
 //! document.

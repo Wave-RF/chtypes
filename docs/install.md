@@ -7,13 +7,13 @@ Two steps, in this order: the **binding** for your language, then at least one *
 <details open><summary><b>Go</b></summary>
 
 ```sh
-go get github.com/wave-rf/chtypes/go
+go get github.com/wave-rf/chtypes/go/v2
 ```
 
-The module path is lowercase — the Go norm — and froze at the first tag. Import it as:
+The module path is lowercase — the Go norm — and ends in `/v2` for SDK 2.x, as Go's major-version rule requires (`github.com/wave-rf/chtypes/go` stays the 1.x module). Import it as:
 
 ```go
-import "github.com/wave-rf/chtypes/go/chtypes"
+import "github.com/wave-rf/chtypes/go/v2/chtypes"
 ```
 
 The default build is **dlopen-only**: it compiles with cgo (for `dlfcn`) but links nothing, includes no header, and needs no build tree. That is what `go get` gives a consumer, and it is all you need.
@@ -64,10 +64,10 @@ Version requirements per language and the platforms artifacts are published for 
 Each binding ships the same fetch command, so you need nothing from this repository:
 
 ```sh
-go run github.com/wave-rf/chtypes/go/cmd/chtypes@latest fetch 26.8   # Go
-python -m chtypes fetch 26.8                                         # Python
-npx @wavehouse/chtypes fetch 26.8                                    # TypeScript
-cargo install chtypes && chtypes fetch 26.8                          # Rust
+go run github.com/wave-rf/chtypes/go/v2/cmd/chtypes@latest fetch 26.8   # Go
+python -m chtypes fetch 26.8                                            # Python
+npx @wavehouse/chtypes fetch 26.8                                       # TypeScript
+cargo install chtypes && chtypes fetch 26.8                             # Rust
 ```
 
 A spelling is two, three or four parts (`26.8`, `26.8.15`, `26.8.15.10`), with no `v` prefix and no channel suffix. The command installs into the per-user OCI cache `${XDG_CACHE_HOME:-~/.cache}/chtypes/v1/`, which every binding reads by default, so **one machine set up once serves all four**. `CHTYPES_CACHE` overrides the cache directory, and `chtypes where` prints the one in use. `CHTYPES_REGISTRY`, which the previous generation used, is retired: set, it warns once and is otherwise ignored.
@@ -144,8 +144,8 @@ If you are developing against this repository rather than consuming a release:
 <details open><summary><b>Go</b></summary>
 
 ```text
-require github.com/wave-rf/chtypes/go v0.0.0
-replace github.com/wave-rf/chtypes/go => ../path/to/chtypes/go
+require github.com/wave-rf/chtypes/go/v2 v2.0.0
+replace github.com/wave-rf/chtypes/go/v2 => ../path/to/chtypes/go
 ```
 
 The `require` version is never resolved once the module is replaced by a path, so `v0.0.0` is the honest placeholder — it is what `examples/go/go.mod` in this repository uses.
@@ -191,4 +191,4 @@ A library you built yourself, for example the artifact producer's own unpublishe
 
 ## Next
 
-[`quickstart.md`](quickstart.md) — one artifact, one schema, one row, in whichever of the four you just installed. What 1.0 does not do yet is in [`limitations.md`](limitations.md#known-gaps-in-10).
+[`quickstart.md`](quickstart.md) — one artifact, one schema, one row, in whichever of the four you just installed. What the SDK does not do yet is in [`limitations.md`](limitations.md#known-gaps-in-10).

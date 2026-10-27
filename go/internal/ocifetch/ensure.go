@@ -34,7 +34,7 @@ type Request struct {
 // fields are refused (spec/abi-v2/docs.md, rule r6).
 type Options struct {
 	Bases                  []string // CHTYPES_ARTIFACTS_URL, comma-separated; ignored by the dev channel
-	CacheDir               string   // CHTYPES_CACHE; the dev channel uses <dir>/v2-dev (rule r5)
+	CacheDir               string   // CHTYPES_CACHE; used as <dir>/v2 (<dir>/v2-dev under the dev channel; rule r5)
 	SystemDirs             []string // defaults to the contract's system dirs
 	TrustedKeys            []string // raw hex ed25519 public keys; CHTYPES_TRUSTED_KEYS; ignored by the dev channel
 	Token                  string   // CHTYPES_DOWNLOAD_TOKEN
@@ -178,9 +178,9 @@ func resolveOptions(o *Options) (resolvedOptions, error) {
 		}
 	}
 
-	// An explicit cache is used through the contract's subroot: under the
-	// dev channel <cache>/v2-dev, never <cache> itself, which a 1.x binding
-	// uses as its whole layout (rule r5, a MUST).
+	// An explicit cache is used through the contract's subroot: <cache>/v2
+	// (<cache>/v2-dev under the dev channel), never <cache> itself, which a
+	// 1.x binding uses as its whole layout (rule r5, a MUST).
 	ro.cacheDir = o.CacheDir
 	if ro.cacheDir == "" {
 		ro.cacheDir = os.Getenv(EnvCacheName)

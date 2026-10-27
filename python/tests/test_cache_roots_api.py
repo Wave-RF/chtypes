@@ -1,5 +1,7 @@
 """Public issue #530: `cache_root` and `search_dirs` report the resolution the
-fetch layer runs, in the order it reads, and create nothing."""
+fetch layer runs, in the order it reads, and create nothing. The shared table
+holds the production generation-2 channel's expectations (v2), the default a
+user's process speaks since the lock, so no test here selects a channel."""
 
 from __future__ import annotations
 
@@ -44,8 +46,8 @@ def test_the_shared_table(case, tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
 def test_no_options_is_the_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     monkeypatch.setenv("CHTYPES_CACHE", str(tmp_path / "env"))
-    assert chtypes.cache_root() == tmp_path / "env" / "v2-dev"
-    assert chtypes.search_dirs()[0] == tmp_path / "env" / "v2-dev"
+    assert chtypes.cache_root() == tmp_path / "env" / "v2"
+    assert chtypes.search_dirs()[0] == tmp_path / "env" / "v2"
     assert chtypes.search_dirs() == chtypes.search_dirs(chtypes.FetchOptions())
 
 

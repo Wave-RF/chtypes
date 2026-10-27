@@ -1,21 +1,20 @@
 //! `chtypes`: the command line over the v1 fetch layer
 //! (`docs/guides/fetch-v1.md`), spelled identically in every SDK.
 //!
-//! 2.0.0-dev: UNSTABLE, staging only, not for production. This CLI speaks the
-//! ABI v2 dev channel (`spec/abi-v2/docs.md`, rules r5 and r6): it fetches only
-//! from `https://registry-staging.wavehouse.dev/chtypes/v2-dev` and trusts only
-//! the staging key; `CHTYPES_ARTIFACTS_URL`, `CHTYPES_TRUSTED_KEYS` and
-//! `CHTYPES_ALLOW_UNSIGNED` are ignored, each with one warning; `--lock`,
-//! `--frozen` and `--update` are refused before any network call; its default
-//! cache is `${XDG_CACHE_HOME:-~/.cache}/chtypes/v2-dev`, and `--cache DIR` (or
-//! `CHTYPES_CACHE`) is used through its subroot `DIR/v2-dev`.
+//! This CLI speaks ABI v2's production channel (`docs/guides/fetch-v1.md`,
+//! "Generation 2 after the lock"): it fetches from
+//! `https://registry.wavehouse.dev/chtypes/v2` and trusts the release key,
+//! honors `CHTYPES_ARTIFACTS_URL`, `CHTYPES_TRUSTED_KEYS` and
+//! `CHTYPES_ALLOW_UNSIGNED` and `--lock`, `--frozen` and `--update`; its default
+//! cache is `${XDG_CACHE_HOME:-~/.cache}/chtypes/v2`, and `--cache DIR` (or
+//! `CHTYPES_CACHE`) is used through its subroot `DIR/v2`.
 //!
 //! ```text
 //! chtypes fetch <spelling>... | --all  [--platform <key>] [--cache <dir>] [--lock <file>] [--frozen] [--offline] [--update] [--strict]
 //!                                      [--allow-revoked] [--require-revocation-check]
 //! chtypes verify [--cache <dir>] [--strict]       re-verify the installed cache
 //! chtypes list [--cache <dir>] [--offline] [--strict]   installed builds, and the published lines unless --offline
-//! chtypes where [--cache <dir>] [--strict] [--all]  the cache root (the v2-dev one); --all: every directory searched
+//! chtypes where [--cache <dir>] [--strict] [--all]  the cache root (the v2 one); --all: every directory searched
 //! chtypes resolve <spelling> [--json] [--cache <dir>] [--offline] [--strict]   what each platform resolves to; installs nothing
 //! chtypes prune [--line <line>] [--keep <n>] [--dry-run] [--cache <dir>] [--strict]   remove superseded builds
 //! ```
@@ -50,7 +49,7 @@ chtypes: fetch, verify, list, resolve and prune ClickHouse artifacts for the cht
                               [--allow-revoked] [--require-revocation-check]
   chtypes verify [--cache <dir>] [--strict]            re-verify the installed cache
   chtypes list [--cache <dir>] [--offline] [--strict]  installed builds; without --offline, published lines too
-  chtypes where [--cache <dir>] [--strict] [--all]     the cache root (<dir>/v2-dev); --all: every directory searched
+  chtypes where [--cache <dir>] [--strict] [--all]     the cache root (<dir>/v2); --all: every directory searched
   chtypes resolve <spelling> [--json] [--cache <dir>] [--offline] [--strict]
                                       the build and manifest each platform resolves to, verified; installs nothing
   chtypes prune  [--line <line>] [--keep <n>] [--dry-run] [--cache <dir>] [--strict]
@@ -75,14 +74,14 @@ CHTYPES_CACHE_UNUSABLE, never not-installed.
 never a lock or an update). --require-revocation-check: a revocation status
 that cannot be read is an error, not a warning.
 
-Environment: CHTYPES_CACHE (this 2.0.0-dev SDK uses its subroot
-<CHTYPES_CACHE>/v2-dev), CHTYPES_DOWNLOAD_TOKEN, CHTYPES_CACHE_STRICT,
-CHTYPES_OFFLINE=1 (the same as --offline).
+Environment: CHTYPES_CACHE (this SDK uses its subroot <CHTYPES_CACHE>/v2),
+CHTYPES_ARTIFACTS_URL, CHTYPES_TRUSTED_KEYS, CHTYPES_ALLOW_UNSIGNED,
+CHTYPES_DOWNLOAD_TOKEN, CHTYPES_CACHE_STRICT, CHTYPES_OFFLINE=1 (the same as
+--offline).
 
-2.0.0-dev: UNSTABLE, staging only, not for production. Fetches only from the
-staging dev channel and trusts only its key; --lock, --frozen and --update are
-refused; CHTYPES_ARTIFACTS_URL, CHTYPES_TRUSTED_KEYS and CHTYPES_ALLOW_UNSIGNED
-are ignored (spec/abi-v2/docs.md, rule r6).
+ABI v2: fetches from https://registry.wavehouse.dev/chtypes/v2 under the release
+key, and caches under <cache>/v2 (docs/guides/fetch-v1.md, \"Generation 2 after
+the lock\").
 ";
 
 /// A usage problem, reported on stderr with exit status 2.
@@ -299,9 +298,9 @@ fn refuse_flags(command: &str, args: &Args, refused: &[&str]) -> Result<(), Usag
 }
 
 fn cmd_fetch(args: &Args) -> Result<u8, Usage> {
-    // A dev SDK pins nothing: the refusal comes before anything else, every
-    // other check of the arguments and the network above all
-    // (spec/abi-v2/docs.md, rule r6).
+    // The dev channel pins nothing: under it the refusal comes before anything
+    // else, every other check of the arguments and the network above all
+    // (spec/abi-v2/docs.md, rule r6). The production channel honors every pin.
     if let Some(refusal) = ocifetch::channel::refuse_pinning(&options(args)) {
         return Err(Usage(refusal));
     }

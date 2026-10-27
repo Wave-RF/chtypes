@@ -25,17 +25,16 @@
 // in spec/fetch-v1/constants.json (docs/guides/fetch-v1.md section 8), read
 // from the generated table, never hard-coded here.
 //
-// Environment: CHTYPES_CACHE (the cache: this 2.0.0-dev SDK uses its subroot
-// <CHTYPES_CACHE>/v2-dev), CHTYPES_DOWNLOAD_TOKEN, CHTYPES_TARGET (the default
+// Environment: CHTYPES_CACHE (the cache: this SDK uses its subroot
+// <CHTYPES_CACHE>/v2), CHTYPES_ARTIFACTS_URL, CHTYPES_TRUSTED_KEYS,
+// CHTYPES_ALLOW_UNSIGNED, CHTYPES_DOWNLOAD_TOKEN, CHTYPES_TARGET (the default
 // --platform) and CHTYPES_CACHE_STRICT=1 (--strict).
 //
-// 2.0.0-dev: UNSTABLE, staging only, not for production. This CLI speaks the
-// ABI v2 dev channel (spec/abi-v2/docs.md, rules r5 and r6): it fetches only
-// from https://registry-staging.wavehouse.dev/chtypes/v2-dev and trusts only
-// the staging key; CHTYPES_ARTIFACTS_URL, CHTYPES_TRUSTED_KEYS and
-// CHTYPES_ALLOW_UNSIGNED are ignored, each with one warning; --lock, --frozen
-// and --update are refused before any network call; its default cache is
-// ${XDG_CACHE_HOME:-~/.cache}/chtypes/v2-dev.
+// This CLI speaks ABI v2's production channel (docs/guides/fetch-v1.md,
+// "Generation 2 after the lock"): it fetches from
+// https://registry.wavehouse.dev/chtypes/v2, trusts the release key, honors
+// the source and trust overrides and --lock, --frozen and --update, and its
+// default cache is ${XDG_CACHE_HOME:-~/.cache}/chtypes/v2.
 package main
 
 import (
@@ -76,9 +75,8 @@ const usageText = `usage:
 --require-revocation-check: a revocation status that cannot be read is an error, not a warning
 exit statuses: 0 ok, 2 usage, otherwise the failure's own status (docs/guides/fetch-v1.md section 8)
 
-2.0.0-dev: UNSTABLE, staging only, not for production. Fetches only from the staging dev channel and
-trusts only its key; --lock, --frozen and --update are refused; CHTYPES_ARTIFACTS_URL,
-CHTYPES_TRUSTED_KEYS and CHTYPES_ALLOW_UNSIGNED are ignored (spec/abi-v2/docs.md, rule r6).
+ABI v2: fetches from https://registry.wavehouse.dev/chtypes/v2 under the release key, and caches under
+<cache>/v2 (docs/guides/fetch-v1.md, "Generation 2 after the lock").
 `
 
 // usageError is exit 2.
@@ -279,8 +277,9 @@ func cmdFetch(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 	if err != nil {
 		return err
 	}
-	// A dev SDK pins nothing: the refusal comes before anything else, the
-	// network above all (rule r6).
+	// The dev channel pins nothing: under it the refusal comes before
+	// anything else, the network above all (rule r6). The production channel
+	// honors every pin.
 	if lock != "" || frozen || update {
 		if probe := (&ocifetch.Options{Frozen: frozen, LockPath: lock, Update: update}); ocifetch.PinningRefusedFor(probe) {
 			return &usageError{ocifetch.PinningRefused}

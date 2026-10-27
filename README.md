@@ -12,7 +12,7 @@
 <p align="center">
   <a href="https://github.com/Wave-RF/chtypes/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/Wave-RF/chtypes/ci.yml?branch=main&label=CI&color=%2306B0BF"></a>
   <a href="LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/License-Apache_2.0-%23086D77"></a>
-  <a href="https://pkg.go.dev/github.com/wave-rf/chtypes/go"><img alt="Go" src="https://img.shields.io/badge/Go-pkg.go.dev-%2306B0BF?logo=go&logoColor=white"></a>
+  <a href="https://pkg.go.dev/github.com/wave-rf/chtypes/go/v2"><img alt="Go" src="https://img.shields.io/badge/Go-pkg.go.dev-%2306B0BF?logo=go&logoColor=white"></a>
   <a href="https://pypi.org/project/chtypes/"><img alt="PyPI" src="https://img.shields.io/pypi/v/chtypes?label=PyPI&color=%2306B0BF&logo=pypi&logoColor=white"></a>
   <a href="https://www.npmjs.com/package/@wavehouse/chtypes"><img alt="npm" src="https://img.shields.io/npm/v/%40wavehouse%2Fchtypes?label=npm&color=%2306B0BF&logo=npm&logoColor=white"></a>
   <a href="https://crates.io/crates/chtypes"><img alt="crates.io" src="https://img.shields.io/crates/v/chtypes?label=crates.io&color=%2306B0BF&logo=rust&logoColor=white"></a>
@@ -44,7 +44,7 @@ That last line is the point. ClickHouse will accept `256` into a `UInt8`, store 
 Two things, always: the **binding** for your language, and at least one **library** — the per-version native library it loads. The binding is small; the library is real ClickHouse, compiled.
 
 ```sh
-go get github.com/wave-rf/chtypes/go     # Go
+go get github.com/wave-rf/chtypes/go/v2  # Go
 uv add chtypes                           # Python  (or: pip install chtypes)
 pnpm add @wavehouse/chtypes              # TypeScript
 cargo add chtypes                        # Rust
@@ -53,7 +53,7 @@ cargo add chtypes                        # Rust
 Then fetch a library: resolved over OCI, verified, and unpacked into the per-user cache every binding reads by default. Each binding ships the same command, so you need nothing from this repository:
 
 ```sh
-go run github.com/wave-rf/chtypes/go/cmd/chtypes@latest fetch 26.8
+go run github.com/wave-rf/chtypes/go/v2/cmd/chtypes@latest fetch 26.8
 python -m chtypes fetch 26.8
 npx @wavehouse/chtypes fetch 26.8
 cargo install chtypes && chtypes fetch 26.8
@@ -163,7 +163,7 @@ Three axes — the language you call from, the platform you run on, and the Clic
 
 ## Known gaps in 1.0
 
-A short list of places where 1.0 does less than you might expect, each with what happens, a workaround and a note that a fix is planned: nested `String` values carry no raw bytes, binary `settings` and `query_params` values must be UTF-8, zone names follow the host's zone files, `SHOW CREATE` of a Memory table is declined, a batch preview with a filter in another zone is declined, per-call settings values are not validated like `SET`, `lossy` on a raw NUL in TSV, and no call for a server's version or settings. The full text is in **[docs/limitations.md](docs/limitations.md#known-gaps-in-10)**.
+A short list of places where the library does less than you might expect, each with what happens, a workaround and a note that a fix is planned: nested `String` values carry no raw bytes, binary `settings` and `query_params` values must be UTF-8 in Rust and the 1.x SDKs, zone names follow the host's zone files, a batch preview with a filter in another zone is declined, per-call settings values are not validated like `SET`, `lossy` on a raw NUL in TSV, and no call for a server's version or settings. The full text is in **[docs/limitations.md](docs/limitations.md#known-gaps-in-10)**.
 
 ## Documentation
 
@@ -177,7 +177,7 @@ A short list of places where 1.0 does less than you might expect, each with what
 
 ## Project status
 
-The `v1` line is the 1.0 release in progress, and the ABI stays provisional until it is confirmed. The badges above read the live version from each registry. What that means for you is in [`docs/support-v1.md`](docs/support-v1.md#pre-10).
+The current major is v2; 1.x is the frozen previous major. The badges above read the live version from each registry. What that means for you is in [`docs/support-v1.md`](docs/support-v1.md#pre-10).
 
 This repository is the **SDK half** of chtypes, Apache 2.0. The other half — the C++ wrapper, the per-version vendoring and build pipeline, the libraries themselves, and the differential proof (tens of thousands of cases scored against real ClickHouse servers on every supported version) — belongs to the artifact producer, under its own license. The bindings here contain no ClickHouse code: they load a library and speak the ABI. Libraries carry their own license; see the `LICENSE` inside each one.
 

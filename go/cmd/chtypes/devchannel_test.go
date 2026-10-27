@@ -1,10 +1,11 @@
 package main
 
 // devchannel_test.go — the command line under the ABI v2 dev channel
-// (spec/abi-v2/docs.md, rules r5 and r6). The first tests run the in-process
-// CLI switched to the dev channel; the last builds the real binary (no test
-// seam can reach it: ocifetch's seams panic outside a test binary) and proves
-// the same answers from it. Nothing here reaches the network.
+// (spec/abi-v2/docs.md, rules r5 and r6), which a 2.0.0-dev SDK spoke. The
+// first tests run the in-process CLI switched to the dev channel; the last
+// builds the real binary (no test seam can reach it: ocifetch's seams panic
+// outside a test binary) and proves that since the lock it speaks the
+// production generation-2 channel instead. Nothing here reaches the network.
 
 import (
 	"os"
@@ -81,11 +82,13 @@ func TestDevRefusesLockFrozenAndUpdate(t *testing.T) {
 	}
 }
 
-// TestRealBinarySpeaksTheDevChannel builds cmd/chtypes as a user's `go
-// install` would and runs it: the subroot, the default root, the pinning
-// refusals and the one-time warnings for each ignored override all come from
-// a binary no test seam reaches.
-func TestRealBinarySpeaksTheDevChannel(t *testing.T) {
+// TestRealBinarySpeaksTheProductionChannel builds cmd/chtypes as a user's `go
+// install` would and runs it: since the lock, a binary no test seam reaches
+// speaks the production generation-2 channel (docs/guides/fetch-v1.md,
+// "Generation 2 after the lock"), never the dev channel. Its default root and
+// an explicit cache's subroot are v2, its system directories are v2's, a pin
+// is honored (never the dev channel's refusal), and no override is ignored.
+func TestRealBinarySpeaksTheProductionChannel(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skipf("SKIPPED: no go toolchain on PATH to build the real binary (%v)", err)
 	}
@@ -101,6 +104,7 @@ func TestRealBinarySpeaksTheDevChannel(t *testing.T) {
 	run := func(env []string, args ...string) (int, string, string) {
 		t.Helper()
 		cmd := exec.CommandContext(t.Context(), bin, args...)
+		cmd.Dir = t.TempDir()
 		cmd.Env = append([]string{"HOME=" + t.TempDir(), "XDG_CACHE_HOME=" + xdg, "PATH=" + os.Getenv("PATH")}, env...)
 		var out, errb strings.Builder
 		cmd.Stdout, cmd.Stderr = &out, &errb
@@ -113,29 +117,33 @@ func TestRealBinarySpeaksTheDevChannel(t *testing.T) {
 		}
 		return code, out.String(), errb.String()
 	}
-	if code, out, _ := run(nil, "where"); code != 0 || strings.TrimSpace(out) != filepath.Join(xdg, "chtypes", "v2-dev") {
-		t.Errorf("the real binary's default root = %d %q, want ${XDG_CACHE_HOME}/chtypes/v2-dev", code, out)
+	if code, out, _ := run(nil, "where"); code != 0 || strings.TrimSpace(out) != filepath.Join(xdg, "chtypes", "v2") {
+		t.Errorf("the real binary's default root = %d %q, want ${XDG_CACHE_HOME}/chtypes/v2", code, out)
 	}
 	cache := t.TempDir()
-	if code, out, _ := run([]string{"CHTYPES_CACHE=" + cache}, "where"); code != 0 || strings.TrimSpace(out) != filepath.Join(cache, "v2-dev") {
-		t.Errorf("the real binary under CHTYPES_CACHE = %d %q, want <CHTYPES_CACHE>/v2-dev", code, out)
+	if code, out, _ := run([]string{"CHTYPES_CACHE=" + cache}, "where"); code != 0 || strings.TrimSpace(out) != filepath.Join(cache, "v2") {
+		t.Errorf("the real binary under CHTYPES_CACHE = %d %q, want <CHTYPES_CACHE>/v2", code, out)
 	}
-	if code, _, errText := run([]string{"CHTYPES_CACHE=" + cache}, "fetch", "26.8", "--frozen"); code != 2 || !strings.Contains(errText, ocifetch.PinningRefused) {
-		t.Errorf("the real binary's fetch --frozen = %d %q, want exit 2 and the dev-channel refusal", code, errText)
+	want := filepath.Join(cache, "v2") + "\n/usr/local/share/chtypes/v2\n/opt/chtypes/v2\n"
+	if code, out, _ := run(nil, "where", "--all", "--cache", cache); code != 0 || out != want {
+		t.Errorf("the real binary's where --all = %d %q, want %q", code, out, want)
+	}
+	// A pin is honored: --frozen with no lock file reads the lock and fails on
+	// it, never with the dev channel's refusal.
+	if code, _, errText := run([]string{"CHTYPES_CACHE=" + cache}, "fetch", "26.8", "--frozen"); strings.Contains(errText, ocifetch.PinningRefused) || !strings.Contains(errText, "chtypes.lock") {
+		t.Errorf("the real binary's fetch --frozen = %d %q, want the lock read, not the dev-channel refusal", code, errText)
 	}
 	overrides := []string{
 		"CHTYPES_CACHE=" + cache,
-		"CHTYPES_ARTIFACTS_URL=http://127.0.0.1:9/chtypes/v1",
+		"CHTYPES_ARTIFACTS_URL=http://127.0.0.1:9/chtypes/v2",
 		"CHTYPES_TRUSTED_KEYS=" + ocifetch.TestKeys[0].Ed25519Hex,
 		"CHTYPES_ALLOW_UNSIGNED=1",
 	}
 	code, out, errText := run(overrides, "fetch", "26.8", "--offline", "--platform", "linux-amd64")
 	if code != 1 || out != "" || !strings.Contains(errText, string(ocifetch.CodeArtifactMissing)) {
-		t.Errorf("an offline fetch from an empty dev cache = %d %q %q, want CHTYPES_ARTIFACT_MISSING", code, out, errText)
+		t.Errorf("an offline fetch from an empty cache = %d %q %q, want CHTYPES_ARTIFACT_MISSING", code, out, errText)
 	}
-	for _, name := range []string{"CHTYPES_ARTIFACTS_URL", "CHTYPES_TRUSTED_KEYS", "CHTYPES_ALLOW_UNSIGNED"} {
-		if n := strings.Count(errText, "WARNING: "+name+" is set and IGNORED"); n != 1 {
-			t.Errorf("%s was warned about %d times by the real binary, want exactly once:\n%s", name, n, errText)
-		}
+	if strings.Contains(errText, "is set and IGNORED") {
+		t.Errorf("the real binary ignored an override, as only the dev channel does:\n%s", errText)
 	}
 }

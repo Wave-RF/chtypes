@@ -1,6 +1,6 @@
 //! Public issue #528: `CHTYPES_OFFLINE=1` is the environment twin of the
-//! `offline` option, under the ABI v2 dev channel (spec/abi-v2/docs.md, rule
-//! r6: it names no source). With nothing installed a fetch is
+//! `offline` option, under the production generation-2 channel every build
+//! speaks (it names no source). With nothing installed a fetch is
 //! CHTYPES_ARTIFACT_MISSING and makes no request; with a library installed it
 //! resolves it. Every request follows the layout's creation (the refusals in
 //! tests/devchannel.rs rely on the same ordering), so "the cache was never
@@ -90,7 +90,7 @@ fn offline_env_makes_no_request_and_loads_an_installed_build() {
         library_bytes: library.len() as u64,
         // A build of this SDK's own ABI: its predicate names the generated
         // fingerprint, as a dev artifact's signed predicate does, so the dev
-        // channel's record filter sees it.
+        // channel's record filter would see it too.
         predicate: serde_json::json!({
             "clickhouse_version": "26.8.1.1",
             "build": "20260801.000001",

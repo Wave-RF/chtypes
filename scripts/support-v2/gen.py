@@ -12,8 +12,8 @@ r"""gen.py: generate docs/support-v2.md, the verified v2 support matrix (public 
 
 WHERE THE FACTS COME FROM. The Python binding's ACTIVE generation-2 channel
 decides the registry, the key and the generation (`chtypes._ocifetch._channel.
-active()`): the staging dev channel today, production `chtypes/v2` with the
-release key after the lock change flips `active()`, with no change here. This
+active()`): production `chtypes/v2` with the release key since the lock
+flipped `active()` (it was the staging dev channel before). This
 script reads those three values and nothing else about the channel; an
 environment variable cannot redirect it (the base and the keys are passed as
 explicit options, which beat the environment on a channel that honors it).
@@ -563,15 +563,20 @@ def _selftest() -> int:
             failures.append(what)
 
     # The derivation: a channel gives its own base, keys and generation, and
-    # the active one is the dev channel outside a test run.
+    # the active one is the production channel outside a test run (since the
+    # lock; it was the dev channel before).
     dev, prod = channel_context(_channel.DEV_CHANNEL), channel_context(_channel.PROD_V2_CHANNEL)
-    check(_channel.active() is _channel.DEV_CHANNEL, "the active channel is the dev channel")
+    check(_channel.active() is _channel.PROD_V2_CHANNEL, "the active channel is the production channel")
     check(
-        channel_context() == dev
-        and not dev.production
-        and dev.base == _channel.DEV_CHANNEL_BASE
-        and dev.key_ids == (_channel.DEV_KEY_ID,),
-        "by default the context is the dev base and the dev key",
+        channel_context() == prod
+        and prod.production
+        and prod.base == C.PROD_V2_BASES[0]
+        and prod.key_ids == tuple(k["keyid"] for k in C.RELEASE_KEYS),
+        "by default the context is the production base and the release key",
+    )
+    check(
+        not dev.production and dev.base == _channel.DEV_CHANNEL_BASE and dev.key_ids == (_channel.DEV_KEY_ID,),
+        "the dev channel gives the dev base and the dev key",
     )
     check(
         prod.production

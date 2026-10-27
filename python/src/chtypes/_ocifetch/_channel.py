@@ -1,8 +1,11 @@
 """The fetch contract this build speaks.
 
-A 2.0.0-dev SDK speaks the ABI v2 dev channel (spec/abi-v2/docs.md, rules r5
-and r6), which is the v1 fetch contract (docs/guides/fetch-v1.md) narrowed in
-five ways:
+Every non-test process of this package speaks the production generation-2
+channel (`PROD_V2_CHANNEL`; docs/guides/fetch-v1.md, "Generation 2 after the
+lock"): the v1 fetch contract with v2 values. A 2.0.0-dev SDK spoke the ABI v2
+dev channel (spec/abi-v2/docs.md, rules r5 and r6), which stays here, reachable
+only from a test run (`use_dev_channel_for_tests`, `allow_overrides_for_tests`),
+and is the v1 fetch contract (docs/guides/fetch-v1.md) narrowed in five ways:
 
 - it fetches ONLY from `DEV_CHANNEL_BASE` and trusts ONLY the staging key
   (`DEV_KEY_HEX`, id `DEV_KEY_ID`); the release key is not in its trust list;
@@ -139,8 +142,8 @@ class Channel:
     revocation: bool = False
 
 
-# What a 2.0.0-dev SDK speaks, and what every process speaks unless a test
-# selected another contract.
+# What a 2.0.0-dev SDK spoke. Since the lock only a test run selects it
+# (use_dev_channel_for_tests, allow_overrides_for_tests).
 DEV_CHANNEL: Final = Channel(
     name="v2-dev",
     abi=DEV_ABI_GENERATION,
@@ -171,12 +174,10 @@ FETCH_V1_CHANNEL: Final = Channel(
     pinnable=True,
 )
 
-# The production generation-2 channel a 2.0.0 SDK speaks after the lock: the v1
+# The production generation-2 channel every non-test process speaks since the lock: the v1
 # contract with v2 values, from the generated constants (docs/guides/fetch-v1.md,
 # "Generation 2 after the lock"). It trusts the release key, honors every
-# override and pin, and has no alias step. NOT the default: only
-# use_prod_v2_for_tests selects it, until the lock change makes it active()'s
-# fallback.
+# override and pin, and has no alias step. It is active()'s fallback.
 PROD_V2_CHANNEL: Final = Channel(
     name=C.PROD_V2_NAME,
     abi=C.PROD_V2_ABI_GENERATION,
@@ -196,14 +197,14 @@ _current: Channel | None = None
 
 
 def active() -> Channel:
-    """The contract this process fetches under: the dev channel, unless a test
-    selected another."""
+    """The contract this process fetches under: the production generation-2
+    channel, unless a test selected another."""
     current = _current
-    return DEV_CHANNEL if current is None else current
+    return PROD_V2_CHANNEL if current is None else current
 
 
 def channel_name() -> str:
-    """The fetch contract this process speaks: "v2-dev" outside a test run."""
+    """The fetch contract this process speaks: "v2" outside a test run."""
     return active().name
 
 
@@ -221,8 +222,8 @@ def _test_only(what: str) -> None:
     # variable alone (anyone can export it). Go's equivalent is testing.Testing().
     if "_pytest" not in sys.modules or not os.environ.get("PYTEST_CURRENT_TEST"):
         raise RuntimeError(
-            f"chtypes._ocifetch: {what} is test-only; a 2.0.0-dev SDK has no override "
-            "(spec/abi-v2/docs.md, rule r6)"
+            f"chtypes._ocifetch: {what} is test-only: a non-test process "
+            "speaks only the production channel"
         )
 
 
@@ -374,7 +375,7 @@ def _ahead_message(own: str, predicate: object) -> str:
 
 
 def use_dev_channel_for_tests() -> Callable[[], None]:
-    """Make this TEST run speak the dev channel exactly as a user's process does
+    """Make this TEST run speak the dev channel exactly as a 2.0.0-dev SDK did
     (undoing either function above, for a test of the dev channel itself).
     Returns the restore function."""
     _test_only("use_dev_channel_for_tests")
@@ -382,8 +383,8 @@ def use_dev_channel_for_tests() -> Callable[[], None]:
 
 
 def trusted_keys(channel: Channel | None = None) -> tuple[TrustedKey, ...]:
-    """The contract's default trust list: the staging key alone on the dev
-    channel, the release key(s) under the v1 contract."""
+    """The contract's default trust list: the release key(s) under the production
+    and v1 contracts, the staging key alone on the dev channel."""
     channel = channel or active()
     return tuple(
         TrustedKey(keyid=k["keyid"], public_key=bytes.fromhex(k["ed25519_hex"]))

@@ -1,10 +1,8 @@
 # chtypes — Python SDK
 
-> **2.0.0-dev: UNSTABLE, staging only, not for production.** This is the ABI v2 development binding (public issue #511). It speaks ABI v2's unstable description, pins its dev fingerprint and refuses a library with any other ("update your dev SDK"). It fetches only from the staging dev channel (`https://registry-staging.wavehouse.dev/chtypes/v2-dev`) and trusts only the staging key; `CHTYPES_ARTIFACTS_URL`, `CHTYPES_TRUSTED_KEYS` and `CHTYPES_ALLOW_UNSIGNED`, and the `bases`, `trusted_keys` and `allow_unsigned` fetch options, are ignored, each with one warning; `--lock`, `--frozen` and `--update`, and the `frozen`, `lock_path`, `lock_write` and `update` options, are refused, because a dev build is replaceable and a superseded one expires after 14 days. Its cache is `${XDG_CACHE_HOME:-~/.cache}/chtypes/v2-dev`, or `<CHTYPES_CACHE>/v2-dev` under an explicit cache, which no 1.x SDK reads. A dev SDK prefers the newest build of its own fingerprint: it resolves `<tag>--fp-<its fingerprint>` first and the tag only when no such build exists, and its cache lookups ignore another dev SDK's builds in a shared cache, so a newer dev fingerprint never strands it (§3 of [`docs/guides/fetch-v1.md`](../docs/guides/fetch-v1.md)). Every vocabulary keeps a value it does not list as its `unknown(n)` member (`Outcome("x")`, whose `known` is `False`) instead of failing the document. The rules are r1 to r6 of [`docs/reference/abi-v2.md`](../docs/reference/abi-v2.md). For production, use the 1.x package: `pip install "chtypes<2"`.
+> **SDK 2.x speaks ABI v2.** This binding speaks ABI v2's locked description and refuses a library with any other fingerprint. It fetches from the production channel, `https://registry.wavehouse.dev/chtypes/v2`, signed with the release key, and honors `CHTYPES_ARTIFACTS_URL`, `CHTYPES_TRUSTED_KEYS` and `CHTYPES_ALLOW_UNSIGNED` (and the `bases`, `trusted_keys` and `allow_unsigned` fetch options), and `--lock`, `--frozen` and `--update` (and the `frozen`, `lock_path`, `lock_write` and `update` options) ([`docs/guides/fetch-v1.md`](../docs/guides/fetch-v1.md#generation-2-after-the-lock)). Its cache is `${XDG_CACHE_HOME:-~/.cache}/chtypes/v2`, or `<CHTYPES_CACHE>/v2` under an explicit cache, which no 1.x SDK reads. Every vocabulary keeps a value it does not list as its `unknown(n)` member (`Outcome("x")`, whose `known` is `False`) instead of failing the document. The rules are r1 to r9 of [`docs/reference/abi-v2.md`](../docs/reference/abi-v2.md). The 1.x package, `pip install "chtypes<2"`, speaks ABI v1. A `2.0.0-dev.N` pre-release spoke an unstable draft of ABI v2 from the staging dev channel: it refuses the 2.0.0 library, and 2.0.0 refuses a dev build.
 >
-> An explicit cache directory gets the `v2-dev` subroot whether it comes from `CHTYPES_CACHE` or from `FetchOptions(cache_dir=...)`: the layout is under `<cache_dir>/v2-dev`, never in the directory itself, so code that inspects or pre-populates a cache looks there; `chtypes.cache_root` and `chtypes.search_dirs` return the resolved paths. `CHTYPES_OFFLINE=1` is the environment twin of `FetchOptions(offline=True)` and `--offline`: the cache only, no request.
->
-> <!-- remove-at-v2-lock -->v2-dev builds before the one that carries this contract (its release notice names it) can answer `ok` with `t` verdicts after a refused row. On those builds, when a body or block holds more than one row, treat every verdict as `d` if `errors` is non-empty.<!-- /remove-at-v2-lock -->
+> An explicit cache directory gets the `v2` subroot whether it comes from `CHTYPES_CACHE` or from `FetchOptions(cache_dir=...)`: the layout is under `<cache_dir>/v2`, never in the directory itself, so code that inspects or pre-populates a cache looks there; `chtypes.cache_root` and `chtypes.search_dirs` return the resolved paths. `CHTYPES_OFFLINE=1` is the environment twin of `FetchOptions(offline=True)` and `--offline`: the cache only, no request.
 
 **If this row were inserted into this table on this ClickHouse version, what would happen?** chtypes answers with ClickHouse's own code: the real C++ type machinery, vendored per release into a native library behind the frozen `chs_*` C ABI and reached here through stdlib `ctypes`. Nothing semantic is reimplemented, so _"what does ClickHouse do with `256` into a `UInt8`?"_ is answered by ClickHouse rather than by a model of it. One peer binding among `{go, python, ts, rust}` — no language is privileged, and all four give one answer.
 
@@ -15,10 +13,8 @@ Pure ctypes: no compiler, no build step. The only dependency is a zstd decompres
 Two things: this package, and at least one **artifact** — the per-version native library it `dlopen`s at runtime. The registry fetches the artifact on first use when autofetch is on (`Registry(autofetch=True)` or `CHTYPES_AUTOFETCH=1`), after verifying its signature and every byte against the signed statement; with autofetch off it answers only from what is already installed.
 
 ```sh
-uv add "chtypes>=2.0.0.dev0"            # or: pip install "chtypes>=2.0.0.dev0"
+uv add chtypes                           # or: pip install chtypes
 ```
-
-`uv add chtypes` and `pip install chtypes` never select a pre-release on their own: the specifier names a dev version, which is what allows one.
 
 ## Quickstart
 
@@ -79,7 +75,7 @@ A bad **row** is a verdict, not an exception: `outcome` becomes `Outcome.REJECTE
 
 **The INSERT column list is a keyword-only `columns`** on `schema.row`, `schema.rows`, `schema.parse_block` and `filter.rows`: `schema.row(Format.JSON_EACH_ROW, body, columns=["id", "e"])`. `None` or an empty sequence is the no-list shape; a list makes the data supply exactly those columns, with a listed `EPHEMERAL` value read and in scope for the DEFAULTs that reference it but never stored.
 
-**Known gaps in 1.0** are listed, with workarounds, in [`docs/limitations.md`](https://github.com/wave-rf/chtypes/blob/main/docs/limitations.md#known-gaps-in-10).
+**Known gaps** are listed, with workarounds, in [`docs/limitations.md`](https://github.com/wave-rf/chtypes/blob/main/docs/limitations.md#known-gaps-in-10).
 
 ## Tests
 

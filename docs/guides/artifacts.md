@@ -9,10 +9,10 @@ This page is what a consumer needs. [`fetch-v1.md`](fetch-v1.md) is the normativ
 Every binding ships the same command, so you need nothing from this repository:
 
 ```sh
-go run github.com/wave-rf/chtypes/go/cmd/chtypes@latest fetch 26.8   # Go
-python -m chtypes fetch 26.8                                         # Python
-npx @wavehouse/chtypes fetch 26.8                                    # TypeScript
-cargo install chtypes && chtypes fetch 26.8                          # Rust
+go run github.com/wave-rf/chtypes/go/v2/cmd/chtypes@latest fetch 26.8   # Go
+python -m chtypes fetch 26.8                                            # Python
+npx @wavehouse/chtypes fetch 26.8                                       # TypeScript
+cargo install chtypes && chtypes fetch 26.8                             # Rust
 ```
 
 `fetch --all` takes every line the registry publishes for this platform. A spelling is two, three or four parts (`26.8`, `26.8.15`, `26.8.15.10`) with no `v` prefix and no channel suffix; a floating one resolves to the newest build inside it. The commands are spelled identically in all four bindings:

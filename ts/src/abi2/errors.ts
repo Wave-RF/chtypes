@@ -136,7 +136,12 @@ export function devFingerprintMessage(sdk: string, library: string): string {
 
 /** An incompatible-artifact refusal's message: rule r6's exact text for a fingerprint refusal while the description is unstable (a 2.0.0-dev SDK), the loader's own otherwise. */
 function incompatibleMessage(f: RefusalFields): string {
-  if (f.reason === 'fingerprint' && ABI_STABILITY === 'unstable' && f.want !== undefined && f.got !== undefined) {
+  return incompatibleMessageAt(ABI_STABILITY, f);
+}
+
+/** `incompatibleMessage` at a given stability, so a test selects either side explicitly, whichever the description declares. Not part of the public API. */
+export function incompatibleMessageAt(stability: string, f: RefusalFields): string {
+  if (f.reason === 'fingerprint' && stability === 'unstable' && f.want !== undefined && f.got !== undefined) {
     return devFingerprintMessage(f.want, f.got);
   }
   return renderLoaderMessage('incompatible artifact', f);

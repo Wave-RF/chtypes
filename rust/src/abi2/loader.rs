@@ -138,7 +138,13 @@ impl Refusal {
     /// SDK`), which is then this refusal's whole display. `None` for every other
     /// refusal.
     pub fn dev_message(&self) -> Option<String> {
-        if self.reason != "fingerprint" || decls::CHS_ABI_STABILITY != "unstable" {
+        self.dev_message_at(decls::CHS_ABI_STABILITY)
+    }
+
+    /// [`Refusal::dev_message`] at a given stability, so a test selects either
+    /// side explicitly, whichever the description declares.
+    pub(crate) fn dev_message_at(&self, stability: &str) -> Option<String> {
+        if self.reason != "fingerprint" || stability != "unstable" {
             return None;
         }
         Some(dev_fingerprint_message(
@@ -602,16 +608,42 @@ mod tests {
         );
     }
 
-    /// Rule r6, the mapping alone: a fingerprint refusal of this dev SDK reads
-    /// exactly as the rule spells it, X the SDK's fingerprint and Y the
-    /// library's; every other refusal keeps its own shape. The message is
+    /// Rule r6, the mapping alone, at each stability selected explicitly: while
+    /// the description is unstable (a 2.0.0-dev SDK) a fingerprint refusal
+    /// reads exactly as the rule spells it, X the SDK's fingerprint and Y the
+    /// library's; once it is locked the same refusal keeps the loader's own
+    /// shape. Every other refusal keeps its own shape at both. The messages are
     /// spelled out here, not taken from the code under test.
     #[test]
     fn a_dev_fingerprint_refusal_is_rule_r6_exactly() {
+        let other = format!("sha256:{}", "0".repeat(64));
+        let r = Refusal::naming(
+            "fingerprint",
+            Path::new("/p"),
+            decls::CHS_ABI_FINGERPRINT,
+            other.as_str(),
+        );
+        let dev = format!(
+            "this SDK speaks dev fingerprint {}; the library has {other} — update your dev SDK",
+            decls::CHS_ABI_FINGERPRINT
+        );
+        assert_eq!(r.dev_message_at("unstable").as_deref(), Some(dev.as_str()));
+        assert_eq!(r.dev_message_at("locked"), None);
+        let abi = Refusal::naming("abi_version", Path::new("/p"), "2", "1");
+        assert_eq!(abi.dev_message_at("unstable"), None);
+        assert_eq!(abi.dev_message_at("locked"), None);
+        assert_eq!(abi.to_string(), "/p: abi_version (want 2, got 1)");
+    }
+
+    /// Rule r6 after the lock: this SDK's description is locked, so a library
+    /// with another fingerprint (a 2.0.0-dev build's included) is refused with
+    /// the loader's own message, never the dev one.
+    #[test]
+    fn a_fingerprint_refusal_after_the_lock_keeps_the_loaders_shape() {
         assert_eq!(
             decls::CHS_ABI_STABILITY,
-            "unstable",
-            "the dev message applies only while the description is unstable"
+            "locked",
+            "this test pins the locked SDK's refusal"
         );
         let other = format!("sha256:{}", "0".repeat(64));
         let r = Refusal::naming(
@@ -620,15 +652,14 @@ mod tests {
             decls::CHS_ABI_FINGERPRINT,
             other.as_str(),
         );
-        let want = format!(
-            "this SDK speaks dev fingerprint {}; the library has {other} — update your dev SDK",
-            decls::CHS_ABI_FINGERPRINT
-        );
-        assert_eq!(r.dev_message().as_deref(), Some(want.as_str()));
-        assert_eq!(r.to_string(), want);
-        let r = Refusal::naming("abi_version", Path::new("/p"), "2", "1");
         assert_eq!(r.dev_message(), None);
-        assert_eq!(r.to_string(), "/p: abi_version (want 2, got 1)");
+        assert_eq!(
+            r.to_string(),
+            format!(
+                "/p: fingerprint (want {}, got {other})",
+                decls::CHS_ABI_FINGERPRINT
+            )
+        );
     }
 
     #[test]
