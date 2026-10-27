@@ -2077,7 +2077,7 @@
   {
    "id": "schema-server-zone",
    "class": "create-decline",
-   "trigger": "a schema whose server time zone this build cannot compile in",
+   "trigger": "a schema whose server zone (the server profile's session_timezone when it sets one, else its timezone) this build cannot compile in; or, under posture load on a server zone other than the image zone, a column type that holds an AggregateFunction together with a DateTime or DateTime64 that has no zone of its own",
    "code": {
     "chs": "CHS_DECLINED",
     "ch": []
@@ -2092,7 +2092,7 @@
     "chs_schema_create"
    ],
    "retirement": "none",
-   "description": "The schema is compiled in the server's zone; when that zone cannot be armed the schema is declined."
+   "description": "The schema is compiled in the zone the server binds its types to; when that zone cannot be armed the schema is declined. Under posture load a server builds an aggregate's state with no query context while binding a zone-less DateTime to its own zone, and this build cannot do both in one compile, so such a column type is declined rather than bound to another zone."
   },
   {
    "id": "projection-with-settings",
