@@ -184,7 +184,7 @@ jobs:
   # registry (dev: staging chtypes/v2-dev; stable: production chtypes/v2) and
   # no other, and the loaded library reports abi 2 and that fingerprint. The
   # six checks are scripts/release-verify.sh's header; a stable dry run runs
-  # them against the stand-in, under pytest before the lock.
+  # them against the stand-in.
   # The retry loop is for registry lag: an install that cannot resolve the version
   # yet is retried for up to 15 minutes, and every other failure fails at once.
   # The steps are scripts/release-verify.sh, shared by every path: a tag push

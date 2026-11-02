@@ -26,16 +26,14 @@
 # release is verified against production and nothing else. Everything else
 # stays the stable mode's (the v2 cache subroot, record schema 2, abi 2, no
 # alias step), so the stand-in proves the same six checks against another
-# registry and key. Before the lock (spec/abi-v2/abi.json not `locked`) no
-# non-test binary of this repository speaks the production channel: it is
-# reached only through each binding's test-only selector (UseProdV2ForTests,
-# use_prod_v2_for_tests, useProdV2ForTests, use_prod_v2_for_tests). So the
-# stand-in then builds the binding's own TEST binary around its CLI and its
-# public API (the `selector_*` functions below: a Go test binary, pytest,
-# vitest, a cargo test binary), selects the production channel through that
-# selector, and runs every check through it. Once the spec is locked the
-# shipped CLI speaks the production channel by default, and the stand-in runs
-# it as is.
+# registry and key. The shipped CLI speaks the production channel by default
+# once the spec is locked, and the stand-in runs it as is.
+#
+# A stable release needs a locked spec. SDK major == ABI major, and each major
+# is fully locked before any stable release, so the script refuses to verify a
+# stable version while spec/abi-v2/abi.json is not `locked`, in every mode
+# (locked_spec_gate below), before anything is installed. The dev mode has no
+# such gate.
 #
 # Every mode then runs six checks, in a clean directory with a clean cache, and
 # reports every one of them: PASS, FAIL, or NOT RUN when an earlier failure left
@@ -280,439 +278,17 @@ readback() {
   done
 }
 
-# ---- the stand-in's selector path: a stable dry run before the lock ----
-#
-# The production channel is reachable only through each binding's test-only
-# selector until the lock, so the stand-in builds the binding's own TEST
-# binary around its CLI and its public API (selector_build_<lang>), and every
-# `chtypes ...` this script runs, and the load of check 6, goes through it
-# (selector_run). Each harness selects the production channel through the
-# selector, runs one command line (`cli`) or the load (`load`), and leaves the
-# command's stdout, stderr and exit status in CHTYPES_RELEASE_STANDIN_OUT; Rust
-# prints them between markers instead (rust_markers), because a test cannot
-# redirect println!. None of it is committed: each harness is written here,
-# built, and deleted.
-
-# selector_report <dir>: replay a harness's stdout, stderr and exit status as
-# the command's own; a harness that left no status did not run the command.
-selector_report() {
-  local out="$1" code
-  if [ ! -f "$out/code" ]; then
-    echo "the stand-in's test binary did not report a status for this command; its log:" >&2
-    tail -n 40 "$out/runner.log" >&2 || true
-    return 1
-  fi
-  [ ! -f "$out/stdout" ] || cat "$out/stdout"
-  [ ! -f "$out/stderr" ] || cat "$out/stderr" >&2
-  code="$(cat "$out/code")"
-  [[ "$code" =~ ^[0-9]+$ ]] || { echo "the stand-in's test binary reported the status '$code'" >&2; return 1; }
-  return "$code"
+# locked_spec_gate <release kind> <spec_stability>: a stable release needs a
+# locked spec. SDK major == ABI major, and each major is fully locked before
+# any stable release, so a stable version of a spec that is not `locked` is
+# refused; the dev mode has no such gate. Fails closed: an unreadable spec has
+# no stability, and is refused.
+locked_spec_gate() {
+  [ "$1" = stable ] || return 0
+  [ "$2" != locked ] || return 0
+  echo "a stable release needs a locked spec: SDK major == ABI major, and each major is fully locked before any stable release (spec_stability is '${2:-<none>}')"
+  return 1
 }
-
-# rust_markers <dir>: libtest's output ($dir/raw) holds the command's stdout
-# between `<<<release-standin begin>>>` and
-# `<<<release-standin end N>>>`; write it to $dir/stdout, and N to
-# $dir/code. Nothing is written without both markers.
-rust_markers() {
-  awk -v out="$1" '
-    /<<<release-standin end [0-9]+>>>/ { if (on) { match($0, /end [0-9]+/); code = substr($0, RSTART + 4, RLENGTH - 4) } on = 0; next }
-    on { body = body $0 "\n" }
-    /<<<release-standin begin>>>/ { on = 1; body = "" }
-    END { if (code != "") { printf "%s", body > (out "/stdout"); print code > (out "/code") } }
-  ' "$1/raw"
-}
-
-# selector_run <lang> <cli|load> <args...>: one command line (cli), or the
-# load of the line <args> names (load), through the binding's test binary
-# under the production channel; its stdout, stderr and exit status are the
-# command's.
-selector_run() {
-  local lang="$1" what="$2" out exe; shift 2
-  out="$(mktemp -d "$work/selector-run.XXXXXX")"
-  (
-    export CHTYPES_RELEASE_STANDIN="$what" CHTYPES_RELEASE_STANDIN_ARGS="$*" CHTYPES_RELEASE_STANDIN_OUT="$out"
-    [ "$what" != load ] || export CHTYPES_RELEASE_STANDIN_LINE="$1"
-    case "$lang" in
-      go) "$work/bin/standin-go.test" "$@" ;;
-      python) cd "$work/standin" && "$work/venv/bin/python" -m pytest -q -p no:cacheprovider test_release_standin.py ;;
-      ts) cd "$work/standin" && CHTYPES_RELEASE_STANDIN_PKG="$work/node_modules/$NPM_PACKAGE" "$ROOT/ts/node_modules/.bin/vitest" run --root "$work/standin" ;;
-      rust)
-        exe="$(cat "$work/bin/standin-rust.$what")"
-        "$exe" --exact "zz_release_standin::release_standin_$what" --nocapture --test-threads=1 > "$out/raw" 2> "$out/stderr" || true
-        rust_markers "$out"
-        [ -f "$out/code" ] || cat "$out/raw" "$out/stderr"
-        ;;
-    esac
-  ) > "$out/runner.log" 2>&1 || true
-  selector_report "$out"
-}
-
-selector_build_go() {
-  local f="$source_arg/cmd/chtypes/zz_release_standin_test.go"
-  cat > "$f" <<GO
-package main
-
-// zz_release_standin_test.go: written by scripts/release-verify.sh for a
-// stable dry run's stand-in before the lock, built into this package's test
-// binary, and deleted; never committed. Only a test binary reaches the
-// production generation-2 channel before the lock (ocifetch.UseProdV2ForTests
-// panics anywhere else), so this init, which runs before TestMain, selects it,
-// runs one command line or the load, and exits: no test ever runs.
-
-import (
-	"context"
-	"fmt"
-	"os"
-	"path/filepath"
-	"strconv"
-
-	"$GO_MODULE/chtypes"
-	"$GO_MODULE/internal/ocifetch"
-)
-
-func init() {
-	what := os.Getenv("CHTYPES_RELEASE_STANDIN")
-	if what == "" {
-		return
-	}
-	out := os.Getenv("CHTYPES_RELEASE_STANDIN_OUT")
-	stdout, err := os.Create(filepath.Join(out, "stdout"))
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	stderr, err := os.Create(filepath.Join(out, "stderr"))
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	ocifetch.UseProdV2ForTests()
-	var code int
-	if what == "load" {
-		code = releaseStandinLoad(os.Getenv("CHTYPES_RELEASE_STANDIN_LINE"), stdout, stderr)
-	} else {
-		code = run(context.Background(), os.Args[1:], stdout, stderr)
-	}
-	_ = stdout.Close()
-	_ = stderr.Close()
-	if err := os.WriteFile(filepath.Join(out, "code"), []byte(strconv.Itoa(code)), 0o644); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	os.Exit(0)
-}
-
-// releaseStandinLoad is load_go's program, run under the selected channel.
-func releaseStandinLoad(line string, stdout, stderr *os.File) int {
-	reg, err := chtypes.NewRegistry()
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	lib, err := reg.For(line)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	schema, err := lib.CompileTable("CREATE TABLE t (x UInt8) ENGINE = MergeTree ORDER BY x")
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	defer schema.Close()
-	var opts []chtypes.RowsOption
-	if os.Getenv("CHTYPES_RELEASE_VERIFY_PLANT") != "no-docflags" {
-		opts = append(opts, chtypes.WithDocFlags(chtypes.DocAll))
-	}
-	batch, err := schema.Rows(chtypes.JSONEachRow, []byte(\`{"x":256}\`), opts...)
-	if err != nil || batch.Outcome != chtypes.Accepted || len(batch.Rows) != 1 || len(batch.Rows[0].Transformed) != 1 || batch.Rows[0].Transformed[0].Reason != chtypes.ReasonOverflowWrap {
-		fmt.Fprintf(stderr, "unexpected answer: %+v, %v\n", batch, err)
-		return 1
-	}
-	fmt.Fprintln(stdout, lib.BuildInfo().ABI, lib.BuildInfo().ABIFingerprint)
-	return 0
-}
-GO
-  if ! (cd "$source_arg" && go test -c -o "$work/bin/standin-go.test" ./cmd/chtypes); then
-    rm -f "$f"
-    fail "the stand-in's Go test binary did not build"
-  fi
-  rm -f "$f"
-}
-
-selector_build_python() {
-  local pytest
-  pytest="$(python3 -c '
-import sys, tomllib
-lock = tomllib.load(open(sys.argv[1], "rb"))
-got = [p["version"] for p in lock.get("package", []) if p.get("name") == "pytest"]
-print(got[0] if len(got) == 1 else "")
-' "$ROOT/python/uv.lock")"
-  [ -n "$pytest" ] || fail "python/uv.lock pins no single pytest, which the stand-in runs"
-  uv pip install --quiet --python "$work/venv/bin/python" "pytest==$pytest"
-  mkdir -p "$work/standin"
-  printf '[pytest]\n' > "$work/standin/pytest.ini"
-  cat > "$work/standin/test_release_standin.py" <<'PY'
-# Written by scripts/release-verify.sh for a stable dry run's stand-in before
-# the lock; never committed. Only a test run reaches the production
-# generation-2 channel before the lock (use_prod_v2_for_tests raises anywhere
-# but under pytest), so this one test selects it, runs one command line or the
-# load, and leaves its stdout, stderr and exit status for the script.
-import contextlib
-import os
-
-from chtypes._ocifetch import _channel
-
-
-def test_release_standin():
-    out = os.environ["CHTYPES_RELEASE_STANDIN_OUT"]
-    restore = _channel.use_prod_v2_for_tests()
-    try:
-        with (
-            open(os.path.join(out, "stdout"), "w") as so,
-            open(os.path.join(out, "stderr"), "w") as se,
-            contextlib.redirect_stdout(so),
-            contextlib.redirect_stderr(se),
-        ):
-            if os.environ["CHTYPES_RELEASE_STANDIN"] == "load":
-                import chtypes
-
-                import sys
-
-                from chtypes import DocFlags, Format, Outcome, Reason
-
-                library = chtypes.Registry().for_version(os.environ["CHTYPES_RELEASE_STANDIN_LINE"])
-                assert library.validate_type("UInt8") == b"UInt8"
-                # The documents path, as load_python's program asks it.
-                plant = os.environ.get("CHTYPES_RELEASE_VERIFY_PLANT") == "no-docflags"
-                with library.compile_table("CREATE TABLE t (x UInt8) ENGINE = MergeTree ORDER BY x") as schema:
-                    batch = schema.rows(Format.JSON_EACH_ROW, b'{"x":256}', **({} if plant else {"doc_flags": DocFlags.ALL}))
-                if (
-                    batch.outcome != Outcome.ACCEPTED
-                    or len(batch.rows) != 1
-                    or len(batch.rows[0].transformed) != 1
-                    or batch.rows[0].transformed[0].reason != Reason.OVERFLOW_WRAP
-                ):
-                    print("unexpected answer:", batch, file=sys.stderr)
-                    code = 1
-                else:
-                    print(library.build_info.abi, library.build_info.abi_fingerprint)
-                    code = 0
-            else:
-                from chtypes.__main__ import main
-
-                code = main(os.environ["CHTYPES_RELEASE_STANDIN_ARGS"].split())
-    finally:
-        restore()
-    with open(os.path.join(out, "code"), "w") as f:
-        f.write(str(code))
-PY
-}
-
-selector_build_ts() {
-  [ -x "$ROOT/ts/node_modules/.bin/vitest" ] || fail "the stand-in runs the CLI under vitest, from ts/'s own lockfile: run 'pnpm install --frozen-lockfile' in ts/ first (release-ts.yml's verify job does)"
-  mkdir -p "$work/standin"
-  # No import: the harness lives outside ts/, where 'vitest' does not resolve.
-  printf 'export default { test: { globals: true, testTimeout: 900000, include: ["release-standin.test.mjs"] } };\n' > "$work/standin/vitest.config.mjs"
-  cat > "$work/standin/release-standin.test.mjs" <<'JS'
-// Written by scripts/release-verify.sh for a stable dry run's stand-in before
-// the lock; never committed. Only a vitest worker reaches the production
-// generation-2 channel before the lock (useProdV2ForTests throws anywhere
-// else), so this one test selects it, runs one command line or the load, and
-// leaves its stdout, stderr and exit status for the script. The package is
-// imported from where the verify installed it, by file URL.
-import { writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
-import { inspect } from 'node:util';
-
-const pkg = process.env.CHTYPES_RELEASE_STANDIN_PKG;
-const out = process.env.CHTYPES_RELEASE_STANDIN_OUT;
-const load = (p) => import(pathToFileURL(join(pkg, p)).href);
-
-test('release stand-in', async () => {
-  const channel = await load('dist/ocifetch/channel.js');
-  const restore = channel.useProdV2ForTests();
-  let stdout = '';
-  let stderr = '';
-  let code = 1;
-  try {
-    if (process.env.CHTYPES_RELEASE_STANDIN === 'load') {
-      const { Registry, Format, DocFlags, Outcome, Reason } = await load('dist/index.js');
-      const registry = await Registry.open();
-      const lib = await registry.for(process.env.CHTYPES_RELEASE_STANDIN_LINE);
-      const type = lib.validateType('UInt8').toString();
-      if (type !== 'UInt8') throw new Error('validateType(UInt8) answered ' + JSON.stringify(type));
-      // The documents path, as load_ts's program asks it.
-      const plant = process.env.CHTYPES_RELEASE_VERIFY_PLANT === 'no-docflags';
-      const schema = lib.compileTable('CREATE TABLE t (x UInt8) ENGINE = MergeTree ORDER BY x');
-      let batch;
-      try {
-        batch = schema.rows(Format.JSONEachRow, Buffer.from(JSON.stringify({ x: 256 })), plant ? {} : { docFlags: DocFlags.All });
-      } finally {
-        schema.close();
-      }
-      if (batch.outcome !== Outcome.Accepted || batch.rows.length !== 1 || batch.rows[0].transformed.length !== 1 || batch.rows[0].transformed[0].reason !== Reason.OverflowWrap) {
-        throw new Error('unexpected answer: ' + inspect(batch, { depth: 6 }));
-      }
-      stdout = `${lib.buildInfo.abi} ${lib.buildInfo.abiFingerprint}\n`;
-      code = 0;
-    } else {
-      const { runCli } = await load('dist/cli.js');
-      const args = (process.env.CHTYPES_RELEASE_STANDIN_ARGS ?? '').split(' ').filter((a) => a !== '');
-      code = await runCli(args, {
-        stdout: (t) => {
-          stdout += t;
-        },
-        stderr: (t) => {
-          stderr += t;
-        },
-      });
-    }
-  } catch (err) {
-    stderr += `${err && err.stack ? err.stack : err}\n`;
-    code = 1;
-  } finally {
-    restore();
-  }
-  writeFileSync(join(out, 'stdout'), stdout);
-  writeFileSync(join(out, 'stderr'), stderr);
-  writeFileSync(join(out, 'code'), String(code));
-});
-JS
-}
-
-selector_build_rust() {
-  local main="$source_arg/src/main.rs" lib="$source_arg/src/lib.rs" built=1
-  cp "$main" "$work/main.rs.orig"
-  cp "$lib" "$work/lib.rs.orig"
-  cat >> "$main" <<'RS'
-
-// Written by scripts/release-verify.sh for a stable dry run's stand-in before
-// the lock, and removed after the build; never committed. Only a test build
-// reaches the production generation-2 channel before the lock
-// (`use_prod_v2_for_tests` exists only under cfg(test)), so the stand-in runs
-// one command line here, on this test's thread, under that channel.
-#[cfg(test)]
-mod zz_release_standin {
-    #[test]
-    fn release_standin_cli() {
-        let Ok(args) = std::env::var("CHTYPES_RELEASE_STANDIN_ARGS") else {
-            return;
-        };
-        let _prod = super::ocifetch::channel::use_prod_v2_for_tests();
-        let argv: Vec<String> = args.split_whitespace().map(String::from).collect();
-        println!("\n<<<release-standin begin>>>");
-        let result = match super::parse(&argv) {
-            Ok(a) => match a.command.as_str() {
-                "fetch" => super::cmd_fetch(&a),
-                "verify" => super::cmd_verify(&a),
-                "list" => super::cmd_list(&a),
-                "where" => super::cmd_where(&a),
-                other => Err(super::Usage(format!("unknown command: {other}"))),
-            },
-            Err(u) => Err(u),
-        };
-        let code = match result {
-            Ok(c) => c,
-            Err(super::Usage(message)) => {
-                eprintln!("chtypes: {message}");
-                super::EXIT_USAGE
-            }
-        };
-        println!("<<<release-standin end {code}>>>");
-    }
-}
-RS
-  cat >> "$lib" <<'RS'
-
-// Written by scripts/release-verify.sh for a stable dry run's stand-in before
-// the lock, and removed after the build; never committed: load_rust's program,
-// on this test's thread, under the production generation-2 channel.
-#[cfg(test)]
-mod zz_release_standin {
-    #[test]
-    fn release_standin_load() {
-        let Ok(line) = std::env::var("CHTYPES_RELEASE_STANDIN_LINE") else {
-            return;
-        };
-        let _prod = crate::ocifetch::channel::use_prod_v2_for_tests();
-        let registry =
-            crate::Registry::new(crate::RegistryOptions::default()).expect("Registry::new");
-        let lib = registry.for_version(&line).expect("for_version");
-        // The documents path, as load_rust's program asks it.
-        let plant = std::env::var("CHTYPES_RELEASE_VERIFY_PLANT").as_deref() == Ok("no-docflags");
-        let options = if plant {
-            crate::RowsOptions::default()
-        } else {
-            crate::RowsOptions { doc_flags: Some(crate::DocFlags::ALL), ..Default::default() }
-        };
-        let schema = lib
-            .compile_table("CREATE TABLE t (x UInt8) ENGINE = MergeTree ORDER BY x", &crate::CompileOptions::default())
-            .expect("compile_table");
-        let batch = schema.rows(crate::Format::JsonEachRow, br#"{"x":256}"#, &options).expect("rows");
-        if batch.outcome != crate::Outcome::Accepted
-            || batch.rows.len() != 1
-            || batch.rows[0].transformed.len() != 1
-            || batch.rows[0].transformed[0].reason != crate::Reason::OverflowWrap
-        {
-            eprintln!("unexpected answer: {batch:?}");
-            println!("\n<<<release-standin begin>>>\n<<<release-standin end 1>>>");
-            return;
-        }
-        let info = lib.build_info();
-        println!(
-            "\n<<<release-standin begin>>>\n{} {}\n<<<release-standin end 0>>>",
-            info.abi, info.abi_fingerprint
-        );
-    }
-}
-RS
-  (cd "$source_arg" && cargo test --locked --no-run --message-format=json-render-diagnostics --lib --bin chtypes) > "$work/standin-rust-build.json" || built=0
-  cp "$work/main.rs.orig" "$main"
-  cp "$work/lib.rs.orig" "$lib"
-  [ "$built" = 1 ] || fail "the stand-in's Rust test binaries did not build"
-  python3 - "$work/standin-rust-build.json" "$work/bin" <<'PY' || fail "the stand-in's Rust test binaries were not found in cargo's output"
-import json, sys
-exes = {}
-for line in open(sys.argv[1], encoding="utf-8"):
-    try:
-        m = json.loads(line)
-    except ValueError:
-        continue
-    t = m.get("target") or {}
-    if m.get("reason") != "compiler-artifact" or not m.get("executable") or not (m.get("profile") or {}).get("test") or t.get("name") != "chtypes":
-        continue
-    exes["cli" if "bin" in t.get("kind", []) else "load"] = m["executable"]
-if set(exes) != {"cli", "load"}:
-    sys.exit(f"cargo built {exes}; wanted the bin's and the lib's test executables")
-for kind, exe in exes.items():
-    open(f"{sys.argv[2]}/standin-rust.{kind}", "w", encoding="utf-8").write(exe)
-PY
-}
-
-# selector_build <lang>: build the harness, and make $CLI the command line
-# that runs through it.
-selector_build() {
-  mkdir -p "$work/bin"
-  "selector_build_$1"
-  cat > "$work/bin/standin-cli" <<SH
-#!/usr/bin/env bash
-# The stand-in's \`chtypes\`: one command line through $1's test binary, under
-# the production channel's test-only selector (scripts/release-verify.sh).
-exec bash "$ROOT/scripts/release-verify.sh" --selector-run "$1" "$work" "\$@"
-SH
-  chmod +x "$work/bin/standin-cli"
-  CLI="$work/bin/standin-cli"
-}
-
-# The stand-in's `chtypes` (selector_build) calls back here: one command line.
-if [ "${1:-}" = "--selector-run" ]; then
-  [ "$#" -ge 3 ] || fail "usage: --selector-run <lang> <work> <args...>"
-  lang="$2"; work="$3"; shift 3
-  rc=0; selector_run "$lang" cli "$@" || rc=$?
-  exit "$rc"
-fi
 
 if [ "${1:-}" = "--selftest" ]; then
   n=0
@@ -909,31 +485,10 @@ if [ "${1:-}" = "--selftest" ]; then
   grep -qF "is not a release of this branch" <<<"$out" || { echo "selftest FAIL: the 3.0.0 refusal: $out" >&2; exit 1; }
   echo "selftest ok: a version neither mode releases is refused"; n=$((n + 1))
 
-  # ---- The selector path's plumbing (the harnesses themselves run only in a dry run) ----
-  t="$(mktemp -d)"
-  printf '\nrunning 1 test\ntest zz_release_standin::release_standin_cli ... \n<<<release-standin begin>>>\n/c/v2\n<<<release-standin end 0>>>\nok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.01s\n\n' > "$t/raw"
-  rust_markers "$t"
-  expect "libtest's output: the command's stdout, between the markers" "/c/v2" "$(cat "$t/stdout")"
-  expect "libtest's output: the command's status" "0" "$(cat "$t/code")"
-  rm -f "$t/stdout" "$t/code"
-  printf 'running 1 test\n\n<<<release-standin begin>>>\ninstalled 26.9.8.3 linux-amd64 /c/x\npublished 26.9 support unknown\n<<<release-standin end 3>>>\n' > "$t/raw"
-  rust_markers "$t"
-  expect "libtest's output: several lines, and a failing status" $'installed 26.9.8.3 linux-amd64 /c/x\npublished 26.9 support unknown 3' "$(cat "$t/stdout") $(cat "$t/code")"
-  rm -f "$t/stdout" "$t/code"
-  printf 'running 1 test\n<<<release-standin begin>>>\n/c/v2\nthread panicked\n' > "$t/raw"
-  rust_markers "$t"
-  expect "libtest's output with no end marker: no status, so no command ran" "absent" "$([ -f "$t/code" ] && echo present || echo absent)"
-  printf 'the output\n' > "$t/stdout"; printf 'a warning\n' > "$t/stderr"; printf '0' > "$t/code"
-  expect "a harness's report is the command's stdout" "the output" "$(selector_report "$t" 2>/dev/null)"
-  printf '7' > "$t/code"
-  expect "  ... and its status" "7" "$(selector_report "$t" >/dev/null 2>&1 && echo 0 || echo "$?")"
-  rm -f "$t/code"; printf 'the harness log\n' > "$t/runner.log"
-  report_all() { selector_report "$1" 2>&1; }
+  # ---- The planted control of check 6 ----
   passes "the planted control: the probe fails on its assertion" check_control 1 "unexpected answer: {Outcome:accepted}"
   refuses "the planted control: a probe that still passes" "cannot fail" check_control 0 ""
   refuses "the planted control: a probe that fails for another reason" "not on its assertion" check_control 1 "dial tcp: lookup failed"
-  refuses "a harness that left no status" "did not report a status" report_all "$t"
-  rm -rf "$t"
   # The read-back loop: an attempt that passes on its third try passes within a
   # window, and fails at once with none (sleep stubbed: no time passes).
   sleep() { :; }
@@ -945,6 +500,29 @@ if [ "${1:-}" = "--selftest" ]; then
   readback_once() { readback 0 attempt 2>/dev/null || { echo "$readback_detail"; return 1; }; }
   refuses "a read-back with no window: one try only" "try 1" readback_once
   unset -f sleep
+
+  # ---- A stable release needs a locked spec: the gate, on spec_stability's
+  # own reading of a tree ----
+  channel_select stable
+  t="$(mktemp -d)"; mkdir -p "$t/spec/abi-v$ABI"
+  printf '{"stability": "unstable"}\n' > "$t/spec/abi-v$ABI/abi.json"
+  refuses "a stable version of an unlocked spec" "a stable release needs a locked spec: SDK major == ABI major, and each major is fully locked before any stable release (spec_stability is 'unstable')" locked_spec_gate stable "$(spec_stability "$t")"
+  passes "a dev version of the same unlocked spec (the dev mode has no gate)" locked_spec_gate dev "$(spec_stability "$t")"
+  printf '{"stability": "locked"}\n' > "$t/spec/abi-v$ABI/abi.json"
+  passes "a stable version of a locked spec" locked_spec_gate stable "$(spec_stability "$t")"
+  rm -f "$t/spec/abi-v$ABI/abi.json"
+  refuses "a stable version of an unreadable spec (fails closed)" "(spec_stability is '<none>')" locked_spec_gate stable "$(spec_stability "$t" 2>/dev/null)"
+  rm -rf "$t"
+  # End to end, on this tree: before the lock the script itself refuses a
+  # stable version, in a mode the dry-run refusals do not cover, before it
+  # installs anything; after the lock the gate lets this tree through.
+  if [ "$(spec_stability "$ROOT")" != locked ]; then
+    if out="$(bash "${BASH_SOURCE[0]}" ts local 2.0.0 /nonexistent.tgz 2>&1)"; then echo "selftest FAIL: a stable version of this unlocked tree was verified" >&2; exit 1; fi
+    grep -qF "a stable release needs a locked spec" <<<"$out" || { echo "selftest FAIL: the unlocked-spec refusal: $out" >&2; exit 1; }
+    echo "selftest ok: this tree's spec is '$(spec_stability "$ROOT")', and the script refuses a stable version of it"; n=$((n + 1))
+  else
+    passes "this tree's locked spec passes the gate" locked_spec_gate stable "$(spec_stability "$ROOT")"
+  fi
 
   # The script refuses a version outside the channel before it installs anything.
   if out="$(bash "${BASH_SOURCE[0]}" ts local 1.0.4 /nonexistent.tgz 2>&1)"; then echo "selftest FAIL: a 1.x version was verified" >&2; exit 1; fi
@@ -961,14 +539,15 @@ case "$mode" in registry) ;; local | standin) [ -n "$source_arg" ] || fail "$mod
 # The version selects the mode (scripts/release-channel.sh, THE MODES), and nothing else does.
 release_kind="$(release_mode "$version")" || fail "$version is not a release of this branch (2.0.0-dev.N, the dev mode, or 2.N.N, the stable mode: scripts/release-channel.sh, THE MODES; #511, #597); 1.x releases are verified from main"
 channel_select "$release_kind"
-# The stand-in (a stable dry run only; refused otherwise) and how it reaches
-# the production channel: the shipped CLI once the spec is locked, the
-# binding's test-only selector before.
+# The stand-in (a stable dry run only; refused otherwise), which runs the
+# shipped CLI.
 standin_path=""
 if [ "$mode" = standin ]; then
   channel_standin "${RELEASE_DRY_RUN:-false}"
-  if [ "$(spec_stability "$ROOT")" = locked ]; then standin_path=default; else standin_path=selector; fi
+  standin_path=default
 fi
+# A stable release needs a locked spec, in every mode (locked_spec_gate).
+gate_out="$(locked_spec_gate "$release_kind" "$(spec_stability "$ROOT")")" || fail "$gate_out"
 [ -z "$source_arg" ] || source_arg="$(cd "$(dirname "$source_arg")" && pwd)/$(basename "$source_arg")"
 
 want="$(header_fingerprint "$ROOT/$HEADER")"
@@ -986,11 +565,7 @@ if [ -n "$standin_path" ]; then
   # dev channel would ignore (scripts/release-channel.sh, channel_standin).
   export CHTYPES_ARTIFACTS_URL="$REGISTRY_BASE" CHTYPES_TRUSTED_KEYS="$KEY"
   echo "THE STAND-IN (a dry run only): production $STANDIN_OF holds nothing until the lock, so the production channel's base and trust point at $REGISTRY_BASE and the staging key $KEY_ID, through CHTYPES_ARTIFACTS_URL and CHTYPES_TRUSTED_KEYS; the cache subroot ($CACHE_SUBROOT), record schema $RECORD_SCHEMA, abi $ABI and the lack of an alias step stay the production channel's"
-  if [ "$standin_path" = selector ]; then
-    echo "  spec/abi-v$ABI/abi.json is '$(spec_stability "$ROOT")', not locked, so no non-test binary speaks the production channel yet: every check below runs through $lang's own test binary, which selects that channel through the binding's test-only selector"
-  else
-    echo "  spec/abi-v$ABI/abi.json is locked, so the shipped CLI speaks the production channel by default, and the checks run it as is"
-  fi
+  echo "  spec/abi-v$ABI/abi.json is locked, so the shipped CLI speaks the production channel by default, and the checks run it as is"
 fi
 
 # retry <seconds> <what> <command...>: the registry-lag loop. Registry mode only.
@@ -1027,9 +602,6 @@ fingerprint_rust() {
   sed -n 's/^ *"\(sha256:[0-9a-f]*\)";$/\1/p' "$f" | head -n 1
 }
 load_rust() {
-  # The stand-in before the lock: the same program, in the crate's lib test
-  # binary, under the production channel (selector_build_rust).
-  if [ "$standin_path" = selector ]; then selector_run rust load "$1" || return 1; return 0; fi
   cat > src/main.rs <<RS
 use chtypes::{CompileOptions, DocFlags, Format, Outcome, Reason, RowsOptions};
 
@@ -1087,9 +659,6 @@ fingerprint_ts() {
 # load_* run inside `if`, where errexit does not apply: every step returns its own failure.
 load_ts() {
   "$CLI" verify >&2 || return 1
-  # The stand-in before the lock: the same program, in a vitest worker, under
-  # the production channel (selector_build_ts).
-  if [ "$standin_path" = selector ]; then selector_run ts load "$1" || return 1; return 0; fi
   LINE="$1" node --input-type=module -e "
     import { inspect } from 'node:util';
     import { Registry, Format, DocFlags, Outcome, Reason } from '$NPM_PACKAGE';
@@ -1139,9 +708,6 @@ print(m.CHS_ABI_FINGERPRINT)
 "
 }
 load_python() {
-  # The stand-in before the lock: the same program, under pytest, under the
-  # production channel (selector_build_python).
-  if [ "$standin_path" = selector ]; then selector_run python load "$1" || return 1; return 0; fi
   LINE="$1" "$PY" -c '
 import os
 import sys
@@ -1237,9 +803,6 @@ GO
   # if the module ships any file, under any build tag except `ignore`, that
   # imports a package the module does not contain (go/v1.0.0 did: #454).
   go mod tidy >&2 || return 1
-  # The stand-in before the lock: the same program, in the module's test
-  # binary, under the production channel (selector_build_go).
-  if [ "$standin_path" = selector ]; then selector_run go load "$1" || return 1; return 0; fi
   go run . "$1" || return 1
 }
 
@@ -1260,7 +823,6 @@ run_check() { # <check> <check function> <args...>
 }
 
 "install_$lang"
-[ "$standin_path" != selector ] || selector_build "$lang"
 
 # 1
 run_check "1 fingerprint" check_fingerprint "$("fingerprint_$lang")" "$want"
