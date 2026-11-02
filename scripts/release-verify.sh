@@ -400,7 +400,7 @@ func releaseStandinLoad(line string, stdout, stderr *os.File) int {
 		return 1
 	}
 	defer schema.Close()
-	batch, err := schema.Rows(chtypes.JSONEachRow, []byte(\`{"x":256}\`))
+	batch, err := schema.Rows(chtypes.JSONEachRow, []byte(\`{"x":256}\`), chtypes.WithDocFlags(chtypes.DocAll))
 	if err != nil || batch.Outcome != chtypes.Accepted || len(batch.Rows) != 1 || len(batch.Rows[0].Transformed) != 1 || batch.Rows[0].Transformed[0].Reason != chtypes.ReasonOverflowWrap {
 		fmt.Fprintf(stderr, "unexpected answer: %+v, %v\n", batch, err)
 		return 1
@@ -1094,7 +1094,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer schema.Close()
-	batch, err := schema.Rows(chtypes.JSONEachRow, []byte(`{"x":256}`))
+	batch, err := schema.Rows(chtypes.JSONEachRow, []byte(`{"x":256}`), chtypes.WithDocFlags(chtypes.DocAll))
 	if err != nil || batch.Outcome != chtypes.Accepted || len(batch.Rows) != 1 || len(batch.Rows[0].Transformed) != 1 || batch.Rows[0].Transformed[0].Reason != chtypes.ReasonOverflowWrap {
 		fmt.Fprintf(os.Stderr, "unexpected answer: %+v, %v\n", batch, err)
 		os.Exit(1)
