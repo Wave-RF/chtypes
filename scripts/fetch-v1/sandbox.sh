@@ -15,10 +15,16 @@
 # "cannot reach 127.0.0.1" before any curl ran), and whose "unreachable" proof
 # counted any nonzero result — a refused wrapper included — as success.
 #
-# Environment: `sudo -E` keeps the caller's variables (the CHTYPES_V1_* set,
-# GOPATH, CARGO_HOME, UV_*, …); PATH and HOME are passed again explicitly,
-# because sudo may rewrite them (secure_path, home reset). --selftest proves
-# a marker variable, PATH and HOME all survive.
+# Environment: the caller's variables (the CHTYPES_V1_* set, GOPATH,
+# CARGO_HOME, UV_*, …) travel in a file, never through sudo. `sudo -E` is not
+# honored everywhere: ubuntu-26.04's sudo prints "preserving the entire
+# environment is not supported, '-E' is ignored", and an env_reset sudoers
+# drops them anyway. `env -0` writes them NUL-separated, so a value with a
+# newline survives; the file is the caller's own (mktemp, mode 600) and is
+# deleted when the command ends. Inside, after setpriv drops back to the
+# caller, `env -i` rebuilds exactly that environment, with PATH and HOME passed
+# again explicitly. --selftest proves a marker variable, PATH and HOME all
+# survive.
 #
 # Proofs (each prints its exact exit code; a wrapper failure never counts as a
 # pass because every proof also needs a positive result from inside):
@@ -42,14 +48,21 @@ sandbox() {
   ip_bin="$(command -v ip)" || die "ip not found"
   setpriv_bin="$(command -v setpriv)" || die "setpriv not found"
   env_bin="$(command -v env)" || die "env not found"
-  sudo -E "$unshare_bin" --net -- bash -c '
+  local envfile rc=0
+  envfile="$(mktemp)"
+  "$env_bin" -0 >"$envfile"
+  sudo "$unshare_bin" --net -- bash -c '
     set -e
-    ip_bin=$1 setpriv_bin=$2 env_bin=$3 uid=$4 gid=$5 path=$6 home=$7
-    shift 7
+    ip_bin=$1 setpriv_bin=$2 env_bin=$3 uid=$4 gid=$5 path=$6 home=$7 envfile=$8
+    shift 8
+    vars=()
+    while IFS= read -r -d "" kv; do vars+=("$kv"); done <"$envfile"
     "$ip_bin" link set lo up
     exec "$setpriv_bin" --reuid="$uid" --regid="$gid" --init-groups \
-      "$env_bin" PATH="$path" HOME="$home" "$@"
-  ' sandbox-inner "$ip_bin" "$setpriv_bin" "$env_bin" "$(id -u)" "$(id -g)" "$PATH" "${HOME:-/}" "$@"
+      "$env_bin" -i "${vars[@]}" PATH="$path" HOME="$home" "$@"
+  ' sandbox-inner "$ip_bin" "$setpriv_bin" "$env_bin" "$(id -u)" "$(id -g)" "$PATH" "${HOME:-/}" "$envfile" "$@" || rc=$?
+  rm -f -- "$envfile"
+  return "$rc"
 }
 
 # Runs INSIDE the sandbox: server.py and its client share one loopback.
