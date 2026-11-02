@@ -2653,14 +2653,13 @@ mod preseed_scan_tests {
         (cache, digests)
     }
 
-    fn lookup(
-        cache: &Path,
-        request: &str,
-        key: &str,
-    ) -> (
+    /// What `find_installed` answered, and the blob reads it made, by digest.
+    type Lookup = (
         Option<(PathBuf, VerifiedRecord, String)>,
         HashMap<String, usize>,
-    ) {
+    );
+
+    fn lookup(cache: &Path, request: &str, key: &str) -> Lookup {
         let req = VersionRequest::parse(request).unwrap();
         let trust = trust(key);
         layout::blob_reads::count(cache, || {
