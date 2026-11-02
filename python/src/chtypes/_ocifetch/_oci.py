@@ -26,6 +26,7 @@ from chtypes._ocifetch._http import (
 
 __all__ = [
     "Descriptor",
+    "copy_blob_verified",
     "fetch_blob_bytes",
     "fetch_blob_to_path",
     "fetch_manifest_by_digest",
@@ -141,6 +142,46 @@ def verify_body_matches_digest(body: bytes, digest: str, *, what: str) -> None:
         raise ArtifactCorruptError(
             f"{what}: sha256 {actual} disagreed with the requested {expected}"
         )
+
+
+def copy_blob_verified(src_path: str, descriptor: Descriptor, dest_path: str, *, what: str) -> None:
+    """Copy a LOCAL blob file (a pre-seeded layout's `blobs/sha256/<hex>`)
+    to `dest_path`, streaming, and check the copy's size and sha256 against
+    `descriptor` BEFORE the caller does anything else with it — the local
+    counterpart of `fetch_blob_to_path`, with the same §7.3 rule ("check
+    size and sha256 before decompressing"). The caller unpacks the copy it
+    verified, never the source file, so the bytes checked are the bytes
+    used. Reads at most `descriptor.size + 1` bytes; removes `dest_path` on
+    any failure."""
+    expected = parse_digest(descriptor.digest)
+    hasher = hashlib.sha256()
+    size = 0
+    try:
+        with open(src_path, "rb") as src, open(dest_path, "wb") as dst:
+            while size <= descriptor.size:
+                chunk = src.read(min(1 << 20, descriptor.size + 1 - size))
+                if not chunk:
+                    break
+                hasher.update(chunk)
+                dst.write(chunk)
+                size += len(chunk)
+        if size > descriptor.size:
+            raise ArtifactCorruptError(
+                f"{what}: larger than the descriptor's size {descriptor.size}"
+            )
+        if size != descriptor.size:
+            raise ArtifactCorruptError(
+                f"{what}: size {size} disagreed with the descriptor's {descriptor.size}"
+            )
+        actual = hasher.hexdigest()
+        if actual != expected:
+            raise ArtifactCorruptError(f"{what}: sha256 {actual} disagreed with {expected}")
+    except BaseException:
+        try:
+            os.unlink(dest_path)
+        except OSError:
+            pass
+        raise
 
 
 def resolve_platform_manifest(index_doc: dict, platform_key: str) -> Descriptor:
