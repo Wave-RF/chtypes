@@ -80,7 +80,15 @@
 #      the dev mode and the stand-in, the release key in the stable mode), and
 #      its predicate names abi [ABI] and the header's fingerprint;
 #   6. load: the public API loads that line, and the library's own build_info
-#      reports abi [ABI] and the header's fingerprint.
+#      reports abi [ABI] and the header's fingerprint. In every binding the
+#      probe also compiles `CREATE TABLE t (x UInt8) ...`, submits the
+#      JSONEachRow row {"x":256} asking for every document group, and requires
+#      an accepted batch of one row with exactly one transformed entry whose
+#      reason is overflow_wrap. THE PLANTED CONTROL: the probe is then run a
+#      second time with CHTYPES_RELEASE_VERIFY_PLANT=no-docflags, which drops the
+#      document-group request; that run must fail on the assertion, and both
+#      outcomes are printed. Without it, a passing check 6 would not show that it
+#      can see a documents regression.
 #
 # Checks 3 to 6 are the registry assertion. The dev bindings are hard-wired to
 # the staging dev repository with no override (rule r6), so a verify that ran
@@ -242,6 +250,18 @@ check_loaded() { # <"abi fingerprint" as the loaded library reports them> <heade
   echo "the loaded library reports abi $abi and $fp"
 }
 
+# check_control <exit status> <stderr>: the planted control of check 6. The
+# probe is run a second time with CHTYPES_RELEASE_VERIFY_PLANT=no-docflags,
+# which drops its request for the document groups (the default is none); the
+# probe's assertion must then fail, and fail on the assertion ("unexpected
+# answer"), not on a missing library or a network error. If it still passes,
+# check 6 cannot see a documents regression and passes whatever the binding does.
+check_control() {
+  [ "$1" != 0 ] || { echo "the probe without the doc-flags request still passed: its documents assertion cannot fail"; return 1; }
+  grep -qF "unexpected answer" <<<"$2" || { echo "the probe without the doc-flags request failed, but not on its assertion: $(paste -sd' ' - <<<"$2" | cut -c1-300)"; return 1; }
+  echo "the probe without the doc-flags request fails its documents assertion (exit $1), as it must"
+}
+
 # readback <seconds> <attempt function> <args...>: run one attempt of a check
 # until it passes, retrying every 30 s for <seconds> (READBACK_WINDOW: 0 in the
 # dev mode, which reads once as it always did; more than the production
@@ -400,7 +420,11 @@ func releaseStandinLoad(line string, stdout, stderr *os.File) int {
 		return 1
 	}
 	defer schema.Close()
-	batch, err := schema.Rows(chtypes.JSONEachRow, []byte(\`{"x":256}\`), chtypes.WithDocFlags(chtypes.DocAll))
+	var opts []chtypes.RowsOption
+	if os.Getenv("CHTYPES_RELEASE_VERIFY_PLANT") != "no-docflags" {
+		opts = append(opts, chtypes.WithDocFlags(chtypes.DocAll))
+	}
+	batch, err := schema.Rows(chtypes.JSONEachRow, []byte(\`{"x":256}\`), opts...)
 	if err != nil || batch.Outcome != chtypes.Accepted || len(batch.Rows) != 1 || len(batch.Rows[0].Transformed) != 1 || batch.Rows[0].Transformed[0].Reason != chtypes.ReasonOverflowWrap {
 		fmt.Fprintf(stderr, "unexpected answer: %+v, %v\n", batch, err)
 		return 1
@@ -453,10 +477,27 @@ def test_release_standin():
             if os.environ["CHTYPES_RELEASE_STANDIN"] == "load":
                 import chtypes
 
+                import sys
+
+                from chtypes import DocFlags, Format, Outcome, Reason
+
                 library = chtypes.Registry().for_version(os.environ["CHTYPES_RELEASE_STANDIN_LINE"])
                 assert library.validate_type("UInt8") == b"UInt8"
-                print(library.build_info.abi, library.build_info.abi_fingerprint)
-                code = 0
+                # The documents path, as load_python's program asks it.
+                plant = os.environ.get("CHTYPES_RELEASE_VERIFY_PLANT") == "no-docflags"
+                with library.compile_table("CREATE TABLE t (x UInt8) ENGINE = MergeTree ORDER BY x") as schema:
+                    batch = schema.rows(Format.JSON_EACH_ROW, b'{"x":256}', **({} if plant else {"doc_flags": DocFlags.ALL}))
+                if (
+                    batch.outcome != Outcome.ACCEPTED
+                    or len(batch.rows) != 1
+                    or len(batch.rows[0].transformed) != 1
+                    or batch.rows[0].transformed[0].reason != Reason.OVERFLOW_WRAP
+                ):
+                    print("unexpected answer:", batch, file=sys.stderr)
+                    code = 1
+                else:
+                    print(library.build_info.abi, library.build_info.abi_fingerprint)
+                    code = 0
             else:
                 from chtypes.__main__ import main
 
@@ -483,6 +524,7 @@ selector_build_ts() {
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { inspect } from 'node:util';
 
 const pkg = process.env.CHTYPES_RELEASE_STANDIN_PKG;
 const out = process.env.CHTYPES_RELEASE_STANDIN_OUT;
@@ -496,11 +538,23 @@ test('release stand-in', async () => {
   let code = 1;
   try {
     if (process.env.CHTYPES_RELEASE_STANDIN === 'load') {
-      const { Registry } = await load('dist/index.js');
+      const { Registry, Format, DocFlags, Outcome, Reason } = await load('dist/index.js');
       const registry = await Registry.open();
       const lib = await registry.for(process.env.CHTYPES_RELEASE_STANDIN_LINE);
       const type = lib.validateType('UInt8').toString();
       if (type !== 'UInt8') throw new Error('validateType(UInt8) answered ' + JSON.stringify(type));
+      // The documents path, as load_ts's program asks it.
+      const plant = process.env.CHTYPES_RELEASE_VERIFY_PLANT === 'no-docflags';
+      const schema = lib.compileTable('CREATE TABLE t (x UInt8) ENGINE = MergeTree ORDER BY x');
+      let batch;
+      try {
+        batch = schema.rows(Format.JSONEachRow, Buffer.from(JSON.stringify({ x: 256 })), plant ? {} : { docFlags: DocFlags.All });
+      } finally {
+        schema.close();
+      }
+      if (batch.outcome !== Outcome.Accepted || batch.rows.length !== 1 || batch.rows[0].transformed.length !== 1 || batch.rows[0].transformed[0].reason !== Reason.OverflowWrap) {
+        throw new Error('unexpected answer: ' + inspect(batch, { depth: 6 }));
+      }
       stdout = `${lib.buildInfo.abi} ${lib.buildInfo.abiFingerprint}\n`;
       code = 0;
     } else {
@@ -586,6 +640,26 @@ mod zz_release_standin {
         let registry =
             crate::Registry::new(crate::RegistryOptions::default()).expect("Registry::new");
         let lib = registry.for_version(&line).expect("for_version");
+        // The documents path, as load_rust's program asks it.
+        let plant = std::env::var("CHTYPES_RELEASE_VERIFY_PLANT").as_deref() == Ok("no-docflags");
+        let options = if plant {
+            crate::RowsOptions::default()
+        } else {
+            crate::RowsOptions { doc_flags: Some(crate::DocFlags::ALL), ..Default::default() }
+        };
+        let schema = lib
+            .compile_table("CREATE TABLE t (x UInt8) ENGINE = MergeTree ORDER BY x", &crate::CompileOptions::default())
+            .expect("compile_table");
+        let batch = schema.rows(crate::Format::JsonEachRow, br#"{"x":256}"#, &options).expect("rows");
+        if batch.outcome != crate::Outcome::Accepted
+            || batch.rows.len() != 1
+            || batch.rows[0].transformed.len() != 1
+            || batch.rows[0].transformed[0].reason != crate::Reason::OverflowWrap
+        {
+            eprintln!("unexpected answer: {batch:?}");
+            println!("\n<<<release-standin begin>>>\n<<<release-standin end 1>>>");
+            return;
+        }
         let info = lib.build_info();
         println!(
             "\n<<<release-standin begin>>>\n{} {}\n<<<release-standin end 0>>>",
@@ -855,6 +929,9 @@ if [ "${1:-}" = "--selftest" ]; then
   expect "  ... and its status" "7" "$(selector_report "$t" >/dev/null 2>&1 && echo 0 || echo "$?")"
   rm -f "$t/code"; printf 'the harness log\n' > "$t/runner.log"
   report_all() { selector_report "$1" 2>&1; }
+  passes "the planted control: the probe fails on its assertion" check_control 1 "unexpected answer: {Outcome:accepted}"
+  refuses "the planted control: a probe that still passes" "cannot fail" check_control 0 ""
+  refuses "the planted control: a probe that fails for another reason" "not on its assertion" check_control 1 "dial tcp: lookup failed"
   refuses "a harness that left no status" "did not report a status" report_all "$t"
   rm -rf "$t"
   # The read-back loop: an attempt that passes on its third try passes within a
@@ -954,9 +1031,29 @@ load_rust() {
   # binary, under the production channel (selector_build_rust).
   if [ "$standin_path" = selector ]; then selector_run rust load "$1" || return 1; return 0; fi
   cat > src/main.rs <<RS
+use chtypes::{CompileOptions, DocFlags, Format, Outcome, Reason, RowsOptions};
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let registry = chtypes::Registry::new(chtypes::RegistryOptions::default())?;
     let lib = registry.for_version("$1")?;
+    // The documents path: every document group is requested (the default is
+    // none), unless the planted control drops the request.
+    let plant = std::env::var("CHTYPES_RELEASE_VERIFY_PLANT").as_deref() == Ok("no-docflags");
+    let options = if plant {
+        RowsOptions::default()
+    } else {
+        RowsOptions { doc_flags: Some(DocFlags::ALL), ..Default::default() }
+    };
+    let schema = lib.compile_table("CREATE TABLE t (x UInt8) ENGINE = MergeTree ORDER BY x", &CompileOptions::default())?;
+    let batch = schema.rows(Format::JsonEachRow, br#"{"x":256}"#, &options)?;
+    if batch.outcome != Outcome::Accepted
+        || batch.rows.len() != 1
+        || batch.rows[0].transformed.len() != 1
+        || batch.rows[0].transformed[0].reason != Reason::OverflowWrap
+    {
+        eprintln!("unexpected answer: {batch:?}");
+        std::process::exit(1);
+    }
     let info = lib.build_info();
     println!("{} {}", info.abi, info.abi_fingerprint);
     Ok(())
@@ -994,11 +1091,25 @@ load_ts() {
   # the production channel (selector_build_ts).
   if [ "$standin_path" = selector ]; then selector_run ts load "$1" || return 1; return 0; fi
   LINE="$1" node --input-type=module -e "
-    import { Registry } from '$NPM_PACKAGE';
+    import { inspect } from 'node:util';
+    import { Registry, Format, DocFlags, Outcome, Reason } from '$NPM_PACKAGE';
     const registry = await Registry.open();
     const lib = await registry.for(process.env.LINE);
     const type = lib.validateType('UInt8').toString();
     if (type !== 'UInt8') throw new Error('validateType(UInt8) answered ' + JSON.stringify(type));
+    // The documents path: every document group is requested (the default is none),
+    // unless the planted control drops the request.
+    const plant = process.env.CHTYPES_RELEASE_VERIFY_PLANT === 'no-docflags';
+    const schema = lib.compileTable('CREATE TABLE t (x UInt8) ENGINE = MergeTree ORDER BY x');
+    let batch;
+    try {
+      batch = schema.rows(Format.JSONEachRow, Buffer.from(JSON.stringify({ x: 256 })), plant ? {} : { docFlags: DocFlags.All });
+    } finally {
+      schema.close();
+    }
+    if (batch.outcome !== Outcome.Accepted || batch.rows.length !== 1 || batch.rows[0].transformed.length !== 1 || batch.rows[0].transformed[0].reason !== Reason.OverflowWrap) {
+      throw new Error('unexpected answer: ' + inspect(batch, { depth: 6 }));
+    }
     process.stdout.write(lib.buildInfo.abi + ' ' + lib.buildInfo.abiFingerprint);
   " || return 1
 }
@@ -1033,9 +1144,24 @@ load_python() {
   if [ "$standin_path" = selector ]; then selector_run python load "$1" || return 1; return 0; fi
   LINE="$1" "$PY" -c '
 import os
+import sys
 import chtypes
+from chtypes import DocFlags, Format, Outcome, Reason
 library = chtypes.Registry().for_version(os.environ["LINE"])
 assert library.validate_type("UInt8") == b"UInt8"
+# The documents path: every document group is requested (the default is none),
+# unless the planted control drops the request (see "the planted control").
+plant = os.environ.get("CHTYPES_RELEASE_VERIFY_PLANT") == "no-docflags"
+with library.compile_table("CREATE TABLE t (x UInt8) ENGINE = MergeTree ORDER BY x") as schema:
+    batch = schema.rows(Format.JSON_EACH_ROW, b"{\"x\":256}", **({} if plant else {"doc_flags": DocFlags.ALL}))
+if (
+    batch.outcome != Outcome.ACCEPTED
+    or len(batch.rows) != 1
+    or len(batch.rows[0].transformed) != 1
+    or batch.rows[0].transformed[0].reason != Reason.OVERFLOW_WRAP
+):
+    print("unexpected answer:", batch, file=sys.stderr)
+    sys.exit(1)
 print(library.build_info.abi, library.build_info.abi_fingerprint)
 ' || return 1
 }
@@ -1094,7 +1220,11 @@ func main() {
 		os.Exit(1)
 	}
 	defer schema.Close()
-	batch, err := schema.Rows(chtypes.JSONEachRow, []byte(`{"x":256}`), chtypes.WithDocFlags(chtypes.DocAll))
+	var opts []chtypes.RowsOption
+	if os.Getenv("CHTYPES_RELEASE_VERIFY_PLANT") != "no-docflags" {
+		opts = append(opts, chtypes.WithDocFlags(chtypes.DocAll))
+	}
+	batch, err := schema.Rows(chtypes.JSONEachRow, []byte(`{"x":256}`), opts...)
 	if err != nil || batch.Outcome != chtypes.Accepted || len(batch.Rows) != 1 || len(batch.Rows[0].Transformed) != 1 || batch.Rows[0].Transformed[0].Reason != chtypes.ReasonOverflowWrap {
 		fmt.Fprintf(os.Stderr, "unexpected answer: %+v, %v\n", batch, err)
 		os.Exit(1)
@@ -1205,6 +1335,13 @@ else
     run_check "5 record" check_record "$dir/verified.json" "$want"
     if loaded="$("load_$lang" "$line")"; then
       run_check "6 load" check_loaded "$loaded" "$want"
+      # The planted control: the same probe, with the doc-flags request dropped,
+      # must FAIL its documents assertion. Both outcomes are printed.
+      control_rc=0
+      ( export CHTYPES_RELEASE_VERIFY_PLANT=no-docflags; "load_$lang" "$line" ) > "$work/control.out" 2> "$work/control.err" || control_rc=$?
+      echo "--- check 6, planted control (CHTYPES_RELEASE_VERIFY_PLANT=no-docflags): exit $control_rc ---"
+      sed 's/^/  control stdout: /' "$work/control.out"; sed 's/^/  control stderr: /' "$work/control.err" | tail -n 20
+      run_check "6 load (planted control)" check_control "$control_rc" "$(cat "$work/control.err")"
     else
       verdict FAIL "6 load" "the public API did not load $line"
     fi
