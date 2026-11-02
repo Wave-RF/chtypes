@@ -9,11 +9,13 @@
  *
  * There is no referrers API to query here, so trust discovery is a local
  * scan: every blob under `blobs/sha256/` that parses as an OCI manifest
- * with the signature bundle's own `artifactType` is a *candidate* referrer
- * of the platform manifest, tried the same way `dsse.ts`'s
- * `verifyAnyReferrerBundle` tries referrers fetched over the network —
- * stopping at the first whose signature verifies AND whose statement names
- * this exact platform manifest's layer as its subject. `oras copy -r
+ * with the signature bundle's own `artifactType` and names the platform
+ * manifest as its `subject` is a *candidate* referrer of it, tried the same
+ * way `dsse.ts`'s `verifyAnyReferrerBundle` tries referrers fetched over the
+ * network — stopping at the first whose signature verifies AND whose
+ * statement names this exact platform manifest's layer as its subject. The
+ * scan runs once per lookup, never once per entry, and never reads a layer
+ * (`localSignatureReferrers`; public issue #690). `oras copy -r
  * --to-oci-layout` is what populates these blobs when pulling from a real
  * registry (guide §1); `index.json` itself carries no referrers listing (no
  * such thing exists in the OCI image-layout spec), which is exactly why
@@ -22,7 +24,7 @@
 
 import { rm } from 'node:fs/promises';
 import path from 'node:path';
-import { MEDIA_TYPE_BUNDLE, PREDICATE_TYPE_ARTIFACT } from './constants.gen.js';
+import { MANIFEST_MAX_BYTES, MEDIA_TYPE_BUNDLE, PREDICATE_TYPE_ARTIFACT } from './constants.gen.js';
 import { visibleToChannel } from './channel.js';
 import { checkArtifactStatement, parseStatement, verifyBundleSignature } from './dsse.js';
 import { ArtifactCorruptError } from './errors.js';
@@ -31,6 +33,7 @@ import {
   commitStaging,
   freshStagingDir,
   listLocalBlobHexes,
+  localBlobSize,
   readLocalBlob,
   readVerifiedRecord,
   unpackedDir,
@@ -68,6 +71,8 @@ export async function verifyAndInstallFromLocalBlobs(
   trustedKeys: readonly TrustedKey[],
   /** A lookup's own install: another fingerprint's build is never installed (`visibleToChannel`). */
   visibleOnly = false,
+  /** The layout's signature referrers, when the caller has already scanned for them (`localSignatureReferrers`). */
+  referrers?: LocalReferrers,
 ): Promise<VerifiedRecord | undefined> {
   const manifestHex = hexOfDigest(manifestDigest);
   const existing = await readVerifiedRecord(unpackedDir(writeRoot, manifestHex));
@@ -80,7 +85,8 @@ export async function verifyAndInstallFromLocalBlobs(
     const manifest = parseManifest(manifestDigest, manifestBytes);
 
     const info = platformInfo(platform);
-    const found = await findLocalSignature(blobsSourceDir, manifest.layer, trustedKeys);
+    const refs = referrers ?? (await localSignatureReferrers(blobsSourceDir, new Set([hexOfDigest(manifest.layer.digest)])));
+    const found = await findLocalSignature(blobsSourceDir, refs.get(manifestDigest) ?? [], manifest.layer, trustedKeys);
     if (found === undefined) return undefined;
     const predicate: ArtifactPredicate = checkArtifactStatement(found.statement, PREDICATE_TYPE_ARTIFACT, manifest.layer.digest, {
       os: info.os,
@@ -138,31 +144,67 @@ interface LocalSignature {
   readonly bundleManifestDigest: string;
 }
 
+/** One signature referrer manifest found among a layout's blobs: its blob hex name and its parsed manifest. */
+interface LocalReferrer {
+  readonly hex: string;
+  readonly manifest: ReturnType<typeof parseManifest>;
+}
+
+/** Each subject manifest digest's signature referrers among a layout's blobs, in `readdir` order. */
+export type LocalReferrers = ReadonlyMap<string, readonly LocalReferrer[]>;
+
 /**
- * Scans every local blob for one that is an OCI manifest of the signature
- * bundle's `artifactType`, tries its own layer (the bundle JSON) against
- * `trustedKeys`, and accepts the first whose verified statement names
- * `layer`'s digest as its subject. Order is the filesystem's own
- * `readdir` order — deterministic per run, immaterial to correctness since
- * every candidate is checked.
+ * Every blob under `blobsSourceDir`'s `blobs/sha256/` that is an OCI manifest
+ * of the signature bundle's `artifactType` naming a `subject`, keyed by that
+ * subject's digest. A referrer need not be listed in `index.json`, so every
+ * blob that could be one is read, once per lookup rather than once per
+ * entry. A blob named in `skip` (the caller's candidate layers) and a blob
+ * larger than `limits.manifest_bytes`, which cannot be a manifest, are never
+ * read, so no layer is read here; a blob in `known` (bytes the caller already
+ * read) is not read again (public issue #690).
  */
-async function findLocalSignature(
+export async function localSignatureReferrers(
   blobsSourceDir: string,
-  layer: Descriptor,
-  trustedKeys: readonly TrustedKey[],
-): Promise<LocalSignature | undefined> {
-  const hexes = await listLocalBlobHexes(blobsSourceDir);
-  for (const hex of hexes) {
-    const bytes = await readLocalBlob(blobsSourceDir, hex);
+  skip: ReadonlySet<string>,
+  known: ReadonlyMap<string, Buffer> = new Map(),
+): Promise<LocalReferrers> {
+  const out = new Map<string, LocalReferrer[]>();
+  for (const hex of await listLocalBlobHexes(blobsSourceDir)) {
+    if (skip.has(hex)) continue;
+    let bytes = known.get(hex);
+    if (bytes === undefined) {
+      const size = await localBlobSize(blobsSourceDir, hex);
+      if (size === undefined || size > MANIFEST_MAX_BYTES) continue;
+      bytes = await readLocalBlob(blobsSourceDir, hex);
+    }
     if (bytes === undefined) continue;
-    const artifactType = readArtifactType(bytes);
-    if (artifactType !== MEDIA_TYPE_BUNDLE) continue;
-    let candidateManifest: ReturnType<typeof parseManifest>;
+    const parsed = readReferrerFields(bytes);
+    if (parsed?.artifactType !== MEDIA_TYPE_BUNDLE || parsed.subject === undefined) continue;
+    let manifest: ReturnType<typeof parseManifest>;
     try {
-      candidateManifest = parseManifest(digestOfHex(hex), bytes);
+      manifest = parseManifest(digestOfHex(hex), bytes);
     } catch {
       continue; // Names the bundle artifactType but is not a readable manifest — not a candidate.
     }
+    const list = out.get(parsed.subject) ?? [];
+    list.push({ hex, manifest });
+    out.set(parsed.subject, list);
+  }
+  return out;
+}
+
+/**
+ * Tries each of `refs` (the signature referrers of one platform manifest)
+ * in order: its own layer (the bundle JSON) against `trustedKeys`, accepting
+ * the first whose verified statement names `layer`'s digest as its subject.
+ */
+async function findLocalSignature(
+  blobsSourceDir: string,
+  refs: readonly LocalReferrer[],
+  layer: Descriptor,
+  trustedKeys: readonly TrustedKey[],
+): Promise<LocalSignature | undefined> {
+  for (const { hex, manifest: candidateManifest } of refs) {
     const bundleBytes = await readLocalBlob(blobsSourceDir, hexOfDigest(candidateManifest.layer.digest));
     if (bundleBytes === undefined) continue;
     const verified = verifyBundleSignature(bundleBytes, trustedKeys);
@@ -179,12 +221,17 @@ async function findLocalSignature(
   return undefined;
 }
 
-function readArtifactType(manifestBytes: Buffer): string | undefined {
+/** A manifest's `artifactType` and `subject.digest`, or `undefined` when it is not a JSON object. */
+function readReferrerFields(manifestBytes: Buffer): { artifactType: string | undefined; subject: string | undefined } | undefined {
   try {
     const parsed: unknown = JSON.parse(manifestBytes.toString('utf8'));
     if (parsed === null || typeof parsed !== 'object') return undefined;
-    const v = (parsed as Record<string, unknown>)['artifactType'];
-    return typeof v === 'string' ? v : undefined;
+    const rec = parsed as Record<string, unknown>;
+    const artifactType = typeof rec['artifactType'] === 'string' ? rec['artifactType'] : undefined;
+    const subjectField = rec['subject'];
+    const subjectDigest =
+      subjectField !== null && typeof subjectField === 'object' ? (subjectField as Record<string, unknown>)['digest'] : undefined;
+    return { artifactType, subject: typeof subjectDigest === 'string' ? subjectDigest : undefined };
   } catch {
     return undefined;
   }

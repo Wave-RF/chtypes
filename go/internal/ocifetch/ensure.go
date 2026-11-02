@@ -1160,9 +1160,28 @@ func verifyPreseededEntry(srcLayout, dstLayout *layout, ch *channel, req Request
 	if !ok {
 		return nil, nil
 	}
+	// Pass 1: the entries that are still pre-seeded, each with its manifest
+	// read and checked against its descriptor. No layer is read here.
+	type candidate struct {
+		desc, layer Descriptor
+	}
+	var candidates []candidate
+	candidateLayers := map[Digest]bool{}
 	for _, desc := range srcLayout.readIndexEntries() {
 		if desc.Platform == nil || desc.Platform.OS != platform.OS || desc.Platform.Architecture != platform.Architecture {
 			continue
+		}
+		// Pre-seeded means no unpacked/ directory with a record a reader
+		// accepts (§6). An entry that already has one was read, and passed
+		// over, by the record lookup before this scan, so it is excluded
+		// here without reading a blob. An unreadable record counts as none.
+		if _, _, installed := readInstalledRecord(srcLayout, desc.Digest); installed {
+			continue
+		}
+		if dstLayout != srcLayout {
+			if _, _, installed := readInstalledRecord(dstLayout, desc.Digest); installed {
+				continue
+			}
 		}
 		manifestBody, ok := srcLayout.readBlob(desc.Digest)
 		if !ok {
@@ -1175,21 +1194,35 @@ func verifyPreseededEntry(srcLayout, dstLayout *layout, ch *channel, req Request
 		if uerr := strictUnmarshal(manifestBody, &m); uerr != nil || len(m.Layers) != 1 {
 			continue
 		}
-		layerDesc := m.Layers[0]
+		candidates = append(candidates, candidate{desc: desc, layer: m.Layers[0]})
+		candidateLayers[m.Layers[0].Digest] = true
+	}
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+	// The layout's bundle referrers, read once per lookup rather than once
+	// per entry, and never by reading a candidate's layer (public issue #690).
+	refs := srcLayout.bundleReferrers(candidateLayers)
+	// Pass 2, in index order: the signed statement rules a candidate in or
+	// out before its layer is read. Its subject must be the layer digest the
+	// manifest (checked against its descriptor above) names, so the layer is
+	// read and hashed only for the candidate about to be installed.
+	for _, c := range candidates {
+		desc, layerDesc := c.desc, c.layer
+		manifestDigest := desc.Digest
+		stmt := verifyLocalBundle(srcLayout, refs[manifestDigest], trustedKeys, layerDesc.Digest, &platform, req.Spelling)
+		if stmt == nil {
+			continue
+		}
+		if !ch.visible(stmt.Statement.Predicate) {
+			continue // another fingerprint's build: neither the answer nor installed by this lookup
+		}
 		layerBody, ok := srcLayout.readBlob(layerDesc.Digest)
 		if !ok {
 			continue
 		}
 		if verr := verifyDescriptor(layerBody, layerDesc); verr != nil {
 			continue
-		}
-		manifestDigest := desc.Digest
-		stmt := findLocalBundle(srcLayout, trustedKeys, manifestDigest, layerDesc.Digest, &platform, req.Spelling)
-		if stmt == nil {
-			continue
-		}
-		if !ch.visible(stmt.Statement.Predicate) {
-			continue // another fingerprint's build: neither the answer nor installed by this lookup
 		}
 		libraryRelPath, _ := predicateLibraryPath(stmt)
 		// The install begins here, and only here is anything created: a
@@ -1313,13 +1346,39 @@ func installPreseededByDigest(l *layout, manifestDigest Digest, trustedKeys []ed
 	return werr
 }
 
-// findLocalBundle scans l's own index.json for a bundle-artifactType entry
-// that verifies manifestLayerDigest's statement, entirely from local blobs.
-// platform nil skips the platform/version check (§4's validateStatement),
-// for installing a pre-seeded entry by its own digest rather than against a
-// live request.
+// findLocalBundle finds, among l's own blobs, a bundle-artifactType
+// referrer of manifestDigest that verifies its layer's statement, entirely
+// from local blobs. platform nil skips the platform/version check (§4's
+// validateStatement), for installing a pre-seeded entry by its own digest
+// rather than against a live request.
 func findLocalBundle(l *layout, trustedKeys []ed25519.PublicKey, manifestDigest, layerDigest Digest, platform *Platform, request string) *verifiedStatement {
+	return verifyLocalBundle(l, l.bundleReferrers(map[Digest]bool{layerDigest: true})[manifestDigest], trustedKeys, layerDigest, platform, request)
+}
+
+// localReferrer is one bundle-artifactType referrer manifest found among a
+// layout's blobs, already parsed.
+type localReferrer struct {
+	digest   Digest
+	manifest ImageManifest
+}
+
+// bundleReferrers maps each subject manifest digest to the
+// bundle-artifactType referrer manifests among l's blobs that name it, in
+// blob-listing order. A referrer manifest need not be listed in index.json
+// (listAllBlobDigests), so every blob that could be one is read, once. A
+// digest in layers (the caller's candidate layers) and a blob larger than
+// limits.manifest_bytes, which cannot be a manifest, are never read, so no
+// layer is read here (public issue #690).
+func (l *layout) bundleReferrers(layers map[Digest]bool) map[Digest][]localReferrer {
+	out := map[Digest][]localReferrer{}
 	for _, blobDigest := range l.listAllBlobDigests() {
+		if layers[blobDigest] {
+			continue
+		}
+		info, err := os.Stat(l.blobPath(blobDigest))
+		if err != nil || info.Size() > ManifestMaxBytes {
+			continue
+		}
 		refBody, ok := l.readBlob(blobDigest)
 		if !ok {
 			continue
@@ -1328,13 +1387,24 @@ func findLocalBundle(l *layout, trustedKeys []ed25519.PublicKey, manifestDigest,
 		if uerr := strictUnmarshal(refBody, &refManifest); uerr != nil {
 			continue
 		}
-		if refManifest.ArtifactType != MediaTypeBundle || refManifest.Subject == nil || refManifest.Subject.Digest != manifestDigest {
+		if refManifest.ArtifactType != MediaTypeBundle || refManifest.Subject == nil {
 			continue
 		}
-		if len(refManifest.Layers) != 1 {
+		subject := refManifest.Subject.Digest
+		out[subject] = append(out[subject], localReferrer{digest: blobDigest, manifest: refManifest})
+	}
+	return out
+}
+
+// verifyLocalBundle returns the first of refs whose one layer is a bundle
+// that verifies under trustedKeys and whose statement validates against
+// layerDigest (and against platform and request, when platform is not nil).
+func verifyLocalBundle(l *layout, refs []localReferrer, trustedKeys []ed25519.PublicKey, layerDigest Digest, platform *Platform, request string) *verifiedStatement {
+	for _, ref := range refs {
+		if len(ref.manifest.Layers) != 1 {
 			continue
 		}
-		bundleBody, ok := l.readBlob(refManifest.Layers[0].Digest)
+		bundleBody, ok := l.readBlob(ref.manifest.Layers[0].Digest)
 		if !ok {
 			continue
 		}
@@ -1345,7 +1415,7 @@ func findLocalBundle(l *layout, trustedKeys []ed25519.PublicKey, manifestDigest,
 		if cerr := validateStatement(vr.statement, PredicateTypeArtifact, layerDigest, platform, request); cerr != nil {
 			continue
 		}
-		return &verifiedStatement{KeyID: vr.keyID, Statement: *vr.statement, BundleDigest: refManifest.Layers[0].Digest, BundleManifestDigest: blobDigest}
+		return &verifiedStatement{KeyID: vr.keyID, Statement: *vr.statement, BundleDigest: ref.manifest.Layers[0].Digest, BundleManifestDigest: ref.digest}
 	}
 	return nil
 }
