@@ -20,7 +20,7 @@
  */
 
 import { randomBytes } from 'node:crypto';
-import { lstat, mkdir, mkdtemp, readdir, readFile, rename, rm, unlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { activeChannel } from './channel.js';
@@ -64,10 +64,30 @@ export function blobsDir(root: string): string {
 /** Reads a local blob by its hex digest, `undefined` when it is not there — never throws on ENOENT. */
 export async function readLocalBlob(root: string, hex: string): Promise<Buffer | undefined> {
   try {
-    return await readFile(path.join(blobsDir(root), hex));
+    const bytes = await readFile(path.join(blobsDir(root), hex));
+    blobReadSeam.observe?.(root, hex, bytes.length);
+    return bytes;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
     throw err;
+  }
+}
+
+/**
+ * The test seam that counts an offline lookup's blob reads (public issue
+ * #690): when `observe` is set, it is told of every blob `readLocalBlob`
+ * reads. Only tests set it.
+ */
+export const blobReadSeam: { observe: ((root: string, hex: string, bytes: number) => void) | undefined } = {
+  observe: undefined,
+};
+
+/** The size of a blob under `blobs/sha256/`, or `undefined` when it cannot be read. */
+export async function localBlobSize(root: string, hex: string): Promise<number | undefined> {
+  try {
+    return (await stat(path.join(blobsDir(root), hex))).size;
+  } catch {
+    return undefined;
   }
 }
 
