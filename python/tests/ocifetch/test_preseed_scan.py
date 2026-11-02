@@ -116,8 +116,10 @@ def test_lookup_over_unverifiable_entries_reads_no_layer(
     )
     assert results == [None]
     total, most = sum(reads.values()), max(reads.values(), default=0)
-    print(f"N={n}: {total} blob reads, {len(reads)} distinct, most {most}, "
-          f"layer {reads[BUILD_LAYER_HEX]}")
+    print(
+        f"N={n}: {total} blob reads, {len(reads)} distinct, most {most}, "
+        f"layer {reads[BUILD_LAYER_HEX]}"
+    )
     assert reads[BUILD_LAYER_HEX] == 0, f"N={n}: the lookup read the layer"
     assert most <= 2, f"N={n}: one blob was read {most} times in one lookup"
     assert total <= 5 * n + 2, f"N={n}: {total} blob reads in one lookup"
@@ -134,7 +136,9 @@ def test_miss_over_installed_builds_reads_no_blob(
     # The first lookup installs every pre-seeded entry of the build.
     first = resolve_installed(Request("26.1"), "linux-arm64", options)
     assert first is not None
-    assert all((cache / "unpacked" / "sha256" / d.removeprefix("sha256:")).is_dir() for d in digests)
+    assert all(
+        (cache / "unpacked" / "sha256" / d.removeprefix("sha256:")).is_dir() for d in digests
+    )
     results: list[object] = []
     reads = _blob_reads(
         monkeypatch,
