@@ -75,6 +75,7 @@ from chtypes._ocifetch._layout import (
 from chtypes._ocifetch._lock import Lock, LockPin, load_lock, new_lock, save_lock
 from chtypes._ocifetch._oci import (
     Descriptor,
+    copy_blob_verified,
     fetch_blob_bytes,
     fetch_blob_to_path,
     fetch_manifest_by_digest,
@@ -86,6 +87,8 @@ from chtypes._ocifetch._oci import (
     resolve_platform_manifest,
     spelling_components,
     validate_spelling,
+    verify_body_matches_digest,
+    verify_json_descriptor,
     version_within_request,
 )
 from chtypes._ocifetch._referrers import ReferrerListing, discover_referrers, read_listing
@@ -1347,6 +1350,7 @@ def _verify_and_install_from_local_blobs(
     trusted_keys: tuple[TrustedKey, ...],
     visible_only: bool = False,
     referrers: dict[str, list[tuple[str, dict]]] | None = None,
+    manifest_size: int | None = None,
 ) -> VerifiedRecord | None:
     """docs/guides/fetch-v1.md §1/§6: "A pre-seeded layout has entries in
     `index.json` with no corresponding `unpacked/` directory yet; the first
@@ -1358,7 +1362,14 @@ def _verify_and_install_from_local_blobs(
     `source_root/blobs/sha256/*`, never the network. Returns `None` — never
     raises — for a missing, unreadable or untrusted entry, the same
     tolerant shape `_find_verified_signature` uses for a network referrer:
-    a bad pre-seed is "nothing usable here," not a crash."""
+    a bad pre-seed is "nothing usable here," not a crash.
+
+    The manifest blob is checked against `manifest_digest` (and against
+    `manifest_size`, the index descriptor's size, when the caller has one)
+    before it is parsed, and the layer blob against the manifest's layer
+    descriptor (size and sha256) before it is decompressed: the same
+    checks a download gets (§7.3), so no byte the signature does not cover
+    reaches the install."""
     blobs_dir = source_root / "blobs" / "sha256"
     if not blobs_dir.is_dir():
         return None
@@ -1367,7 +1378,15 @@ def _verify_and_install_from_local_blobs(
     if not manifest_path.is_file():
         return None
     try:
-        manifest_doc = json.loads(manifest_path.read_bytes())
+        manifest_bytes = manifest_path.read_bytes()
+        verify_body_matches_digest(manifest_bytes, manifest_digest, what="pre-seeded manifest")
+        if manifest_size is not None:
+            verify_json_descriptor(
+                manifest_bytes,
+                Descriptor(media_type="", digest=manifest_digest, size=manifest_size),
+                what="pre-seeded manifest",
+            )
+        manifest_doc = json.loads(manifest_bytes)
         layer_desc = manifest_layer_descriptor(manifest_doc)
     except (ValueError, OSError, FetchError):
         return None
@@ -1416,9 +1435,18 @@ def _verify_and_install_from_local_blobs(
     scratch = _scratch_root(cache_write_root)
     tmp_dir = tempfile.mkdtemp(dir=str(scratch))
     try:
+        # Size and sha256 against the layer descriptor BEFORE decompressing
+        # (§7.3), on a copy in scratch, which is then the file unpacked.
+        verified_layer = os.path.join(tmp_dir, "layer")
+        copy_blob_verified(
+            str(layer_path),
+            layer_desc,
+            verified_layer,
+            what=f"pre-seeded layer {layer_desc.digest}",
+        )
         unpacked_dir = os.path.join(tmp_dir, "unpacked")
         unpack_tar_zst(
-            str(layer_path),
+            verified_layer,
             unpacked_dir,
             library_name=predicate["library"],
             library_sha256=predicate["library_sha256"],
@@ -1470,11 +1498,15 @@ def _verify_preseeded_entries(roots: Sequence[Path], trusted_keys: tuple[Trusted
         candidates: list[str] = []
         candidate_layers: set[str] = set()
         manifests_read: dict[str, bytes] = {}
+        sizes: dict[str, int] = {}
         for m in index_doc.get("manifests") or []:
             digest = m.get("digest")
             if not digest or digest in already_verified:
                 continue
             candidates.append(digest)
+            size = m.get("size")
+            if isinstance(size, int) and not isinstance(size, bool):
+                sizes[digest] = size
             try:
                 manifest_hex = parse_digest(digest)
                 manifest_bytes = (blobs_dir / manifest_hex).read_bytes()
@@ -1496,6 +1528,7 @@ def _verify_preseeded_entries(roots: Sequence[Path], trusted_keys: tuple[Trusted
                 trusted_keys=trusted_keys,
                 visible_only=True,
                 referrers=referrers,
+                manifest_size=sizes.get(digest),
             )
             if record is not None:
                 already_verified.add(digest)

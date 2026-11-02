@@ -8,8 +8,10 @@ The verdicts come from the blob reads the lookup itself made (every
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import shutil
+import tarfile
 from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
@@ -159,3 +161,121 @@ def test_preseeded_install_still_verifies_the_layer(tmp_path: Path) -> None:
     layer.write_bytes(bytes(b))
     assert resolve_installed(Request("26.1"), "linux-arm64", _options(cache, "test-key")) is None
     assert not (cache / "unpacked" / "sha256" / digests[0].removeprefix("sha256:")).exists()
+
+
+def _tamper_layer(original: bytes, case: str) -> bytes:
+    """A different valid tar.zst carrying the signed library member's bytes
+    unchanged. "extra-member": every member of `original` plus `planted.txt`.
+    "manifest-json": the tarball's `manifest.json` altered — the signed
+    fixture layer has none (its members are `docs/` and the library), so its
+    altered form is a `manifest.json` the signed layer does not carry, beside
+    the same library bytes. Neither is covered by any signature."""
+    try:
+        from compression import zstd  # Python 3.14+
+    except ImportError:  # Python 3.11-3.13
+        from backports import zstd  # type: ignore[no-redef]
+
+    def add(dst: tarfile.TarFile, name: str, body: bytes) -> None:
+        info = tarfile.TarInfo(name)
+        info.size = len(body)
+        dst.addfile(info, io.BytesIO(body))
+
+    src = tarfile.open(fileobj=io.BytesIO(zstd.decompress(original)))
+    out = io.BytesIO()
+    with tarfile.open(fileobj=out, mode="w", format=tarfile.PAX_FORMAT) as dst:
+        for member in src.getmembers():
+            if member.name == "manifest.json":
+                continue
+            dst.addfile(member, src.extractfile(member) if member.isreg() else None)
+        if case == "extra-member":
+            add(dst, "planted.txt", b"bytes no signature covers\n")
+        else:
+            add(dst, "manifest.json", b'{"planted.txt": "bytes no signature covers"}\n')
+    return zstd.compress(out.getvalue())
+
+
+def _unpack_spy(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Every layer file the local install handed to `unpack_tar_zst`."""
+    import chtypes._ocifetch._ensure as ensure_mod
+
+    calls: list[str] = []
+    real = ensure_mod.unpack_tar_zst
+
+    def spy(path: str, *args: object, **kwargs: object) -> None:
+        calls.append(path)
+        real(path, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(ensure_mod, "unpack_tar_zst", spy)
+    return calls
+
+
+def _assert_nothing_installed(cache: Path, manifest: str) -> None:
+    leaked = [*cache.rglob("planted.txt"), *(cache / "unpacked").rglob("manifest.json")]
+    assert leaked == [], f"bytes outside the signature were installed: {leaked}"
+    assert not (cache / "unpacked" / "sha256" / manifest.removeprefix("sha256:")).exists()
+
+
+@pytest.mark.parametrize("case", ["extra-member", "manifest-json"])
+def test_preseeded_layer_swapped_under_its_signed_name_installs_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str
+) -> None:
+    """The layer blob FILE under its signed digest name is replaced by a
+    different valid tar.zst carrying the same library bytes. The library
+    re-hash alone passes on those bytes; the layer descriptor check (size
+    and sha256) refuses them BEFORE any unpack. The lookup installs nothing
+    and is a miss."""
+    cache, digests = _seed_clones(tmp_path, 1)
+    layer = cache / "blobs" / "sha256" / BUILD_LAYER_HEX
+    layer.write_bytes(_tamper_layer(layer.read_bytes(), case))
+    assert hashlib.sha256(layer.read_bytes()).hexdigest() != BUILD_LAYER_HEX
+    unpacked = _unpack_spy(monkeypatch)
+    result = resolve_installed(Request("26.1"), "linux-arm64", _options(cache, "test-key"))
+    _assert_nothing_installed(cache, digests[0])
+    assert unpacked == [], f"{case}: the unverified layer reached unpack"
+    assert result is None
+
+
+def test_preseeded_manifest_swapped_under_its_digest_name_installs_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The manifest blob FILE under its index digest is replaced by other
+    bytes naming the same signed layer: the manifest no longer hashes to the
+    digest the signature names, and the lookup installs nothing."""
+    cache, digests = _seed_clones(tmp_path, 1)
+    path = cache / "blobs" / "sha256" / digests[0].removeprefix("sha256:")
+    manifest = json.loads(path.read_bytes())
+    manifest["annotations"] = {"test.swapped": "1"}
+    path.write_bytes(json.dumps(manifest).encode())
+    unpacked = _unpack_spy(monkeypatch)
+    assert resolve_installed(Request("26.1"), "linux-arm64", _options(cache, "test-key")) is None
+    assert unpacked == []
+    _assert_nothing_installed(cache, digests[0])
+
+
+def test_preseeded_manifest_size_disagreeing_with_index_installs_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The index descriptor's size disagrees with the manifest blob's: the
+    manifest is checked against its whole descriptor, as a download is."""
+    cache, digests = _seed_clones(tmp_path, 1)
+    index = json.loads((cache / "index.json").read_text())
+    index["manifests"][0]["size"] += 1
+    (cache / "index.json").write_text(json.dumps(index))
+    unpacked = _unpack_spy(monkeypatch)
+    assert resolve_installed(Request("26.1"), "linux-arm64", _options(cache, "test-key")) is None
+    assert unpacked == []
+    _assert_nothing_installed(cache, digests[0])
+
+
+def test_preseeded_untouched_layout_still_installs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The control for the cases above: the same layout, untouched, reaches
+    unpack once, installs and answers."""
+    cache, digests = _seed_clones(tmp_path, 1)
+    unpacked = _unpack_spy(monkeypatch)
+    assert (
+        resolve_installed(Request("26.1"), "linux-arm64", _options(cache, "test-key")) is not None
+    )
+    assert len(unpacked) == 1
+    assert (cache / "unpacked" / "sha256" / digests[0].removeprefix("sha256:")).is_dir()

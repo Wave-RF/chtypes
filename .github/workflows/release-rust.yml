@@ -186,8 +186,7 @@ jobs:
   #   - a tag push: publish, then verify the registry's copy;
   #   - a dry run (dry_run=true): no publish; the same steps against the crate
   #     in this checkout (`cargo install --path`), the retry loop skipped; a
-  #     stable dry run against the stand-in, through the crate's own test
-  #     binaries before the lock;
+  #     stable dry run against the stand-in;
   #   - verify_only=true: no publish; the same steps against the version the
   #     `tag` input names, already on crates.io.
   # The parser of `chtypes list` and the whole sequence are therefore exercised
