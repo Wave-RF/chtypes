@@ -336,32 +336,66 @@ pub fn find_content_referrer(
     }
 }
 
-/// Find a trusted signature referrer of `subject_digest` **entirely from
-/// local blobs** — no referrers API, no fallback tag, no network at all.
-///
-/// A plain OCI image layout's `index.json` lists only the artifact
-/// manifest itself (docs/guides/fetch-v1.md §10, "Cache fixtures and
-/// `installed.json`": "it never carries a pre-populated... record" — nor
-/// does it list the referrer). The referrer manifest is still present as
-/// an ordinary content-addressed blob, so it is found by scanning every
-/// blob under `layout_root/blobs/sha256/`, parsing each as an OCI manifest,
-/// and keeping the ones whose own `subject.digest` equals `subject_digest`
-/// — exactly how a real OCI 1.1 client reconstructs referrers from a
-/// layout with no referrers index.
-pub fn find_local_referrer(
+// Trusted signature referrers are found **entirely from local blobs** — no
+// referrers API, no fallback tag, no network at all. A plain OCI image
+// layout's `index.json` lists only the artifact manifest itself
+// (docs/guides/fetch-v1.md §10, "Cache fixtures and `installed.json`": "it
+// never carries a pre-populated... record" — nor does it list the referrer).
+// The referrer manifest is still present as an ordinary content-addressed
+// blob, so it is found by scanning the blobs under
+// `layout_root/blobs/sha256/`, parsing each as an OCI manifest, and keeping
+// the ones whose own `subject.digest` names the artifact manifest — exactly
+// how a real OCI 1.1 client reconstructs referrers from a layout with no
+// referrers index.
+
+/// One signature referrer manifest found among a layout's blobs: its own
+/// digest and its parsed manifest.
+pub struct LocalReferrer {
+    pub digest: String,
+    pub manifest: oci::Manifest,
+}
+
+/// Each subject manifest digest's signature referrers among a layout's
+/// blobs, in directory-listing order.
+pub type LocalReferrers = std::collections::HashMap<String, Vec<LocalReferrer>>;
+
+/// Every blob of `layout_root` that is an OCI manifest of the signature
+/// bundle's `artifactType` naming a `subject`, keyed by that subject's
+/// digest. A referrer need not be listed in `index.json`, so every blob
+/// that could be one is read, once per lookup rather than once per entry. A
+/// digest in `skip` (the caller's candidate layers) and a blob larger than
+/// `limits.manifest_bytes`, which cannot be a manifest, are never read, so
+/// no layer is read here; a digest in `known` (bytes the caller already
+/// read) is not read again (public issue #690).
+pub fn local_referrers(
     layout_root: &std::path::Path,
-    subject_digest: &str,
-    trust: &[TrustedKey],
-) -> Result<VerifiedStatement> {
+    skip: &std::collections::HashSet<String>,
+    known: &std::collections::HashMap<String, Vec<u8>>,
+) -> Result<LocalReferrers> {
     let blobs_dir = layout_root.join("blobs").join("sha256");
     let entries = std::fs::read_dir(&blobs_dir)
         .map_err(|e| Error::SourceUnreachable(format!("{}: {e}", blobs_dir.display())))?;
-
-    let mut last_untrusted: Option<Error> = None;
+    let mut out = LocalReferrers::new();
     for entry in entries {
         let entry = entry?;
-        let Ok(bytes) = std::fs::read(entry.path()) else {
+        let digest = format!("sha256:{}", entry.file_name().to_string_lossy());
+        if skip.contains(&digest) {
             continue;
+        }
+        let bytes = match known.get(&digest) {
+            Some(b) => b.clone(),
+            None => {
+                let Ok(meta) = entry.metadata() else {
+                    continue;
+                };
+                if !meta.is_file() || meta.len() > constants::MANIFEST_MAX_BYTES {
+                    continue;
+                }
+                let Ok(Some(b)) = super::layout::read_blob(layout_root, &digest) else {
+                    continue;
+                };
+                b
+            }
         };
         let Ok(manifest) = serde_json::from_slice::<oci::Manifest>(&bytes) else {
             continue;
@@ -369,25 +403,43 @@ pub fn find_local_referrer(
         let Some(subject) = &manifest.subject else {
             continue;
         };
-        if subject.digest != subject_digest {
-            continue;
-        }
         if manifest.artifact_type.as_deref() != Some(constants::MEDIA_TYPE_BUNDLE) {
             continue;
         }
+        let subject = subject.digest.clone();
+        out.entry(subject)
+            .or_default()
+            .push(LocalReferrer { digest, manifest });
+    }
+    Ok(out)
+}
+
+/// The first of `refs` (signature referrers of `subject_digest`) whose
+/// bundle verifies under `trust`.
+pub fn verify_local_referrer(
+    layout_root: &std::path::Path,
+    refs: &[LocalReferrer],
+    subject_digest: &str,
+    trust: &[TrustedKey],
+) -> Result<VerifiedStatement> {
+    let mut last_untrusted: Option<Error> = None;
+    for LocalReferrer {
+        digest: referrer_digest,
+        manifest,
+    } in refs
+    {
         let [layer] = manifest.layers.as_slice() else {
             continue;
         };
         if layer.media_type != constants::MEDIA_TYPE_BUNDLE {
             continue;
         }
-        let referrer_digest = format!("sha256:{}", entry.file_name().to_string_lossy());
         let Some(blob) = super::layout::read_blob(layout_root, &layer.digest)? else {
             continue;
         };
         match dsse::verify_bundle(&blob, trust, constants::STATEMENT_TYPE) {
             Ok(mut stmt) => {
-                stmt.bundle_manifest_digest = referrer_digest;
+                stmt.bundle_manifest_digest = referrer_digest.clone();
                 stmt.bundle_layer_digest = layer.digest.clone();
                 return Ok(stmt);
             }

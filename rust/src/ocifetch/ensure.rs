@@ -1700,19 +1700,59 @@ fn install_preseeded(
         .iter()
         .find(|p| p.key == platform)
         .ok_or_else(|| Error::InvalidInput(format!("unknown platform {platform:?}")))?;
-    let mut best: Option<(PathBuf, VerifiedRecord)> = None;
+    // Pass 1: the entries still pre-seeded, each with its manifest read; no
+    // layer is read here. An entry fully installed in either root is not
+    // pre-seeded (docs/guides/fetch-v1.md §6): the record lookup before this
+    // scan has already read it, so it costs no blob read here.
+    let mut candidates: Vec<&str> = Vec::new();
+    let mut candidate_layers = std::collections::HashSet::new();
+    let mut manifests_read = std::collections::HashMap::new();
     for d in &index.manifests {
         let Some(p) = &d.platform else { continue };
         if p.os != plat.os || p.architecture != plat.architecture {
             continue;
         }
+        let Ok(dir) = layout::unpacked_dir(cache_root, &d.digest) else {
+            continue;
+        };
+        if is_fully_installed(&dir).unwrap_or(false) {
+            continue;
+        }
+        if layout_root != cache_root {
+            if let Ok(dir) = layout::unpacked_dir(layout_root, &d.digest) {
+                if is_fully_installed(&dir).unwrap_or(false) {
+                    continue;
+                }
+            }
+        }
+        candidates.push(&d.digest);
+        if let Ok(Some(bytes)) = layout::read_blob(layout_root, &d.digest) {
+            if let Ok(m) = serde_json::from_slice::<oci::Manifest>(&bytes) {
+                if let [layer] = m.layers.as_slice() {
+                    candidate_layers.insert(layer.digest.clone());
+                }
+            }
+            manifests_read.insert(d.digest.clone(), bytes);
+        }
+    }
+    if candidates.is_empty() {
+        return Ok(None);
+    }
+    // The layout's signature referrers, read once for every candidate, never
+    // by reading a candidate's layer (public issue #690). A layout whose
+    // blobs cannot be listed has none, as every candidate's own scan found.
+    let refs = referrers::local_referrers(layout_root, &candidate_layers, &manifests_read)
+        .unwrap_or_default();
+    let mut best: Option<(PathBuf, VerifiedRecord)> = None;
+    for digest in candidates {
         let Ok(resolved) = install_from_local_blobs_for(
             layout_root,
             cache_root,
-            &d.digest,
+            digest,
             platform,
             trust,
             Some(version_request),
+            Some(&refs),
         ) else {
             continue;
         };
@@ -1761,11 +1801,14 @@ pub fn install_from_local_blobs(
         platform,
         trust,
         None,
+        None,
     )
 }
 
 /// [`install_from_local_blobs`], additionally refusing (before anything is
 /// unpacked) a signed predicate whose version does not lie within `request`.
+/// `refs` is the layout's signature referrers when the caller has already
+/// scanned for them ([`referrers::local_referrers`]).
 fn install_from_local_blobs_for(
     layout_root: &Path,
     cache_root: &Path,
@@ -1773,6 +1816,7 @@ fn install_from_local_blobs_for(
     platform: &str,
     trust: &[TrustedKey],
     request: Option<&VersionRequest>,
+    refs: Option<&referrers::LocalReferrers>,
 ) -> Result<Resolved> {
     let already = is_fully_installed(&layout::unpacked_dir(cache_root, manifest_digest)?)?;
     let dir = if already {
@@ -1785,7 +1829,25 @@ fn install_from_local_blobs_for(
         let manifest: oci::Manifest = serde_json::from_slice(&manifest_bytes)?;
         oci::check_platform_manifest(&manifest, &format!("manifest {manifest_digest}"))?;
         let layer = &manifest.layers[0];
-        let stmt = referrers::find_local_referrer(layout_root, manifest_digest, trust)?;
+        let scanned;
+        let refs = match refs {
+            Some(r) => r,
+            None => {
+                let skip = std::collections::HashSet::from([layer.digest.clone()]);
+                scanned = referrers::local_referrers(
+                    layout_root,
+                    &skip,
+                    &std::collections::HashMap::new(),
+                )?;
+                &scanned
+            }
+        };
+        let stmt = referrers::verify_local_referrer(
+            layout_root,
+            refs.get(manifest_digest).map(Vec::as_slice).unwrap_or(&[]),
+            manifest_digest,
+            trust,
+        )?;
         check_artifact_statement(&stmt, &layer.digest)?;
         validate_predicate(&stmt.predicate, platform, request)?;
         // A lookup (one with a request) never installs another fingerprint's
@@ -2485,5 +2547,206 @@ mod cache_strict_tests {
         );
         assert!(f.path.starts_with(&cache), "{}", f.path.display());
         restore(&base);
+    }
+}
+
+/// Public issue #690: an offline lookup reads a bounded number of blobs,
+/// whatever the number of builds the cache holds. The verdicts come from the
+/// blob reads the lookup itself made (`layout::blob_reads`), never from a
+/// timing.
+#[cfg(test)]
+mod preseed_scan_tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    // The offline-hit layout's one build: 26.1.1.1 on linux-arm64.
+    const BUILD_MANIFEST: &str =
+        "sha256:b461315c30649fec6d9cc988330ed3081ffd6a2a45aa21acda6ff212413f8637";
+    const BUILD_LAYER: &str =
+        "sha256:df72d6f06f8ed738ecdd8e080dbd71244b66024daee20c85f53d3f822a49463b";
+    const BUNDLE_REF: &str =
+        "sha256:887b88511be68e82d653c734f57fc0e2c9c2e64bda4f23f25fe0ae1648f6244b";
+
+    fn fixtures() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/fetch-v1")
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        std::env::temp_dir().join(format!(
+            "ocifetch-690-{name}-{}-{nanos:x}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ))
+    }
+
+    fn copy_dir(src: &Path, dst: &Path) {
+        std::fs::create_dir_all(dst).unwrap();
+        for e in std::fs::read_dir(src).unwrap() {
+            let e = e.unwrap();
+            let to = dst.join(e.file_name());
+            if e.file_type().unwrap().is_dir() {
+                copy_dir(&e.path(), &to);
+            } else {
+                std::fs::copy(e.path(), to).unwrap();
+            }
+        }
+    }
+
+    fn trust(key: &str) -> Vec<TrustedKey> {
+        let hex = std::fs::read_to_string(fixtures().join(key).join("public.hex")).unwrap();
+        dsse::trusted_keys(Some(&[hex.trim().to_string()])).unwrap()
+    }
+
+    /// The offline-hit layout plus n-1 more pre-seeded entries of the same
+    /// signed build: each its own manifest (the original plus one
+    /// annotation), its own signature referrer manifest naming it, and its
+    /// own copy of the bundle (the original bytes plus trailing whitespace,
+    /// which the signature does not cover). The layer stays the one signed
+    /// layer. Returns the layout and every entry's manifest digest.
+    fn seed_clones(name: &str, n: usize) -> (PathBuf, Vec<String>) {
+        let cache = scratch(name).join("cache");
+        copy_dir(&fixtures().join("layouts/offline-hit"), &cache);
+        let put = |b: &[u8]| -> (String, usize) {
+            let digest = format!("sha256:{}", oci::sha256_hex(b));
+            layout::put_blob(&cache, &digest, b).unwrap();
+            (digest, b.len())
+        };
+        let read = |d: &str| std::fs::read(layout::blob_path(&cache, d).unwrap()).unwrap();
+        let mut index: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(cache.join("index.json")).unwrap()).unwrap();
+        let first = index["manifests"][0].clone();
+        let mut digests = vec![first["digest"].as_str().unwrap().to_string()];
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(&read(BUILD_MANIFEST)).unwrap();
+        let mut referrer: serde_json::Value = serde_json::from_slice(&read(BUNDLE_REF)).unwrap();
+        let bundle = read(referrer["layers"][0]["digest"].as_str().unwrap());
+        for i in 1..n {
+            manifest["annotations"] = serde_json::json!({"test.clone": i.to_string()});
+            let (md, msize) = put(&serde_json::to_vec(&manifest).unwrap());
+            let mut b = bundle.clone();
+            b.extend(std::iter::repeat_n(b' ', i));
+            let (bd, bsize) = put(&b);
+            referrer["layers"][0]["digest"] = bd.into();
+            referrer["layers"][0]["size"] = bsize.into();
+            referrer["subject"] = serde_json::json!({
+                "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                "digest": md, "size": msize,
+            });
+            put(&serde_json::to_vec(&referrer).unwrap());
+            let mut e = first.clone();
+            e.as_object_mut().unwrap().remove("annotations");
+            e["digest"] = md.clone().into();
+            e["size"] = msize.into();
+            index["manifests"].as_array_mut().unwrap().push(e);
+            digests.push(md);
+        }
+        std::fs::write(
+            cache.join("index.json"),
+            serde_json::to_vec(&index).unwrap(),
+        )
+        .unwrap();
+        (cache, digests)
+    }
+
+    fn lookup(
+        cache: &Path,
+        request: &str,
+        key: &str,
+    ) -> (
+        Option<(PathBuf, VerifiedRecord, String)>,
+        HashMap<String, usize>,
+    ) {
+        let req = VersionRequest::parse(request).unwrap();
+        let trust = trust(key);
+        layout::blob_reads::count(cache, || {
+            find_installed(cache, &[], &req, "linux-arm64", &trust).unwrap()
+        })
+    }
+
+    /// An offline miss over N pre-seeded entries the lookup does not install
+    /// (a build outside the request, or a signature that verifies under no
+    /// trusted key) reads no layer, no blob more than twice, and at most 5
+    /// blobs per entry plus 2, at N=2 and N=20 alike. The old scan read every
+    /// blob of the layout once per entry.
+    #[test]
+    fn a_miss_reads_no_layer_whatever_the_cache_holds() {
+        let _v1 = channel::use_fetch_v1_for_tests();
+        for (case, request, key) in [
+            ("another line", "26.3", "test-key"),
+            ("untrusted", "26.1", "other-key"),
+        ] {
+            for n in [2, 20] {
+                let (cache, _) = seed_clones("miss", n);
+                let (found, reads) = lookup(&cache, request, key);
+                assert!(found.is_none(), "{case}, N={n}: want a miss");
+                let total: usize = reads.values().sum();
+                let most = reads.values().copied().max().unwrap_or(0);
+                let layer = reads.get(BUILD_LAYER).copied().unwrap_or(0);
+                println!(
+                    "{case}, N={n}: {total} blob reads, {} distinct, most {most}, layer {layer}",
+                    reads.len()
+                );
+                assert_eq!(layer, 0, "{case}, N={n}: the miss read the layer");
+                assert!(most <= 2, "{case}, N={n}: one blob was read {most} times");
+                assert!(total <= 5 * n + 2, "{case}, N={n}: {total} blob reads");
+                let _ = std::fs::remove_dir_all(cache.parent().unwrap());
+            }
+        }
+    }
+
+    /// The consumer's case: every entry is installed, so none is pre-seeded
+    /// (docs/guides/fetch-v1.md §6), and a miss reads no blob at all.
+    #[test]
+    fn a_miss_over_installed_builds_reads_no_blob() {
+        let _v1 = channel::use_fetch_v1_for_tests();
+        for n in [2, 20] {
+            let (cache, digests) = seed_clones("installed", n);
+            let trust = trust("test-key");
+            for d in &digests {
+                install_from_local_blobs(&cache, &cache, d, "linux-arm64", &trust).unwrap();
+            }
+            let (found, reads) = lookup(&cache, "26.3", "test-key");
+            assert!(found.is_none(), "N={n}: want a miss");
+            let total: usize = reads.values().sum();
+            println!("N={n} installed: {total} blob reads");
+            assert_eq!(total, 0, "N={n}: the miss read {reads:?}");
+            let _ = std::fs::remove_dir_all(cache.parent().unwrap());
+        }
+    }
+
+    /// The candidates installed are verified as strictly as before. A lookup
+    /// installs every pre-seeded entry its request covers and answers with
+    /// the newest (`install_preseeded`), so each of the 20 has its layer read
+    /// once, for its own install; with the layer's bytes altered, nothing is
+    /// installed.
+    #[test]
+    fn a_hit_still_verifies_the_layer() {
+        let _v1 = channel::use_fetch_v1_for_tests();
+        let (cache, digests) = seed_clones("hit", 20);
+        let (found, reads) = lookup(&cache, "26.1", "test-key");
+        let (_, record, _) = found.expect("the pre-seeded build answers 26.1");
+        assert_eq!(record.version, "26.1.1.1");
+        assert!(digests.contains(&record.manifest_digest));
+        assert_eq!(
+            reads.get(BUILD_LAYER).copied().unwrap_or(0),
+            20,
+            "{reads:?}"
+        );
+        let _ = std::fs::remove_dir_all(cache.parent().unwrap());
+
+        let (cache, digests) = seed_clones("hit-altered", 20);
+        let layer = layout::blob_path(&cache, BUILD_LAYER).unwrap();
+        let mut b = std::fs::read(&layer).unwrap();
+        *b.last_mut().unwrap() ^= 0xff;
+        std::fs::write(&layer, b).unwrap();
+        let (found, _) = lookup(&cache, "26.1", "test-key");
+        assert!(found.is_none(), "an altered layer must not be installed");
+        assert!(!layout::unpacked_dir(&cache, &digests[0]).unwrap().exists());
+        let _ = std::fs::remove_dir_all(cache.parent().unwrap());
     }
 }
