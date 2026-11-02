@@ -312,9 +312,45 @@ pub fn put_blob(root: &Path, digest: &str, bytes: &[u8]) -> Result<PathBuf> {
 pub fn read_blob(root: &Path, digest: &str) -> Result<Option<Vec<u8>>> {
     let path = blob_path(root, digest)?;
     match std::fs::read(&path) {
-        Ok(b) => Ok(Some(b)),
+        Ok(b) => {
+            #[cfg(test)]
+            blob_reads::note(root, digest);
+            Ok(Some(b))
+        }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(e.into()),
+    }
+}
+
+/// The test seam that counts an offline lookup's blob reads (public issue
+/// #690): while a test on this thread is counting under a root, every blob
+/// [`read_blob`] reads there is noted, by digest.
+#[cfg(test)]
+pub(crate) mod blob_reads {
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    use std::path::{Path, PathBuf};
+
+    thread_local! {
+        static COUNTING: RefCell<Option<(PathBuf, HashMap<String, usize>)>> = const { RefCell::new(None) };
+    }
+
+    pub(crate) fn note(root: &Path, digest: &str) {
+        COUNTING.with(|c| {
+            if let Some((r, reads)) = c.borrow_mut().as_mut() {
+                if r == root {
+                    *reads.entry(digest.to_string()).or_default() += 1;
+                }
+            }
+        });
+    }
+
+    /// Every blob under `root` read on this thread while `f` runs, by digest.
+    pub(crate) fn count<T>(root: &Path, f: impl FnOnce() -> T) -> (T, HashMap<String, usize>) {
+        COUNTING.with(|c| *c.borrow_mut() = Some((root.to_path_buf(), HashMap::new())));
+        let out = f();
+        let reads = COUNTING.with(|c| c.borrow_mut().take().map(|(_, r)| r).unwrap_or_default());
+        (out, reads)
     }
 }
 

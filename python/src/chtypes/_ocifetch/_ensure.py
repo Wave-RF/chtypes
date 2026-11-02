@@ -1297,6 +1297,48 @@ def _ensure(
         raise _translate_transport_error(e) from e
 
 
+def _local_bundle_referrers(
+    blobs_dir: Path, skip: Collection[str], known: dict[str, bytes] | None = None
+) -> dict[str, list[tuple[str, dict]]]:
+    """Each subject manifest digest's signature referrer manifests among
+    `blobs_dir`'s blobs, as (blob name, parsed manifest), in listing order.
+    A referrer need not be listed in `index.json`, so every blob that could
+    be one is read, once per lookup rather than once per entry. A blob named
+    in `skip` (the caller's candidate layers) and a blob larger than
+    `limits.manifest_bytes`, which cannot be a manifest, are never read, so
+    no layer is read here, and a blob in `known` (bytes the caller already
+    read, by name) is not read again (public issue #690)."""
+    out: dict[str, list[tuple[str, dict]]] = {}
+    try:
+        blob_paths = list(blobs_dir.iterdir())
+    except OSError:
+        return out
+    for blob_path in blob_paths:
+        if blob_path.name in skip:
+            continue
+        try:
+            body = known.get(blob_path.name) if known is not None else None
+            if body is None:
+                if blob_path.stat().st_size > C.MANIFEST_MAX_BYTES:
+                    continue
+                body = blob_path.read_bytes()
+            doc = json.loads(body)
+        except (ValueError, OSError, UnicodeDecodeError):
+            continue
+        if not isinstance(doc, dict) or doc.get("mediaType") != C.MEDIA_TYPE_MANIFEST:
+            continue
+        subject = doc.get("subject") or {}
+        subject_digest = subject.get("digest") if isinstance(subject, dict) else None
+        if not isinstance(subject_digest, str):
+            continue
+        # A signature referrer only: a revocation of the manifest carries the same
+        # bundle media type, and is not the signature of the artifact.
+        if doc.get("artifactType") != C.MEDIA_TYPE_BUNDLE:
+            continue
+        out.setdefault(subject_digest, []).append((blob_path.name, doc))
+    return out
+
+
 def _verify_and_install_from_local_blobs(
     *,
     source_root: Path,
@@ -1304,6 +1346,7 @@ def _verify_and_install_from_local_blobs(
     cache_write_root: Path,
     trusted_keys: tuple[TrustedKey, ...],
     visible_only: bool = False,
+    referrers: dict[str, list[tuple[str, dict]]] | None = None,
 ) -> VerifiedRecord | None:
     """docs/guides/fetch-v1.md §1/§6: "A pre-seeded layout has entries in
     `index.json` with no corresponding `unpacked/` directory yet; the first
@@ -1329,23 +1372,12 @@ def _verify_and_install_from_local_blobs(
     except (ValueError, OSError, FetchError):
         return None
 
+    if referrers is None:
+        referrers = _local_bundle_referrers(blobs_dir, {parse_digest(layer_desc.digest)})
     verified = None
     bundle_digest = None
     bundle_manifest_digest = None
-    for blob_path in blobs_dir.iterdir():
-        try:
-            doc = json.loads(blob_path.read_bytes())
-        except (ValueError, OSError, UnicodeDecodeError):
-            continue
-        if not isinstance(doc, dict) or doc.get("mediaType") != C.MEDIA_TYPE_MANIFEST:
-            continue
-        subject = doc.get("subject") or {}
-        if subject.get("digest") != manifest_digest:
-            continue
-        # A signature referrer only: a revocation of the manifest carries the same
-        # bundle media type, and is not the signature of the artifact.
-        if doc.get("artifactType") != C.MEDIA_TYPE_BUNDLE:
-            continue
+    for referrer_name, doc in referrers.get(manifest_digest, ()):
         try:
             referrer_layer = manifest_single_layer(doc, expected_media_type=C.MEDIA_TYPE_BUNDLE)
             bundle_bytes = (blobs_dir / parse_digest(referrer_layer.digest)).read_bytes()
@@ -1355,7 +1387,7 @@ def _verify_and_install_from_local_blobs(
         if candidate is not None:
             verified = candidate
             bundle_digest = referrer_layer.digest
-            bundle_manifest_digest = "sha256:" + blob_path.name
+            bundle_manifest_digest = "sha256:" + referrer_name
             break
     if verified is None:
         return None
@@ -1423,7 +1455,9 @@ def _verify_preseeded_entries(roots: Sequence[Path], trusted_keys: tuple[Trusted
     anywhere yet, and verifies+unpacks it from that root's OWN local blobs,
     writing the result into `roots[0]` (the writable cache) regardless of
     which root — including a read-only system directory — the blobs came
-    from."""
+    from. An entry that already has a record is passed over without reading
+    a blob, and each root's signature referrers are read once, never by
+    reading a candidate's layer (public issue #690)."""
     cache_write_root = roots[0]
     already_verified = {record.manifest for _dir, record in list_verified_records(roots)}
     for root in roots:
@@ -1432,9 +1466,28 @@ def _verify_preseeded_entries(roots: Sequence[Path], trusted_keys: tuple[Trusted
             index_doc = json.loads(index_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
+        blobs_dir = root / "blobs" / "sha256"
+        candidates: list[str] = []
+        candidate_layers: set[str] = set()
+        manifests_read: dict[str, bytes] = {}
         for m in index_doc.get("manifests") or []:
             digest = m.get("digest")
             if not digest or digest in already_verified:
+                continue
+            candidates.append(digest)
+            try:
+                manifest_hex = parse_digest(digest)
+                manifest_bytes = (blobs_dir / manifest_hex).read_bytes()
+                manifests_read[manifest_hex] = manifest_bytes
+                layer = manifest_layer_descriptor(json.loads(manifest_bytes))
+                candidate_layers.add(parse_digest(layer.digest))
+            except (ValueError, OSError, FetchError):
+                continue
+        if not candidates:
+            continue
+        referrers = _local_bundle_referrers(blobs_dir, candidate_layers, manifests_read)
+        for digest in candidates:
+            if digest in already_verified:
                 continue
             record = _verify_and_install_from_local_blobs(
                 source_root=root,
@@ -1442,6 +1495,7 @@ def _verify_preseeded_entries(roots: Sequence[Path], trusted_keys: tuple[Trusted
                 cache_write_root=cache_write_root,
                 trusted_keys=trusted_keys,
                 visible_only=True,
+                referrers=referrers,
             )
             if record is not None:
                 already_verified.add(digest)

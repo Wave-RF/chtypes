@@ -48,6 +48,7 @@ import {
   installBlob,
   listVerified,
   readIndexEntries,
+  readLocalBlob,
   readVerifiedRecord,
   removeStaging,
   systemDirs,
@@ -75,8 +76,8 @@ import {
   subjectOfStatement,
 } from './revocation.js';
 import { probeRoots, strictMode, unwritable } from './faults.js';
-import { verifyAndInstallFromLocalBlobs } from './localverify.js';
-import { type Descriptor, fetchBlobBytesByDigest, fetchManifestByDigest, type ManifestInfo, resolveTag } from './oci.js';
+import { localSignatureReferrers, verifyAndInstallFromLocalBlobs } from './localverify.js';
+import { type Descriptor, fetchBlobBytesByDigest, fetchManifestByDigest, type ManifestInfo, parseManifest, resolveTag } from './oci.js';
 import { emptyLock, getPin, type LockFile, type LockPin, readLock, withPin, writeLock } from './lock.js';
 import { digestOfHex, endpointUrl, hexOfDigest, platformInfo, realClock, resolvePlatformOption } from './types.js';
 import type { ArtifactPredicate, FetchV1Options, PlatformKey, Resolved, TrustedKey, VerifyResult } from './types.js';
@@ -364,11 +365,33 @@ async function verifyPreseededEntries(
   } catch {
     return;
   }
+  // Pass 1: the entries still pre-seeded, each with its manifest read; no
+  // layer is read here. An entry with a record a reader accepts, in either
+  // root, is installed, not pre-seeded (guide §6), and costs no blob read.
+  const candidates: string[] = [];
+  const candidateLayers = new Set<string>();
+  const manifestsRead = new Map<string, Buffer>();
   for (const entry of entries) {
     if (entry.platform !== undefined && (entry.platform.os !== info.os || entry.platform.architecture !== info.architecture)) continue;
-    const already = await readVerifiedRecord(unpackedDir(writeRoot, hexOfDigest(entry.digest)));
-    if (already !== undefined) continue;
-    await verifyAndInstallFromLocalBlobs(sourceDir, writeRoot, entry.digest, platform, trustedKeys, true);
+    const hex = hexOfDigest(entry.digest);
+    if ((await readVerifiedRecord(unpackedDir(writeRoot, hex))) !== undefined) continue;
+    if (sourceDir !== writeRoot && (await readVerifiedRecord(unpackedDir(sourceDir, hex))) !== undefined) continue;
+    candidates.push(entry.digest);
+    try {
+      const bytes = await readLocalBlob(sourceDir, hex);
+      if (bytes === undefined) continue;
+      manifestsRead.set(hex, bytes);
+      candidateLayers.add(hexOfDigest(parseManifest(entry.digest, bytes).layer.digest));
+    } catch {
+      // Not a readable manifest: verifyAndInstallFromLocalBlobs rules it out below.
+    }
+  }
+  if (candidates.length === 0) return;
+  // The layout's signature referrers, read once for every candidate, never
+  // by reading a candidate's layer (public issue #690).
+  const referrers = await localSignatureReferrers(sourceDir, candidateLayers, manifestsRead);
+  for (const digest of candidates) {
+    await verifyAndInstallFromLocalBlobs(sourceDir, writeRoot, digest, platform, trustedKeys, true, referrers);
   }
 }
 
