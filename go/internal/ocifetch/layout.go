@@ -262,11 +262,19 @@ func (l *layout) ensureSkeleton() error {
 	return nil
 }
 
+// blobReadObserver, when not nil, is told of every blob readBlob reads: the
+// test seam that counts an offline miss's blob reads (public issue #690).
+// Only tests set it.
+var blobReadObserver func(layoutDir string, d Digest, n int)
+
 // readBlob returns a blob's content if present in this layout.
 func (l *layout) readBlob(d Digest) ([]byte, bool) {
 	b, err := os.ReadFile(l.blobPath(d))
 	if err != nil {
 		return nil, false
+	}
+	if blobReadObserver != nil {
+		blobReadObserver(l.dir, d, len(b))
 	}
 	return b, true
 }
