@@ -17,7 +17,7 @@
 #
 # Environment: the caller's variables (the CHTYPES_V1_* set, GOPATH,
 # CARGO_HOME, UV_*, …) travel in a file, never through sudo. `sudo -E` is not
-# honoured everywhere: ubuntu-26.04's sudo prints "preserving the entire
+# honored everywhere: ubuntu-26.04's sudo prints "preserving the entire
 # environment is not supported, '-E' is ignored", and an env_reset sudoers
 # drops them anyway. `env -0` writes them NUL-separated, so a value with a
 # newline survives; the file is the caller's own (mktemp, mode 600) and is
