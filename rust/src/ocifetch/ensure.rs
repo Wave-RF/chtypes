@@ -2732,10 +2732,10 @@ mod preseed_scan_tests {
         let (_, record, _) = found.expect("the pre-seeded build answers 26.1");
         assert_eq!(record.version, "26.1.1.1");
         assert!(digests.contains(&record.manifest_digest));
+        let layer = reads.get(BUILD_LAYER).copied().unwrap_or(0);
         assert_eq!(
-            reads.get(BUILD_LAYER).copied().unwrap_or(0),
-            20,
-            "{reads:?}"
+            layer, 20,
+            "the hit read the layer {layer} times; want once per install"
         );
         let _ = std::fs::remove_dir_all(cache.parent().unwrap());
 
