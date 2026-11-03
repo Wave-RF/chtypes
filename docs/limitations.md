@@ -14,7 +14,7 @@ The builds this page names by id were measured while v2 was in development, on i
 
 The darwin artifacts give exactly the answers ClickHouse itself gives on macOS, on every supported line, with one exception on 26.3 (deep nesting, below). The artifact producer measured this against official macOS ClickHouse binaries.
 
-**On 26.7, 26.8 and 26.9,** ClickHouse agrees on every platform (macOS, Linux amd64, Linux arm64), float text included. On these lines, a mismatch of platform changes nothing.
+**On 26.8, 26.9 and 26.10 (and on 26.7, which is served but unsupported),** ClickHouse agrees on every platform (macOS, Linux amd64, Linux arm64), float text included. On these lines, a mismatch of platform changes nothing.
 
 **On 26.3,** ClickHouse's own parse of Float values from text input formats differs across platforms (macOS, Linux amd64, Linux arm64; mostly 1 ULP), and none is correctly rounded. So stored Float values, and comparisons involving them, can differ across architectures, and a verdict computed on another platform can differ from the server's.
 
@@ -97,6 +97,8 @@ The rules genuinely differ: `256` into a `UInt8` column stores `0`, while `x = 2
 | `26.9` | lifted from `20261010.180314` | lifted from `20261010.180314` | lifted from `20261010.180314`               |
 
 The `darwin-arm64` lifts are measured: the producer's differential ran those pairs on that build and reported zero over-accepts, zero body over-accepts and zero over-rejects.
+
+This table is the record at build `20261010.180314`. It predates `26.10`, and `26.7` is now served but unsupported; the current set is in [`support-v2.md`](support-v2.md).
 
 **Not covered: `26.3` on `darwin-arm64`, a documented platform limitation.** The macOS 26.3 server runs queries on 512 KiB threads, so it refuses deeply nested expressions and types with 306 (TOO_DEEP_RECURSION) at depths where the library answers or accepts them. Measured on the official 26.3.38.2 macOS server, it refuses:
 
