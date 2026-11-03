@@ -3,9 +3,9 @@
  "generator": "chtypes filter-declines generator",
  "lines": [
   "26.3",
-  "26.7",
   "26.8",
-  "26.9"
+  "26.9",
+  "26.10"
  ],
  "declines": [
   {
@@ -18,9 +18,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create"
@@ -38,9 +38,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create"
@@ -58,9 +58,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create"
@@ -78,9 +78,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create"
@@ -98,9 +98,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_preview_row",
@@ -124,9 +124,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_reference_type"
@@ -144,9 +144,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create"
@@ -164,9 +164,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create",
@@ -186,9 +186,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_live_handles",
@@ -226,9 +226,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create"
@@ -246,15 +246,57 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_schema_create"
    ],
    "retirement": "when the compile runs in a server's environment (its identity, its macros and a query context), for the functions that need only those",
    "description": "A server resolves such a function with its own resources, settings, macros or environment, so whether it accepts the schema is its own to say; it is declined, naming the column and the function. Declined although a stock server accepts: serverUUID, the timeSeries functions, getMacro of a configured macro, and on 26.9 getServerPort, filesystemAvailable, filesystemCapacity and filesystemUnreserved."
+  },
+  {
+   "id": "expression-executes-query",
+   "class": "create-decline",
+   "trigger": "a CREATE TABLE (any clause: a column expression, codec, TTL, constraint, index, projection, key or setting) or a filter WHERE that holds a subquery, at any depth, including a table function read inside one",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create",
+    "chs_filter_create"
+   ],
+   "retirement": "none",
+   "description": "A server runs a subquery as a query against its own tables and table functions. The library never runs a query in the caller's process, so the statement or filter is declined before any analysis; whether a server accepts it is its own to say."
+  },
+  {
+   "id": "expression-reads-storage",
+   "class": "create-decline",
+   "trigger": "a CREATE TABLE (any clause) or a filter WHERE that reads a table, a dictionary, a file or a remote host: the set of an IN-family operator that is a table name or a table function call, a joinGet, dictGet-family or (from 26.8) naiveBayesClassifier call, or a call of file, hasColumnInTable or catboostEvaluate",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create",
+    "chs_filter_create"
+   ],
+   "retirement": "none",
+   "description": "A server reads its own catalog, dictionaries, files or a remote host for these. The library never does in the caller's process, so the statement or filter is declined before any analysis; whether a server accepts it is its own to say."
   },
   {
    "id": "undeclared-gate",
@@ -266,9 +308,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_schema_create"
@@ -285,9 +327,9 @@
     "ch": []
    },
    "lines": [
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create"
@@ -305,9 +347,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create"
@@ -333,6 +375,227 @@
    "description": "On the lines whose analyzer folds an AND of two equals over different constants to false whatever the comparison reads, the server returns no row where the comparison keeps one; the create is declined. Constants the server's own constant test calls equal are answered."
   },
   {
+   "id": "enum-key-unknown-literal",
+   "class": "create-decline",
+   "trigger": "a comparison of an Enum column the table's primary key, partition key or a skip index reads with a String constant that is not a name of the enum, such as NOT (e = 'zz') on ORDER BY e, at validate_enum_literals_in_operators 0",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "when 26.3 leaves the supported set",
+   "description": "Where the index analysis converts a String constant to an Enum key's type, the server refuses the whole query (691) while the comparison, at the setting's default 0, folds an unknown name to a constant and answers; the create is declined, naming the column and the constant. A sorting-key column outside the PRIMARY KEY, IN, isNotDistinctFrom and the setting at 1 are answered."
+  },
+  {
+   "id": "enum-key-has-unknown-literal",
+   "class": "create-decline",
+   "trigger": "has() (or notHas()) of a constant array that holds a String which is not a name of the enum, over an Enum column the table's primary key, partition key, a minmax or set skip index, a projection's key, or a function of the column in one of them reads, such as has(['a', 'zz'], e) on ORDER BY e",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": [
+     691
+    ]
+   },
+   "lines": [
+    "26.3",
+    "26.8"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "when 26.3 and 26.8 leave the supported set",
+   "description": "Where the index analysis casts has()'s constant array to the key's type without testing the pair, a name the enum does not hold refuses the whole query (691) on a table with data parts, while has() answers; the create is declined whatever the table holds, an empty table included."
+  },
+  {
+   "id": "enum-not-has-wrong-answer",
+   "class": "create-decline",
+   "trigger": "has() of a constant array of Strings over an Enum column the table's primary key, partition key, a minmax or set skip index, a projection's key or a function of the column in one of them reads, and, read negated (NOT has(...), notHas(...), also inside AND or OR), on a line that prunes parts by automatic statistics, any column of a MergeTree-family table, such as NOT has(['b'], e)",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "when 26.3 and 26.8 leave the supported set",
+   "description": "The index analysis reads has()'s String array by the enum's names, while has() compares a String with the enum's number and never matches, so a server prunes, or reads unfiltered, the part holding a named value and answers against the comparison; the create is declined, naming the column and the value. A numeric array and a column nothing reads are answered."
+  },
+  {
+   "id": "expression-key-literal-throws",
+   "class": "create-decline",
+   "trigger": "a comparison of a column with a constant where the table's primary key, partition key or a minmax or set skip index reads a function of that column, and the server's index analysis, pushing the constant through that function, refuses it: c = 'abc' on ORDER BY toInt64(c) (26.3), e = 'zz' on ORDER BY toString(e) (26.3 to 26.9) or ORDER BY CAST(e, 'Int8') (every line), a name the enum does not hold",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": [
+     6,
+     691
+    ]
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "when this build runs the server's own index analysis",
+   "description": "The index analysis runs the key's function on the constant, or casts the constant to the column's type before a key transform, and a throw refuses the whole query on a table with data parts, where the comparison answers; the create is declined whatever the table holds, an empty table included. Which path and which cast follow each line's own analysis."
+  },
+  {
+   "id": "enum-key-converted-literal",
+   "class": "create-decline",
+   "trigger": "a comparison the server's index analysis converts the constant for (such as LIKE, isNotDistinctFrom, or any comparison at validate_enum_literals_in_operators 1), of an Enum column the table's primary key, partition key, a minmax or set skip index or a projection's key reads, with a String that is not a name of the enum, where the comparison answers: e LIKE 'zz%' on 26.3, NOT isNotDistinctFrom(e, 'zz') over a Nullable Enum key at 1 on 26.8 to 26.10",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": [
+     691
+    ]
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "when the last line that converts such a constant leaves the supported set",
+   "description": "The index analysis converts the constant to the Enum key's type (on 26.3 at any setting, later at validate_enum_literals_in_operators 1) and refuses the whole query (691) on a table with data parts, while the comparison answers; the create is declined whatever the table holds. Shapes enum-key-unknown-literal declines keep that id."
+  },
+  {
+   "id": "bloom-filter-index-literal-mismatch",
+   "class": "create-decline",
+   "trigger": "a comparison or has() over a column a bloom_filter skip index reads, with a constant the index's own condition cannot convert to the column's type: a number that is no value of an Enum column (e = 3, has([1, 3], e)), a name it does not hold inside has(), has() of an Array(Enum) column with such a name or number, a Decimal constant against an integer column, a FixedString constant longer than the column's",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": [
+     691,
+     53,
+     131
+    ]
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "none: it follows each line's own bloom_filter condition",
+   "description": "The server builds the bloom_filter index's condition while it plans the query on a table with data parts, and its conversion of the constant refuses the whole query (691, 53 or 131) where the comparison answers; this build builds the same condition at create and declines when it throws, so shapes and lines are each line's own, an empty table included."
+  },
+  {
+   "id": "token-index-array-literal",
+   "class": "create-decline",
+   "trigger": "a comparison = or != of a column an ngrambf_v1 or tokenbf_v1 skip index reads, or = of a column a text index reads, with an Array constant, such as c = ['zz'] or c = [] over an Array(String) column",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "when 26.3 leaves the supported set",
+   "description": "Where the index analysis reads the Array constant as a String, the server refuses the whole query (170) once the table holds data parts, while the comparison answers every row; the decline is made at create, whether or not the table holds rows, naming the column, the index and the constant. has, hasAny and hasAll with an Array constant are answered."
+  },
+  {
+   "id": "text-index-negated-token-nullable",
+   "class": "create-decline",
+   "trigger": "NOT over hasToken, hasAnyTokens or hasAllTokens (directly, or over an AND or OR holding it) of a Nullable or LowCardinality(Nullable) String or FixedString column a text index reads, such as NOT hasToken(c, 'hello'), and hasToken over a Nullable(FixedString) column a text index reads",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "when the server's text index answers NULL rows as the function does",
+   "description": "A server reads the token function off the text index, a 0 for a NULL row where the function is NULL, so NOT returns the NULL row the row path drops; over Nullable(FixedString) it also answers hasToken, which the function refuses (44). The create is declined, naming the column and the index. hasTokenOrNull, NOT LIKE and non-Nullable columns are answered."
+  },
+  {
+   "id": "text-index-mapkeys-or",
+   "class": "create-decline",
+   "trigger": "an OR one of whose operands is has(mapKeys(c), k), mapContains(c, k) or mapContainsKey(c, k) over a Map column whose keys a text index reads, and another operand of which reads the same column, such as has(mapKeys(c), 'a') OR c['b'] = 2",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "when the server's text index answers such an OR as its row path does",
+   "description": "Over rows held in separate data parts, a server drops a row that holds the key; the decline is made at create, whatever the table holds, naming the column and the index. The key lookup alone, and an OR whose other operands do not read the column, are answered."
+  },
+  {
+   "id": "bloom-filter-float-signed-zero",
+   "class": "create-decline",
+   "trigger": "an equals, has or IN, reached from the filter's root through AND and OR only, of a Float32 or Float64 column a bloom_filter skip index reads, that matches both +0.0 and -0.0, such as c = 0 or has([0.0], c)",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "when the server's bloom_filter index hashes the two zeros alike",
+   "description": "The bloom_filter index hashes a zero's bits, so a server drops the row holding the other zero that the comparison keeps (c = 0 drops a -0.0 row); the create is declined, naming the column and the index. The comparison's own function decides, run over one row of each zero: where it tells the zeros apart, as IN does on some lines, the filter is answered, and so is NOT over such a comparison."
+  },
+  {
+   "id": "partition-key-null-element-dropped",
+   "class": "create-decline",
+   "trigger": "a comparison, read by the partition key's index analysis as =, <, <= or isNotDistinctFrom, of a constant with a function of one Nullable or LowCardinality(Nullable) partition key column, bare (PARTITION BY c, (k, c), tuple(c)) or an expression the filter spells as the key does (PARTITION BY toString(c), intDiv(c, 10)), which matches a row where that column is NULL, such as has(['b'], c) = 0, indexOf(['b'], c) = 0, countEqual(['b'], c) = 0 or length([toString(c)]) = 1",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "when the server's partition pruner reads a NULL partition as its row path does",
+   "description": "A server's partition pruner reads the NULL partition as the largest key value through the function, so has(['b'], c) = 0, true for a NULL row, drops that row; the same under an expression key the filter spells (length([toString(c)]) = 1 under PARTITION BY toString(c)). Declined where the comparison over a NULL row is true; a bare column or key expression and a never-NULL key are answered."
+  },
+  {
    "id": "alias-expansion",
    "class": "decline",
    "trigger": "a WHERE that refers to an alias it defines",
@@ -342,9 +605,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -364,9 +627,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -386,9 +649,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create"
@@ -406,9 +669,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -428,9 +691,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -448,15 +711,13 @@
     "chs": "-2",
     "ch": []
    },
-   "lines": [
-    "26.7"
-   ],
+   "lines": [],
    "paths": [
     "chs_filter_eval_body",
     "chs_filter_eval_block",
     "chs_preview_batch"
    ],
-   "retirement": "when 26.7 leaves the supported set",
+   "retirement": "dormant: anchor line retired 2026-11-02",
    "description": "On the lines where the server rewrites such an arrayExists to has(), and has() compares a FixedString with a String differently from equals(), the server answers differently with the rewrite on and off; every row is declined."
   },
   {
@@ -468,7 +729,6 @@
     "ch": []
    },
    "lines": [
-    "26.7",
     "26.8"
    ],
    "paths": [
@@ -480,6 +740,87 @@
    "description": "On the lines where the server rewrites such an arrayExists to has() by default, and has() compares two native numbers with a plain machine comparison, a negative value can match a large unsigned constant or an integer a float; every row is declined."
   },
   {
+   "id": "array-exists-enum-string-const",
+   "class": "decline",
+   "trigger": "arrayExists over a lambda that compares an element with a String or FixedString constant (Nullable or LowCardinality of one included), where the array is a constant Array(Enum8), Array(Enum16) or Array(Nullable) of one",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "when 26.8 and 26.9 leave the supported set",
+   "description": "On the lines where the server rewrites such an arrayExists to has() by default, and has() compares a constant Enum array with a String by the enum's number while equals() compares by name, the server keeps no row where equals() matches; every row is declined when the two answer differently. A NULL constant, an unknown name and an array column are answered."
+  },
+  {
+   "id": "array-exists-enum-const-fixedstring-longer",
+   "class": "decline",
+   "trigger": "arrayExists over a lambda that compares an element with a FixedString constant (Nullable or LowCardinality of one included), where the array is a constant Array(Enum8), Array(Enum16) or Array(Nullable) of one",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "when 26.10 leaves the supported set",
+   "description": "On the lines where the server rewrites such an arrayExists to has() by default, and has() compares a constant Enum array by name, a FixedString longer than the name still matches it while equals() does not; every row is declined when the two answer differently."
+  },
+  {
+   "id": "array-exists-enum-column-fixedstring-longer",
+   "class": "decline",
+   "trigger": "arrayExists over a lambda that compares an element with a FixedString constant (Nullable or LowCardinality of one included), where the array is an Array(Enum8), Array(Enum16) or Array(Nullable) of one that is not a constant",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "when 26.8, 26.9 and 26.10 leave the supported set",
+   "description": "On the lines where the server rewrites such an arrayExists to has() by default, has() matches an Enum element with a longer FixedString while equals() does not, so under NOT the server drops a row equals() keeps; every row is declined when the two answer differently for some value of the enum. A String constant is answered."
+  },
+  {
+   "id": "array-exists-nullable-enum-null-element",
+   "class": "decline",
+   "trigger": "arrayExists over a lambda that compares an element with a String or FixedString constant (Nullable or LowCardinality of one included), where the array is an Array(Nullable(Enum8)) or Array(Nullable(Enum16)) that is not a constant",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "when 26.8, 26.9 and 26.10 leave the supported set",
+   "description": "On the lines where the server rewrites such an arrayExists to has() by default, has() refuses the whole query (691) when it reads a NULL element, where equals() answers; whether a NULL is stored is not known at compile, so every row is declined. An enum with a value 0, which does not refuse, and a NULL or number constant are answered."
+  },
+  {
    "id": "fixed-const-header",
    "class": "decline",
    "trigger": "a filter that is constant false over the server's empty header because length() of a FixedString or QBit, or a fixed-to-constant CRC, is 0 there",
@@ -488,8 +829,7 @@
     "ch": []
    },
    "lines": [
-    "26.3",
-    "26.7"
+    "26.3"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -517,6 +857,25 @@
    ],
    "retirement": "when 26.3 leaves the supported set",
    "description": "On the lines where a CRC over a FixedString answers every row of a block with the CRC of the block's first row, a batch evaluated as one block gives a row another row's answer; every row of such a filter is declined."
+  },
+  {
+   "id": "nullable-const-block",
+   "class": "decline",
+   "trigger": "a filter with a function that answers a constant over a Nullable column, such as c != '300' over Nullable(UInt8) or NOT (e = 'zz') over Nullable(Enum8)",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "when 26.3 leaves the supported set",
+   "description": "On the lines where a function's constant answer over a Nullable column takes the NULL of its block's first row, a server keeps or drops every row of a block by that first row, whichever block an INSERT or a merge put it in; every row of such a filter is declined."
   },
   {
    "id": "projection-filter-type",
@@ -547,7 +906,6 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8"
    ],
    "paths": [
@@ -568,9 +926,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -590,9 +948,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -612,9 +970,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -634,9 +992,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -656,9 +1014,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -678,9 +1036,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -700,9 +1058,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -722,9 +1080,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -744,9 +1102,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -766,9 +1124,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -788,7 +1146,8 @@
    },
    "lines": [
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -808,9 +1167,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -830,9 +1189,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -857,9 +1216,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create"
@@ -879,9 +1238,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create",
@@ -905,9 +1264,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create"
@@ -927,9 +1286,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create"
@@ -940,19 +1299,20 @@
   {
    "id": "regex-pattern",
    "class": "server-check",
-   "trigger": "a regular-expression function whose constant pattern is invalid",
+   "trigger": "a regular-expression function (or, from 26.10, SIMILAR TO; from 26.8, LIKE with ESCAPE) whose constant pattern or escape is invalid",
    "code": {
     "chs": "CHS_REJECTED",
     "ch": [
      427,
-     36
+     36,
+     25
     ]
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create"
@@ -972,9 +1332,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create"
@@ -995,9 +1355,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create"
@@ -1015,9 +1375,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create"
@@ -1035,9 +1395,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -1059,9 +1419,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create"
@@ -1081,9 +1441,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create"
@@ -1103,9 +1463,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -1125,9 +1485,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -1147,9 +1507,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -1169,9 +1529,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -1191,9 +1551,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -1213,9 +1573,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -1235,9 +1595,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -1257,9 +1617,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_preview_batch"
@@ -1277,9 +1637,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -1299,9 +1659,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_preview_batch"
@@ -1319,9 +1679,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_preview_batch"
@@ -1339,9 +1699,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_preview_batch"
@@ -1359,9 +1719,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_preview_batch"
@@ -1379,9 +1739,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_preview_batch"
@@ -1399,9 +1759,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_preview_batch"
@@ -1419,9 +1779,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_preview_batch"
@@ -1439,9 +1799,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -1483,9 +1843,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -1505,9 +1865,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -1516,6 +1876,25 @@
    ],
    "retirement": "none",
    "description": "The library and the server each compute their own clock read or generated value, so a filter that reads such a column has no answer for a row that omitted it; supply the value to get a verdict."
+  },
+  {
+   "id": "float-negative-zero-sparse-default",
+   "class": "row-decline",
+   "trigger": "a filter that reads a Float32, Float64 or BFloat16 column, or such a Tuple element, holding -0.0 in a row of a MergeTree-family table",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "when 26.3 leaves the supported set",
+   "description": "On the lines where a MergeTree part's sparse serialization counts -0.0 as its type's default, a part whose rows are mostly defaults stores -0.0 as +0.0, which depends on the part's other rows; a filter that reads such a value in a row gives that row no verdict. Nullable and Array values, and plain engines, keep the sign and are answered."
   },
   {
    "id": "admission-envelope",
@@ -1527,9 +1906,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -1549,9 +1928,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_schema_create",
@@ -1574,9 +1953,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_schema_create",
@@ -1599,9 +1978,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_schema_create",
@@ -1625,9 +2004,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_schema_create"
@@ -1663,9 +2042,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_schema_create"
@@ -1683,9 +2062,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_schema_create"
@@ -1703,9 +2082,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_preview_batch",
@@ -1724,9 +2103,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_schema_create"
@@ -1744,9 +2123,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_schema_create"
@@ -1764,9 +2143,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_schema_create"
@@ -1784,9 +2163,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_schema_create"
@@ -1804,9 +2183,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_schema_create"
@@ -1824,9 +2203,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_schema_create"
@@ -1844,9 +2223,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_schema_create"
@@ -1864,9 +2243,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_schema_create"
@@ -1884,9 +2263,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_schema_create"
@@ -1904,9 +2283,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_schema_create"
@@ -1924,9 +2303,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_schema_create"
@@ -1944,9 +2323,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_schema_create"
@@ -1964,15 +2343,32 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_schema_create"
    ],
    "retirement": "none",
    "description": "A server refuses the column TTL for such an engine in a way this build does not model, so the schema is declined."
+  },
+  {
+   "id": "temporary-table-memory-limit",
+   "class": "create-decline",
+   "trigger": "a TEMPORARY table with the Memory engine created under a non-zero max_temporary_table_memory_usage",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "none",
+   "description": "A server counts the temporary table's whole contents against the limit on every INSERT, which this build does not hold, so the schema is declined."
   },
   {
    "id": "key-build-refused",
@@ -1984,9 +2380,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_schema_create"
@@ -2004,9 +2400,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_schema_create"
@@ -2024,9 +2420,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_schema_create"
@@ -2044,9 +2440,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_schema_create"
@@ -2064,9 +2460,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_schema_create"
@@ -2084,9 +2480,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_schema_create"
@@ -2104,9 +2500,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_schema_create"
@@ -2124,9 +2520,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_schema_create"
@@ -2144,9 +2540,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_schema_create"
@@ -2164,9 +2560,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_schema_create"
@@ -2184,9 +2580,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_schema_create"
@@ -2204,9 +2600,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -2226,9 +2622,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -2248,9 +2644,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -2270,9 +2666,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -2292,9 +2688,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -2314,9 +2710,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -2336,9 +2732,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -2358,9 +2754,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -2369,6 +2765,28 @@
    ],
    "retirement": "none",
    "description": "Evaluating it would run a query in the gateway process, so the row is declined."
+  },
+  {
+   "id": "values-reads-storage",
+   "class": "call-decline",
+   "trigger": "a Values expression that reads a table, a dictionary, a file or a remote host (the same list as expression-reads-storage)",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "Evaluating it would read storage, a file or the network in the gateway process, so the row is declined."
   },
   {
    "id": "expression-query-parameter",
@@ -2380,9 +2798,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -2402,9 +2820,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -2424,9 +2842,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -2446,9 +2864,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -2468,9 +2886,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -2490,9 +2908,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -2512,9 +2930,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -2534,9 +2952,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -2556,9 +2974,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -2578,9 +2996,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -2600,9 +3018,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -2622,9 +3040,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -2644,9 +3062,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -2666,9 +3084,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -2688,9 +3106,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -2710,9 +3128,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -2732,9 +3150,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -2754,9 +3172,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -2776,9 +3194,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -2798,9 +3216,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -2820,9 +3238,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -2842,9 +3260,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_schema_create",
@@ -2865,9 +3283,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create"
@@ -2885,9 +3303,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_preview_row",
@@ -2909,9 +3327,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_preview_batch"
@@ -2929,9 +3347,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_schema_create"
@@ -2948,9 +3366,9 @@
     "ch": []
    },
    "lines": [
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_schema_create"
