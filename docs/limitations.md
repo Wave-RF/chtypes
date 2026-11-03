@@ -149,6 +149,19 @@ The ABI header is the full contract.
 
 This is by design, because the server does too: on every supported line, compiling such a schema refuses it (`691`, or `70`). The rule and the codes are in [`transformations.md`](guides/transformations.md#an-out-of-domain-enum-default-follows-the-server).
 
+## Another patch of the same line can answer differently
+
+chtypes models one exact ClickHouse patch per line, and the patch is named in [`support-v2.md`](support-v2.md): `26.3.60.2`, `26.8.34.13`, `26.9.25.15` and `26.10.2.103` are the four supported lines, and `26.7` is served but unsupported, frozen on `26.7.19.5`. A server on another patch of the same line can answer differently, so compare the patch your server runs with the one chtypes models.
+
+The previous patches of two lines were measured against the current ones, on a server only, for filter verdicts: the `26.8` bump (`26.8.15.10` to `26.8.34.13`) and the `26.9` bump (`26.9.8.3` to `26.9.25.15`). Only the comparison of an enum column with a literal moved, at the default `validate_enum_literals_in_operators = 0`, and it moved in both directions (`measured`):
+
+- **The newer patch answers what the older refused with error 691** (`UNKNOWN_ELEMENT_OF_ENUM`): `e != 'zz'`, `e <> 'zz'`, `notEquals(e, 'zz')`, `NOT (e = 'zz')`, `e = 'a' OR e = 'zz'` and similar, where `'zz'` is not in the enum. 169 cells on the `26.8` bump, 114 on the `26.9` bump.
+- **The newer patch refuses what the older answered with no rows:** `e < 'zz'`, `>`, `<=` and `>=` with an unknown literal are refused with 691. 162 cells on the `26.8` bump, 96 on the `26.9` bump.
+
+Nothing else moved on either bump: the `DateTime` and `DateTime64` edges, `LIKE`, `SIMILAR TO` and regular expressions, `has` and `arrayExists`, 10,304 spelling cells, and lambda depth (none changed), and no verdict changed by error code apart from the two groups above.
+
+The `26.3` bump (`26.3.38.2` to `26.3.60.2`) was **not measured**. Do not read that as no change.
+
 ## Known divergences
 
 Each entry here is a case where this library and a real ClickHouse server give different answers, and a caller can reach it. Every entry names the direction, the input, both answers, and **which half of the comparison was measured where** — there is no ClickHouse server in this repository, so the server half always comes from the differential proof the artifacts are built from.
