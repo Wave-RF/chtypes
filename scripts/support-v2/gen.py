@@ -39,7 +39,9 @@ A supported line's verified rows must carry exactly that patch: a row on
 another patch is OMITTED (named on stderr), and a supported line the registry
 does not publish is named too, so the page never claims a patch or a line the
 registry does not serve. A `served-unsupported` line is shown with its served
-build's own version and marked so; a published line the file does not name is
+build's own version and marked so (and, when the file names the patch it froze
+on, that patch is shown as frozen; it is not checked against the rows);
+a published line the file does not name is
 marked `support unknown`.
 
 DETERMINISM. No timestamp, no generated-at line, no host name beyond the
@@ -258,8 +260,11 @@ def support_problems(doc: object) -> list[str]:
             if not (isinstance(patch, str) and VERSION_RE.fullmatch(patch) and patch.startswith(line + ".")):
                 out.append(f"lines.json: {line} is supported without a four-part patch of the line")
         elif support == SERVED_UNSUPPORTED:
-            if patch is not None:
-                out.append(f"lines.json: {line} is served-unsupported and names a patch")
+            # A patch is optional here: it names the build the line froze on.
+            if patch is not None and not (
+                isinstance(patch, str) and VERSION_RE.fullmatch(patch) and patch.startswith(line + ".")
+            ):
+                out.append(f"lines.json: {line} is served-unsupported and names a patch that is not a four-part patch of the line")
         else:
             out.append(f"lines.json: {line}'s support {support!r} is not {SUPPORTED!r} or {SERVED_UNSUPPORTED!r}")
         if any(p.search(str(v)) for v in e.values() for p in PRIVATE_PATTERNS):
@@ -389,6 +394,14 @@ def _support_label(s: Support | None) -> str:
     return "supported" if s.support == SUPPORTED else SERVED_UNSUPPORTED_TEXT
 
 
+def _patch_cell(s: Support) -> str:
+    if not s.patch:
+        return "its served build's (below)"
+    if s.support == SERVED_UNSUPPORTED:
+        return f"`{s.patch}` (frozen)"
+    return f"`{s.patch}`"
+
+
 def render(ctx: Context, data: Collected, support: dict[str, Support] | None = None) -> str:
     support = support or {}
     where = urlsplit(ctx.base)
@@ -478,7 +491,7 @@ def render(ctx: Context, data: Collected, support: dict[str, Support] | None = N
         out += _table(
             ["Line", "Support", "ClickHouse patch modeled"],
             [
-                [f"`{line}`", _support_label(s), f"`{s.patch}`" if s.patch else "its served build's (below)"]
+                [f"`{line}`", _support_label(s), _patch_cell(s)]
                 for line, s in sorted(support.items(), key=lambda kv: _num(kv[0]), reverse=True)
             ],
         )
@@ -783,7 +796,7 @@ def _selftest() -> int:
             sup_ok = {"26.8": Support(SUPPORTED, "26.8.15.10")}
             support_cases = {
                 "sup-ok": sup_ok,
-                "sup-served": {**sup_ok, "26.6": Support(SERVED_UNSUPPORTED)},
+                "sup-served": {**sup_ok, "26.6": Support(SERVED_UNSUPPORTED, "26.6.1.2")},
                 "sup-wrong-patch": {"26.8": Support(SUPPORTED, "26.8.15.11")},
                 "sup-missing": {**sup_ok, "26.9": Support(SUPPORTED, "26.9.1.1")},
             }
@@ -861,6 +874,8 @@ def _selftest() -> int:
     status, page, said, _ = results["sup-served"]
     check(status == EXIT_OK and "### 26.6 (served, unsupported)" in page and SERVED_UNSUPPORTED_TEXT in page,
           "a served-unsupported line is shown and marked so (0)")  # fmt: skip
+    check("| `26.6` | " + SERVED_UNSUPPORTED_TEXT + " | `26.6.1.2` (frozen)" in page,
+          "a served-unsupported line with a frozen patch: the patch is rendered, marked frozen")  # fmt: skip
     check("`20" in page.split("### 26.6", 1)[1].split("Ask for a line", 1)[0],
           "a served-unsupported line keeps its served build's rows")  # fmt: skip
     status, page, said, _ = results["sup-wrong-patch"]
@@ -875,8 +890,8 @@ def _selftest() -> int:
         ({"schema": LINES_SCHEMA, "lines": [{"line": "26.8", "support": SUPPORTED}]}, "a supported line without a patch"),
         ({"schema": LINES_SCHEMA, "lines": [{"line": "26.8", "support": SUPPORTED, "patch": "26.9.1.1"}]},
          "a patch of another line"),
-        ({"schema": LINES_SCHEMA, "lines": [{"line": "26.7", "support": SERVED_UNSUPPORTED, "patch": "26.7.1.1"}]},
-         "a served-unsupported line with a patch"),
+        ({"schema": LINES_SCHEMA, "lines": [{"line": "26.7", "support": SERVED_UNSUPPORTED, "patch": "26.8.1.1"}]},
+         "a served-unsupported line with a patch of another line"),
         ({"schema": LINES_SCHEMA, "lines": [{"line": "26.7", "support": "retired"}]}, "an unknown support state"),
         ({"schema": LINES_SCHEMA, "lines": [{"line": "26.7", "support": SERVED_UNSUPPORTED},
                                             {"line": "26.7", "support": SERVED_UNSUPPORTED}]}, "a line listed twice"),
