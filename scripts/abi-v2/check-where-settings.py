@@ -55,7 +55,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DIR = ROOT / "spec" / "abi-v2" / "where-settings"
-LINES = ("26.3", "26.7", "26.8", "26.9")
+LINES = ("26.3", "26.7", "26.8", "26.9", "26.10")
 FILES = tuple(f"{n}.json" for n in LINES) + ("union.json",)
 LINE_SCHEMA = "chtypes.where-settings/1"
 UNION_SCHEMA = "chtypes.where-settings-union/1"

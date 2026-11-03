@@ -6,10 +6,10 @@ A consumer that streams rows (instead of asking the server to run the SELECT) ne
 
 ## Files
 
-| file                                               | what it is                                                                                                                            |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `26.3.json`, `26.7.json`, `26.8.json`, `26.9.json` | one list per line: `schema`, `line`, `tag`, `version`, `generator`, and `settings` sorted by `name`                                   |
-| `union.json`                                       | every name that is in any line: `name`, `tier`, `kind`, `scopes` (the union over the lines) and `tags` (the pinned tags that list it) |
+| file                                                             | what it is                                                                                                                                                                       |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `26.3.json`, `26.7.json`, `26.8.json`, `26.9.json`, `26.10.json` | one list per line: `schema`, `line`, `tag`, `version`, `generator`, and `settings` sorted by `name`. `26.7.json` is kept for a line that is still served but no longer supported |
+| `union.json`                                                     | every name that is in any line: `name`, `tier`, `kind`, `scopes` (the union over the lines) and `tags` (the pinned tags that list it)                                            |
 
 `documented-pathological.tsv` is a different kind of file: the settings values a server refuses outright (see "Settings the server may refuse outright" below).
 
@@ -62,7 +62,7 @@ The exact list is the data file `documented-pathological.tsv`, copied byte for b
 | `rule`    | why the server refuses: `refuses-every-query` (a pathological configuration) or `refuses-by-query-size` (a size limit on the resolved query) |
 | `ruling`  | who signed the row off, and when                                                                                                             |
 
-Two examples from the data: `max_expanded_ast_elements=1` is refused with server code 36 on every supported line, and `page=1` is refused with code 36 on the 26.8 and 26.9 lines.
+Two examples from the data: `max_expanded_ast_elements=1` is refused with server code 36 on every supported line, and `page=1` is refused with code 36 on the 26.8, 26.9 and 26.10 lines.
 
 The producer's differential gate counts these cells under their own heading and does not block on them. Nothing else is excused: the list grows only by sign-off, and a listed cell that stops failing must have its row removed. A value not on the list is one no measurement has found the server refusing; the producer's gate is what finds a new cell, and a consumer never extends the list itself.
 
@@ -73,15 +73,16 @@ The producer's differential gate counts these cells under their own heading and 
 
 ## Provenance and changes
 
-The five JSON files were produced by the artifact producer at its commit `495f7a702460561611b93837762e1e24f82cf705`, generator `chtypes where-settings generator`. `documented-pathological.tsv` is the producer's file at its commit `8f629c5e5e8682feed490c90d79956e231915e26` (14 rows). Entries per line: 26.3 has 390, 26.7 has 446, 26.8 has 477 and 26.9 has 480; the union has 495.
+The six JSON files were produced by the artifact producer at its commit `74bba4fb47c46eb6578796308d3f2e6e1cc6c559`, generator `chtypes where-settings generator`, from the tags `v26.3.60.2-lts`, `v26.7.19.5-stable`, `v26.8.34.13-lts`, `v26.9.25.15-stable` and `v26.10.2.103-stable`. `documented-pathological.tsv` is the producer's file at the same commit (14 rows). Entries per line: 26.3 has 390, 26.7 has 446, 26.8 has 478, 26.9 has 481 and 26.10 has 484; the union has 509.
 
-The sha256 of each file (the five lists and the TSV), computed by `scripts/abi-v2/check-where-settings.py --print-table` and checked by `--check`:
+The sha256 of each file (the six lists and the TSV), computed by `scripts/abi-v2/check-where-settings.py --print-table` and checked by `--check`:
 
-- `26.3.json`: `d049ab91129549b9283cd399018f7931e697c920627ca60eac35a7f52546934c`
-- `26.7.json`: `2c01a341755d23602a4f7cc2ae318ea6301fbf0b61ec65dddb9d818d00e471d6`
-- `26.8.json`: `290d6da61bdba5398387f09018668251c37e2b63d617dfd397363f88b1e8c0b8`
-- `26.9.json`: `db6e64b7f9aca7ce3c5e7479f665fdb08dda0e721700a879447a3b39e4e8af1e`
-- `union.json`: `34e8f06e9582046384fbf05c95018250e7a8d9506c1fd48969e5e38248e2f992`
-- `documented-pathological.tsv`: `51feb8bb5ae41297b6f5a597d8b59551e83ffaff9efd31854a2717d9997a0c47`
+- `26.3.json`: `8f2af776b27dc0c6b3b3b2226fc76e7615805c7a1de07c9b3bcd01473b940c6d`
+- `26.7.json`: `c2ebc38baaf42e8ad300cf41c99d9735dac075231e288578cfda90bc634d45b9`
+- `26.8.json`: `458cd177a80457e1332f6ae771ed2874a073816c0f0467d79d99f3a305ad0ce1`
+- `26.9.json`: `ef538a3655cfa8190766008bf56d4f50b16b74280638b3124cddd6c70b15f8de`
+- `26.10.json`: `81fafa54ff63ae3faf7571cb4a91d269078dd66b4338f42553f8f7ff835e7e2d`
+- `union.json`: `6af331bb3ec8f5689f6c1082dfdd8b6874139f3723bfc87607059bc5ef88e315`
+- `documented-pathological.tsv`: `c6dfbcb1512f08d3db1241e87a64b0988dbe4f29ab4a7788c2701c6768becd6f`
 
 The producer regenerates the lists per pinned tag. A pin that adds or drops a name is a new copy here, with this table updated in the same change.
