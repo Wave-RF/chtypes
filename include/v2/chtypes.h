@@ -1323,6 +1323,12 @@ CHS_API void chs_server_free(chs_server *server);
  * accepted under `posture` `load`, which a server's Atomic database refuses (80), and under
  * `create` it is declined (`attach-statement-under-create`).
  *
+ * On a 26.10 line, a `CREATE TABLE` that declares two constraints of the same name, as a `CHECK`
+ * and a `CHECK`, a `CHECK` and an `ASSUME`, an `ASSUME` and a `CHECK`, or two `ASSUME`s, on any
+ * engine and whether or not the two are adjacent, is `CHS_REJECTED` with ClickHouse's code 80
+ * (`INCORRECT_QUERY`), as a 26.10 server refuses it. Earlier supported lines create the table.
+ * Names are compared case-sensitively, so `c` and `C` are two names.
+ *
  * A table whose engine this build does not model (a `Distributed` or `Buffer` table, for example)
  * is `CHS_DECLINED` with the reason `engine-not-modeled`, which is returned only when the engine
  * itself is the cause: a decline for anything else in the statement carries that thing's own
