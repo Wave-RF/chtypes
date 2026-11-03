@@ -162,6 +162,19 @@ Nothing else moved on either bump: the `DateTime` and `DateTime64` edges, `LIKE`
 
 The `26.3` bump (`26.3.38.2` to `26.3.60.2`) was **not measured**. Do not read that as no change.
 
+## ClickHouse 26.3: a lone -0.0 can be stored as +0.0
+
+On 26.3, a MergeTree table writes a column whose values are mostly the type's default with sparse serialization, and that version counts `-0.0` as the default. A `Float32`, `Float64` or `BFloat16` value of `-0.0`, or such a value inside a `Tuple`, can therefore be stored, and read back, as `+0.0`, depending on the other rows in the same part. `Nullable` and `Array` values keep the sign, and so do `Memory` and `Log` tables. ClickHouse 26.8 and later keep the sign everywhere.
+
+- **Previews:** a row's stored rendering on 26.3 can show `-0` where the server will store `+0`. The INSERT verdict is unaffected, and inserts are not declined for it.
+- **Filters:** a filter that reads such a value answers that row `d` (reason `float-negative-zero-sparse-default`), because the server may see either sign. Treat `d` as "no verdict", as for every decline.
+
+The ABI specification states the same limitation under "Known limitations" in [`spec/abi-v2/docs.md`](../spec/abi-v2/docs.md).
+
+## The merge-time TTL model does not see the server profile
+
+The model of a merge-time TTL (the batch document's `at_merge`) evaluates a TTL expression under the library's process-wide settings, not under the server profile given to `chs_server_create`, on every line. A server-profile setting that a TTL expression reads, for example `date_time_overflow_behavior`, can therefore move which rows the model reports as expired, in either direction. The INSERT-time evaluation follows the server profile on 26.10.
+
 ## Known divergences
 
 Each entry here is a case where this library and a real ClickHouse server give different answers, and a caller can reach it. Every entry names the direction, the input, both answers, and **which half of the comparison was measured where** — there is no ClickHouse server in this repository, so the server half always comes from the differential proof the artifacts are built from.
