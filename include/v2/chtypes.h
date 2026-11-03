@@ -237,6 +237,32 @@
  * time, never answered differently: above the budget on an idle core it always declines, below
  * about half of it never. Its catalog entry states this load dependence. A conformance case drives
  * two lines, then four, concurrently in one process.
+ *
+ * Known limitations:
+ *
+ * - **The merge-time TTL model does not see the server profile.** `at_merge` (`document:batch`)
+ *   evaluates a TTL expression under the library's process-wide settings, not under the server
+ *   profile given to `chs_server_create`, on every line. So a server-profile setting that a TTL
+ *   expression reads (for example `date_time_overflow_behavior`) can move which rows `at_merge`
+ *   reports, in either direction.
+ * - **On 26.3, a lone -0.0 is stored as +0.0.** 26.3's sparse serialization compares a
+ *   floating-point value with the type's default by value, so in a `Float32`, `Float64` or
+ *   `BFloat16` column (or such a `Tuple` element) a MergeTree part can store `-0.0` as `+0.0`;
+ *   whether it does depends on the part's other rows. A row's stored rendering on 26.3 can show
+ *   `-0` (`cols[].stored`, `computed[].stored`, the export) where the server's sparse serialization
+ *   stores `+0`. The insert verdict is the same either way, and inserts are not declined for it. A
+ *   filter that reads such a value in a row answers that row `d`
+ *   (`float-negative-zero-sparse-default`), because whether the server sees `-0.0` or `+0.0` there
+ *   depends on the part.
+ * - **On 26.3, one check stops a remote `hasColumnInTable`.** The library never reads a file or
+ *   opens a network connection while it analyzes a schema, a filter or a Values row, and two
+ *   independent checks enforce it: a screen declines any expression that would read storage or the
+ *   network (`expression-reads-storage`, or `values-reads-storage` in a Values field) before
+ *   anything is analyzed, and the library's own context gives the analysis nothing to read with. On
+ *   26.3 only, the remote form of `hasColumnInTable` (`hasColumnInTable('host:port', 'db', 't',
+ *   'x')`, with or without a user and password) is refused by the screen alone, not by the context:
+ *   that form opens a connection to the named host before it asks anything the context controls.
+ *   From 26.8 the function takes no host, and both checks apply.
  */
 #ifndef CHTYPES_V2_H
 #define CHTYPES_V2_H
