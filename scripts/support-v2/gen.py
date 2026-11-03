@@ -32,13 +32,23 @@ build id, glibc floor), and no string anywhere in a verified predicate may match
 a private-name pattern; a row that fails either is omitted like an unverified
 one. Messages never carry a predicate's value.
 
+SUPPORT STATE. Whether a line is supported, and the exact patch a supported
+line models, are not in a signed statement: they are the artifact producer's
+per-line state, copied (never re-derived) into scripts/support-v2/lines.json.
+A supported line's verified rows must carry exactly that patch: a row on
+another patch is OMITTED (named on stderr), and a supported line the registry
+does not publish is named too, so the page never claims a patch or a line the
+registry does not serve. A `served-unsupported` line is shown with its served
+build's own version and marked so; a published line the file does not name is
+marked `support unknown`.
+
 DETERMINISM. No timestamp, no generated-at line, no host name beyond the
 channel's own base: the same registry state gives the same bytes.
 
 EXIT STATUSES
     0  the page is complete (and, with --check, equals the committed page)
     1  --check: the committed page differs from the output
-    2  usage error
+    2  usage error, or scripts/support-v2/lines.json is malformed
     3  the page was produced but some rows were omitted (named on stderr);
        --check does not compare, and fails
     4  nothing was written: the tag listing was unreadable, named no line, or
@@ -77,9 +87,23 @@ from chtypes._ocifetch._dsse import trusted_keys_from_hex  # noqa: E402
 from chtypes._ocifetch._errors import FetchError  # noqa: E402
 
 PAGE = ROOT / "docs" / "support-v2.md"
+LINES_FILE = Path(__file__).resolve().parent / "lines.json"
+LINES_SCHEMA = "chtypes.support-lines/1"
+SUPPORTED = "supported"
+SERVED_UNSUPPORTED = "served-unsupported"
+# The producer's wording for a line that is served but not supported, with
+# "ABI revision" read as v2's "ABI generation".
+SERVED_UNSUPPORTED_TEXT = (
+    "served, unsupported: still fetchable and loadable by any SDK of its ABI generation; unmaintained"
+)
+PATCH_SENTENCE = (
+    "A server on a different patch of the same line can answer differently; chtypes models "
+    "the patch named here."
+)
 
 EXIT_OK = 0
 EXIT_DIFF = 1
+EXIT_USAGE = 2
 EXIT_PARTIAL = 3
 EXIT_NOTHING = 4
 
@@ -203,7 +227,64 @@ def _refusal(line: str, platform: str, predicate: dict) -> str:
     return ""
 
 
-def collect(options: Options, say) -> Collected:
+@dataclass(frozen=True)
+class Support:
+    """One line of lines.json: its support state and, when supported, the
+    exact patch it models."""
+
+    support: str
+    patch: str = ""
+
+
+def support_problems(doc: object) -> list[str]:
+    """What is wrong with a lines.json document, or [] when nothing is."""
+    if not isinstance(doc, dict) or doc.get("schema") != LINES_SCHEMA:
+        return [f"lines.json: schema is not {LINES_SCHEMA!r}"]
+    entries = doc.get("lines")
+    if not isinstance(entries, list) or not entries:
+        return ["lines.json: `lines` is not a non-empty list"]
+    out: list[str] = []
+    seen: set[str] = set()
+    for e in entries:
+        line = e.get("line") if isinstance(e, dict) else None
+        if not isinstance(line, str) or not LINE_RE.fullmatch(line):
+            out.append(f"lines.json: an entry's line {line!r} is not a line")
+            continue
+        if line in seen:
+            out.append(f"lines.json: {line} is listed twice")
+        seen.add(line)
+        support, patch = e.get("support"), e.get("patch")
+        if support == SUPPORTED:
+            if not (isinstance(patch, str) and VERSION_RE.fullmatch(patch) and patch.startswith(line + ".")):
+                out.append(f"lines.json: {line} is supported without a four-part patch of the line")
+        elif support == SERVED_UNSUPPORTED:
+            if patch is not None:
+                out.append(f"lines.json: {line} is served-unsupported and names a patch")
+        else:
+            out.append(f"lines.json: {line}'s support {support!r} is not {SUPPORTED!r} or {SERVED_UNSUPPORTED!r}")
+        if any(p.search(str(v)) for v in e.values() for p in PRIVATE_PATTERNS):
+            out.append(f"lines.json: {line} has a field that matched the private-name filter")
+    return out
+
+
+def support_of(doc: dict) -> dict[str, Support]:
+    return {
+        e["line"]: Support(e["support"], e.get("patch") or "")
+        for e in doc["lines"]
+    }
+
+
+def load_support(path: Path = LINES_FILE) -> tuple[dict[str, Support], list[str]]:
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return {}, [f"lines.json: unreadable ({type(exc).__name__})"]
+    problems = support_problems(doc)
+    return ({} if problems else support_of(doc)), problems
+
+
+def collect(options: Options, say, support: dict[str, Support] | None = None) -> Collected:
+    support = support or {}
     out = Collected()
     try:
         tags = cli._published_tags(options)
@@ -235,6 +316,9 @@ def collect(options: Options, say) -> Collected:
             else:
                 predicate = dict(o.resolution.predicate)
                 why = _refusal(line, o.platform, predicate)
+                want = support.get(line)
+                if not why and want and want.support == SUPPORTED and predicate["clickhouse_version"] != want.patch:
+                    why = "its version is not the patch the support table names for the line"
                 if why:
                     out.omitted.append(f"{line} {o.platform}: omitted, {why}")
                     continue
@@ -250,6 +334,9 @@ def collect(options: Options, say) -> Collected:
             out.lines[line] = rows
         else:
             out.omitted.append(f"{line}: omitted, no platform of the line verified")
+    for line in sorted(support, key=_num):
+        if support[line].support == SUPPORTED and line not in lines:
+            out.omitted.append(f"{line}: the support table names it supported, the registry does not publish it")
     return out
 
 
@@ -296,7 +383,14 @@ def _table(header: list[str], rows: list[list[str]]) -> list[str]:
     return [fmt(header), "| " + " | ".join("-" * w for w in widths) + " |", *map(fmt, rows)]
 
 
-def render(ctx: Context, data: Collected) -> str:
+def _support_label(s: Support | None) -> str:
+    if s is None:
+        return "support unknown"
+    return "supported" if s.support == SUPPORTED else SERVED_UNSUPPORTED_TEXT
+
+
+def render(ctx: Context, data: Collected, support: dict[str, Support] | None = None) -> str:
+    support = support or {}
     where = urlsplit(ctx.base)
     repo = where.path.strip("/")
     out: list[str] = ["# What chtypes supports in v2", ""]
@@ -373,10 +467,32 @@ def render(ctx: Context, data: Collected) -> str:
         "failed verification is left out, never shown.",
         "",
     ]
+    if support:
+        intro = "Which lines are supported, and the exact ClickHouse patch each supported line models."
+        if any(s.support == SERVED_UNSUPPORTED for s in support.values()):
+            intro += (
+                " A served, unsupported line is still in the registry, on the build shown in its "
+                "own table below."
+            )
+        out += [intro, ""]
+        out += _table(
+            ["Line", "Support", "ClickHouse patch modeled"],
+            [
+                [f"`{line}`", _support_label(s), f"`{s.patch}`" if s.patch else "its served build's (below)"]
+                for line, s in sorted(support.items(), key=lambda kv: _num(kv[0]), reverse=True)
+            ],
+        )
+        out += ["", PATCH_SENTENCE, ""]
     if not data.lines:
         out += ["No line has a verified build on this channel.", ""]
     for line in sorted(data.lines, key=_num, reverse=True):
-        out += [f"### {line}", ""]
+        s = support.get(line)
+        heading = f"### {line}"
+        if s is None:
+            heading += " (support unknown)"
+        elif s.support == SERVED_UNSUPPORTED:
+            heading += " (served, unsupported)"
+        out += [heading, ""]
         rows = []
         for r in data.lines[line]:
             if r.published:
@@ -405,9 +521,11 @@ def render(ctx: Context, data: Collected) -> str:
 # ------------------------------------------------------------------------ run
 
 
-def generate(options: Options, ctx: Context, say) -> tuple[int, str]:
+def generate(
+    options: Options, ctx: Context, say, support: dict[str, Support] | None = None
+) -> tuple[int, str]:
     """(exit status, page). The page is empty when the status is 4."""
-    data = collect(options, say)
+    data = collect(options, say, support)
     for message in data.omitted:
         say(f"support-v2: {message}")
     if data.fatal:
@@ -416,13 +534,18 @@ def generate(options: Options, ctx: Context, say) -> tuple[int, str]:
     if data.verified_rows == 0:
         say("support-v2: nothing written: no platform of any line verified")
         return EXIT_NOTHING, ""
-    return (EXIT_PARTIAL if data.omitted else EXIT_OK), render(ctx, data)
+    return (EXIT_PARTIAL if data.omitted else EXIT_OK), render(ctx, data, support)
 
 
 def run(mode: str, out: Path, say=lambda m: print(m, file=sys.stderr)) -> int:
     ctx = channel_context()
+    support, problems = load_support()
+    if problems:
+        for p in problems:
+            say(f"support-v2: {p}")
+        return EXIT_USAGE
     with tempfile.TemporaryDirectory(prefix="support-v2-cache-") as cache:
-        status, page = generate(channel_options(cache), ctx, say)
+        status, page = generate(channel_options(cache), ctx, say, support)
     return _finish(mode, out, status, page, say)
 
 
@@ -655,6 +778,25 @@ def _selftest() -> int:
                 results[name] = (status, page, "\n".join(said), base)
                 if os.environ.get("SUPPORT_V2_SELFTEST_SHOW") == name:
                     print(page, "\n".join(said), sep="\n--stderr--\n")
+            # The support table (lines.json), against the valid tree: the
+            # fixture's 26.8 builds are 26.8.15.10 on every platform.
+            sup_ok = {"26.8": Support(SUPPORTED, "26.8.15.10")}
+            support_cases = {
+                "sup-ok": sup_ok,
+                "sup-served": {**sup_ok, "26.6": Support(SERVED_UNSUPPORTED)},
+                "sup-wrong-patch": {"26.8": Support(SUPPORTED, "26.8.15.11")},
+                "sup-missing": {**sup_ok, "26.9": Support(SUPPORTED, "26.9.1.1")},
+            }
+            for name, sup in support_cases.items():
+                options = Options(
+                    bases=(f"http://127.0.0.1:{port}/s-valid/chtypes/v1",),
+                    trusted_keys=trusted_keys_from_hex((pub,), "selftest"),
+                    cache_dir=str(tmp / "cache" / name),
+                    system_dirs=(),
+                )
+                said = []
+                status, page = generate(options, dev, said.append, sup)
+                results[name] = (status, page, "\n".join(said), "")
         finally:
             restore()
         log = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/_log/s-valid").read())  # noqa: S310
@@ -708,6 +850,40 @@ def _selftest() -> int:
         check("26.8 linux-arm64: omitted" in said, f"{name}: the row is named")
         leak = (PLANTED_NAME, PLANTED_PATH)
         check(not any(s in page or s in said for s in leak), f"{name}: the string is nowhere")
+    status, page, said, _ = results["sup-ok"]
+    check(status == EXIT_OK, "support table, patch matches: exit 0")
+    check("| `26.8` | supported | `26.8.15.10`" in page and PATCH_SENTENCE in page,
+          "support table: the line, its state and its exact patch, and the patch sentence")  # fmt: skip
+    check("### 26.6 (support unknown)" in page and "### 26.8\n" in page,
+          "a published line the table does not name is `support unknown`")  # fmt: skip
+    check("unsupported" not in page.lower().replace("not the same as unsupported", ""),
+          "no served-unsupported line: the page never says `unsupported`")  # fmt: skip
+    status, page, said, _ = results["sup-served"]
+    check(status == EXIT_OK and "### 26.6 (served, unsupported)" in page and SERVED_UNSUPPORTED_TEXT in page,
+          "a served-unsupported line is shown and marked so (0)")  # fmt: skip
+    check("`20" in page.split("### 26.6", 1)[1].split("Ask for a line", 1)[0],
+          "a served-unsupported line keeps its served build's rows")  # fmt: skip
+    status, page, said, _ = results["sup-wrong-patch"]
+    check(status == EXIT_PARTIAL and "26.8 linux-amd64: omitted, its version is not the patch" in said,
+          "a supported line on another patch: its rows are omitted and named (3)")  # fmt: skip
+    check("| `26.8.15.10`" not in page, "a supported line on another patch: the other patch is not shown")
+    status, page, said, _ = results["sup-missing"]
+    check(status == EXIT_PARTIAL and "26.9: the support table names it supported" in said,
+          "a supported line the registry does not publish is named (3)")  # fmt: skip
+    for doc, what in (
+        ({"schema": "x", "lines": []}, "a wrong schema"),
+        ({"schema": LINES_SCHEMA, "lines": [{"line": "26.8", "support": SUPPORTED}]}, "a supported line without a patch"),
+        ({"schema": LINES_SCHEMA, "lines": [{"line": "26.8", "support": SUPPORTED, "patch": "26.9.1.1"}]},
+         "a patch of another line"),
+        ({"schema": LINES_SCHEMA, "lines": [{"line": "26.7", "support": SERVED_UNSUPPORTED, "patch": "26.7.1.1"}]},
+         "a served-unsupported line with a patch"),
+        ({"schema": LINES_SCHEMA, "lines": [{"line": "26.7", "support": "retired"}]}, "an unknown support state"),
+        ({"schema": LINES_SCHEMA, "lines": [{"line": "26.7", "support": SERVED_UNSUPPORTED},
+                                            {"line": "26.7", "support": SERVED_UNSUPPORTED}]}, "a line listed twice"),
+    ):  # fmt: skip
+        check(bool(support_problems(doc)), f"lines.json: {what} is refused")
+    committed, problems = load_support()
+    check(not problems and bool(committed), "lines.json as committed is well formed")
     # The exit-status contract at the file level: --check on a partial page,
     # a missing page and an equal page.
     out = tmp / "page.md"

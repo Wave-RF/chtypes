@@ -1,0 +1,11 @@
+{
+ "schema": "chtypes.support-lines/1",
+ "source": "the artifact producer's per-line support state and pinned patch, at its commit 74bba4fb",
+ "lines": [
+  {"line": "26.10", "support": "supported", "patch": "26.10.2.103"},
+  {"line": "26.9", "support": "supported", "patch": "26.9.25.15"},
+  {"line": "26.8", "support": "supported", "patch": "26.8.34.13"},
+  {"line": "26.7", "support": "served-unsupported"},
+  {"line": "26.3", "support": "supported", "patch": "26.3.60.2"}
+ ]
+}
