@@ -6,6 +6,7 @@ package chtypes
 // out_rows buffer Insert returns as Output is the argument echo.
 
 import (
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -33,7 +34,7 @@ func wireOf(t *testing.T, res InsertResult) (args []json.RawMessage) {
 // echoed it in Output. The stub's document carries no outcome, so the public
 // Insert would (rightly) hide that buffer; the wire tests read it raw.
 func insertEcho(s *Schema, format Format, body []byte, out Format, opts ...InsertCallOption) (InsertResult, error) {
-	_, rows, err := s.insertRaw(format, body, out, opts...)
+	_, rows, err := s.insertRaw(context.Background(), format, body, out, opts...)
 	return InsertResult{Output: rows}, err
 }
 

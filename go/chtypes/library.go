@@ -5,6 +5,7 @@ package chtypes
 // exactly one ABI call and takes no lock.
 
 import (
+	"context"
 	"path/filepath"
 	"sync"
 
@@ -208,6 +209,14 @@ func (l *Library) LiveHandles() (map[string]uint64, error) {
 // CompileTable compiles exactly one CREATE TABLE statement (chs_schema_create),
 // on the server OnServer names, or on the image's own server without it.
 func (l *Library) CompileTable(createTable string, opts ...CompileOption) (*Schema, error) {
+	return l.CompileTableContext(context.Background(), createTable, opts...)
+}
+
+// CompileTableContext is CompileTable, canceled by ctx through
+// schema_options' cancel member: when ctx is done before the compile returns,
+// the call returns a *CanceledError whose Cause is context.Cause(ctx), and no
+// schema. A ctx that can never be done makes it exactly CompileTable.
+func (l *Library) CompileTableContext(ctx context.Context, createTable string, opts ...CompileOption) (*Schema, error) {
 	c := compileConfig(opts)
 	settings, err := callSettings(c.settings, c.timezone)
 	if err != nil {
@@ -227,13 +236,18 @@ func (l *Library) CompileTable(createTable string, opts ...CompileOption) (*Sche
 	}
 	// The options document (posture, and any member passed through), or length
 	// 0, which the library reads as {}.
-	options, err := c.schemaOpts.json("schema options")
+	arm, err := armCancel(l.tbl, ctx, &c.schemaOpts)
 	if err != nil {
 		return nil, err
 	}
+	options, err := c.schemaOpts.json("schema options")
+	if err != nil {
+		return nil, arm.finish(err)
+	}
 	h, cerr := l.tbl.SchemaCreate(server, []byte(createTable), settings, options)
-	if cerr != nil {
-		return nil, callError(cerr)
+	if err := arm.finish(callError(cerr)); err != nil {
+		_ = h.Close()
+		return nil, err
 	}
 	return newSchema(l, h), nil
 }
