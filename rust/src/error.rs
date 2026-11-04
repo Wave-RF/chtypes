@@ -9,7 +9,7 @@
 //! The refusal ([`Error::Schema`]) and the decline ([`Error::Unsupported`]) are
 //! PEERS, never one a subtype of the other: a handler that forgot the
 //! distinction must not be able to turn every decline into a rejection. Catching
-//! all four call classes is an explicit choice, [`Error::call_error`].
+//! all five call classes is an explicit choice, [`Error::call_error`].
 
 use std::fmt;
 use std::path::PathBuf;
@@ -141,6 +141,8 @@ pub enum Error {
     /// call (a refused version spelling, a conflicting setup, a zone given
     /// twice, an unverified open without both opt-ins).
     Usage(CallError),
+    /// `CHS_CANCELED`: the call's cancel token fired before it finished.
+    Canceled(CallError),
     /// `CHS_INTERNAL`; a status outside the closed set, naming its
     /// `unknown(n)` (rule r3); a document that does not decode.
     Internal(CallError),
@@ -195,13 +197,15 @@ impl Error {
         matches!(self, Error::Unsupported(_))
     }
 
-    /// The six fields of the library's error, from any of the four call
+    /// The six fields of the library's error, from any of the five call
     /// classes; `None` for an artifact or fetch error.
     pub fn call_error(&self) -> Option<&CallError> {
         match self {
-            Error::Schema(c) | Error::Unsupported(c) | Error::Usage(c) | Error::Internal(c) => {
-                Some(c)
-            }
+            Error::Schema(c)
+            | Error::Unsupported(c)
+            | Error::Usage(c)
+            | Error::Canceled(c)
+            | Error::Internal(c) => Some(c),
             _ => None,
         }
     }
@@ -256,6 +260,7 @@ impl Error {
             Some(ErrorClass::Schema) => Error::Schema(call),
             Some(ErrorClass::Unsupported) => Error::Unsupported(call),
             Some(ErrorClass::Usage) => Error::Usage(call),
+            Some(ErrorClass::Canceled) => Error::Canceled(call),
             Some(ErrorClass::Internal) | None => Error::Internal(call),
         }
     }
@@ -275,6 +280,7 @@ impl fmt::Display for Error {
             Error::Schema(c) => write!(f, "refused: {c}"),
             Error::Unsupported(c) => write!(f, "declined: {c}"),
             Error::Usage(c) => write!(f, "misuse: {c}"),
+            Error::Canceled(c) => write!(f, "canceled: {c}"),
             Error::Internal(c) => write!(f, "internal error: {c}"),
             // A dev SDK's fingerprint refusal is rule r6's exact message, alone.
             Error::ArtifactIncompatible(r) if r.dev_message().is_some() => write!(f, "{r}"),
@@ -363,6 +369,10 @@ mod tests {
             Error::from_call(raw(status::INTERNAL)),
             Error::Internal(_)
         ));
+        assert!(matches!(
+            Error::from_call(raw(status::CANCELED)),
+            Error::Canceled(_)
+        ));
         let e = Error::from_call(raw(status::REJECTED));
         let c = e.call_error().expect("a call error");
         assert_eq!(c.status, status::REJECTED);
@@ -405,6 +415,7 @@ mod tests {
             status::DECLINED,
             status::INVALID_ARGUMENT,
             status::INTERNAL,
+            status::CANCELED,
         ] {
             assert!(Status::from_code(listed).is_known(), "{listed}");
         }
