@@ -186,6 +186,12 @@ jobs:
         run: uv run --no-project --python 3.11 scripts/abi-v2/check-declines.py --selftest
       - name: the filter decline-reasons catalog agrees with its README
         run: uv run --no-project --python 3.11 scripts/abi-v2/check-declines.py --check
+      # The insert projection rule (docs.md, chs_preview_insert) over the fixture
+      # every binding's projection-gate unit tests also read. Selftest first.
+      - name: the insert projection rule — every rule fires on the fixture's planted cases
+        run: uv run --no-project --python 3.11 scripts/abi-v2/check-insert-projection.py --selftest
+      - name: the insert projection fixture agrees with the rule
+        run: uv run --no-project --python 3.11 scripts/abi-v2/check-insert-projection.py
       # The documented platform differences (spec/abi-v2/documented-platform/)
       # are data from the artifact producer too. Same shape.
       - name: the documented platform differences — every rule fires on planted copies
