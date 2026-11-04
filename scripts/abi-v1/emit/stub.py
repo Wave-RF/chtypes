@@ -101,6 +101,7 @@ parameter-kind vocabulary model.py already enforces.
 
 from __future__ import annotations
 
+import model as abimodel
 from model import BUF_HANDLE, ERROR_HANDLE, STATUS_ENUM
 
 from . import _stubshared
@@ -1324,6 +1325,47 @@ def _r2_members(model, fn) -> list[str]:
     ]
 
 
+def _canned_docs(model, fn, macro: str, docs_name: str) -> list[str]:
+    """Generation 2, the decode cells: under `macro` chs_preview_row and
+    chs_preview_batch answer the kind's document from
+    `_stubshared.<docs_name>`, after the input checks and the status
+    injection. Each document is validated against the description's own
+    schema for its kind before it is compiled in."""
+    if model.abi < 2 or fn.name not in ("chs_preview_row", "chs_preview_batch"):
+        return []
+    import json
+
+    out, others = _doc_out(fn)
+    kind = None if out is None else out.content[len("document:") :]
+    doc = getattr(_stubshared, docs_name).get(kind)
+    if doc is None:
+        raise ValueError(f"{fn.name}: the shape {docs_name} answers has changed")
+    problems = abimodel.validate(doc, model.documents[kind].schema)
+    if problems:
+        raise ValueError(f"{docs_name}[{kind!r}] fails documents.{kind}.schema: {problems}")
+    text = json.dumps(doc, separators=(",", ":"), ensure_ascii=True)
+    return [
+        f"#if defined({macro})",
+        "    {",
+        f"        static const char rule_doc[] = {_c_str(text)};",
+        *_answer_doc(out, others, "rule_doc"),
+        "    }",
+        "#endif",
+    ]
+
+
+def _null_input(model, fn) -> list[str]:
+    """The null_input decode cells: CHS_STUB_NULL_INPUT (variant "null-input",
+    _stubshared.NULL_INPUT_DOCS)."""
+    return _canned_docs(model, fn, "CHS_STUB_NULL_INPUT", "NULL_INPUT_DOCS")
+
+
+def _value_flags(model, fn) -> list[str]:
+    """The poison and dup_dropped decode cells: CHS_STUB_VALUE_FLAGS (variant
+    "value-flags", _stubshared.VALUE_FLAGS_DOCS)."""
+    return _canned_docs(model, fn, "CHS_STUB_VALUE_FLAGS", "VALUE_FLAGS_DOCS")
+
+
 def _filter_observable(model, fn) -> list[str]:
     """Generation 2, rule r7: under CHS_STUB_FILTER_OBSERVABLE (variant
     "filter-observable", see _stubshared.FILTER_OBSERVABLE_DOCS) a call that
@@ -1508,6 +1550,8 @@ def _gen_generic(model, fn) -> str:
     body += _r3_values(model, fn)
     body += _declined_settings(model, fn)
     body += _filter_observable(model, fn)
+    body += _null_input(model, fn)
+    body += _value_flags(model, fn)
     body += _fill_outputs(model, fn)
     err_param = next((p for p in fn.params if p.kind == "out_error"), None)
     if err_param is not None:

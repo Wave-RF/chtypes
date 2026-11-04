@@ -30,6 +30,24 @@ type Value struct {
 	Source Source
 	// IsStored is the description's is_stored fact for Source.
 	IsStored bool
+	// NullInput is whether the input field was the format's NULL literal (a
+	// JSON null, a TSV \N), from null_input; false when the document carries
+	// none. It is a fact about the input, where Null is one about the stored
+	// value: the two differ where a NULL literal is read into a column that
+	// is not Nullable.
+	NullInput bool
+	// Poison is whether the stored value is one the server cannot read back
+	// (the batch is then accepted_poisoned and exports nothing), from poison;
+	// false when the document carries none.
+	Poison bool
+	// DupDropped is whether the reader dropped a duplicate key for this
+	// column, from dup_dropped; false when the document carries none. At
+	// default settings a repeated top-level JSONEachRow key that arrives after
+	// every column has been read is skipped: the first value is stored,
+	// DupDropped is true, and a duplicate_key_dropped transform is reported. A
+	// repeat while a column is still unread is refused with 117, and a
+	// repeated key inside a Map value keeps both keys.
+	DupDropped bool
 }
 
 // Transform is one silent change the library reports.

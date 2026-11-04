@@ -57,6 +57,24 @@ pub struct Value {
     /// `value_b64`), whether or not they are valid UTF-8; `None` otherwise. A
     /// value nested in another type has none in 1.0.
     pub value: Option<RawText>,
+    /// Whether the input field was the format's NULL literal (a JSON `null`, a
+    /// TSV `\N`), from `null_input`; `false` when the document carries none. A
+    /// fact about the input, where [`Value::null`] is one about the stored
+    /// value: the two differ where a NULL literal is read into a column that
+    /// is not Nullable.
+    pub null_input: bool,
+    /// Whether the stored value is one the server cannot read back (the batch
+    /// is then `accepted_poisoned` and exports nothing), from `poison`;
+    /// `false` when the document carries none.
+    pub poison: bool,
+    /// Whether the reader dropped a duplicate key for this column, from
+    /// `dup_dropped`; `false` when the document carries none. At default
+    /// settings a repeated top-level JSONEachRow key that arrives after every
+    /// column has been read is skipped: the first value is stored, this is
+    /// `true`, and a `duplicate_key_dropped` transform is reported. A repeat
+    /// while a column is still unread is refused with 117, and a repeated key
+    /// inside a Map value keeps both keys.
+    pub dup_dropped: bool,
 }
 
 /// One transformation: a value the library stored differently from the input.
