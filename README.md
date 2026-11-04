@@ -163,7 +163,7 @@ Three axes — the language you call from, the platform you run on, and the Clic
 
 ## Known gaps in 1.0
 
-A short list of places where the library does less than you might expect, each with what happens, a workaround and how it was measured: nested `String` values carry no raw bytes, binary `settings` and `query_params` values must be UTF-8 in Rust, `posix/*` zone names follow the host's zone files on 26.3, 26.8 and 26.9, a batch preview with a filter in another zone is declined, and there is no call for a server's version or settings. The full text is in **[docs/limitations.md](docs/limitations.md#known-gaps-in-10)**.
+A short list of places where the library does less than you might expect, each with what happens, a workaround and how it was measured: nested `String` values carry no raw bytes, binary `settings` and `query_params` values must be UTF-8 in Rust, the `posix/*`, `posixrules` and `localtime` zone names follow the host's zone files on 26.3, 26.8 and 26.9, a batch preview with a filter in another zone is declined, and there is no call for a server's version or settings. The full text is in **[docs/limitations.md](docs/limitations.md#known-gaps-in-10)**.
 
 ## Documentation
 
