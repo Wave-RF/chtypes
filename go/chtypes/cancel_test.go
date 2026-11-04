@@ -194,6 +194,41 @@ func TestStubCancelDuringTheCall(t *testing.T) {
 	}
 }
 
+// A cancel that arrives after the library's last check point finds a complete
+// answer: the call returns it, never an error ("a complete answer is never
+// turned into a cancel"). The stub's !L: body passes its last check point,
+// waits for the token, then answers the echo.
+func TestCancelAfterLastCheckPoint(t *testing.T) {
+	fx := newCancelFixture(t)
+	body := []byte("!L:late")
+	want, err := fx.schema.Row(JSONEachRow, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := cancelProbe(t, fx.lib).Inflight
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	type res struct {
+		row RowResult
+		err error
+	}
+	done := make(chan res, 1)
+	go func() {
+		r, err := fx.schema.RowContext(ctx, JSONEachRow, body)
+		done <- res{r, err}
+	}()
+	waitInflight(t, fx.lib, base+1)
+	cancel()
+	r := <-done
+	if r.err != nil {
+		t.Fatalf("a cancel after the last check point returned %v; want the complete answer", r.err)
+	}
+	if !reflect.DeepEqual(r.row, want) {
+		t.Errorf("RowContext = %+v; want the answer with no cancel source %+v", r.row, want)
+	}
+	waitInflight(t, fx.lib, base)
+}
+
 func TestStubCancelNeverFiredIsTheSyncCall(t *testing.T) {
 	fx := newCancelFixture(t)
 	ctx, cancel := context.WithCancel(context.Background())
