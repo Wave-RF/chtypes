@@ -2697,22 +2697,6 @@
       "kind": "status"
     },
     {
-      "args": [],
-      "expect": {
-        "outputs": {
-          "out_id": {
-            "args": [],
-            "fn": "chs_cancel_create",
-            "out": "out_id"
-          }
-        },
-        "status": "CHS_OK"
-      },
-      "fn": "chs_cancel_create",
-      "id": "chs_cancel_create.echo",
-      "kind": "echo"
-    },
-    {
       "args": [
         {
           "null_handle": true
@@ -5091,6 +5075,2406 @@
       "id": "chs_filter_eval_block.concurrent",
       "kind": "concurrent",
       "threads": 8
+    },
+    {
+      "id": "cancel.chs_schema_create.pre_fired",
+      "kind": "lifecycle",
+      "steps": [
+        {
+          "cancel": "t"
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 1,
+            "chs_error": 0,
+            "chs_filter": 0,
+            "chs_schema": 0,
+            "chs_server": 0
+          }
+        },
+        {
+          "fire": "t"
+        },
+        {
+          "fired": "t",
+          "want": 1
+        },
+        {
+          "call": {
+            "args": [
+              {
+                "null_handle": true
+              },
+              {
+                "bytes_hex": "6100ff7a"
+              },
+              {
+                "bytes_hex": "7b7d"
+              },
+              {
+                "cancel_options": "t"
+              }
+            ],
+            "fn": "chs_schema_create"
+          },
+          "expect": {
+            "error": {
+              "ch_code": 0,
+              "ch_name": "",
+              "column": "",
+              "message": "call canceled at entry: the token was fired before the call",
+              "reason": "call-canceled"
+            },
+            "null_outputs": true,
+            "status": "CHS_CANCELED"
+          }
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 1,
+            "chs_error": 0,
+            "chs_filter": 0,
+            "chs_schema": 0,
+            "chs_server": 0
+          }
+        },
+        {
+          "free": "t"
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 0,
+            "chs_error": 0,
+            "chs_filter": 0,
+            "chs_schema": 0,
+            "chs_server": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "cancel.chs_schema_create.during",
+      "kind": "lifecycle",
+      "steps": [
+        {
+          "cancel": "t"
+        },
+        {
+          "fired": "t",
+          "want": 0
+        },
+        {
+          "blocked_call": {
+            "call": {
+              "args": [
+                {
+                  "null_handle": true
+                },
+                {
+                  "bytes_hex": "21423a7b7d"
+                },
+                {
+                  "bytes_hex": "7b7d"
+                },
+                {
+                  "cancel_options": "t"
+                }
+              ],
+              "fn": "chs_schema_create"
+            },
+            "expect": {
+              "error": {
+                "ch_code": 0,
+                "ch_name": "",
+                "column": "",
+                "message": "call canceled at the stub's block check point",
+                "reason": "call-canceled"
+              },
+              "null_outputs": true,
+              "status": "CHS_CANCELED"
+            },
+            "fire": "t"
+          }
+        },
+        {
+          "fired": "t",
+          "want": 1
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 1,
+            "chs_error": 0,
+            "chs_filter": 0,
+            "chs_schema": 0,
+            "chs_server": 0
+          }
+        },
+        {
+          "free": "t"
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 0,
+            "chs_error": 0,
+            "chs_filter": 0,
+            "chs_schema": 0,
+            "chs_server": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "cancel.chs_schema_create.never_fired",
+      "kind": "lifecycle",
+      "steps": [
+        {
+          "cancel": "t"
+        },
+        {
+          "call": {
+            "args": [
+              {
+                "null_handle": true
+              },
+              {
+                "bytes_hex": "6100ff7a"
+              },
+              {
+                "bytes_hex": "7b7d"
+              },
+              {
+                "cancel_options": "t"
+              }
+            ],
+            "fn": "chs_schema_create"
+          },
+          "expect": {
+            "status": "CHS_OK"
+          }
+        },
+        {
+          "fired": "t",
+          "want": 0
+        },
+        {
+          "fire": "t"
+        },
+        {
+          "fired": "t",
+          "want": 1
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 1,
+            "chs_error": 0,
+            "chs_filter": 0,
+            "chs_schema": 0,
+            "chs_server": 0
+          }
+        },
+        {
+          "free": "t"
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 0,
+            "chs_error": 0,
+            "chs_filter": 0,
+            "chs_schema": 0,
+            "chs_server": 0
+          }
+        }
+      ]
+    },
+    {
+      "args": [
+        {
+          "null_handle": true
+        },
+        {
+          "bytes_hex": "6100ff7a"
+        },
+        {
+          "bytes_hex": "7b7d"
+        },
+        {
+          "bytes_hex": "7b2263616e63656c223a226330303030303030303030303030303030227d"
+        }
+      ],
+      "expect": {
+        "error": {
+          "ch_code": 0,
+          "ch_name": "",
+          "column": "",
+          "message": "options: cancel \"c0000000000000000\" names no live cancel token"
+        },
+        "status": "CHS_INVALID_ARGUMENT"
+      },
+      "fn": "chs_schema_create",
+      "id": "cancel.chs_schema_create.unknown_id",
+      "kind": "status"
+    },
+    {
+      "id": "cancel.chs_preview_row.pre_fired",
+      "kind": "lifecycle",
+      "steps": [
+        {
+          "cancel": "t"
+        },
+        {
+          "call": {
+            "args": [
+              {
+                "null_handle": true
+              },
+              {
+                "bytes_hex": "435245415445205441424c45207420287820496e74333229"
+              },
+              {
+                "bytes_hex": ""
+              },
+              {
+                "bytes_hex": ""
+              }
+            ],
+            "fn": "chs_schema_create"
+          },
+          "let": "s"
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 1,
+            "chs_error": 0,
+            "chs_filter": 0,
+            "chs_schema": 1,
+            "chs_server": 0
+          }
+        },
+        {
+          "fire": "t"
+        },
+        {
+          "fired": "t",
+          "want": 1
+        },
+        {
+          "call": {
+            "args": [
+              {
+                "ref": "s"
+              },
+              {
+                "int": 0
+              },
+              {
+                "bytes_hex": "6100ff7a"
+              },
+              {
+                "bytes_hex": "7b7d"
+              },
+              {
+                "bytes_hex": "5b5d"
+              },
+              {
+                "cancel_options": "t"
+              }
+            ],
+            "fn": "chs_preview_row"
+          },
+          "expect": {
+            "error": {
+              "ch_code": 0,
+              "ch_name": "",
+              "column": "",
+              "message": "call canceled at entry: the token was fired before the call",
+              "reason": "call-canceled"
+            },
+            "null_outputs": true,
+            "status": "CHS_CANCELED"
+          }
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 1,
+            "chs_error": 0,
+            "chs_filter": 0,
+            "chs_schema": 1,
+            "chs_server": 0
+          }
+        },
+        {
+          "free": "s"
+        },
+        {
+          "free": "t"
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 0,
+            "chs_error": 0,
+            "chs_filter": 0,
+            "chs_schema": 0,
+            "chs_server": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "cancel.chs_preview_row.during",
+      "kind": "lifecycle",
+      "steps": [
+        {
+          "cancel": "t"
+        },
+        {
+          "call": {
+            "args": [
+              {
+                "null_handle": true
+              },
+              {
+                "bytes_hex": "435245415445205441424c45207420287820496e74333229"
+              },
+              {
+                "bytes_hex": ""
+              },
+              {
+                "bytes_hex": ""
+              }
+            ],
+            "fn": "chs_schema_create"
+          },
+          "let": "s"
+        },
+        {
+          "fired": "t",
+          "want": 0
+        },
+        {
+          "blocked_call": {
+            "call": {
+              "args": [
+                {
+                  "ref": "s"
+                },
+                {
+                  "int": 0
+                },
+                {
+                  "bytes_hex": "21423a7b7d"
+                },
+                {
+                  "bytes_hex": "7b7d"
+                },
+                {
+                  "bytes_hex": "5b5d"
+                },
+                {
+                  "cancel_options": "t"
+                }
+              ],
+              "fn": "chs_preview_row"
+            },
+            "expect": {
+              "error": {
+                "ch_code": 0,
+                "ch_name": "",
+                "column": "",
+                "message": "call canceled at the stub's block check point",
+                "reason": "call-canceled"
+              },
+              "null_outputs": true,
+              "status": "CHS_CANCELED"
+            },
+            "fire": "t"
+          }
+        },
+        {
+          "fired": "t",
+          "want": 1
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 1,
+            "chs_error": 0,
+            "chs_filter": 0,
+            "chs_schema": 1,
+            "chs_server": 0
+          }
+        },
+        {
+          "free": "s"
+        },
+        {
+          "free": "t"
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 0,
+            "chs_error": 0,
+            "chs_filter": 0,
+            "chs_schema": 0,
+            "chs_server": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "cancel.chs_preview_row.never_fired",
+      "kind": "lifecycle",
+      "steps": [
+        {
+          "cancel": "t"
+        },
+        {
+          "call": {
+            "args": [
+              {
+                "null_handle": true
+              },
+              {
+                "bytes_hex": "435245415445205441424c45207420287820496e74333229"
+              },
+              {
+                "bytes_hex": ""
+              },
+              {
+                "bytes_hex": ""
+              }
+            ],
+            "fn": "chs_schema_create"
+          },
+          "let": "s"
+        },
+        {
+          "call": {
+            "args": [
+              {
+                "ref": "s"
+              },
+              {
+                "int": 0
+              },
+              {
+                "bytes_hex": "6100ff7a"
+              },
+              {
+                "bytes_hex": "7b7d"
+              },
+              {
+                "bytes_hex": "5b5d"
+              },
+              {
+                "cancel_options": "t"
+              }
+            ],
+            "fn": "chs_preview_row"
+          },
+          "expect": {
+            "outputs": {
+              "out": {
+                "args": [
+                  {
+                    "kind": "chs_schema"
+                  },
+                  0,
+                  {
+                    "head_hex": "6100ff7a",
+                    "len": 4,
+                    "sha256": "baf9342f98f4ff9b59662fa6afac189dfcda55079f9298c54819bbd2b43bf7b9"
+                  },
+                  {
+                    "head_hex": "7b7d",
+                    "len": 2,
+                    "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+                  },
+                  {
+                    "head_hex": "5b5d",
+                    "len": 2,
+                    "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+                  },
+                  {
+                    "cancel_echo": "t"
+                  }
+                ],
+                "fn": "chs_preview_row",
+                "out": "out"
+              }
+            },
+            "status": "CHS_OK"
+          }
+        },
+        {
+          "fired": "t",
+          "want": 0
+        },
+        {
+          "fire": "t"
+        },
+        {
+          "fired": "t",
+          "want": 1
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 1,
+            "chs_error": 0,
+            "chs_filter": 0,
+            "chs_schema": 1,
+            "chs_server": 0
+          }
+        },
+        {
+          "free": "s"
+        },
+        {
+          "free": "t"
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 0,
+            "chs_error": 0,
+            "chs_filter": 0,
+            "chs_schema": 0,
+            "chs_server": 0
+          }
+        }
+      ]
+    },
+    {
+      "args": [
+        {
+          "handle": {
+            "args": [
+              {
+                "null_handle": true
+              },
+              {
+                "bytes_hex": "435245415445205441424c45207420287820496e74333229"
+              },
+              {
+                "bytes_hex": ""
+              },
+              {
+                "bytes_hex": ""
+              }
+            ],
+            "fn": "chs_schema_create"
+          }
+        },
+        {
+          "int": 0
+        },
+        {
+          "bytes_hex": "6100ff7a"
+        },
+        {
+          "bytes_hex": "7b7d"
+        },
+        {
+          "bytes_hex": "5b5d"
+        },
+        {
+          "bytes_hex": "7b2263616e63656c223a226330303030303030303030303030303030227d"
+        }
+      ],
+      "expect": {
+        "error": {
+          "ch_code": 0,
+          "ch_name": "",
+          "column": "",
+          "message": "options: cancel \"c0000000000000000\" names no live cancel token"
+        },
+        "status": "CHS_INVALID_ARGUMENT"
+      },
+      "fn": "chs_preview_row",
+      "id": "cancel.chs_preview_row.unknown_id",
+      "kind": "status"
+    },
+    {
+      "id": "cancel.chs_preview_batch.pre_fired",
+      "kind": "lifecycle",
+      "steps": [
+        {
+          "cancel": "t"
+        },
+        {
+          "call": {
+            "args": [
+              {
+                "null_handle": true
+              },
+              {
+                "bytes_hex": "435245415445205441424c45207420287820496e74333229"
+              },
+              {
+                "bytes_hex": ""
+              },
+              {
+                "bytes_hex": ""
+              }
+            ],
+            "fn": "chs_schema_create"
+          },
+          "let": "s"
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 1,
+            "chs_error": 0,
+            "chs_filter": 0,
+            "chs_schema": 1,
+            "chs_server": 0
+          }
+        },
+        {
+          "fire": "t"
+        },
+        {
+          "fired": "t",
+          "want": 1
+        },
+        {
+          "call": {
+            "args": [
+              {
+                "ref": "s"
+              },
+              {
+                "int": 0
+              },
+              {
+                "bytes_hex": "6100ff7a"
+              },
+              {
+                "bytes_hex": "7b7d"
+              },
+              {
+                "bytes_hex": "5b5d"
+              },
+              {
+                "null_handle": true
+              },
+              {
+                "int": -1
+              },
+              {
+                "int": 0
+              },
+              {
+                "cancel_options": "t"
+              }
+            ],
+            "fn": "chs_preview_batch"
+          },
+          "expect": {
+            "error": {
+              "ch_code": 0,
+              "ch_name": "",
+              "column": "",
+              "message": "call canceled at entry: the token was fired before the call",
+              "reason": "call-canceled"
+            },
+            "null_outputs": true,
+            "status": "CHS_CANCELED"
+          }
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 1,
+            "chs_error": 0,
+            "chs_filter": 0,
+            "chs_schema": 1,
+            "chs_server": 0
+          }
+        },
+        {
+          "free": "s"
+        },
+        {
+          "free": "t"
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 0,
+            "chs_error": 0,
+            "chs_filter": 0,
+            "chs_schema": 0,
+            "chs_server": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "cancel.chs_preview_batch.during",
+      "kind": "lifecycle",
+      "steps": [
+        {
+          "cancel": "t"
+        },
+        {
+          "call": {
+            "args": [
+              {
+                "null_handle": true
+              },
+              {
+                "bytes_hex": "435245415445205441424c45207420287820496e74333229"
+              },
+              {
+                "bytes_hex": ""
+              },
+              {
+                "bytes_hex": ""
+              }
+            ],
+            "fn": "chs_schema_create"
+          },
+          "let": "s"
+        },
+        {
+          "fired": "t",
+          "want": 0
+        },
+        {
+          "blocked_call": {
+            "call": {
+              "args": [
+                {
+                  "ref": "s"
+                },
+                {
+                  "int": 0
+                },
+                {
+                  "bytes_hex": "21423a7b7d"
+                },
+                {
+                  "bytes_hex": "7b7d"
+                },
+                {
+                  "bytes_hex": "5b5d"
+                },
+                {
+                  "null_handle": true
+                },
+                {
+                  "int": -1
+                },
+                {
+                  "int": 0
+                },
+                {
+                  "cancel_options": "t"
+                }
+              ],
+              "fn": "chs_preview_batch"
+            },
+            "expect": {
+              "error": {
+                "ch_code": 0,
+                "ch_name": "",
+                "column": "",
+                "message": "call canceled at the stub's block check point",
+                "reason": "call-canceled"
+              },
+              "null_outputs": true,
+              "status": "CHS_CANCELED"
+            },
+            "fire": "t"
+          }
+        },
+        {
+          "fired": "t",
+          "want": 1
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 1,
+            "chs_error": 0,
+            "chs_filter": 0,
+            "chs_schema": 1,
+            "chs_server": 0
+          }
+        },
+        {
+          "free": "s"
+        },
+        {
+          "free": "t"
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 0,
+            "chs_error": 0,
+            "chs_filter": 0,
+            "chs_schema": 0,
+            "chs_server": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "cancel.chs_preview_batch.never_fired",
+      "kind": "lifecycle",
+      "steps": [
+        {
+          "cancel": "t"
+        },
+        {
+          "call": {
+            "args": [
+              {
+                "null_handle": true
+              },
+              {
+                "bytes_hex": "435245415445205441424c45207420287820496e74333229"
+              },
+              {
+                "bytes_hex": ""
+              },
+              {
+                "bytes_hex": ""
+              }
+            ],
+            "fn": "chs_schema_create"
+          },
+          "let": "s"
+        },
+        {
+          "call": {
+            "args": [
+              {
+                "ref": "s"
+              },
+              {
+                "int": 0
+              },
+              {
+                "bytes_hex": "6100ff7a"
+              },
+              {
+                "bytes_hex": "7b7d"
+              },
+              {
+                "bytes_hex": "5b5d"
+              },
+              {
+                "null_handle": true
+              },
+              {
+                "int": -1
+              },
+              {
+                "int": 0
+              },
+              {
+                "cancel_options": "t"
+              }
+            ],
+            "fn": "chs_preview_batch"
+          },
+          "expect": {
+            "outputs": {
+              "out": {
+                "args": [
+                  {
+                    "kind": "chs_schema"
+                  },
+                  0,
+                  {
+                    "head_hex": "6100ff7a",
+                    "len": 4,
+                    "sha256": "baf9342f98f4ff9b59662fa6afac189dfcda55079f9298c54819bbd2b43bf7b9"
+                  },
+                  {
+                    "head_hex": "7b7d",
+                    "len": 2,
+                    "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+                  },
+                  {
+                    "head_hex": "5b5d",
+                    "len": 2,
+                    "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+                  },
+                  null,
+                  -1,
+                  0,
+                  {
+                    "cancel_echo": "t"
+                  }
+                ],
+                "fn": "chs_preview_batch",
+                "out": "out"
+              },
+              "out_export": {
+                "args": [
+                  {
+                    "kind": "chs_schema"
+                  },
+                  0,
+                  {
+                    "head_hex": "6100ff7a",
+                    "len": 4,
+                    "sha256": "baf9342f98f4ff9b59662fa6afac189dfcda55079f9298c54819bbd2b43bf7b9"
+                  },
+                  {
+                    "head_hex": "7b7d",
+                    "len": 2,
+                    "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+                  },
+                  {
+                    "head_hex": "5b5d",
+                    "len": 2,
+                    "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+                  },
+                  null,
+                  -1,
+                  0,
+                  {
+                    "cancel_echo": "t"
+                  }
+                ],
+                "fn": "chs_preview_batch",
+                "out": "out_export"
+              }
+            },
+            "status": "CHS_OK"
+          }
+        },
+        {
+          "fired": "t",
+          "want": 0
+        },
+        {
+          "fire": "t"
+        },
+        {
+          "fired": "t",
+          "want": 1
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 1,
+            "chs_error": 0,
+            "chs_filter": 0,
+            "chs_schema": 1,
+            "chs_server": 0
+          }
+        },
+        {
+          "free": "s"
+        },
+        {
+          "free": "t"
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 0,
+            "chs_error": 0,
+            "chs_filter": 0,
+            "chs_schema": 0,
+            "chs_server": 0
+          }
+        }
+      ]
+    },
+    {
+      "args": [
+        {
+          "handle": {
+            "args": [
+              {
+                "null_handle": true
+              },
+              {
+                "bytes_hex": "435245415445205441424c45207420287820496e74333229"
+              },
+              {
+                "bytes_hex": ""
+              },
+              {
+                "bytes_hex": ""
+              }
+            ],
+            "fn": "chs_schema_create"
+          }
+        },
+        {
+          "int": 0
+        },
+        {
+          "bytes_hex": "6100ff7a"
+        },
+        {
+          "bytes_hex": "7b7d"
+        },
+        {
+          "bytes_hex": "5b5d"
+        },
+        {
+          "null_handle": true
+        },
+        {
+          "int": -1
+        },
+        {
+          "int": 0
+        },
+        {
+          "bytes_hex": "7b2263616e63656c223a226330303030303030303030303030303030227d"
+        }
+      ],
+      "expect": {
+        "error": {
+          "ch_code": 0,
+          "ch_name": "",
+          "column": "",
+          "message": "options: cancel \"c0000000000000000\" names no live cancel token"
+        },
+        "status": "CHS_INVALID_ARGUMENT"
+      },
+      "fn": "chs_preview_batch",
+      "id": "cancel.chs_preview_batch.unknown_id",
+      "kind": "status"
+    },
+    {
+      "id": "cancel.chs_preview_insert.pre_fired",
+      "kind": "lifecycle",
+      "steps": [
+        {
+          "cancel": "t"
+        },
+        {
+          "call": {
+            "args": [
+              {
+                "null_handle": true
+              },
+              {
+                "bytes_hex": "435245415445205441424c45207420287820496e74333229"
+              },
+              {
+                "bytes_hex": ""
+              },
+              {
+                "bytes_hex": ""
+              }
+            ],
+            "fn": "chs_schema_create"
+          },
+          "let": "s"
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 1,
+            "chs_error": 0,
+            "chs_filter": 0,
+            "chs_schema": 1,
+            "chs_server": 0
+          }
+        },
+        {
+          "fire": "t"
+        },
+        {
+          "fired": "t",
+          "want": 1
+        },
+        {
+          "call": {
+            "args": [
+              {
+                "ref": "s"
+              },
+              {
+                "int": 0
+              },
+              {
+                "bytes_hex": "6100ff7a"
+              },
+              {
+                "bytes_hex": "7b7d"
+              },
+              {
+                "bytes_hex": "5b5d"
+              },
+              {
+                "null_handle": true
+              },
+              {
+                "int": 0
+              },
+              {
+                "cancel_options": "t"
+              }
+            ],
+            "fn": "chs_preview_insert"
+          },
+          "expect": {
+            "error": {
+              "ch_code": 0,
+              "ch_name": "",
+              "column": "",
+              "message": "call canceled at entry: the token was fired before the call",
+              "reason": "call-canceled"
+            },
+            "null_outputs": true,
+            "status": "CHS_CANCELED"
+          }
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 1,
+            "chs_error": 0,
+            "chs_filter": 0,
+            "chs_schema": 1,
+            "chs_server": 0
+          }
+        },
+        {
+          "free": "s"
+        },
+        {
+          "free": "t"
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 0,
+            "chs_error": 0,
+            "chs_filter": 0,
+            "chs_schema": 0,
+            "chs_server": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "cancel.chs_preview_insert.during",
+      "kind": "lifecycle",
+      "steps": [
+        {
+          "cancel": "t"
+        },
+        {
+          "call": {
+            "args": [
+              {
+                "null_handle": true
+              },
+              {
+                "bytes_hex": "435245415445205441424c45207420287820496e74333229"
+              },
+              {
+                "bytes_hex": ""
+              },
+              {
+                "bytes_hex": ""
+              }
+            ],
+            "fn": "chs_schema_create"
+          },
+          "let": "s"
+        },
+        {
+          "fired": "t",
+          "want": 0
+        },
+        {
+          "blocked_call": {
+            "call": {
+              "args": [
+                {
+                  "ref": "s"
+                },
+                {
+                  "int": 0
+                },
+                {
+                  "bytes_hex": "21423a7b7d"
+                },
+                {
+                  "bytes_hex": "7b7d"
+                },
+                {
+                  "bytes_hex": "5b5d"
+                },
+                {
+                  "null_handle": true
+                },
+                {
+                  "int": 0
+                },
+                {
+                  "cancel_options": "t"
+                }
+              ],
+              "fn": "chs_preview_insert"
+            },
+            "expect": {
+              "error": {
+                "ch_code": 0,
+                "ch_name": "",
+                "column": "",
+                "message": "call canceled at the stub's block check point",
+                "reason": "call-canceled"
+              },
+              "null_outputs": true,
+              "status": "CHS_CANCELED"
+            },
+            "fire": "t"
+          }
+        },
+        {
+          "fired": "t",
+          "want": 1
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 1,
+            "chs_error": 0,
+            "chs_filter": 0,
+            "chs_schema": 1,
+            "chs_server": 0
+          }
+        },
+        {
+          "free": "s"
+        },
+        {
+          "free": "t"
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 0,
+            "chs_error": 0,
+            "chs_filter": 0,
+            "chs_schema": 0,
+            "chs_server": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "cancel.chs_preview_insert.never_fired",
+      "kind": "lifecycle",
+      "steps": [
+        {
+          "cancel": "t"
+        },
+        {
+          "call": {
+            "args": [
+              {
+                "null_handle": true
+              },
+              {
+                "bytes_hex": "435245415445205441424c45207420287820496e74333229"
+              },
+              {
+                "bytes_hex": ""
+              },
+              {
+                "bytes_hex": ""
+              }
+            ],
+            "fn": "chs_schema_create"
+          },
+          "let": "s"
+        },
+        {
+          "call": {
+            "args": [
+              {
+                "ref": "s"
+              },
+              {
+                "int": 0
+              },
+              {
+                "bytes_hex": "6100ff7a"
+              },
+              {
+                "bytes_hex": "7b7d"
+              },
+              {
+                "bytes_hex": "5b5d"
+              },
+              {
+                "null_handle": true
+              },
+              {
+                "int": 0
+              },
+              {
+                "cancel_options": "t"
+              }
+            ],
+            "fn": "chs_preview_insert"
+          },
+          "expect": {
+            "outputs": {
+              "out": {
+                "args": [
+                  {
+                    "kind": "chs_schema"
+                  },
+                  0,
+                  {
+                    "head_hex": "6100ff7a",
+                    "len": 4,
+                    "sha256": "baf9342f98f4ff9b59662fa6afac189dfcda55079f9298c54819bbd2b43bf7b9"
+                  },
+                  {
+                    "head_hex": "7b7d",
+                    "len": 2,
+                    "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+                  },
+                  {
+                    "head_hex": "5b5d",
+                    "len": 2,
+                    "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+                  },
+                  null,
+                  0,
+                  {
+                    "cancel_echo": "t"
+                  }
+                ],
+                "fn": "chs_preview_insert",
+                "out": "out"
+              },
+              "out_rows": {
+                "args": [
+                  {
+                    "kind": "chs_schema"
+                  },
+                  0,
+                  {
+                    "head_hex": "6100ff7a",
+                    "len": 4,
+                    "sha256": "baf9342f98f4ff9b59662fa6afac189dfcda55079f9298c54819bbd2b43bf7b9"
+                  },
+                  {
+                    "head_hex": "7b7d",
+                    "len": 2,
+                    "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+                  },
+                  {
+                    "head_hex": "5b5d",
+                    "len": 2,
+                    "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+                  },
+                  null,
+                  0,
+                  {
+                    "cancel_echo": "t"
+                  }
+                ],
+                "fn": "chs_preview_insert",
+                "out": "out_rows"
+              }
+            },
+            "status": "CHS_OK"
+          }
+        },
+        {
+          "fired": "t",
+          "want": 0
+        },
+        {
+          "fire": "t"
+        },
+        {
+          "fired": "t",
+          "want": 1
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 1,
+            "chs_error": 0,
+            "chs_filter": 0,
+            "chs_schema": 1,
+            "chs_server": 0
+          }
+        },
+        {
+          "free": "s"
+        },
+        {
+          "free": "t"
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 0,
+            "chs_error": 0,
+            "chs_filter": 0,
+            "chs_schema": 0,
+            "chs_server": 0
+          }
+        }
+      ]
+    },
+    {
+      "args": [
+        {
+          "handle": {
+            "args": [
+              {
+                "null_handle": true
+              },
+              {
+                "bytes_hex": "435245415445205441424c45207420287820496e74333229"
+              },
+              {
+                "bytes_hex": ""
+              },
+              {
+                "bytes_hex": ""
+              }
+            ],
+            "fn": "chs_schema_create"
+          }
+        },
+        {
+          "int": 0
+        },
+        {
+          "bytes_hex": "6100ff7a"
+        },
+        {
+          "bytes_hex": "7b7d"
+        },
+        {
+          "bytes_hex": "5b5d"
+        },
+        {
+          "null_handle": true
+        },
+        {
+          "int": 0
+        },
+        {
+          "bytes_hex": "7b2263616e63656c223a226330303030303030303030303030303030227d"
+        }
+      ],
+      "expect": {
+        "error": {
+          "ch_code": 0,
+          "ch_name": "",
+          "column": "",
+          "message": "options: cancel \"c0000000000000000\" names no live cancel token"
+        },
+        "status": "CHS_INVALID_ARGUMENT"
+      },
+      "fn": "chs_preview_insert",
+      "id": "cancel.chs_preview_insert.unknown_id",
+      "kind": "status"
+    },
+    {
+      "id": "cancel.chs_filter_eval_body.pre_fired",
+      "kind": "lifecycle",
+      "steps": [
+        {
+          "cancel": "t"
+        },
+        {
+          "call": {
+            "args": [
+              {
+                "null_handle": true
+              },
+              {
+                "bytes_hex": "435245415445205441424c45207420287820496e74333229"
+              },
+              {
+                "bytes_hex": ""
+              },
+              {
+                "bytes_hex": ""
+              }
+            ],
+            "fn": "chs_schema_create"
+          },
+          "let": "s"
+        },
+        {
+          "call": {
+            "args": [
+              {
+                "ref": "s"
+              },
+              {
+                "bytes_hex": "78203d2031"
+              },
+              {
+                "bytes_hex": "7b7d"
+              },
+              {
+                "bytes_hex": ""
+              },
+              {
+                "bytes_hex": ""
+              }
+            ],
+            "fn": "chs_filter_create"
+          },
+          "let": "f"
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 1,
+            "chs_error": 0,
+            "chs_filter": 1,
+            "chs_schema": 1,
+            "chs_server": 0
+          }
+        },
+        {
+          "fire": "t"
+        },
+        {
+          "fired": "t",
+          "want": 1
+        },
+        {
+          "call": {
+            "args": [
+              {
+                "ref": "f"
+              },
+              {
+                "int": 0
+              },
+              {
+                "bytes_hex": "6100ff7a"
+              },
+              {
+                "bytes_hex": "7b7d"
+              },
+              {
+                "bytes_hex": "5b5d"
+              },
+              {
+                "cancel_options": "t"
+              }
+            ],
+            "fn": "chs_filter_eval_body"
+          },
+          "expect": {
+            "error": {
+              "ch_code": 0,
+              "ch_name": "",
+              "column": "",
+              "message": "call canceled at entry: the token was fired before the call",
+              "reason": "call-canceled"
+            },
+            "null_outputs": true,
+            "status": "CHS_CANCELED"
+          }
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 1,
+            "chs_error": 0,
+            "chs_filter": 1,
+            "chs_schema": 1,
+            "chs_server": 0
+          }
+        },
+        {
+          "free": "f"
+        },
+        {
+          "free": "s"
+        },
+        {
+          "free": "t"
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 0,
+            "chs_error": 0,
+            "chs_filter": 0,
+            "chs_schema": 0,
+            "chs_server": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "cancel.chs_filter_eval_body.during",
+      "kind": "lifecycle",
+      "steps": [
+        {
+          "cancel": "t"
+        },
+        {
+          "call": {
+            "args": [
+              {
+                "null_handle": true
+              },
+              {
+                "bytes_hex": "435245415445205441424c45207420287820496e74333229"
+              },
+              {
+                "bytes_hex": ""
+              },
+              {
+                "bytes_hex": ""
+              }
+            ],
+            "fn": "chs_schema_create"
+          },
+          "let": "s"
+        },
+        {
+          "call": {
+            "args": [
+              {
+                "ref": "s"
+              },
+              {
+                "bytes_hex": "78203d2031"
+              },
+              {
+                "bytes_hex": "7b7d"
+              },
+              {
+                "bytes_hex": ""
+              },
+              {
+                "bytes_hex": ""
+              }
+            ],
+            "fn": "chs_filter_create"
+          },
+          "let": "f"
+        },
+        {
+          "fired": "t",
+          "want": 0
+        },
+        {
+          "blocked_call": {
+            "call": {
+              "args": [
+                {
+                  "ref": "f"
+                },
+                {
+                  "int": 0
+                },
+                {
+                  "bytes_hex": "21423a7b7d"
+                },
+                {
+                  "bytes_hex": "7b7d"
+                },
+                {
+                  "bytes_hex": "5b5d"
+                },
+                {
+                  "cancel_options": "t"
+                }
+              ],
+              "fn": "chs_filter_eval_body"
+            },
+            "expect": {
+              "error": {
+                "ch_code": 0,
+                "ch_name": "",
+                "column": "",
+                "message": "call canceled at the stub's block check point",
+                "reason": "call-canceled"
+              },
+              "null_outputs": true,
+              "status": "CHS_CANCELED"
+            },
+            "fire": "t"
+          }
+        },
+        {
+          "fired": "t",
+          "want": 1
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 1,
+            "chs_error": 0,
+            "chs_filter": 1,
+            "chs_schema": 1,
+            "chs_server": 0
+          }
+        },
+        {
+          "free": "f"
+        },
+        {
+          "free": "s"
+        },
+        {
+          "free": "t"
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 0,
+            "chs_error": 0,
+            "chs_filter": 0,
+            "chs_schema": 0,
+            "chs_server": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "cancel.chs_filter_eval_body.never_fired",
+      "kind": "lifecycle",
+      "steps": [
+        {
+          "cancel": "t"
+        },
+        {
+          "call": {
+            "args": [
+              {
+                "null_handle": true
+              },
+              {
+                "bytes_hex": "435245415445205441424c45207420287820496e74333229"
+              },
+              {
+                "bytes_hex": ""
+              },
+              {
+                "bytes_hex": ""
+              }
+            ],
+            "fn": "chs_schema_create"
+          },
+          "let": "s"
+        },
+        {
+          "call": {
+            "args": [
+              {
+                "ref": "s"
+              },
+              {
+                "bytes_hex": "78203d2031"
+              },
+              {
+                "bytes_hex": "7b7d"
+              },
+              {
+                "bytes_hex": ""
+              },
+              {
+                "bytes_hex": ""
+              }
+            ],
+            "fn": "chs_filter_create"
+          },
+          "let": "f"
+        },
+        {
+          "call": {
+            "args": [
+              {
+                "ref": "f"
+              },
+              {
+                "int": 0
+              },
+              {
+                "bytes_hex": "6100ff7a"
+              },
+              {
+                "bytes_hex": "7b7d"
+              },
+              {
+                "bytes_hex": "5b5d"
+              },
+              {
+                "cancel_options": "t"
+              }
+            ],
+            "fn": "chs_filter_eval_body"
+          },
+          "expect": {
+            "outputs": {
+              "out": {
+                "args": [
+                  {
+                    "kind": "chs_filter"
+                  },
+                  0,
+                  {
+                    "head_hex": "6100ff7a",
+                    "len": 4,
+                    "sha256": "baf9342f98f4ff9b59662fa6afac189dfcda55079f9298c54819bbd2b43bf7b9"
+                  },
+                  {
+                    "head_hex": "7b7d",
+                    "len": 2,
+                    "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+                  },
+                  {
+                    "head_hex": "5b5d",
+                    "len": 2,
+                    "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+                  },
+                  {
+                    "cancel_echo": "t"
+                  }
+                ],
+                "fn": "chs_filter_eval_body",
+                "out": "out"
+              }
+            },
+            "status": "CHS_OK"
+          }
+        },
+        {
+          "fired": "t",
+          "want": 0
+        },
+        {
+          "fire": "t"
+        },
+        {
+          "fired": "t",
+          "want": 1
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 1,
+            "chs_error": 0,
+            "chs_filter": 1,
+            "chs_schema": 1,
+            "chs_server": 0
+          }
+        },
+        {
+          "free": "f"
+        },
+        {
+          "free": "s"
+        },
+        {
+          "free": "t"
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 0,
+            "chs_error": 0,
+            "chs_filter": 0,
+            "chs_schema": 0,
+            "chs_server": 0
+          }
+        }
+      ]
+    },
+    {
+      "args": [
+        {
+          "handle": {
+            "args": [
+              {
+                "handle": {
+                  "args": [
+                    {
+                      "null_handle": true
+                    },
+                    {
+                      "bytes_hex": "435245415445205441424c45207420287820496e74333229"
+                    },
+                    {
+                      "bytes_hex": ""
+                    },
+                    {
+                      "bytes_hex": ""
+                    }
+                  ],
+                  "fn": "chs_schema_create"
+                }
+              },
+              {
+                "bytes_hex": "78203d2031"
+              },
+              {
+                "bytes_hex": "7b7d"
+              },
+              {
+                "bytes_hex": ""
+              },
+              {
+                "bytes_hex": ""
+              }
+            ],
+            "fn": "chs_filter_create"
+          }
+        },
+        {
+          "int": 0
+        },
+        {
+          "bytes_hex": "6100ff7a"
+        },
+        {
+          "bytes_hex": "7b7d"
+        },
+        {
+          "bytes_hex": "5b5d"
+        },
+        {
+          "bytes_hex": "7b2263616e63656c223a226330303030303030303030303030303030227d"
+        }
+      ],
+      "expect": {
+        "error": {
+          "ch_code": 0,
+          "ch_name": "",
+          "column": "",
+          "message": "options: cancel \"c0000000000000000\" names no live cancel token"
+        },
+        "status": "CHS_INVALID_ARGUMENT"
+      },
+      "fn": "chs_filter_eval_body",
+      "id": "cancel.chs_filter_eval_body.unknown_id",
+      "kind": "status"
+    },
+    {
+      "id": "cancel.chs_block_create.pre_fired",
+      "kind": "lifecycle",
+      "steps": [
+        {
+          "cancel": "t"
+        },
+        {
+          "call": {
+            "args": [
+              {
+                "null_handle": true
+              },
+              {
+                "bytes_hex": "435245415445205441424c45207420287820496e74333229"
+              },
+              {
+                "bytes_hex": ""
+              },
+              {
+                "bytes_hex": ""
+              }
+            ],
+            "fn": "chs_schema_create"
+          },
+          "let": "s"
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 1,
+            "chs_error": 0,
+            "chs_filter": 0,
+            "chs_schema": 1,
+            "chs_server": 0
+          }
+        },
+        {
+          "fire": "t"
+        },
+        {
+          "fired": "t",
+          "want": 1
+        },
+        {
+          "call": {
+            "args": [
+              {
+                "ref": "s"
+              },
+              {
+                "int": 0
+              },
+              {
+                "bytes_hex": "6100ff7a"
+              },
+              {
+                "bytes_hex": "7b7d"
+              },
+              {
+                "bytes_hex": "5b5d"
+              },
+              {
+                "cancel_options": "t"
+              }
+            ],
+            "fn": "chs_block_create"
+          },
+          "expect": {
+            "error": {
+              "ch_code": 0,
+              "ch_name": "",
+              "column": "",
+              "message": "call canceled at entry: the token was fired before the call",
+              "reason": "call-canceled"
+            },
+            "null_outputs": true,
+            "status": "CHS_CANCELED"
+          }
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 1,
+            "chs_error": 0,
+            "chs_filter": 0,
+            "chs_schema": 1,
+            "chs_server": 0
+          }
+        },
+        {
+          "free": "s"
+        },
+        {
+          "free": "t"
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 0,
+            "chs_error": 0,
+            "chs_filter": 0,
+            "chs_schema": 0,
+            "chs_server": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "cancel.chs_block_create.during",
+      "kind": "lifecycle",
+      "steps": [
+        {
+          "cancel": "t"
+        },
+        {
+          "call": {
+            "args": [
+              {
+                "null_handle": true
+              },
+              {
+                "bytes_hex": "435245415445205441424c45207420287820496e74333229"
+              },
+              {
+                "bytes_hex": ""
+              },
+              {
+                "bytes_hex": ""
+              }
+            ],
+            "fn": "chs_schema_create"
+          },
+          "let": "s"
+        },
+        {
+          "fired": "t",
+          "want": 0
+        },
+        {
+          "blocked_call": {
+            "call": {
+              "args": [
+                {
+                  "ref": "s"
+                },
+                {
+                  "int": 0
+                },
+                {
+                  "bytes_hex": "21423a7b7d"
+                },
+                {
+                  "bytes_hex": "7b7d"
+                },
+                {
+                  "bytes_hex": "5b5d"
+                },
+                {
+                  "cancel_options": "t"
+                }
+              ],
+              "fn": "chs_block_create"
+            },
+            "expect": {
+              "error": {
+                "ch_code": 0,
+                "ch_name": "",
+                "column": "",
+                "message": "call canceled at the stub's block check point",
+                "reason": "call-canceled"
+              },
+              "null_outputs": true,
+              "status": "CHS_CANCELED"
+            },
+            "fire": "t"
+          }
+        },
+        {
+          "fired": "t",
+          "want": 1
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 1,
+            "chs_error": 0,
+            "chs_filter": 0,
+            "chs_schema": 1,
+            "chs_server": 0
+          }
+        },
+        {
+          "free": "s"
+        },
+        {
+          "free": "t"
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 0,
+            "chs_error": 0,
+            "chs_filter": 0,
+            "chs_schema": 0,
+            "chs_server": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "cancel.chs_block_create.never_fired",
+      "kind": "lifecycle",
+      "steps": [
+        {
+          "cancel": "t"
+        },
+        {
+          "call": {
+            "args": [
+              {
+                "null_handle": true
+              },
+              {
+                "bytes_hex": "435245415445205441424c45207420287820496e74333229"
+              },
+              {
+                "bytes_hex": ""
+              },
+              {
+                "bytes_hex": ""
+              }
+            ],
+            "fn": "chs_schema_create"
+          },
+          "let": "s"
+        },
+        {
+          "call": {
+            "args": [
+              {
+                "ref": "s"
+              },
+              {
+                "int": 0
+              },
+              {
+                "bytes_hex": "6100ff7a"
+              },
+              {
+                "bytes_hex": "7b7d"
+              },
+              {
+                "bytes_hex": "5b5d"
+              },
+              {
+                "cancel_options": "t"
+              }
+            ],
+            "fn": "chs_block_create"
+          },
+          "expect": {
+            "status": "CHS_OK"
+          }
+        },
+        {
+          "fired": "t",
+          "want": 0
+        },
+        {
+          "fire": "t"
+        },
+        {
+          "fired": "t",
+          "want": 1
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 1,
+            "chs_error": 0,
+            "chs_filter": 0,
+            "chs_schema": 1,
+            "chs_server": 0
+          }
+        },
+        {
+          "free": "s"
+        },
+        {
+          "free": "t"
+        },
+        {
+          "live_delta": {
+            "chs_block": 0,
+            "chs_buf": 0,
+            "chs_cancel": 0,
+            "chs_error": 0,
+            "chs_filter": 0,
+            "chs_schema": 0,
+            "chs_server": 0
+          }
+        }
+      ]
+    },
+    {
+      "args": [
+        {
+          "handle": {
+            "args": [
+              {
+                "null_handle": true
+              },
+              {
+                "bytes_hex": "435245415445205441424c45207420287820496e74333229"
+              },
+              {
+                "bytes_hex": ""
+              },
+              {
+                "bytes_hex": ""
+              }
+            ],
+            "fn": "chs_schema_create"
+          }
+        },
+        {
+          "int": 0
+        },
+        {
+          "bytes_hex": "6100ff7a"
+        },
+        {
+          "bytes_hex": "7b7d"
+        },
+        {
+          "bytes_hex": "5b5d"
+        },
+        {
+          "bytes_hex": "7b2263616e63656c223a226330303030303030303030303030303030227d"
+        }
+      ],
+      "expect": {
+        "error": {
+          "ch_code": 0,
+          "ch_name": "",
+          "column": "",
+          "message": "options: cancel \"c0000000000000000\" names no live cancel token"
+        },
+        "status": "CHS_INVALID_ARGUMENT"
+      },
+      "fn": "chs_block_create",
+      "id": "cancel.chs_block_create.unknown_id",
+      "kind": "status"
     },
     {
       "expect": {
