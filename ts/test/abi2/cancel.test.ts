@@ -171,6 +171,39 @@ describe.skipIf(!stubsAvailable)('cancelable async calls over the stub library',
     expect(probe(image).fire_after_free).toBe(0);
   });
 
+  it('cancel after the last check point', async () => {
+    // The stub's `!L:` body passes the library's last check point and then waits for the token, so the native call
+    // goes on to return a complete answer. The TypeScript call still rejects promptly with CallCanceledError (cause =
+    // the signal's reason); the late native result is freed and never surfaced, and its buffers stay alive until the
+    // native call returns.
+    const { image, library } = openStub();
+    const schema = library.compileTable(CREATE);
+    const seen = recordReturns();
+    const late = Buffer.from('!L:{"x":1}\n');
+    const baseline = library.liveHandles();
+    // parseBlock returns a handle, so a late result that leaked would show in the live count.
+    for (const [name, call] of [
+      ['row', (signal: AbortSignal) => schema.rowAsync(Format.JSONEachRow, late, { signal })],
+      ['parseBlock', (signal: AbortSignal) => schema.parseBlockAsync(Format.JSONEachRow, late, { signal })],
+    ] as const) {
+      const before = probe(image).inflight;
+      const ac = new AbortController();
+      const reasonValue = { why: `stop ${name}` };
+      const p = call(ac.signal);
+      expect(await waitFor(() => probe(image).inflight > before), `${name} reached the wait`).toBe(true);
+      ac.abort(reasonValue);
+      await expectCanceled(p, reasonValue);
+      // Rejected while the native call is still waiting inside the library.
+      expect(probe(image).inflight, name).toBe(before + 1);
+      expect(await waitFor(() => probe(image).inflight === before), `${name} native call returned`).toBe(true);
+      await asyncCallsForTest.drain();
+      const last = seen.at(-1);
+      expect(last === undefined ? undefined : statusOf(last.result), `${name}: the library answered`).toBe(Status.Ok);
+      expect(library.liveHandles(), `${name}: the late result was freed`).toEqual(baseline);
+    }
+    expect(probe(image).fire_after_free).toBe(0);
+  });
+
   it('never aborted: the same answer as the synchronous call, with the token id in the options document', async () => {
     const { library } = openStub();
     const schema = library.compileTable(CREATE);

@@ -264,6 +264,34 @@ fn a_token_canceled_during_the_call_cancels_it() {
     assert_eq!(live_cancels(&f.lib), 0);
 }
 
+/// A cancel that arrives after the library's last check point finds a
+/// complete answer, and the call returns it: a complete answer is never turned
+/// into a cancel. The stub's `!L:` body passes its last check point, waits for
+/// the token, then answers its echo.
+#[test]
+fn cancel_after_last_check_point() {
+    let Some(f) = fixture("cancel_after_last_check_point") else {
+        return;
+    };
+    let late: &[u8] = b"!L:{\"x\":1}";
+    let want = make(&f, Call::Row, late, None).expect("without a token");
+    let before = probe(&f.lib).0;
+    let token = CancelToken::new();
+    let got = std::thread::scope(|s| {
+        let t = token.clone();
+        let worker = s.spawn(|| make(&f, Call::Row, late, Some(t)));
+        wait_inflight(&f.lib, before + 1);
+        token.cancel();
+        worker.join().expect("the call's thread panicked")
+    });
+    assert_eq!(
+        got.expect("a cancel after the last check point is not an error"),
+        want
+    );
+    assert_eq!(probe(&f.lib).0, before);
+    assert_eq!(live_cancels(&f.lib), 0);
+}
+
 #[test]
 fn a_token_never_canceled_gives_the_answer_the_call_gives_without_one() {
     let Some(f) = fixture("a_token_never_canceled_gives_the_answer_the_call_gives_without_one")
