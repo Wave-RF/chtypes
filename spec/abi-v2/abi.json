@@ -3022,7 +3022,6 @@
       "carries_names": true,
       "byte_fields": [
         "err",
-        "export_declined",
         "unsupported_settings[].name",
         "export_columns[].name",
         "framing.header.names[].name"
@@ -3192,17 +3191,6 @@
               "$ref": "#/$defs/named"
             }
           },
-          "export_declined": {
-            "type": "string"
-          },
-          "export_declined_b64": {
-            "type": "string",
-            "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
-          },
-          "export_declined_reason": {
-            "type": "string",
-            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
-          },
           "rows_undecided": {
             "type": "integer",
             "minimum": 0,
@@ -3232,32 +3220,6 @@
                 "properties": {
                   "err": false,
                   "err_b64": false
-                }
-              }
-            ]
-          },
-          {
-            "oneOf": [
-              {
-                "required": [
-                  "export_declined"
-                ],
-                "properties": {
-                  "export_declined_b64": false
-                }
-              },
-              {
-                "required": [
-                  "export_declined_b64"
-                ],
-                "properties": {
-                  "export_declined": false
-                }
-              },
-              {
-                "properties": {
-                  "export_declined": false,
-                  "export_declined_b64": false
                 }
               }
             ]
