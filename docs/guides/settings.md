@@ -130,7 +130,7 @@ the prefix 'SQL_' registered for user-defined settings
 
 Obsolete setting names are accepted silently, as real servers do. Custom-prefixed names are legal and inert — the default prefix is `SQL_`, and `chtypes_custom_settings_prefixes` mirrors whatever your server's `custom_settings_prefixes` is set to.
 
-Catching a typo at **declare** time is the point of passing the discovered profile to the compile rather than only per call. A typo in a profile that is only ever passed per call is a typo you find on the hot path. Per-call values are not validated the way a server's `SET` validates them, so validate a value yourself before relying on a refusal ([`limitations.md`](../limitations.md#per-call-settings-values-are-not-validated-the-way-a-servers-set-validates-them)).
+Catching a typo at **declare** time is the point of passing the discovered profile to the compile rather than only per call. A typo in a profile that is only ever passed per call is a typo you find on the hot path. An invalid per-call value is refused with the code a server's `SET` gives.
 
 ## The six `chtypes_*` keys
 

@@ -201,69 +201,58 @@ The decline catalog (`spec/abi-v2/declines/declines.json`) gives two reasons, an
 
 ## Known gaps
 
-Each item is a place where the library does less than you might expect, or answers differently from a server. None of them returns a wrong answer without saying so, and every one is planned. Each entry says what happens, what to do today, and that a fix is planned.
+Each item is a place where the library does less than you might expect, or answers differently from a server. None of them returns a wrong answer without saying so. Each entry says what happens, what to do today, and how it was measured.
 
 ### Nested String values carry no raw bytes
 
-A `String` value nested inside `Array(String)`, `Map` or `Tuple` carries no raw `value` bytes, only ClickHouse's rendering of it. A scalar `String` or `FixedString` value always carries its raw bytes, including inside `Nullable` and `LowCardinality`.
+A `String` inside an `Array`, `Tuple` or `Map` carries no `value_b64`. Its rendering is byte-exact: `stored_b64` or `wire_b64` carry the bytes when they are not valid UTF-8. A scalar `String` or `FixedString` value always carries its raw bytes, including inside `Nullable` and `LowCardinality`.
 
-**Workaround:** read the rendering for a nested value, or select the nested element as its own scalar column when you need the bytes. **Planned.**
+**Workaround:** read the rendering for a nested value, or select the nested element as its own scalar column when you need the bytes.
+
+**Measured** by the artifact producer on build `20261104.061020`, all four lines, against stock servers.
 
 <a id="binary-input-parameters-must-be-utf-8"></a>
 
-### Binary input parameters: Rust and the 1.x SDKs need UTF-8
+### Binary input parameters: Rust settings and query parameters must be valid UTF-8
 
-**Fixed in ABI v2 for Go, Python and TypeScript.** A `settings` or `query_params` value whose bytes are not valid UTF-8 is carried in the object form `{"b64": "<standard base64, padded>"}` (Input values, in the Preamble of [`spec/abi-v2/docs.md`](../spec/abi-v2/docs.md)), and those three bindings send it in place of the string ([`guides/settings.md`](guides/settings.md)). Rust's settings and query parameters take `String`, so a value that is not valid UTF-8 cannot be expressed there, and on ABI v1 (the 1.x SDKs) such a value is refused.
+Go, Python and TypeScript send any bytes as a `settings` or `query_params` value, in the ABI's `{"b64": "<standard base64, padded>"}` form ([`guides/settings.md`](guides/settings.md)). The library accepts that form on every line, and a raw non-UTF-8 byte in the JSON itself is a usage error. `param_encoding=raw` is declined (`option-not-implemented`).
 
-**Workaround** where the binding cannot send the bytes: inline the value as `unhex('<hex>')`, built from hex digits only.
+Rust's settings and query-parameter values are Rust `String`s, so they must be valid UTF-8: the `settings` and `params` fields of the schema, insert and filter option types are `Vec<(String, String)>`, and `ServerProfile.settings` is a `BTreeMap<String, String>`. In Rust, only column defaults and column names may be arbitrary bytes.
 
-### Zone names outside ClickHouse's embedded table follow the host
+**Workaround** in Rust: inline the value as `unhex('<hex>')`, built from hex digits only.
 
-Every zone in ClickHouse's own embedded table, the 598 names of `system.time_zones` on 26.3, 26.7, 26.8 and 26.9 (tzdata 2026d), is compiled into the library. It answers the same on every host, with no zoneinfo installed. A name outside that table is looked up the way a ClickHouse server looks it up: in the host's zoneinfo directory, `$TZDIR` if set, else `/usr/share/zoneinfo`. Three kinds of name depend on it:
+**Measured** for the C ABI by the artifact producer on build `20261104.061020`, all four lines, against stock servers. The Rust types are read from the binding's public API.
 
-- `posix/<zone>` loads only where the host has a `posix/` tree. The `clickhouse/clickhouse-server` images (Ubuntu 22.04) and Debian 12 have one. Ubuntu 24.04 has none, even with `tzdata-legacy`.
-- `posixrules` loads only where the host has that file. Ubuntu's and Debian's `tzdata` install it.
-- `localtime` loads only where `<zoneinfo>/localtime` resolves. On Debian and Ubuntu it is a symlink to `/etc/localtime`, so that file must exist too.
+<a id="zone-names-outside-clickhouses-embedded-table-follow-the-host"></a>
 
-Where the host lacks the file, the library refuses the name with ClickHouse's error 36, as a server whose image lacks it does. `right/*` names are refused on every host, even where the files exist, because ClickHouse's loader rejects leap-second data. When both accept a name, the library and the server render values identically. The library needs glibc. On darwin, the host lookup folds case.
+### On 26.3, 26.8 and 26.9, `posix/*` zone names follow the host
 
-**Workaround:** to answer as the official server image does, give the library host that image's zoneinfo. Copy its `/usr/share/zoneinfo`, or point `TZDIR` at a copy, and copy its `/etc/localtime` for `localtime`. With both in place, the library agreed with the server image on every name tested, on all four lines.
+All 598 names of `system.time_zones` compile into the library on all four lines, with no failures, and answer the same on every host with no zoneinfo installed. A name outside that table is a different matter, and it depends on the line:
 
-### `SHOW CREATE` of a Memory table is declined
+- **26.10:** the server refuses any zone name outside `system.time_zones` with error 36 ("Time zone X is not supported"), and the library matches it exactly, with or without `TZDIR`. There is no host dependence.
+- **26.3, 26.8 and 26.9:** a `posix/<zone>` name is looked up in the host's zoneinfo tree, `$TZDIR` if set, else `/usr/share/zoneinfo`. Where the host has no `posix/` tree the library refuses the name with error 36, as a server whose image lacks it does. `right/*` names are refused with 36 on both sides.
 
-**Fixed in the 2.0.0 libraries** (build `20261021.191313`, measured by the artifact producer). `SHOW CREATE TABLE` text from live 26.3, 26.7, 26.8 and 26.9 servers compiles with the schema call for all 32 shapes measured (8 per line, `ENGINE = Memory` included), under `posture` `create` and `load`. Compiling means the call succeeds; the compiled columns were not compared with the server's. The 28 of 32, with the 4 `ENGINE = Memory` tables declined, was measured on the 1.x libraries.
+**Workaround:** to answer as the official server image does, point `TZDIR` at a copy of that image's zoneinfo.
+
+**Measured** by the artifact producer on build `20261104.061020`, all four lines (the 598 names of `system.time_zones` on each), against stock servers.
 
 ### A batch preview with a filter in a different zone than the batch is declined
 
-When the filter evaluates in a different time zone than the batch it runs over, the preview is declined. It never answers wrongly.
+When the filter was created in a different time zone than the batch it runs over, `chs_preview_batch` is declined (`unsupported`, reason `preview-batch-zone-mismatch`), and so is a named zone paired with none. The same zone on both sides, or none on both, answers. A decline never answers wrongly.
 
-**Workaround:** use one zone for both, or a per-row preview. **Planned.**
+**Workaround:** use one zone for both, or parse the body with `chs_block_create` and evaluate with `chs_filter_eval_block`, or use a per-row preview.
 
-### Per-call settings values are not validated the way a server's `SET` validates them
-
-**Fixed in the artifacts, build `20261004.021416` and later** (no SDK change). The artifact producer reports that an invalid value for a per-call setting is now refused with the server's own error code, as a server's `SET` refuses it, and that a filter created with an invalid `session_timezone` is refused at create (code 36). Every tag and line resolves to that build by default.
-
-On the first 1.0 build, `20261003.231921`, which stays fetchable by digest and through a lock that pins it, some invalid values are still accepted. **Workaround on that build:** validate settings values in the caller, or against a server, before relying on a refusal here, or move to the current build: `chtypes fetch <line>` resolves it, and a locked project re-resolves with `chtypes fetch --lock <file> --update`.
-
-### `lossy` on a String holding a raw NUL in TSV
-
-**Fixed on build `20261012.142240` (v2-dev.13); still present in the 1.0 libraries.** For a TSV `String` that contains a raw NUL byte, the third detector reported `value_changed` with `lossy: true` although the bytes are preserved. On build `20261012.142240` it reports no change for a raw NUL in a `String`, an `Array(String)` or an exact-length `FixedString`, nor for a TSV `\x41` escape, and it still reports real changes: a `[NULL]` into `Array(String)` and a `DateTime` reformat (`value_changed`), and a `FixedString` pad (`fixedstring_pad`). On the 1.0 production build `20261007.162307`, a raw NUL in a TSV `String` still reports `value_changed` with `lossy: true`. Both measured by this repository through the Python SDK on darwin-arm64, on all four lines.
-
-On a 1.0 library, **workaround:** compare `value`, the raw bytes, with your input; the bindings never second-guess `lossy`.
+**Measured** by the artifact producer on build `20261104.061020`, all four lines.
 
 ### No call for a server's version or settings
 
-The library has no call that queries a server's version or its changed settings, and no settings reader. The caller supplies both.
+The library has no call that queries a server's version or its changed settings, and no settings reader. The caller supplies both. By design: the ABI has 41 exports and none queries a server; `chs_clickhouse_version` reports the library's own version.
 
-**Workaround:** read the version and settings from your own connection and pass them in. **Planned.**
+**Workaround:** read the version and settings from your own connection and pass them in.
 
 On ABI v2, a table a server already holds was created under that CREATE's own settings, which its `create_table_query` does not carry, so compile such a statement at `posture: load`, as the caller's obligation in [`spec/abi-v2/docs.md`](../spec/abi-v2/docs.md) (`input:schema_options`) requires: compiled at `create` instead, a table created under `flatten_nested = 0` has its `Nested` column read as flattened arrays.
 
-### A time-dependent TTL in a CREATE comes back as an internal error
-
-`TTL now() + INTERVAL 1 DAY` in a `CREATE TABLE` returns an `InternalError` (`CHS_INTERNAL`) where a server refuses the statement with its own error. Measured against the 26.9.8.3 library (`measured`).
-
-**Workaround:** treat an internal error from a CREATE whose TTL does not reference a column as that refusal. **Planned.**
+**Measured** by the artifact producer on build `20261104.061020`: `abi.json` and the library's exported symbols agree on the 41 exports.
 
 <a id="pre-10"></a>
 
