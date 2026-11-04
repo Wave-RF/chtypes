@@ -177,7 +177,14 @@ TAB = "\t"
 # ------------------------------------------------------------------- naming
 
 
+# Go initialisms (revive's var-naming): a word that is one is written in
+# capitals inside a Go identifier. Only the words an ABI name uses today.
+_GO_INITIALISMS = {"id": "ID"}
+
+
 def _pascal_word(word: str) -> str:
+    if word in _GO_INITIALISMS:
+        return _GO_INITIALISMS[word]
     return word[:1].upper() + word[1:] if word else word
 
 
