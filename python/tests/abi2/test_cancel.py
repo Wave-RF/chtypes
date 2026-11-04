@@ -168,6 +168,30 @@ def test_a_token_fired_during_the_call_cancels_it(lib, handles, name) -> None:
     assert _probe(lib) == {"fire_after_free": 0, "inflight": before}
 
 
+def test_cancel_after_last_check_point(lib, handles) -> None:
+    """A cancel that arrives after the library's last check point finds a
+    complete answer, and the call returns it: a complete answer is never
+    turned into a cancel. The stub's `!L:` body passes its last check point,
+    waits for the token, then answers its echo."""
+    body = b"!L:late"
+    want = handles["row"](body)
+    base = _live_cancel(lib)
+    before = _probe(lib)["inflight"]
+    tok = CancelToken()
+    w = _Worker(lambda: handles["row"](body, cancel=tok))
+    w.start()
+    _wait_inflight(lib, before + 1)
+    assert w.is_alive()
+    tok.cancel()
+    w.join(10)
+    assert not w.is_alive()
+    assert w.error is None, repr(w.error)
+    assert w.result == want
+    assert tok.canceled
+    assert _live_cancel(lib) == base
+    assert _probe(lib) == {"fire_after_free": 0, "inflight": before}
+
+
 # -------------------------------------------------------------- never fired
 
 
