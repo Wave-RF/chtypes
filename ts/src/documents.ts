@@ -273,13 +273,9 @@ export interface InsertResult {
   readonly unsupportedSettings: readonly Buffer[];
   readonly framing: Framing | undefined;
   readonly partitionCount: number | undefined;
-  /** The output's one column list, from `export_columns`; `undefined` when the document carries none (no output was asked for, or it was declined). */
+  /** The output's one column list, from `export_columns`; present only when the outcome is `accepted` and an output format was asked for, `undefined` otherwise. */
   readonly exportColumns: readonly Buffer[] | undefined;
-  /** Why an asked-for output was declined, as bytes (`export_declined` or `export_declined_b64`); empty when none was. */
-  readonly exportDeclined: Buffer;
-  /** The catalog id of a declined output, from `export_declined_reason`; `undefined` when the output ran or none was asked for. */
-  readonly exportDeclinedReason: string | undefined;
-  /** The output rows in the requested format (possibly empty): present only for an output that ran; `undefined` when none was asked for, or the insert was refused or declined. Owned bytes. */
+  /** The output rows in the requested format (possibly empty): present only when the outcome is `accepted` and an output format was asked for; `undefined` in every other case, whatever the library handed back. A declined output is the whole call's decline (`outcome` `unsupported`, `reason` the decline id, `errCode` -2, `refusedAt` `body_step`). Owned bytes. */
   readonly output: Buffer | undefined;
 }
 
@@ -725,12 +721,13 @@ export function decodeBatch(bytes: Uint8Array, payload: Buffer | undefined): Bat
 export function decodeInsert(bytes: Uint8Array, output: Buffer | undefined): InsertResult {
   const doc = 'insert_result';
   const o = asObject(doc, '$', parseDoc(doc, bytes));
-  const exportDeclined = bytesOr(doc, o, 'export_declined');
   const exportColumnsRaw = o.export_columns;
-  // As for a batch: a declined output has no buffer and no column list, whatever the call returned.
-  const declined = exportDeclined.length > 0;
+  const outcome = batchOutcomeOf(strOr(doc, o, 'outcome', ''));
+  // The output exists exactly when the outcome is accepted (and an output format was asked for, which is
+  // what the caller's buffer says): keyed on the outcome, not on any member of the document.
+  const accepted = outcome === 'accepted';
   return {
-    outcome: batchOutcomeOf(strOr(doc, o, 'outcome', '')),
+    outcome,
     errCode: intOr(doc, o, 'code', 0),
     errMsg: bytesOr(doc, o, 'err'),
     reason: optStr(doc, o, 'reason'),
@@ -743,10 +740,8 @@ export function decodeInsert(bytes: Uint8Array, output: Buffer | undefined): Ins
     unsupportedSettings: bytesListOf(doc, o, 'unsupported_settings'),
     framing: o.framing === undefined ? undefined : framingOf(doc, o.framing),
     partitionCount: optInt(doc, o, 'partition_count'),
-    exportColumns: exportColumnsRaw === undefined || declined ? undefined : bytesListOf(doc, o, 'export_columns'),
-    exportDeclined,
-    exportDeclinedReason: optStr(doc, o, 'export_declined_reason'),
-    output: declined ? undefined : output,
+    exportColumns: exportColumnsRaw === undefined || !accepted ? undefined : bytesListOf(doc, o, 'export_columns'),
+    output: accepted ? output : undefined,
   };
 }
 

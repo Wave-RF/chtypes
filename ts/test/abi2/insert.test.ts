@@ -111,14 +111,21 @@ describe.skipIf(!stubsAvailable)('Schema.insert over the stub library', () => {
     schema.close();
   });
 
-  it('returns the output only when one was asked for, and EXPORT_NONE validates only', () => {
-    const { library } = openStub('ok');
+  it('hands the output to the result only for an accepted call, and EXPORT_NONE validates only', () => {
+    const { image, library } = openStub('ok');
     const schema = library.compileTable(CREATE);
+    const spy = vi.spyOn(image.calls, 'previewInsert');
     const withOut = schema.insert(Format.JSONEachRow, BODY, Format.CSV);
-    expect(Buffer.isBuffer(withOut.output)).toBe(true);
-    expect(echo(withOut.output).out).toBe('out_rows');
+    // The library did hand back bytes (the stub's echo), but the echo's outcome is unknown, never
+    // accepted: the output is keyed on the outcome, so the public result carries none.
+    const raw = spy.mock.results[0]?.value as { outRows?: Buffer } | undefined;
+    expect(Buffer.isBuffer(raw?.outRows)).toBe(true);
+    expect(echo(raw?.outRows).out).toBe('out_rows');
+    expect(withOut.output).toBeUndefined();
+    expect(withOut.exportColumns).toBeUndefined();
     const none = schema.insert(Format.JSONEachRow, BODY, EXPORT_NONE);
     expect(none.output).toBeUndefined();
+    spy.mockRestore();
     schema.close();
   });
 

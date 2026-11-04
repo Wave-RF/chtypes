@@ -3,11 +3,14 @@
  * decoded results: `scripts/abi-v2/check-insert-projection.py`'s `evaluate`, rule
  * by rule and in the same order. A test helper, not public API.
  *
- * `projectionVerdict(insert, outputBytes, batch, exportBytes, outputFormat)`
+ * `projectionVerdict(insert, outputBytes, batch, exportBytes, outputFormat, rawInsert)`
  * returns the FIRST violated rule, or the carve-out the case is equal by, or
  * equal. The output and the export bytes are passed on their own because a
- * decoded result hides the buffer of a declined output (as it should), while the
- * rule is about exactly the buffers a broken library could hand out anyway.
+ * decoded result hides the buffer of an output that does not exist (as it
+ * should), while the rule is about exactly the buffers a broken library could
+ * hand out anyway. `rawInsert` is the insert document as parsed JSON: the public
+ * `InsertResult` has no `export_declined*` member, and the rule must still see
+ * one that a broken library wrote.
  *
  * Whether the batch carried a filter is read off its rows: a verdict is present
  * on every row exactly when the call had a filter (`batch.verdict_iff_filter`),
@@ -20,6 +23,7 @@ import type { BatchResult, InsertResult } from '../../src/documents.js';
 
 export const RULES = [
   'e_row_rejects',
+  'export_decline_is_call_decline',
   'shared_members',
   'counts',
   'err_prefix',
@@ -70,6 +74,7 @@ export function projectionVerdict(
   batch: BatchResult,
   exp: Buffer | undefined,
   outputFormat: string,
+  rawInsert: Record<string, unknown>,
 ): ProjectionVerdict {
   const rows = batch.rows;
   const verdicts = rows.map((r) => r.verdict);
@@ -97,24 +102,38 @@ export function projectionVerdict(
     return EQUAL;
   }
 
+  // export_decline_is_call_decline: a declined export of an accepted batch is the insert's whole-call decline.
+  const declined = batch.outcome === 'accepted' && (batch.exportDeclined.length > 0 || batch.exportDeclinedReason !== undefined);
+  if (declined) {
+    if (
+      !(
+        ins.outcome === 'unsupported' &&
+        ins.reason === batch.exportDeclinedReason &&
+        ins.errCode === -2 &&
+        ins.refusedAt === 'body_step' &&
+        ins.exportColumns === undefined &&
+        out === undefined
+      )
+    ) {
+      return violates('export_decline_is_call_decline');
+    }
+  }
+
   // shared_members: every member both documents may carry, equal and absent where absent.
+  // An insert document never carries export_declined*; a declined output replaces the call's decline members.
+  if (['export_declined', 'export_declined_b64', 'export_declined_reason'].some((k) => k in rawInsert)) return violates('shared_members');
   // The batch decoder reads an absent count as 0, so a count is absent on the batch exactly when it had no filter.
   const batchPassed = filtered ? batch.rowsPassed : undefined;
   const batchCut = filtered ? batch.rowsCut : undefined;
   if (
     !(
-      batch.outcome === ins.outcome &&
-      batch.errCode === ins.errCode &&
-      batch.reason === ins.reason &&
-      batch.refusedAt === ins.refusedAt &&
+      (declined || (batch.outcome === ins.outcome && batch.errCode === ins.errCode && batch.reason === ins.reason && batch.refusedAt === ins.refusedAt)) &&
       batch.rowsRead === ins.rowsRead &&
       batch.rowsSkipped === ins.rowsSkipped &&
       buffersEqual(batch.unsupportedSettings, ins.unsupportedSettings) &&
       isDeepStrictEqual(batch.framing, ins.framing) &&
       batch.partitionCount === ins.partitionCount &&
-      optBuffersEqual(batch.exportColumns, ins.exportColumns) &&
-      batch.exportDeclined.equals(ins.exportDeclined) &&
-      batch.exportDeclinedReason === ins.exportDeclinedReason &&
+      (declined || optBuffersEqual(batch.exportColumns, ins.exportColumns)) &&
       batchPassed === ins.rowsPassed &&
       batchCut === ins.rowsCut
     )
