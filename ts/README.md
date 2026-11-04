@@ -71,7 +71,20 @@ The four are **peers**: a decline never satisfies `instanceof SchemaError`. Load
 
 **`Registry.open`, `for` and `installed` are async**, because the fetch layer is. Construction opens nothing; `for` resolves from the cache first and fetches only when `autofetch` is on.
 
-**`worker_threads` is the boundary.** Every call runs synchronously on one thread, so there is nothing to share inside an isolate. A handle cannot cross to another worker: each worker opens its own objects over the shared image, and every worker must call `setup` identically.
+**Cancellation is an `AbortSignal` on the `...Async` calls.** `rowAsync`, `rowsAsync`, `insertAsync`, `parseBlockAsync`, `filter.rowsAsync` and `library.compileTableAsync` take the same arguments as their synchronous twins plus `{ signal }`, and give the same answer. Each runs off the event loop on the libuv threadpool (four threads by default; `UV_THREADPOOL_SIZE` sets it, and a call beyond it waits for a free thread). Aborting the signal rejects the promise at once, whether the call is queued or running, with a `CallCanceledError` (`name` `'AbortError'`, `cause` the signal's `reason`); the library stops the call at its next check point. `Filter.eval` is not cancelable and has no async twin. Closing a schema, filter or block while an async call uses it refuses later calls at once and frees once the call returns; it does not cancel the call. The synchronous calls are unchanged.
+
+```ts
+const ac = new AbortController();
+setTimeout(() => ac.abort(new Error('too slow')), 5000);
+try {
+  const batch = await schema.rowsAsync(Format.JSONEachRow, body, { signal: ac.signal });
+} catch (err) {
+  if (err instanceof CallCanceledError) console.log('canceled:', err.cause);
+  else throw err;
+}
+```
+
+**`worker_threads` is the boundary.** Every synchronous call runs on the calling thread, so there is nothing to share inside an isolate. A handle cannot cross to another worker: each worker opens its own objects over the shared image, and every worker must call `setup` identically.
 
 ## Tests
 

@@ -12,13 +12,22 @@
  * the library, so a binding object neither holds its parent alive nor orders
  * its frees: closing a schema while its filters are in use is legal, and
  * `close` is idempotent. A `FinalizationRegistry` per handle class frees what
- * the caller abandons. TypeScript runs every call synchronously on one
- * thread, so the close guard of the other bindings reduces to this check: no
- * call is ever in flight while `close` runs.
+ * the caller abandons.
+ *
+ * Asynchronous calls. `row`, `rows`, `insert`, `parseBlock`, `Filter.rows`
+ * and `Library.compileTable` each have an `...Async` twin that runs off the
+ * event loop and takes an `AbortSignal` (`./cancel.ts`); the synchronous
+ * methods are unchanged. An asynchronous call leases every handle it passes,
+ * so `close()` of a schema, filter or block while one runs refuses every later
+ * call at once and frees once the last call in flight returns. `close()` does
+ * NOT cancel those calls: abort their signal for that. `Filter.eval` has no
+ * asynchronous twin; the library's block evaluation is not cancelable.
  */
 
-import type { BlockHandle, Calls, FilterHandle, Posture, SchemaHandle } from './abi2/index.js';
-import { EXPORT_NONE, type Format } from './abi2/index.js';
+import type { BlockHandle, Calls, FilterHandle, HandleRef, Posture, SchemaHandle } from './abi2/index.js';
+import { asBuffer, EXPORT_NONE, type Format, NULL_EXTERNAL, wrapHandle } from './abi2/index.js';
+import { SYMBOL } from './abi2/decls.gen.js';
+import { type AsyncOptions, callAsync } from './cancel.js';
 import {
   type BatchResult,
   decodeBatch,
@@ -175,7 +184,24 @@ export class Filter {
     );
   }
 
-  /** Evaluate over a parsed block. The filter brings its zone and the block brought its parse zone, so there are no settings here. */
+  /** `rows`, off the event loop: the same call and the same answer, cancelable through `options.signal` (a `CallCanceledError`). */
+  rowsAsync(format: Format, body: Uint8Array, options: EvalOptions & AsyncOptions = {}): Promise<FilterResult> {
+    return callAsync(this.#calls, options.signal, {
+      name: SYMBOL.FILTER_EVAL_BODY,
+      handles: [this.#h],
+      args: ([f], cancelId) => [
+        f,
+        format,
+        asBuffer(bodyIn(body)),
+        encodeSettings(options.settings, options.sessionTimezone),
+        encodeColumns(options.columns),
+        encodeInsertOptions(options, cancelId),
+      ],
+      decode: (outs) => decodeFilterResult(outs.out as Buffer),
+    });
+  }
+
+  /** Evaluate over a parsed block. The filter brings its zone and the block brought its parse zone, so there are no settings here. Not cancelable, and so with no asynchronous twin. */
   eval(block: Block): FilterResult {
     return decodeFilterResult(this.#calls.filterEvalBlock(this.#h, blockHandles.get(block) as BlockHandle));
   }
@@ -265,7 +291,7 @@ export class Schema {
    * the outcome, the counts and the output rows in `outFormat`, with no per-row documents. A refusal or a decline
    * is the result, never an error; only misuse and internal errors raise. `outFormat` is `EXPORT_NONE` (validate
    * only: `output` is `undefined`) or a `Format` the build can write. The output exists only if the whole call
-   * succeeded; an `e` verdict from the filter fails the call. Synchronous: there is no async variant and no cancellation.
+   * succeeded; an `e` verdict from the filter fails the call. Synchronous; `insertAsync` is the cancelable twin.
    */
   insert(format: Format, body: Uint8Array, outFormat: Format | typeof EXPORT_NONE, options: InsertCallOptions = {}): InsertResult {
     const filter = options.rowFilter === undefined ? null : (filterHandles.get(options.rowFilter) as FilterHandle);
@@ -310,7 +336,86 @@ export class Schema {
     );
   }
 
-  /** Release this schema; idempotent. Filters and blocks made from it keep working. */
+  /** `row`, off the event loop: the same call and the same answer, cancelable through `options.signal` (a `CallCanceledError`). */
+  rowAsync(format: Format, body: Uint8Array, options: RowOptions & AsyncOptions = {}): Promise<RowResult> {
+    return callAsync(this.#calls, options.signal, {
+      name: SYMBOL.PREVIEW_ROW,
+      handles: [this.#h],
+      args: ([s], cancelId) => [
+        s,
+        format,
+        asBuffer(bodyIn(body)),
+        encodeSettings(options.settings, options.sessionTimezone),
+        encodeColumns(options.columns),
+        encodeInsertOptions(options, cancelId),
+      ],
+      decode: (outs) => decodeRow(outs.out as Buffer),
+    });
+  }
+
+  /** `rows`, off the event loop: the same call and the same answer, cancelable through `options.signal` (a `CallCanceledError`). */
+  rowsAsync(format: Format, body: Uint8Array, options: RowsOptions & AsyncOptions = {}): Promise<BatchResult> {
+    const exporting = options.exportFormat !== undefined;
+    return callAsync(this.#calls, options.signal, {
+      name: SYMBOL.PREVIEW_BATCH,
+      handles: [this.#h, options.rowFilter === undefined ? null : (filterHandles.get(options.rowFilter) as FilterHandle)],
+      args: ([s, f], cancelId) => [
+        s,
+        format,
+        asBuffer(bodyIn(body)),
+        encodeSettings(options.settings, options.sessionTimezone),
+        encodeColumns(options.columns),
+        f ?? NULL_EXTERNAL,
+        exporting ? (options.exportFormat as number) : EXPORT_NONE,
+        options.docFlags ?? 0,
+        encodeInsertOptions(options, cancelId),
+      ],
+      decode: (outs) => decodeBatch(outs.out as Buffer, exporting ? (outs.out_export as Buffer) : undefined),
+    });
+  }
+
+  /** `insert`, off the event loop: the same call and the same answer, cancelable through `options.signal` (a `CallCanceledError`). */
+  insertAsync(
+    format: Format,
+    body: Uint8Array,
+    outFormat: Format | typeof EXPORT_NONE,
+    options: InsertCallOptions & AsyncOptions = {},
+  ): Promise<InsertResult> {
+    return callAsync(this.#calls, options.signal, {
+      name: SYMBOL.PREVIEW_INSERT,
+      handles: [this.#h, options.rowFilter === undefined ? null : (filterHandles.get(options.rowFilter) as FilterHandle)],
+      args: ([s, f], cancelId) => [
+        s,
+        format,
+        asBuffer(bodyIn(body)),
+        encodeSettings(options.settings, options.sessionTimezone),
+        encodeColumns(options.columns),
+        f ?? NULL_EXTERNAL,
+        outFormat as number,
+        encodeInsertOptions(options, cancelId),
+      ],
+      decode: (outs) => decodeInsert(outs.out as Buffer, outFormat === EXPORT_NONE ? undefined : (outs.out_rows as Buffer)),
+    });
+  }
+
+  /** `parseBlock`, off the event loop: the same call and the same answer, cancelable through `options.signal` (a `CallCanceledError`). A block parsed after the signal aborted is freed, never returned. */
+  parseBlockAsync(format: Format, body: Uint8Array, options: RowOptions & AsyncOptions = {}): Promise<Block> {
+    return callAsync(this.#calls, options.signal, {
+      name: SYMBOL.BLOCK_CREATE,
+      handles: [this.#h],
+      args: ([s], cancelId) => [
+        s,
+        format,
+        asBuffer(bodyIn(body)),
+        encodeSettings(options.settings, options.sessionTimezone),
+        encodeColumns(options.columns),
+        encodeInsertOptions(options, cancelId),
+      ],
+      decode: (outs) => new Block(wrapHandle(this.#calls.raw, outs.out as HandleRef) as BlockHandle),
+    });
+  }
+
+  /** Release this schema; idempotent. Filters and blocks made from it keep working. An asynchronous call in flight keeps the schema until it returns; `close` does not cancel it. */
   close(): void {
     this.#h.close();
   }

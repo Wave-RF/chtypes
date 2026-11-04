@@ -322,8 +322,12 @@ function memoryLimitText(v: bigint | number | string): string {
   return text;
 }
 
-/** The `insert_options` document of a call that models an INSERT. */
-export function encodeInsertOptions(o: InsertOptions): Buffer {
+/**
+ * The `insert_options` document of a call that models an INSERT. `cancelId` is the id of the call's own cancel token
+ * (`./cancel.ts`), set only by an asynchronous call given a signal; it is written last, so it replaces a `cancel` key
+ * in `insertOptionsExtra`.
+ */
+export function encodeInsertOptions(o: InsertOptions, cancelId?: string): Buffer {
   const doc = new OptionDoc('insert options');
   if (o.insertableColumns !== undefined) doc.set('insertable_columns', o.insertableColumns.map((n) => nameObject('insert options', n)));
   if (o.columnDefaults !== undefined) {
@@ -336,6 +340,7 @@ export function encodeInsertOptions(o: InsertOptions): Buffer {
   if (o.deferDefaults !== undefined) doc.set('defer_defaults', o.deferDefaults);
   if (o.memoryLimitBytes !== undefined) doc.set('memory_limit_bytes', memoryLimitText(o.memoryLimitBytes));
   doc.setRaw(o.insertOptionsExtra);
+  if (cancelId !== undefined) doc.set('cancel', cancelId);
   return doc.encode();
 }
 
@@ -347,10 +352,11 @@ export function encodeFilterOptions(o: FilterOptionMembers): Buffer {
   return doc.encode();
 }
 
-/** The `schema_options` document of `chs_schema_create`. */
-export function encodeSchemaOptions(o: SchemaOptionMembers): Buffer {
+/** The `schema_options` document of `chs_schema_create`; `cancelId` as for `encodeInsertOptions`. */
+export function encodeSchemaOptions(o: SchemaOptionMembers, cancelId?: string): Buffer {
   const doc = new OptionDoc('schema options');
   if (o.posture !== undefined) doc.set('posture', o.posture);
   doc.setRaw(o.schemaOptionsExtra);
+  if (cancelId !== undefined) doc.set('cancel', cancelId);
   return doc.encode();
 }
