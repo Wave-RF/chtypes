@@ -42,7 +42,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-USER_AGENT = "chtypes-ci-line-select/1"
+USER_AGENT = "line-select/1 (chtypes CI)"
 LINE_RE = re.compile(r"[0-9]+\.[0-9]+")
 FP_RE = re.compile(r"[0-9a-f]{64}")
 
