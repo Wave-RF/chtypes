@@ -263,6 +263,20 @@
  *   'x')`, with or without a user and password) is refused by the screen alone, not by the context:
  *   that form opens a connection to the named host before it asks anything the context controls.
  *   From 26.8 the function takes no host, and both checks apply.
+ * - **A filter's key-dependent and index-dependent verdicts describe the table the schema
+ *   declares.** Every decline that reads the schema's keys, partition key, skip indices or
+ *   projections (the enum, token-index, text-index, bloom_filter and partition-key declines among
+ *   them; each catalog entry in `spec/abi-v2/declines/declines.json` states its trigger) holds only
+ *   when the schema carries the server table's ACTUAL keys and indices, ideally compiled from that
+ *   table's `create_table_query` with `chs_schema_create` in the `load` posture (`schema_options`
+ *   `{"posture":"load"}`; see `posture`). A schema compiled with a neutral or different engine or
+ *   key, such as the column list under `MergeTree ORDER BY tuple()`, makes those verdicts describe
+ *   that different table: there the library answers as a server holding the unkeyed table answers,
+ *   while the server's keyed table refuses the query. For example, `NOT isNotDistinctFrom(ne,
+ *   'zz')` over a `Nullable(Enum8)` column at `validate_enum_literals_in_operators = 1` answers
+ *   every row over `ORDER BY tuple()`, and is declined over `ORDER BY (e, ne, id)`, where 26.8,
+ *   26.9 and 26.10 refuse it with 691 (`measured` on build 20261103.193829, through every settings
+ *   route).
  */
 #ifndef CHTYPES_V2_H
 #define CHTYPES_V2_H
