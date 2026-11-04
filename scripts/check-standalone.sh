@@ -89,6 +89,10 @@ note "OpenLinked is undefined without the tag (as it must be)"
 
 LOG_DIR="$ROOT/scratch"; mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/check-standalone.json"
+# The bare copy has no tests/fixtures by design, so a test that requires a
+# shared fixture where CHTYPES_REQUIRE_FIXTURES is set (the main CI sets it)
+# must skip here, loudly, as it does on a contributor's machine.
+unset CHTYPES_REQUIRE_FIXTURES
 say "go test -race ./... (untagged, -json into $LOG)"
 rc=0
 ( cd "$DEST" && go test -race -json -count=1 ./... ) > "$LOG" 2>&1 || rc=$?
