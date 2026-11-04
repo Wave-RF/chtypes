@@ -65,6 +65,7 @@ export {
   ArtifactCorruptError,
   ArtifactError,
   ArtifactIncompatibleError,
+  CallCanceledError,
   CallError,
   type CallErrorFields,
   ChtypesError,

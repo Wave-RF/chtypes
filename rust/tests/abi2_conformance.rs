@@ -225,6 +225,7 @@ fn free_handle(api: &Api, h: MintedHandle) {
             MintedHandle::Schema(p) => (api.chs_schema_free)(p),
             MintedHandle::Filter(p) => (api.chs_filter_free)(p),
             MintedHandle::Block(p) => (api.chs_block_free)(p),
+            MintedHandle::Cancel(p) => (api.chs_cancel_free)(p),
         }
     }
 }
