@@ -1554,12 +1554,12 @@ CHS_API chs_status chs_preview_row(
  * chs_preview_batch: Validates and coerces a whole body, which may hold many rows, and returns the
  * batch document, with the same declines as `chs_preview_row`. Row separation and the server's
  * error allowance are ClickHouse's own, and the document's `unconsumed` and `framing` say what the
- * reader skipped and how it framed the body. `filter`, when given, is evaluated over each stored
- * row in the same parse. When that filter's WHERE would read a setting this build's filters do not
- * honor, from the filter's own `settings`, the name joins the batch document's top-level
- * `unsupported_settings` and the batch is `unsupported` by `batch_outcome`'s step 2: every row
- * `unsupported`, filter rows `d`, and no export. The same call without the filter is unchanged.
- * `export_format` is `CHS_EXPORT_NONE` or a `chs_format` the build can write
+ * reader skipped or left unread and how it framed the body. `filter`, when given, is evaluated over
+ * each stored row in the same parse. When that filter's WHERE would read a setting this build's
+ * filters do not honor, from the filter's own `settings`, the name joins the batch document's
+ * top-level `unsupported_settings` and the batch is `unsupported` by `batch_outcome`'s step 2:
+ * every row `unsupported`, filter rows `d`, and no export. The same call without the filter is
+ * unchanged. `export_format` is `CHS_EXPORT_NONE` or a `chs_format` the build can write
  * (`capabilities.export_formats`; this description defines `JSONCompactEachRow`, with `row_spans`,
  * and `Native`, with `row_positions`); with an export that runs, `out_export` receives the accepted
  * rows serialized once, an empty buffer when the batch holds no row. When the export is declined
