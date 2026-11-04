@@ -41,8 +41,7 @@ type Value struct {
 	// false when the document carries none.
 	Poison bool
 	// DupDropped is whether the reader dropped a duplicate key for this
-	// column (an object that names it twice), from dup_dropped; false when
-	// the document carries none.
+	// column, from dup_dropped; false when the document carries none.
 	DupDropped bool
 }
 

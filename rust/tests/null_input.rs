@@ -6,16 +6,17 @@
 //! expected value is read off its name (a `control.` name expects false), and
 //! the cell count is the generator's `NULL_INPUT_CELL_COUNT`, pinned here as 12
 //! (the Python suite fails first if the generator changes it), so a document
-//! that lost its cells fails.
+//! that lost its cells fails. The Enum8 cells also read `poison` true
+//! (null-as-default stores 0, outside the enum); every other cell is false.
 //!
 //! `CHTYPES_ABI2_STUBS` unset: this suite skips LOUDLY by name and passes. One
 //! test function, deliberately: it sets the process environment the
 //! unverified open needs.
 //!
 //! The same function then runs the `poison` and `dup_dropped` cells over the
-//! `value-flags` variant (`VALUE_FLAGS_DOCS`): an Enum DEFAULT outside its
-//! domain and a Map key named twice, with controls holding each member false
-//! and absent; a `poison.` entry expects `poison` only, a `dup.` entry
+//! `value-flags` variant (`VALUE_FLAGS_DOCS`): a NULL read into a non-Nullable
+//! Enum8 and one canned `dup_dropped` entry, with controls holding each member
+//! false and absent; a `poison.` entry expects `poison` only, a `dup.` entry
 //! `dup_dropped` only.
 
 use std::path::{Path, PathBuf};
@@ -48,6 +49,13 @@ fn check(where_: &str, cols: &[Value]) -> usize {
         if want {
             cells += 1;
         }
+        // A NULL into a non-Nullable Enum8 stores 0, outside the enum: poisoned.
+        let want_poison = want && c.column.as_bytes().ends_with(b".enum8");
+        assert_eq!(
+            c.poison, want_poison,
+            "{where_}: column {:?}: poison",
+            c.column
+        );
         assert_eq!(
             c.null_input, want,
             "{where_}: column {:?}: null_input",
@@ -119,9 +127,8 @@ fn null_input_is_exposed_over_the_v2_stub() {
         .sum();
     assert_eq!(cells, CELL_COUNT, "{b:?}");
 
-    // The poison and dup_dropped cells (variant "value-flags"): an Enum
-    // DEFAULT outside its domain left out of the row, and a Map key named
-    // twice in a JSONEachRow object.
+    // The poison and dup_dropped cells (variant "value-flags"): a NULL read
+    // into a non-Nullable Enum8, and one canned dup_dropped entry.
     let lib = open_variant(&dir, "value-flags");
     let schema = lib
         .compile_table("CREATE TABLE t (x Int32)", &CompileOptions::default())
@@ -129,7 +136,7 @@ fn null_input_is_exposed_over_the_v2_stub() {
     let r = schema
         .row(
             Format::JsonEachRow,
-            br#"{"m":{"a":1,"a":2}}"#,
+            br#"{"e":null}"#,
             &RowOptions::default(),
         )
         .expect("row");

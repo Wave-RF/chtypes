@@ -7,6 +7,8 @@ package chtypes
 // true; two controls carry it false and absent. Each entry's expected value is
 // read off its name (a "control." name expects false), and the cell count is
 // _stubshared.NULL_INPUT_CELL_COUNT, so a document that lost its cells fails.
+// The Enum8 cells also read Poison true (null-as-default stores 0, outside the
+// enum), every other cell and control false.
 // The row goes through the generic reader and the batch through the fast one
 // (decode_batch.go). Without CHTYPES_ABI2_STUBS this skips loudly by name.
 
@@ -27,6 +29,11 @@ func checkNullInput(t *testing.T, where string, cols []Value) (cells int) {
 		}
 		if c.NullInput != want {
 			t.Errorf("%s: column %q: NullInput = %v, want %v", where, c.Column, c.NullInput, want)
+		}
+		// A NULL into a non-Nullable Enum8 stores 0, outside the enum: poisoned.
+		wantPoison := want && strings.HasSuffix(c.Column, ".enum8")
+		if c.Poison != wantPoison {
+			t.Errorf("%s: column %q: Poison = %v, want %v", where, c.Column, c.Poison, wantPoison)
 		}
 	}
 	return cells
@@ -59,11 +66,11 @@ func TestStubNullInput(t *testing.T) {
 }
 
 // The poison and dup_dropped cells, variant "value-flags"
-// (_stubshared.VALUE_FLAGS_DOCS): an Enum DEFAULT outside its domain left
-// out of the row (poison, in JSONEachRow and TSV) and a Map key named twice in
-// a JSONEachRow object (dup_dropped), plus four controls that hold each
-// member false and absent. A "poison." entry expects Poison true and
-// DupDropped false, a "dup." entry the reverse, a "control." entry both false,
+// (_stubshared.VALUE_FLAGS_DOCS): a JSON null or TSV \N into a non-Nullable
+// Enum8 (poison, in JSONEachRow and TSV) and one canned entry that carries
+// dup_dropped, plus four controls that hold each member false and absent. A
+// "poison." entry expects Poison true and DupDropped false, a "dup." entry the
+// reverse, a "control." entry both false,
 // so a binding that swaps the members fails.
 const (
 	valueFlagsPoisonCells = 2 // _stubshared.VALUE_FLAGS_POISON_CELLS: 2 formats

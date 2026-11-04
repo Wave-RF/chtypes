@@ -44,6 +44,9 @@ function check(where: string, cols: readonly Value[]): number {
     const want = !name.startsWith('control.');
     if (want) cells++;
     expect({ where, name, nullInput: c.nullInput }).toEqual({ where, name, nullInput: want });
+    // A NULL into a non-Nullable Enum8 stores 0, outside the enum: poisoned.
+    const wantPoison = want && name.endsWith('.enum8');
+    expect({ where, name, poison: c.poison }).toEqual({ where, name, poison: wantPoison });
   }
   return cells;
 }
@@ -69,11 +72,11 @@ describe.skipIf(!stubsAvailable)('null_input: a NULL literal into a non-Nullable
 
 /**
  * The poison and dup_dropped cells, variant `value-flags`
- * (`_stubshared.VALUE_FLAGS_DOCS`): an Enum DEFAULT outside its domain left out
- * of the row (poison, in JSONEachRow and TSV) and a Map key named twice in a
- * JSONEachRow object (dup_dropped), plus four controls that hold each member
- * false and absent. A `poison.` entry expects poison true and dupDropped
- * false, a `dup.` entry the reverse, a `control.` entry both false, so a
+ * (`_stubshared.VALUE_FLAGS_DOCS`): a JSON null or TSV \N into a non-Nullable
+ * Enum8 (poison, in JSONEachRow and TSV) and one canned entry that carries
+ * dup_dropped, plus four controls that hold each member false and absent. A
+ * `poison.` entry expects poison true and dupDropped false, a `dup.` entry the
+ * reverse, a `control.` entry both false, so a
  * binding that swaps the members fails. The counts are pinned as 2 and 1 (the
  * Python suite fails first if the generator changes them).
  */
@@ -100,11 +103,11 @@ function checkFlags(where: string, cols: readonly Value[]): { poison: number; du
   return { poison, dup };
 }
 
-describe.skipIf(!stubsAvailable)('poison and dup_dropped: Enum DEFAULT out of domain, a Map key named twice (stub value-flags)', () => {
+describe.skipIf(!stubsAvailable)('poison and dup_dropped: an Enum8 NULL read, a canned dup_dropped entry (stub value-flags)', () => {
   it('every row and batch entry exposes both members, each false where it is false or absent', () => {
     const lib = openStub('value-flags');
     const schema = lib.compileTable('CREATE TABLE t (x Int32)');
-    const r = schema.row(Format.JSONEachRow, Buffer.from('{"m":{"a":1,"a":2}}', 'utf8'));
+    const r = schema.row(Format.JSONEachRow, Buffer.from('{"e":null}', 'utf8'));
     expect(checkFlags('row', r.columns)).toEqual({ poison: POISON_CELLS, dup: DUP_CELLS });
     const b = schema.rows(Format.TSV, Buffer.from('1\n', 'utf8'));
     let poison = 0;

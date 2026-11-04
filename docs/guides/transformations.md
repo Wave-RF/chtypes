@@ -87,15 +87,18 @@ The lossy ones, by what they are about:
 
 **`poisoned` is the one to wire an alert to.** It means the stored value is not merely different but meaningless — the row was accepted and what landed cannot be read back as what was sent. A batch carrying one gets the outcome `accepted_poisoned` rather than `accepted`, which exists precisely so a caller can branch on it without scanning the reasons.
 
+## A NULL into a non-Nullable Enum is poisoned
+
+A JSON `null` (JSONEachRow) or a TSV `\N` read into a column that is not `Nullable` stores the column's default, and `null_input` is true on that entry. For an `Enum8('a' = 1, 'b' = 2)` the default the server stores is 0, which is outside the Enum. The server accepts the insert and cannot read the row back, so the answer is the outcome `accepted_poisoned` with code `691`, the column's `poison` is true (and `null_input` too), and `transformed` names it with the reason `poisoned`. `measured` on a real library build, all four lines and all four bindings.
+
+- **Every other type in the `null_input` set stores a readable default** (`0`, the empty string, the zero UUID, `1970-01-01 00:00:00`), so its entry carries `null_input` true and `poison` false.
+- **A row that supplies an in-domain value is unaffected**: `poison` and `null_input` are both false.
+
 ## An out-of-domain Enum DEFAULT follows the server
 
-An `Enum` column whose literal `DEFAULT` is outside the Enum's domain (for example `x Enum8('a' = 1) DEFAULT 7.5`) follows the server. Compiling the schema mirrors the server's `CREATE`, and a row answer mirrors the server's `INSERT` plus readback:
+An `Enum` column whose literal `DEFAULT` is outside the Enum's domain is a different case from the NULL above, and it follows the server's `CREATE`. On the supported 26.x lines the server refuses such a table, so compiling the schema fails with a `SchemaError`, code `691` (or `70` for a literal out of the Enum's integer range, such as `300`). With the `load` posture the schema compiles, but a row that leaves the column out is `rejected` with code `691` and `poison` false: no row there is poisoned. Use the NULL case above to see `poison`.
 
-- **Where the server accepts the table** (24.8, 25.3, 25.8, 25.10), the schema compiles. A row that relies on the default is answered `accepted_poisoned`, carrying the code the server's readback raises (`691` on the 25.x lines, `36` on 24.8). The row goes in, and any later read of it fails, which is what a server does.
-- **Where the server refuses the table at `CREATE`** (26.x), compiling refuses with the same code: `691`, or `70` for a literal out of the Enum's integer range (such as `300`).
-- **A row that supplies its own in-domain value is unaffected.**
-
-Branch on the outcome, never on the code: which code a poisoned row carries is the server's, and it differs by line. The conformance suite compares the poisoned row's code as well as its outcome, and it reads no mismatch on any line or binding (`measured` by the artifact producer).
+Branch on the outcome, never on the code: which code a poisoned row carries is the server's. `dup_dropped` is the one other flag of this kind: it says that the reader dropped a duplicate key for the column.
 
 ## Substituted DEFAULTs, and the mistake they exist to prevent
 

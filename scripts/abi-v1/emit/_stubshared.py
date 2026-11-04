@@ -249,7 +249,12 @@ def _strip_unknown(v):
 # NULL_INPUT_DOCS["batch"], whatever the call's inputs. Each document carries,
 # for every format and type of NULL_INPUT_CELLS, the entry a NULL literal (a
 # JSON null, a TSV \N) read into that NON-Nullable column gives: `null_input`
-# true, the column's default stored, `null` false. The stub is not ClickHouse:
+# true, the column's default stored, `null` false. One type is the exception, as
+# measured on a real library build (all four lines): a NULL into a non-Nullable
+# Enum8 stores 0, outside the enum, so its entry also carries `poison` true and
+# an empty `stored`, the row's `transformed` names it with reason "poisoned",
+# and the document's outcome is accepted_poisoned with code 691 (the poison
+# cells below). The stub is not ClickHouse:
 # these are DECODE cells, proving every binding exposes the member the library
 # sets, under the name bindings-v1.md section 5 gives it. Two control entries
 # per document hold `null_input` false and `null_input` absent, which every
@@ -266,8 +271,10 @@ NULL_INPUT_TYPES = (
     ("int32", "Int32", "Int32", "0", None),
     ("datetime", "DateTime", "DateTime", '"1970-01-01 00:00:00"', None),
     ("lowcard", "LowCardinality(String)", "String", '""', ""),
-    ("enum8", "Enum8('a' = 1, 'b' = 2)", "Enum8('a' = 1, 'b' = 2)", '"a"', None),
+    ("enum8", "Enum8('a' = 1, 'b' = 2)", "Enum8('a' = 1, 'b' = 2)", '""', None),
 )
+# The type whose NULL read is poisoned (stored 0 is outside the enum).
+NULL_INPUT_POISON_TYPE = "enum8"
 NULL_INPUT_CONTROL_PREFIX = "control."
 NULL_INPUT_CELL_COUNT = len(NULL_INPUT_FORMATS) * len(NULL_INPUT_TYPES)
 
@@ -282,7 +289,7 @@ def _null_input_cell(fmt: str, literal: str, t: tuple) -> dict:
         "input": literal,
         "stored": stored,
         "nullable": False,
-        "poison": False,
+        "poison": name == NULL_INPUT_POISON_TYPE,
         "null_input": True,
         "dup_dropped": False,
         "null": False,
@@ -302,23 +309,35 @@ def _null_input_controls() -> list[dict]:
 
 def _null_input_row(formats) -> dict:
     cols = [_null_input_cell(fmt, lit, t) for fmt, lit in formats for t in NULL_INPUT_TYPES]
+    transformed = [
+        {
+            "row": 0,
+            "column": c["name"],
+            "input": c["input"],
+            "stored": c["stored"],
+            "reason": "poisoned",
+            "lossy": True,
+        }
+        for c in cols
+        if c["poison"]
+    ]
     return {
-        "outcome": "accepted",
-        "code": 0,
+        "outcome": "accepted_poisoned",
+        "code": 691,
         "err": "",
         "input_span": {"off": 0, "len": 1},
         "unknown_fields": [],
         "cols": cols + _null_input_controls(),
         "computed": [],
-        "transformed": [],
+        "transformed": transformed,
     }
 
 
 NULL_INPUT_DOCS = {
     "row": _null_input_row(NULL_INPUT_FORMATS),
     "batch": {
-        "outcome": "accepted",
-        "code": 0,
+        "outcome": "accepted_poisoned",
+        "code": 691,
         "err": "",
         "rows_read": len(NULL_INPUT_FORMATS),
         "rows_skipped": 0,
@@ -334,17 +353,18 @@ NULL_INPUT_DOCS = {
 # The poison and dup_dropped cells, variant "value-flags"
 # (-DCHS_STUB_VALUE_FLAGS): chs_preview_row answers VALUE_FLAGS_DOCS["row"] and
 # chs_preview_batch VALUE_FLAGS_DOCS["batch"], whatever the call's inputs. The
-# entries are the ones the library gives for inputs that REALLY produce each
-# flag (the stub is not ClickHouse, so these are DECODE cells):
-#   poison: a column whose literal DEFAULT is outside its Enum's domain
-#     (`x Enum8('a' = 1) DEFAULT 7.5`) when the row leaves it out. The server
-#     accepts the insert and fails on readback, so the row's outcome is
-#     accepted_poisoned and the entry (src "default") carries `poison` true;
-#     the row's `transformed` names it with reason "poisoned"
-#     (docs/guides/transformations.md).
-#   dup_dropped: a JSONEachRow object that names a Map(String, Int32) column's
-#     key twice (`{"m":{"a":1,"a":2}}`): the reader drops the second, the entry
-#     carries `dup_dropped` true, and `transformed` names it with reason
+# stub is not ClickHouse, so these are DECODE cells:
+#   poison: a JSON null (JSONEachRow) or a TSV \N read into a NON-Nullable
+#     Enum8('a' = 1, 'b' = 2). Measured on a real library build (all four
+#     lines): null-as-default stores 0, which is outside the enum, so the
+#     server accepts the insert and cannot read it back. The row's outcome is
+#     accepted_poisoned with code 691, the entry carries `poison` true (and
+#     `null_input` true, `stored` empty), and `transformed` names it with
+#     reason "poisoned" (docs/guides/transformations.md).
+#   dup_dropped: a document that carries `dup_dropped` true. The member is
+#     spec-defined (a duplicate key the reader dropped); no input is claimed to
+#     produce it, because a repeated Map key was measured to keep both keys and
+#     leave the flag false. The entry's `transformed` reason is
 #     "duplicate_key_dropped".
 # A runner keys each entry's expected pair on its name: a "poison." name
 # expects poison true and dup_dropped false, a "dup." name the reverse (so a
@@ -357,22 +377,25 @@ VALUE_FLAGS_FORMATS = ("JSONEachRow", "TSV")
 VALUE_FLAGS_CONTROL_PREFIX = "control."
 VALUE_FLAGS_POISON_PREFIX = "poison."
 VALUE_FLAGS_DUP_PREFIX = "dup."
-VALUE_FLAGS_POISON_CELLS = len(VALUE_FLAGS_FORMATS)  # the Enum DEFAULT, once per format
-VALUE_FLAGS_DUP_CELLS = 1  # the Map's repeated key, JSONEachRow only
+VALUE_FLAGS_POISON_CELLS = len(VALUE_FLAGS_FORMATS)  # the Enum8 NULL read, once per format
+VALUE_FLAGS_DUP_CELLS = 1  # one canned dup_dropped entry, in the JSONEachRow row only
+
+
+VALUE_FLAGS_NULL_LITERAL = {"JSONEachRow": "null", "TSV": "\\N"}
 
 
 def _value_flags_cols(fmt: str) -> list[dict]:
     cols = [
         {
-            "name": f"{VALUE_FLAGS_POISON_PREFIX}{fmt}.enum_default",
-            "type": "Enum8('a' = 1)",
-            "base": "Enum8('a' = 1)",
-            "src": "default",
-            "input": "",
-            "stored": '"7"',
+            "name": f"{VALUE_FLAGS_POISON_PREFIX}{fmt}.enum8_null",
+            "type": "Enum8('a' = 1, 'b' = 2)",
+            "base": "Enum8('a' = 1, 'b' = 2)",
+            "src": "input",
+            "input": VALUE_FLAGS_NULL_LITERAL[fmt],
+            "stored": '""',
             "nullable": False,
             "poison": True,
-            "null_input": False,
+            "null_input": True,
             "dup_dropped": False,
             "null": False,
         }
@@ -380,12 +403,12 @@ def _value_flags_cols(fmt: str) -> list[dict]:
     if fmt == "JSONEachRow":
         cols.append(
             {
-                "name": f"{VALUE_FLAGS_DUP_PREFIX}{fmt}.map_key",
+                "name": f"{VALUE_FLAGS_DUP_PREFIX}{fmt}.flagged",
                 "type": "Map(String, Int32)",
                 "base": "Map(String, Int32)",
                 "src": "input",
-                "input": '{"a":1,"a":2}',
-                "stored": "{'a':1}",
+                "input": "{}",
+                "stored": "{}",
                 "nullable": False,
                 "poison": False,
                 "null_input": False,
@@ -422,7 +445,7 @@ def _value_flags_row(formats) -> dict:
     ]
     return {
         "outcome": "accepted_poisoned",
-        "code": 0,
+        "code": 691,
         "err": "",
         "input_span": {"off": 0, "len": 1},
         "unknown_fields": [],
@@ -436,7 +459,7 @@ VALUE_FLAGS_DOCS = {
     "row": _value_flags_row(VALUE_FLAGS_FORMATS),
     "batch": {
         "outcome": "accepted_poisoned",
-        "code": 0,
+        "code": 691,
         "err": "",
         "rows_read": len(VALUE_FLAGS_FORMATS),
         "rows_skipped": 0,

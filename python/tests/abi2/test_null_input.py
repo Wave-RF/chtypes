@@ -54,6 +54,11 @@ def _check(where: str, cols: tuple[Value, ...], prefix: bytes) -> int:
         assert c.null_input is want, (
             f"{where}: column {c.column!r}: null_input = {c.null_input}, want {want}"
         )
+        # A NULL into a non-Nullable Enum8 stores 0, outside the enum: poisoned.
+        want_poison = want and c.column.endswith(b".enum8")
+        assert c.poison is want_poison, (
+            f"{where}: column {c.column!r}: poison = {c.poison}, want {want_poison}"
+        )
     return cells
 
 
@@ -75,13 +80,12 @@ def test_stub_null_input(null_input_library) -> None:
 
 
 # The poison and dup_dropped cells, variant "value-flags"
-# (_stubshared.VALUE_FLAGS_DOCS): an Enum DEFAULT outside its domain left out
-# of the row (poison, in JSONEachRow and TSV) and a Map key named twice in a
-# JSONEachRow object (dup_dropped), plus four controls that hold each member
-# false and absent. A "poison." entry expects poison True and dup_dropped
-# False, a "dup." entry the reverse, a "control." entry both False, so a
-# binding that swaps the members fails. The other three bindings pin the
-# counts as 2 and 1.
+# (_stubshared.VALUE_FLAGS_DOCS): a JSON null or TSV \N into a non-Nullable
+# Enum8 (poison, in JSONEachRow and TSV) and one canned entry that carries
+# dup_dropped, plus four controls that hold each member false and absent. A
+# "poison." entry expects poison True and dup_dropped False, a "dup." entry the
+# reverse, a "control." entry both False, so a binding that swaps the members
+# fails. The other three bindings pin the counts as 2 and 1.
 PINNED_POISON_CELLS = 2
 PINNED_DUP_CELLS = 1
 
