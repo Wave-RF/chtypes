@@ -4439,6 +4439,14 @@
       "expect": {
         "reason": "accepted"
       },
+      "id": "loader.value-flags",
+      "kind": "loader",
+      "variant": "value-flags"
+    },
+    {
+      "expect": {
+        "reason": "accepted"
+      },
       "id": "loader.declined-settings",
       "kind": "loader",
       "variant": "declined-settings"

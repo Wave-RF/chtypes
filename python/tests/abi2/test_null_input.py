@@ -72,3 +72,67 @@ def test_stub_null_input(null_input_library) -> None:
     batch = schema.rows(Format.TSV, b"\\N\n")
     cells = sum(_check(f"batch.rows[{i}]", r.columns, prefix) for i, r in enumerate(batch.rows))
     assert cells == shared.NULL_INPUT_CELL_COUNT
+
+
+# The poison and dup_dropped cells, variant "value-flags"
+# (_stubshared.VALUE_FLAGS_DOCS): an Enum DEFAULT outside its domain left out
+# of the row (poison, in JSONEachRow and TSV) and a Map key named twice in a
+# JSONEachRow object (dup_dropped), plus four controls that hold each member
+# false and absent. A "poison." entry expects poison True and dup_dropped
+# False, a "dup." entry the reverse, a "control." entry both False, so a
+# binding that swaps the members fails. The other three bindings pin the
+# counts as 2 and 1.
+PINNED_POISON_CELLS = 2
+PINNED_DUP_CELLS = 1
+
+
+@pytest.fixture
+def value_flags_library(
+    stubs_dir: Path, stubs_manifest: dict, tmp_path: Path, clean_process, monkeypatch
+):
+    monkeypatch.setenv("CHTYPES_ALLOW_UNVERIFIED_LIBRARY", "1")
+    target = tmp_path / "value-flags.so"
+    shutil.copyfile(stub_path(stubs_dir, stubs_manifest["variants"]["value-flags"]), target)
+    target.chmod(0o755)
+    with pytest.warns(UserWarning, match="UNVERIFIED"):
+        return library.open_unverified(target, allow=True)
+
+
+def _check_flags(where: str, cols: tuple[Value, ...], shared) -> tuple[int, int]:
+    poison = dup = 0
+    for c in cols:
+        name = c.column.decode()
+        want_p = name.startswith(shared.VALUE_FLAGS_POISON_PREFIX)
+        want_d = name.startswith(shared.VALUE_FLAGS_DUP_PREFIX)
+        if not (want_p or want_d):
+            assert name.startswith(shared.VALUE_FLAGS_CONTROL_PREFIX), (
+                f"{where}: unexpected {name!r}"
+            )
+        poison += want_p
+        dup += want_d
+        assert (c.poison, c.dup_dropped) == (want_p, want_d), (
+            f"{where}: column {name!r}: poison = {c.poison}, dup_dropped = {c.dup_dropped}, "
+            f"want {want_p}, {want_d}"
+        )
+    return poison, dup
+
+
+def test_value_flags_cell_counts_are_pinned() -> None:
+    shared = _shared()
+    assert shared.VALUE_FLAGS_POISON_CELLS == PINNED_POISON_CELLS
+    assert shared.VALUE_FLAGS_DUP_CELLS == PINNED_DUP_CELLS
+
+
+def test_stub_value_flags(value_flags_library) -> None:
+    shared = _shared()
+    schema = value_flags_library.compile_table(b"CREATE TABLE t (x Int32)")
+
+    row = schema.row(Format.JSON_EACH_ROW, b'{"m":{"a":1,"a":2}}')
+    assert _check_flags("row", row.columns, shared) == (PINNED_POISON_CELLS, PINNED_DUP_CELLS)
+
+    batch = schema.rows(Format.TSV, b"1\n")
+    counts = [_check_flags(f"batch.rows[{i}]", r.columns, shared) for i, r in enumerate(batch.rows)]
+    assert (sum(p for p, _ in counts), sum(d for _, d in counts)) == (
+        PINNED_POISON_CELLS,
+        PINNED_DUP_CELLS,
+    )

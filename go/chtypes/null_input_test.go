@@ -57,3 +57,64 @@ func TestStubNullInput(t *testing.T) {
 		t.Errorf("batch: %d null_input cells across %d rows, want %d", n, len(b.Rows), nullInputCellCount)
 	}
 }
+
+// The poison and dup_dropped cells, variant "value-flags"
+// (_stubshared.VALUE_FLAGS_DOCS): an Enum DEFAULT outside its domain left
+// out of the row (poison, in JSONEachRow and TSV) and a Map key named twice in
+// a JSONEachRow object (dup_dropped), plus four controls that hold each
+// member false and absent. A "poison." entry expects Poison true and
+// DupDropped false, a "dup." entry the reverse, a "control." entry both false,
+// so a binding that swaps the members fails.
+const (
+	valueFlagsPoisonCells = 2 // _stubshared.VALUE_FLAGS_POISON_CELLS: 2 formats
+	valueFlagsDupCells    = 1 // _stubshared.VALUE_FLAGS_DUP_CELLS
+)
+
+func checkValueFlags(t *testing.T, where string, cols []Value) (poison, dup int) {
+	t.Helper()
+	for _, c := range cols {
+		wantP, wantD := false, false
+		switch {
+		case strings.HasPrefix(c.Column, "poison."):
+			wantP = true
+			poison++
+		case strings.HasPrefix(c.Column, "dup."):
+			wantD = true
+			dup++
+		case !strings.HasPrefix(c.Column, "control."):
+			t.Errorf("%s: unexpected column %q", where, c.Column)
+		}
+		if c.Poison != wantP || c.DupDropped != wantD {
+			t.Errorf("%s: column %q: Poison = %v, DupDropped = %v, want %v, %v",
+				where, c.Column, c.Poison, c.DupDropped, wantP, wantD)
+		}
+	}
+	return poison, dup
+}
+
+func TestStubValueFlags(t *testing.T) {
+	lib := openStub(t, "value-flags")
+	schema, err := lib.CompileTable("CREATE TABLE t (x Int32)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := schema.Row(JSONEachRow, []byte(`{"m":{"a":1,"a":2}}`))
+	if err != nil {
+		t.Fatalf("row: %v", err)
+	}
+	if p, d := checkValueFlags(t, "row", r.Columns); p != valueFlagsPoisonCells || d != valueFlagsDupCells {
+		t.Errorf("row: %d poison and %d dup_dropped cells, want %d and %d", p, d, valueFlagsPoisonCells, valueFlagsDupCells)
+	}
+	b, err := schema.Rows(TSV, []byte("1\n"))
+	if err != nil {
+		t.Fatalf("batch: %v", err)
+	}
+	p, d := 0, 0
+	for i, row := range b.Rows {
+		rp, rd := checkValueFlags(t, fmt.Sprintf("batch.rows[%d]", i), row.Columns)
+		p, d = p+rp, d+rd
+	}
+	if p != valueFlagsPoisonCells || d != valueFlagsDupCells {
+		t.Errorf("batch: %d poison and %d dup_dropped cells across %d rows, want %d and %d", p, d, len(b.Rows), valueFlagsPoisonCells, valueFlagsDupCells)
+	}
+}

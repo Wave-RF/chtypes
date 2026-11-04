@@ -331,6 +331,124 @@ NULL_INPUT_DOCS = {
 }
 
 
+# The poison and dup_dropped cells, variant "value-flags"
+# (-DCHS_STUB_VALUE_FLAGS): chs_preview_row answers VALUE_FLAGS_DOCS["row"] and
+# chs_preview_batch VALUE_FLAGS_DOCS["batch"], whatever the call's inputs. The
+# entries are the ones the library gives for inputs that REALLY produce each
+# flag (the stub is not ClickHouse, so these are DECODE cells):
+#   poison: a column whose literal DEFAULT is outside its Enum's domain
+#     (`x Enum8('a' = 1) DEFAULT 7.5`) when the row leaves it out. The server
+#     accepts the insert and fails on readback, so the row's outcome is
+#     accepted_poisoned and the entry (src "default") carries `poison` true;
+#     the row's `transformed` names it with reason "poisoned"
+#     (docs/guides/transformations.md).
+#   dup_dropped: a JSONEachRow object that names a Map(String, Int32) column's
+#     key twice (`{"m":{"a":1,"a":2}}`): the reader drops the second, the entry
+#     carries `dup_dropped` true, and `transformed` names it with reason
+#     "duplicate_key_dropped".
+# A runner keys each entry's expected pair on its name: a "poison." name
+# expects poison true and dup_dropped false, a "dup." name the reverse (so a
+# binding that swaps the two members fails), and a VALUE_FLAGS_CONTROL_PREFIX
+# name expects both false. The controls hold each member false and absent.
+# VALUE_FLAGS_POISON_CELLS and VALUE_FLAGS_DUP_CELLS count the cells in the row
+# document and, as many, across the batch's rows, so a document that lost its
+# cells fails rather than passing on its controls alone.
+VALUE_FLAGS_FORMATS = ("JSONEachRow", "TSV")
+VALUE_FLAGS_CONTROL_PREFIX = "control."
+VALUE_FLAGS_POISON_PREFIX = "poison."
+VALUE_FLAGS_DUP_PREFIX = "dup."
+VALUE_FLAGS_POISON_CELLS = len(VALUE_FLAGS_FORMATS)  # the Enum DEFAULT, once per format
+VALUE_FLAGS_DUP_CELLS = 1  # the Map's repeated key, JSONEachRow only
+
+
+def _value_flags_cols(fmt: str) -> list[dict]:
+    cols = [
+        {
+            "name": f"{VALUE_FLAGS_POISON_PREFIX}{fmt}.enum_default",
+            "type": "Enum8('a' = 1)",
+            "base": "Enum8('a' = 1)",
+            "src": "default",
+            "input": "",
+            "stored": '"7"',
+            "nullable": False,
+            "poison": True,
+            "null_input": False,
+            "dup_dropped": False,
+            "null": False,
+        }
+    ]
+    if fmt == "JSONEachRow":
+        cols.append(
+            {
+                "name": f"{VALUE_FLAGS_DUP_PREFIX}{fmt}.map_key",
+                "type": "Map(String, Int32)",
+                "base": "Map(String, Int32)",
+                "src": "input",
+                "input": '{"a":1,"a":2}',
+                "stored": "{'a':1}",
+                "nullable": False,
+                "poison": False,
+                "null_input": False,
+                "dup_dropped": True,
+                "null": False,
+            }
+        )
+    return cols
+
+
+def _value_flags_controls() -> list[dict]:
+    base = {"type": "Int32", "base": "Int32", "src": "input", "input": "1", "stored": "1", "null": False}
+    p = VALUE_FLAGS_CONTROL_PREFIX
+    return [
+        {"name": p + "false", **base, "poison": False, "dup_dropped": False},
+        {"name": p + "poison_absent", **base, "dup_dropped": False},
+        {"name": p + "dup_absent", **base, "poison": False},
+        {"name": p + "absent", **base},
+    ]
+
+
+def _value_flags_row(formats) -> dict:
+    cols = [c for f in formats for c in _value_flags_cols(f)]
+    transformed = [
+        {
+            "row": 0,
+            "column": c["name"],
+            "input": c["input"],
+            "stored": c["stored"],
+            "reason": "poisoned" if c["poison"] else "duplicate_key_dropped",
+            "lossy": True,
+        }
+        for c in cols
+    ]
+    return {
+        "outcome": "accepted_poisoned",
+        "code": 0,
+        "err": "",
+        "input_span": {"off": 0, "len": 1},
+        "unknown_fields": [],
+        "cols": cols + _value_flags_controls(),
+        "computed": [],
+        "transformed": transformed,
+    }
+
+
+VALUE_FLAGS_DOCS = {
+    "row": _value_flags_row(VALUE_FLAGS_FORMATS),
+    "batch": {
+        "outcome": "accepted_poisoned",
+        "code": 0,
+        "err": "",
+        "rows_read": len(VALUE_FLAGS_FORMATS),
+        "rows_skipped": 0,
+        "rows": [_value_flags_row((f,)) for f in VALUE_FLAGS_FORMATS],
+        "transformed": [],
+        "unsupported_settings": [],
+        "unconsumed": [],
+        "framing": {"bom_skipped": False, "container": "stream", "header": None},
+    },
+}
+
+
 # Rule r7, variant "filter-observable" (-DCHS_STUB_FILTER_OBSERVABLE):
 # chs_preview_batch answers one of these two batch documents, by whether its
 # filter reached it. rows_passed is the only difference.
@@ -747,6 +865,8 @@ def plan(model) -> list[Variant]:
             Variant("filter-observable", (("CHS_STUB_FILTER_OBSERVABLE", "1"),), "accepted"),
             # The null_input decode cells: see NULL_INPUT_DOCS above.
             Variant("null-input", (("CHS_STUB_NULL_INPUT", "1"),), "accepted"),
+            # The poison and dup_dropped decode cells: see VALUE_FLAGS_DOCS.
+            Variant("value-flags", (("CHS_STUB_VALUE_FLAGS", "1"),), "accepted"),
             # The filter-declined settings, and describe's deep-input
             # refusal: see DECLINED and DEEP above.
             Variant("declined-settings", (("CHS_STUB_DECLINED_SETTINGS", "1"),), "accepted"),

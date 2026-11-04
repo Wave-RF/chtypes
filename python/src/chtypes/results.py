@@ -77,7 +77,11 @@ class Value:
     the input field was the format's NULL literal (a JSON null, a TSV `\\N`),
     from `null_input`, False where the document carries none; a fact about the
     input, where `null` is one about the stored value, so the two differ where
-    a NULL literal is read into a column that is not Nullable.
+    a NULL literal is read into a column that is not Nullable. `poison`: the
+    stored value is one the server cannot read back (the batch is then
+    accepted_poisoned and exports nothing), from `poison`; `dup_dropped`: the
+    reader dropped a duplicate key for this column, from `dup_dropped`. Each is
+    False where the document carries none.
     """
 
     column: bytes
@@ -87,6 +91,8 @@ class Value:
     is_stored: bool
     value: bytes | None = None
     null_input: bool = False
+    poison: bool = False
+    dup_dropped: bool = False
 
 
 @dataclass(frozen=True, slots=True)

@@ -66,3 +66,54 @@ describe.skipIf(!stubsAvailable)('null_input: a NULL literal into a non-Nullable
     expect(cells).toBe(CELL_COUNT);
   });
 });
+
+/**
+ * The poison and dup_dropped cells, variant `value-flags`
+ * (`_stubshared.VALUE_FLAGS_DOCS`): an Enum DEFAULT outside its domain left out
+ * of the row (poison, in JSONEachRow and TSV) and a Map key named twice in a
+ * JSONEachRow object (dup_dropped), plus four controls that hold each member
+ * false and absent. A `poison.` entry expects poison true and dupDropped
+ * false, a `dup.` entry the reverse, a `control.` entry both false, so a
+ * binding that swaps the members fails. The counts are pinned as 2 and 1 (the
+ * Python suite fails first if the generator changes them).
+ */
+const POISON_CELLS = 2;
+const DUP_CELLS = 1;
+
+function checkFlags(where: string, cols: readonly Value[]): { poison: number; dup: number } {
+  let poison = 0;
+  let dup = 0;
+  for (const c of cols) {
+    const name = c.column.toString('utf8');
+    const wantP = name.startsWith('poison.');
+    const wantD = name.startsWith('dup.');
+    if (!wantP && !wantD) expect({ where, name }).toEqual({ where, name: expect.stringMatching(/^control\./) });
+    if (wantP) poison++;
+    if (wantD) dup++;
+    expect({ where, name, poison: c.poison, dupDropped: c.dupDropped }).toEqual({
+      where,
+      name,
+      poison: wantP,
+      dupDropped: wantD,
+    });
+  }
+  return { poison, dup };
+}
+
+describe.skipIf(!stubsAvailable)('poison and dup_dropped: Enum DEFAULT out of domain, a Map key named twice (stub value-flags)', () => {
+  it('every row and batch entry exposes both members, each false where it is false or absent', () => {
+    const lib = openStub('value-flags');
+    const schema = lib.compileTable('CREATE TABLE t (x Int32)');
+    const r = schema.row(Format.JSONEachRow, Buffer.from('{"m":{"a":1,"a":2}}', 'utf8'));
+    expect(checkFlags('row', r.columns)).toEqual({ poison: POISON_CELLS, dup: DUP_CELLS });
+    const b = schema.rows(Format.TSV, Buffer.from('1\n', 'utf8'));
+    let poison = 0;
+    let dup = 0;
+    b.rows.forEach((row, i) => {
+      const c = checkFlags(`batch.rows[${i}]`, row.columns);
+      poison += c.poison;
+      dup += c.dup;
+    });
+    expect({ poison, dup }).toEqual({ poison: POISON_CELLS, dup: DUP_CELLS });
+  });
+});

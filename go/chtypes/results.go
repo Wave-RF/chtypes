@@ -36,6 +36,14 @@ type Value struct {
 	// value: the two differ where a NULL literal is read into a column that
 	// is not Nullable.
 	NullInput bool
+	// Poison is whether the stored value is one the server cannot read back
+	// (the batch is then accepted_poisoned and exports nothing), from poison;
+	// false when the document carries none.
+	Poison bool
+	// DupDropped is whether the reader dropped a duplicate key for this
+	// column (an object that names it twice), from dup_dropped; false when
+	// the document carries none.
+	DupDropped bool
 }
 
 // Transform is one silent change the library reports.

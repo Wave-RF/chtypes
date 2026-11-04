@@ -93,6 +93,13 @@ export interface Value {
    * differ where a NULL literal is read into a column that is not Nullable.
    */
   readonly nullInput: boolean;
+  /**
+   * Whether the stored value is one the server cannot read back (the batch is then `accepted_poisoned` and exports
+   * nothing), from `poison`; `false` when the document carries none.
+   */
+  readonly poison: boolean;
+  /** Whether the reader dropped a duplicate key for this column, from `dup_dropped`; `false` when the document carries none. */
+  readonly dupDropped: boolean;
 }
 
 /** One cell of an engine row: ClickHouse's rendering of a stored value after the engine's insert-time merge. */
@@ -542,6 +549,8 @@ function decodeValue(doc: string, v: unknown): Value {
     isStored,
     value: bytesField(doc, o, 'value'),
     nullInput: boolOr(doc, o, 'null_input', false),
+    poison: boolOr(doc, o, 'poison', false),
+    dupDropped: boolOr(doc, o, 'dup_dropped', false),
   };
 }
 

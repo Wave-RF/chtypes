@@ -63,6 +63,13 @@ pub struct Value {
     /// value: the two differ where a NULL literal is read into a column that
     /// is not Nullable.
     pub null_input: bool,
+    /// Whether the stored value is one the server cannot read back (the batch
+    /// is then `accepted_poisoned` and exports nothing), from `poison`;
+    /// `false` when the document carries none.
+    pub poison: bool,
+    /// Whether the reader dropped a duplicate key for this column, from
+    /// `dup_dropped`; `false` when the document carries none.
+    pub dup_dropped: bool,
 }
 
 /// One transformation: a value the library stored differently from the input.

@@ -70,6 +70,7 @@ if [ "$MAJOR" -ge 2 ]; then
         --require "tests\.abi$MAJOR\.test_reader_rules::test_r3_.*"
         --require "tests\.abi$MAJOR\.test_dev_fingerprint::test_dev_fingerprint_.*"
         --require "tests\.abi$MAJOR\.test_null_input::test_stub_null_input"
+        --require "tests\.abi$MAJOR\.test_null_input::test_stub_value_flags"
     )
 fi
 
