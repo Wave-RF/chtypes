@@ -803,7 +803,7 @@ jobs:
     # examples job's do, through one explicit cache each and so its v2-dev
     # subroot (r5), with the real ~300 MB library in every cell. 4 x 4 over
     # schema-2 records, writer x reader x line over the registry's two newest
-    # lines, 8 concurrent installs per set (each binding alone and mixed) at
+    # lines that have a build at this SDK's fingerprint, 8 concurrent installs per set (each binding alone and mixed) at
     # the natural clock and again under an in-repo LD_PRELOAD shim that makes
     # the wall clock coarse (scripts/fetch-v1/coarse-clock.c, with its own
     # positive control; public PR #516), the read-only commands, and the 4 x 4
@@ -939,6 +939,8 @@ jobs:
           for b in go python ts rust; do sudo -n -u nobody "$X/bin/cli-$b" --version; done
       - name: "selftest — the interop driver's own logic: the 1.x comparisons and tables, the ABI v2 matrix over stand-in CLIs with three planted defects, and the coarse-clock shim's control both ways"
         run: python3 scripts/fetch-v1/cache-interop.py --selftest
+      - name: selftest — line selection skips a line with no build at this SDK's fingerprint, and forcing one or finding only one such line fails
+        run: python3 scripts/fetch-v1/own_fp_lines.py --selftest
       # /opt/chtypes/v1 is one of the CLIs' default system dirs (spec/fetch-v1/constants.json);
       # the fault rows fill it with a readable build to prove the default mode answers from it
       # and strict mode never falls through to it, and leave it empty again.
@@ -1183,6 +1185,8 @@ jobs:
           for b in go python ts rust; do sudo -n -u nobody "$X/bin/cli-$b" --version; done
       - name: "selftest — the interop driver's own logic: the 1.x comparisons and tables, the ABI v2 matrix over stand-in CLIs with three planted defects, and the coarse-clock shim's control both ways"
         run: python3 scripts/fetch-v1/cache-interop.py --selftest
+      - name: selftest — line selection skips a line with no build at this SDK's fingerprint, and forcing one or finding only one such line fails
+        run: python3 scripts/fetch-v1/own_fp_lines.py --selftest
       # /opt/chtypes/v2-dev is one of the v2-dev CLIs' default system dirs
       # (r5), as the required job's step fills it. The work directory is made
       # under /tmp so the other uid can reach it (macOS's per-user temp
