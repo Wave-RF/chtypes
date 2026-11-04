@@ -114,6 +114,10 @@ def _check_flags(where: str, cols: tuple[Value, ...], shared) -> tuple[int, int]
             )
         poison += want_p
         dup += want_d
+        if want_d:
+            # The producing input: a repeated top-level JSONEachRow key after
+            # every column was read; the first value is stored.
+            assert (name, c.text) == ("dup.JSONEachRow.repeated_top_key", b"1"), where
         assert (c.poison, c.dup_dropped) == (want_p, want_d), (
             f"{where}: column {name!r}: poison = {c.poison}, dup_dropped = {c.dup_dropped}, "
             f"want {want_p}, {want_d}"
@@ -131,8 +135,15 @@ def test_stub_value_flags(value_flags_library) -> None:
     shared = _shared()
     schema = value_flags_library.compile_table(b"CREATE TABLE t (x Int32)")
 
-    row = schema.row(Format.JSON_EACH_ROW, b'{"m":{"a":1,"a":2}}')
+    row = schema.row(Format.JSON_EACH_ROW, b'{"a":1,"a":2}')
     assert _check_flags("row", row.columns, shared) == (PINNED_POISON_CELLS, PINNED_DUP_CELLS)
+
+    dup_transforms = [
+        t
+        for t in row.transformed
+        if t.reason == "duplicate_key_dropped" and t.column == b"dup.JSONEachRow.repeated_top_key"
+    ]
+    assert len(dup_transforms) == 1
 
     batch = schema.rows(Format.TSV, b"1\n")
     counts = [_check_flags(f"batch.rows[{i}]", r.columns, shared) for i, r in enumerate(batch.rows)]

@@ -80,7 +80,12 @@ class Value:
     a NULL literal is read into a column that is not Nullable. `poison`: the
     stored value is one the server cannot read back (the batch is then
     accepted_poisoned and exports nothing), from `poison`; `dup_dropped`: the
-    reader dropped a duplicate key for this column, from `dup_dropped`. Each is
+    reader dropped a duplicate key for this column, from `dup_dropped` (at default
+    settings a repeated top-level JSONEachRow key that arrives after every column
+    has been read is skipped: the first value is stored, this is True, and a
+    `duplicate_key_dropped` transform is reported; a repeat while a column is
+    still unread is refused with 117; a repeated key inside a Map value keeps
+    both keys). Each is
     False where the document carries none.
     """
 

@@ -88,6 +88,11 @@ func checkValueFlags(t *testing.T, where string, cols []Value) (poison, dup int)
 		case strings.HasPrefix(c.Column, "dup."):
 			wantD = true
 			dup++
+			// The producing input: a repeated top-level JSONEachRow key
+			// after every column was read; the first value is stored.
+			if c.Column != "dup.JSONEachRow.repeated_top_key" || c.Text != "1" {
+				t.Errorf("%s: dup cell %q stores %q, want dup.JSONEachRow.repeated_top_key storing \"1\"", where, c.Column, c.Text)
+			}
 		case !strings.HasPrefix(c.Column, "control."):
 			t.Errorf("%s: unexpected column %q", where, c.Column)
 		}
@@ -105,7 +110,7 @@ func TestStubValueFlags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := schema.Row(JSONEachRow, []byte(`{"m":{"a":1,"a":2}}`))
+	r, err := schema.Row(JSONEachRow, []byte(`{"a":1,"a":2}`))
 	if err != nil {
 		t.Fatalf("row: %v", err)
 	}
@@ -115,6 +120,15 @@ func TestStubValueFlags(t *testing.T) {
 	b, err := schema.Rows(TSV, []byte("1\n"))
 	if err != nil {
 		t.Fatalf("batch: %v", err)
+	}
+	reasons := 0
+	for _, tr := range r.Transformed {
+		if tr.Reason == ReasonDuplicateKeyDropped && tr.Column == "dup.JSONEachRow.repeated_top_key" {
+			reasons++
+		}
+	}
+	if reasons != 1 {
+		t.Errorf("row: %d duplicate_key_dropped transforms for the dup cell, want 1", reasons)
 	}
 	p, d := 0, 0
 	for i, row := range b.Rows {

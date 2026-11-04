@@ -81,6 +81,12 @@ fn check_flags(where_: &str, cols: &[Value]) -> (usize, usize) {
         );
         poison += usize::from(want_p);
         dup += usize::from(want_d);
+        if want_d {
+            // The producing input: a repeated top-level JSONEachRow key after
+            // every column was read; the first value is stored.
+            assert_eq!(name, b"dup.JSONEachRow.repeated_top_key", "{where_}");
+            assert_eq!(c.text.as_bytes(), b"1", "{where_}: dup cell stored value");
+        }
         assert_eq!(
             (c.poison, c.dup_dropped),
             (want_p, want_d),
@@ -136,7 +142,7 @@ fn null_input_is_exposed_over_the_v2_stub() {
     let r = schema
         .row(
             Format::JsonEachRow,
-            br#"{"e":null}"#,
+            br#"{"a":1,"a":2}"#,
             &RowOptions::default(),
         )
         .expect("row");
@@ -145,6 +151,15 @@ fn null_input_is_exposed_over_the_v2_stub() {
         (POISON_CELLS, DUP_CELLS),
         "{r:?}"
     );
+    let dup_transforms = r
+        .transformed
+        .iter()
+        .filter(|t| {
+            t.reason == chtypes::Reason::DuplicateKeyDropped
+                && t.column.as_bytes() == b"dup.JSONEachRow.repeated_top_key"
+        })
+        .count();
+    assert_eq!(dup_transforms, 1, "{r:?}");
     let b = schema
         .rows(Format::Tsv, b"1\n", &RowsOptions::default())
         .expect("batch");

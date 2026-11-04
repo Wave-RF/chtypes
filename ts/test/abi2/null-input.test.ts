@@ -92,7 +92,15 @@ function checkFlags(where: string, cols: readonly Value[]): { poison: number; du
     const wantD = name.startsWith('dup.');
     if (!wantP && !wantD) expect({ where, name }).toEqual({ where, name: expect.stringMatching(/^control\./) });
     if (wantP) poison++;
-    if (wantD) dup++;
+    if (wantD) {
+      dup++;
+      // The producing input: a repeated top-level JSONEachRow key after every column was read; the first value is stored.
+      expect({ where, name, text: c.text.toString('utf8') }).toEqual({
+        where,
+        name: 'dup.JSONEachRow.repeated_top_key',
+        text: '1',
+      });
+    }
     expect({ where, name, poison: c.poison, dupDropped: c.dupDropped }).toEqual({
       where,
       name,
@@ -107,8 +115,12 @@ describe.skipIf(!stubsAvailable)('poison and dup_dropped: an Enum8 NULL read, a 
   it('every row and batch entry exposes both members, each false where it is false or absent', () => {
     const lib = openStub('value-flags');
     const schema = lib.compileTable('CREATE TABLE t (x Int32)');
-    const r = schema.row(Format.JSONEachRow, Buffer.from('{"e":null}', 'utf8'));
+    const r = schema.row(Format.JSONEachRow, Buffer.from('{"a":1,"a":2}', 'utf8'));
     expect(checkFlags('row', r.columns)).toEqual({ poison: POISON_CELLS, dup: DUP_CELLS });
+    const dupTransforms = r.transformed.filter(
+      (t) => t.reason === 'duplicate_key_dropped' && t.column.toString('utf8') === 'dup.JSONEachRow.repeated_top_key',
+    );
+    expect(dupTransforms).toHaveLength(1);
     const b = schema.rows(Format.TSV, Buffer.from('1\n', 'utf8'));
     let poison = 0;
     let dup = 0;

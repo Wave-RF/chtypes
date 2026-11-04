@@ -361,11 +361,18 @@ NULL_INPUT_DOCS = {
 #     accepted_poisoned with code 691, the entry carries `poison` true (and
 #     `null_input` true, `stored` empty), and `transformed` names it with
 #     reason "poisoned" (docs/guides/transformations.md).
-#   dup_dropped: a document that carries `dup_dropped` true. The member is
-#     spec-defined (a duplicate key the reader dropped); no input is claimed to
-#     produce it, because a repeated Map key was measured to keep both keys and
-#     leave the flag false. The entry's `transformed` reason is
-#     "duplicate_key_dropped".
+#   dup_dropped: the row {"a":1,"a":2} read into `a Int32` (MergeTree). A
+#     repeated TOP-LEVEL JSONEachRow key that arrives after every column has
+#     been read is skipped at default settings
+#     (input_format_json_ignore_unnecessary_fields is true), so the server
+#     stores the FIRST value ("1"), the column's `dup_dropped` is true, and
+#     `transformed` carries a "duplicate_key_dropped" entry. Measured on the
+#     pinned servers (all four lines, both arches). Not modeled by the stub's
+#     one canned document: the control {"a":1,"a":2,"b":3} into (a, b), where
+#     the repeat arrives while b is still unread and the server refuses the
+#     row with code 117 (a refused row is a different document, not a column
+#     of this one); the real-library proof covers it. A repeated key INSIDE a
+#     Map value keeps both keys and leaves dup_dropped false.
 # A runner keys each entry's expected pair on its name: a "poison." name
 # expects poison true and dup_dropped false, a "dup." name the reverse (so a
 # binding that swaps the two members fails), and a VALUE_FLAGS_CONTROL_PREFIX
@@ -403,12 +410,12 @@ def _value_flags_cols(fmt: str) -> list[dict]:
     if fmt == "JSONEachRow":
         cols.append(
             {
-                "name": f"{VALUE_FLAGS_DUP_PREFIX}{fmt}.flagged",
-                "type": "Map(String, Int32)",
-                "base": "Map(String, Int32)",
+                "name": f"{VALUE_FLAGS_DUP_PREFIX}{fmt}.repeated_top_key",
+                "type": "Int32",
+                "base": "Int32",
                 "src": "input",
-                "input": "{}",
-                "stored": "{}",
+                "input": '{"a":1,"a":2}',
+                "stored": "1",
                 "nullable": False,
                 "poison": False,
                 "null_input": False,

@@ -98,7 +98,7 @@ A JSON `null` (JSONEachRow) or a TSV `\N` read into a column that is not `Nullab
 
 An `Enum` column whose literal `DEFAULT` is outside the Enum's domain is a different case from the NULL above, and it follows the server's `CREATE`. On the supported 26.x lines the server refuses such a table, so compiling the schema fails with a `SchemaError`, code `691` (or `70` for a literal out of the Enum's integer range, such as `300`). With the `load` posture the schema compiles, but a row that leaves the column out is `rejected` with code `691` and `poison` false: no row there is poisoned. Use the NULL case above to see `poison`.
 
-Branch on the outcome, never on the code: which code a poisoned row carries is the server's. `dup_dropped` is the one other flag of this kind: it says that the reader dropped a duplicate key for the column.
+Branch on the outcome, never on the code: which code a poisoned row carries is the server's. `dup_dropped` is the one other flag of this kind: it says that the reader dropped a duplicate key for the column. At default settings it is set by a repeated top-level JSONEachRow key that arrives after every column has been read (`{"a":1,"a":2}` into `a Int32`): the reader skips the repeat, so the server stores the first value, `dup_dropped` is true, and a `duplicate_key_dropped` transform is reported. A repeat that arrives while some column is still unread (`{"a":1,"a":2,"b":3}` into `a Int32, b Int32`) is refused with code 117 instead. A repeated key inside a Map value is neither: both keys are kept and `dup_dropped` is false.
 
 ## Substituted DEFAULTs, and the mistake they exist to prevent
 

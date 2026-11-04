@@ -68,7 +68,12 @@ pub struct Value {
     /// `false` when the document carries none.
     pub poison: bool,
     /// Whether the reader dropped a duplicate key for this column, from
-    /// `dup_dropped`; `false` when the document carries none.
+    /// `dup_dropped`; `false` when the document carries none. At default
+    /// settings a repeated top-level JSONEachRow key that arrives after every
+    /// column has been read is skipped: the first value is stored, this is
+    /// `true`, and a `duplicate_key_dropped` transform is reported. A repeat
+    /// while a column is still unread is refused with 117, and a repeated key
+    /// inside a Map value keeps both keys.
     pub dup_dropped: bool,
 }
 
