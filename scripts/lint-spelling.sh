@@ -137,7 +137,7 @@ list_files() {
   # excluded too: they are data copied byte for byte, and they hold real
   # ClickHouse setting names (enable_parallel_blocks_marshalling) whose
   # spelling is upstream's, not this project's prose. Their README is checked.
-  # The decline-reasons catalogue (spec/abi-v2/declines/declines.json) is the
+  # The decline-reasons catalog (spec/abi-v2/declines/declines.json) is the
   # same kind of data and is excluded the same way.
   # This script is excluded from itself, and it is the ONLY other exclusion of
   # its kind. Its WORDLIST is a table of British->American pairs, and its header

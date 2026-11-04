@@ -45,6 +45,7 @@ __all__ = [
     "ArtifactUnpublishedError",
     "ArtifactUntrustedError",
     "CacheUnusableError",
+    "CallCanceledError",
     "CallError",
     "ChtypesError",
     "InternalError",
@@ -137,6 +138,12 @@ class UsageError(CallError):
     """`CHS_INVALID_ARGUMENT`, or a misuse the binding caught before any call: a
     closed object, a conflicting setup, a zone given twice, an unverified open
     without both opt-ins, a refused version spelling."""
+
+
+class CallCanceledError(CallError):
+    """`CHS_CANCELED`: the call's cancel token fired before it finished. It is
+    deliberately not `asyncio.CancelledError`, which means the task itself was
+    canceled; catching one never catches the other."""
 
 
 class InternalError(CallError):

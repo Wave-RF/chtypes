@@ -743,6 +743,20 @@ def render_invoke(model) -> str:
             f"// SAFETY: every input is marshaled from the case's own recipe above, matching "
             f"{fn.name}'s declared shape; every output pointer is this call's own local."
         )
+        if not has_err and fn.returns.kind in ("void", "scalar") and not out_locals:
+            # A call that cannot fail (chs_cancel_fire, chs_cancel_fired): it
+            # has no status and no error to read, so completing the call is
+            # its CHS_OK, as the Go runner reports it. A scalar's value is not
+            # part of any case's expectation today.
+            if fn.returns.kind == "void":
+                body.append(f"unsafe {{ (api.{fn.name})({', '.join(call_args)}) }};")
+            else:
+                body.append(f"let _value = unsafe {{ (api.{fn.name})({', '.join(call_args)}) }};")
+            body.append(
+                'Ok(Outcome::Call { status: "CHS_OK", error: None, outputs: BTreeMap::new() })'
+            )
+            out += arm(fn.name, body)
+            continue
         body.append(f"let status = unsafe {{ (api.{fn.name})({', '.join(call_args)}) }};")
         outputs_mut = "mut " if out_locals else ""
         body.append(f"let {outputs_mut}outputs: BTreeMap<String, MintedHandle> = BTreeMap::new();")
