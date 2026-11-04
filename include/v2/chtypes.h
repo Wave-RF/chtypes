@@ -1574,6 +1574,15 @@ CHS_API chs_status chs_preview_row(
  * refusal of its arguments are the document's, with `refused_at` `call` and `reason`. The export's
  * truth table is in `document:batch`.
  *
+ * Parallel parsing. With `max_parsing_threads` unset, the server's CPU count decides whether it
+ * parses the body in parallel segments, so the library reads such a body twice only under the
+ * conditions measured to make the two reads differ: a non-zero error budget
+ * (`input_format_allow_errors_num` or `input_format_allow_errors_ratio`), a `JSON` (or
+ * `Object('json')`) column, or a DEFAULT on a column the body may omit whose expression reads a
+ * column. When the two reads disagree, the call is declined (`parallel-segment-cut`, or
+ * `error-budget-reread` for the error budget). Naming `max_parsing_threads` avoids the second read.
+ * `chs_preview_insert` reads its body the same way.
+ *
  * Class: api. Thread: shared. Init: required. Returns one of: CHS_OK, CHS_CANCELED,
  * CHS_INVALID_ARGUMENT, CHS_INTERNAL. Growable (rule r1): an input it gains is a new member of its
  * options document, `options`.
