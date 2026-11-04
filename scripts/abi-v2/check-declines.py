@@ -15,9 +15,10 @@ Rules (each has a planted case in --selftest):
   schema      a schema id other than chtypes.filter-declines/1
   unique      a duplicate id (the data is grouped by class, not sorted by id,
               so order is not checked; uniqueness is)
-  class       a class outside the six the data uses
+  class       a class outside the nine the data uses
   field       an entry missing a field, or a code without `chs` and `ch`
   line        a `lines` value outside the file's top-level `lines`, or empty
+              outside a dormant entry
   private     a string that points into the private half: a private CI
               path, the private repository's name, a private notes path or
               "#<digit>" (JSON strings and the README)
@@ -40,7 +41,9 @@ DIR = ROOT / "spec" / "abi-v2" / "declines"
 NAME = "declines.json"
 SCHEMA = "chtypes.filter-declines/1"
 # Derived from the copied file (declines.json at the producer's commit) and pinned.
-CLASSES = frozenset({"decline", "server-check", "create-decline", "call-decline", "row-decline", "batch-precedence"})
+CLASSES = frozenset(
+    {"decline", "server-check", "create-decline", "call-decline", "row-decline", "batch-precedence", "export-decline", "misuse", "canceled"}
+)
 FIELDS = ("id", "class", "trigger", "code", "lines", "paths", "retirement", "description")
 # Built from parts so this file does not itself spell a private name (lint-public).
 PRIVATE = re.compile("|".join(["ci" + "/steps", "chtypes" + "-core", "notes" + "/", "#[0-9]"]))
@@ -80,7 +83,7 @@ def check(raw: bytes, readme: str) -> list[str]:
     for e in entries:
         who = e.get("id")
         if e.get("class") not in CLASSES:
-            out.append(f"{NAME}: {who}: class {e.get('class')!r} is not one of the six (class)")
+            out.append(f"{NAME}: {who}: class {e.get('class')!r} is not one of the nine (class)")
         for f in FIELDS:
             if f not in e:
                 out.append(f"{NAME}: {who}: missing field {f} (field)")
@@ -88,7 +91,10 @@ def check(raw: bytes, readme: str) -> list[str]:
         if not isinstance(code, dict) or "chs" not in code or "ch" not in code:
             out.append(f"{NAME}: {who}: code lacks chs or ch (field)")
         ls = e.get("lines")
-        if not isinstance(ls, list) or not ls:
+        # A dormant entry (its retirement starts "dormant") has had every line
+        # it applied to retired, so it lists none; any other entry names at least one.
+        dormant = str(e.get("retirement", "")).startswith("dormant")
+        if not isinstance(ls, list) or (not ls and not dormant):
             out.append(f"{NAME}: {who}: lines is empty or not a list (line)")
         else:
             for x in ls:
@@ -146,12 +152,12 @@ def selftest() -> int:
 
     variant("schema id", lambda d: d.update(schema="chtypes.filter-declines/2"), "schema")
     variant("duplicate id", lambda d: d["declines"].insert(1, copy.deepcopy(d["declines"][0])), "unique")
-    variant("class outside the six", lambda d: d["declines"][0].update({"class": "mystery"}), "class")
+    variant("class outside the nine", lambda d: d["declines"][0].update({"class": "mystery"}), "class")
     for f in ("id", "class", "trigger", "code", "lines", "paths", "retirement", "description"):
         variant("missing " + f, lambda d, f=f: d["declines"][3].pop(f), "field")
     variant("code without ch", lambda d: d["declines"][0]["code"].pop("ch"), "field")
     variant("line outside the file's lines", lambda d: d["declines"][0]["lines"].append("25.1"), "line")
-    variant("empty lines", lambda d: d["declines"][0].update(lines=[]), "line")
+    variant("empty lines", lambda d: d["declines"][0].update(lines=[], retirement="none"), "line")
     for needle in ("ci" + "/steps/x.sh", "the chtypes" + "-core repo", "see notes" + "/plan.md", "fixed in #123"):
         variant("private string " + needle, lambda d, n=needle: d["declines"][0].update(description=n), "private")
     variant("stale README table", lambda d: d["declines"][0].update(description="changed"), "table", fix_table=False)
