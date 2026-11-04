@@ -834,6 +834,10 @@ ZONE_PROBE = {
 #     capped at `cap_ms`), then answers `status` with `messages["blocked"]`
 #     (or `messages["cap"]` when the cap elapsed). With no token the directive
 #     is plain bytes.
+#   * `late_directive` (`!L:`) is the same wait placed AFTER the last check
+#     point: the call blocks (counted in the probe's inflight) until the token
+#     fires, capped at `cap_ms`, and then answers its normal echo, never
+#     `status`: the token is not observed again.
 #   * Otherwise the call's answer is exactly the one it gives with no token.
 #
 # The probe: a call to `probe_fn` whose `probe_param` is exactly `probe`
@@ -853,6 +857,7 @@ CANCEL = {
     "not_string": "{param}: cancel is not a JSON string",
     "unknown_id": "c" + "0" * 16,
     "directive": "!B:",
+    "late_directive": "!L:",
     "cap_ms": 10000,
     "messages": {
         "entry": "call canceled at entry: the token was fired before the call",
