@@ -513,10 +513,11 @@ extern "C" {
  *   its type default. The export carries every stored non-computed column, those outside the set
  *   included (`document:batch`), so the INSERT of the export needs a grant that covers its column
  *   list. A Nested column is granted per subcolumn (`n.x`). The set is a grant, not a column list:
- *   like a grant it may name an EPHEMERAL or MATERIALIZED column, or a name the table lacks. The
- *   497's message is ClickHouse's own, naming the user `default` and the table `default.t`, since a
- *   schema carries neither a user nor a table name; it is informative. Absent is every column.
- *   Implemented in the first build that carries this description.
+ *   like a grant it may name an EPHEMERAL or MATERIALIZED column, or a name the table lacks. A
+ *   497's message names the user `default`, where the server names the inserting user; the rest of
+ *   the message (the table, the grant and the missing permissions) is the server's exactly. It is
+ *   informative. Absent is every column. Implemented in the first build that carries this
+ *   description.
  * - `column_defaults`: per-call DEFAULT overrides, a list of `{name, value}` (each by the rule for
  *   byte strings in JSON). It is one rule: in a cell the server would fill from the column's
  *   DEFAULT, the call uses the caller's `value` instead. A supplied value wins: the override fills
@@ -1028,7 +1029,16 @@ CHS_API chs_buf *chs_error_ch_name(const chs_error *error);
  * reason (`chs_error_reason`), never on message text. A syntax error's message (ClickHouse code 62,
  * for example a `chs_schema_create` refusal) quotes the statement from the error onward, exactly as
  * the server's does, credentials included: do not log refusal messages for statements that can
- * carry credentials unredacted. Every other message masks secrets as the server does.
+ * carry credentials unredacted. Every other message masks secrets as the server does. A refusal
+ * message that names the table (a CHECK violation, 469; an unknown or duplicate column; the INSERT
+ * privilege, 497) names it as the `CREATE`'s own `database.table`, `default.<name>` when the
+ * `CREATE` is unqualified, as the server does. The server also prints, in parentheses, the table's
+ * UUID, which it draws at `CREATE` time; the library prints the same text without the UUID unless
+ * the `CREATE` has an explicit `UUID '…'` clause, and with one the message is exactly the server's.
+ * A caller that needs byte-exact messages includes the UUID clause. For a refusal, these are the
+ * only differences from the server's own message text: the omitted UUID, a 497's user, and
+ * `chs_preview_batch`'s shorter form, which ends before the server's row-position suffix
+ * (`chs_preview_insert` carries the server's message whole).
  *
  * Class: api. Thread: shared. Init: any. Returns a new chs_buf the caller owns and frees with
  * chs_buf_free; its content is a ClickHouse message: may quote input bytes, so may carry any byte;
