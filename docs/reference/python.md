@@ -99,6 +99,8 @@ Exit statuses come from the `errors` table of [`spec/fetch-v1/constants.json`](.
 
 Safe across threads at every level ([§3](bindings-v1.md)). `ctypes` releases the GIL for the whole of a foreign call, so calls on compiled handles run in parallel. The package takes no lock around a call: it keeps a close guard per handle (so `close` waits for the calls already inside it) and the setup guard.
 
-## Known gaps in 1.0
+<a id="known-gaps-in-10"></a>
+
+## Known gaps in 2.0
 
 What the binding does not do, what happens instead, and the workaround for each are in [`limitations.md`](../limitations.md#known-gaps-in-10).

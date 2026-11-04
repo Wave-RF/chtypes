@@ -1082,8 +1082,8 @@ fn section11(lib: &Arc<Library>) {
                         );
                     }
                     note("a server declared with best_effort takes the ISO-8601 timestamp; the");
-                    note("caller passes the settings its server has, because 1.0 has no call");
-                    note("that reads them (docs/limitations.md, Known gaps in 1.0)");
+                    note("caller passes the settings its server has, because 2.0 has no call");
+                    note("that reads them (docs/limitations.md, Known gaps)");
                 }
                 Err(err) => kv("rebuilt table", &err.to_string()),
             }
