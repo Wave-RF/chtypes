@@ -230,7 +230,7 @@ def _nullable_handle_params(model) -> list[tuple]:
 # The nullable handle parameters the description has today. A new one must be
 # looked at for rule r7 before it is added here: if its NULL means something,
 # it needs its own conformance case.
-KNOWN_NULLABLE = (("chs_schema_create", "server"), ("chs_preview_batch", "filter"))
+KNOWN_NULLABLE = (("chs_schema_create", "server"), ("chs_preview_batch", "filter"), ("chs_preview_insert", "filter"))
 
 
 def _closed_server_case(model) -> dict | None:

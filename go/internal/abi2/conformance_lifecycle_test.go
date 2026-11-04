@@ -168,6 +168,12 @@ func callResolved(t *Table, fn string, a []resolved) (*InvokeResult, error) {
 		}
 		o, x, ce := t.PreviewBatch(a[0].schema(), int32(a[1].i()), a[2].b(), a[3].b(), a[4].b(), a[5].filter(), int32(a[6].i()), uint32(a[7].i()), a[8].b())
 		return finishResult(t, fn, ce, map[string]*Buf{"out": o, "out_export": x})
+	case "chs_preview_insert":
+		if err := need(8); err != nil {
+			return nil, err
+		}
+		o, x, ce := t.PreviewInsert(a[0].schema(), int32(a[1].i()), a[2].b(), a[3].b(), a[4].b(), a[5].filter(), int32(a[6].i()), a[7].b())
+		return finishResult(t, fn, ce, map[string]*Buf{"out": o, "out_rows": x})
 	case "chs_filter_create":
 		if err := need(5); err != nil {
 			return nil, err
