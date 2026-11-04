@@ -47,6 +47,10 @@
       "holds": [
         "chs_schema"
       ]
+    },
+    "chs_cancel": {
+      "free": "chs_cancel_free",
+      "holds": []
     }
   },
   "enums": {
@@ -74,6 +78,10 @@
         {
           "name": "CHS_INTERNAL",
           "value": 4
+        },
+        {
+          "name": "CHS_CANCELED",
+          "value": 5
         }
       ]
     },
@@ -3741,6 +3749,10 @@
               "create",
               "load"
             ]
+          },
+          "cancel": {
+            "type": "string",
+            "pattern": "^c[0-9a-f]{16}$"
           }
         }
       }
@@ -3778,6 +3790,10 @@
           "memory_limit_bytes": {
             "type": "string",
             "pattern": "^(0|[1-9][0-9]{0,17})$"
+          },
+          "cancel": {
+            "type": "string",
+            "pattern": "^c[0-9a-f]{16}$"
           }
         },
         "$defs": {
@@ -4651,6 +4667,7 @@
         "CHS_OK",
         "CHS_REJECTED",
         "CHS_DECLINED",
+        "CHS_CANCELED",
         "CHS_INVALID_ARGUMENT",
         "CHS_INTERNAL"
       ]
@@ -4758,6 +4775,7 @@
       ],
       "may_return": [
         "CHS_OK",
+        "CHS_CANCELED",
         "CHS_INVALID_ARGUMENT",
         "CHS_INTERNAL"
       ]
@@ -4840,6 +4858,7 @@
       ],
       "may_return": [
         "CHS_OK",
+        "CHS_CANCELED",
         "CHS_INVALID_ARGUMENT",
         "CHS_INTERNAL"
       ]
@@ -4917,6 +4936,7 @@
       ],
       "may_return": [
         "CHS_OK",
+        "CHS_CANCELED",
         "CHS_INVALID_ARGUMENT",
         "CHS_INTERNAL"
       ]
@@ -5046,6 +5066,7 @@
       ],
       "may_return": [
         "CHS_OK",
+        "CHS_CANCELED",
         "CHS_INVALID_ARGUMENT",
         "CHS_INTERNAL"
       ]
@@ -5103,6 +5124,7 @@
       ],
       "may_return": [
         "CHS_OK",
+        "CHS_CANCELED",
         "CHS_INVALID_ARGUMENT",
         "CHS_INTERNAL"
       ]
@@ -5219,6 +5241,91 @@
         "CHS_DECLINED",
         "CHS_INVALID_ARGUMENT",
         "CHS_INTERNAL"
+      ]
+    },
+    {
+      "name": "chs_cancel_create",
+      "class": "api",
+      "thread": "any",
+      "init": "required",
+      "returns": {
+        "kind": "status"
+      },
+      "params": [
+        {
+          "name": "out",
+          "kind": "out_handle",
+          "type": "chs_cancel"
+        },
+        {
+          "name": "out_id",
+          "kind": "out_handle",
+          "type": "chs_buf",
+          "content": "ascii"
+        },
+        {
+          "name": "err",
+          "kind": "out_error"
+        }
+      ],
+      "may_return": [
+        "CHS_OK",
+        "CHS_INVALID_ARGUMENT",
+        "CHS_INTERNAL"
+      ]
+    },
+    {
+      "name": "chs_cancel_fire",
+      "class": "api",
+      "thread": "shared",
+      "init": "any",
+      "returns": {
+        "kind": "void"
+      },
+      "params": [
+        {
+          "name": "token",
+          "kind": "handle",
+          "type": "chs_cancel",
+          "const": true,
+          "nullable": true
+        }
+      ]
+    },
+    {
+      "name": "chs_cancel_fired",
+      "class": "api",
+      "thread": "shared",
+      "init": "any",
+      "returns": {
+        "kind": "scalar",
+        "type": "int32"
+      },
+      "params": [
+        {
+          "name": "token",
+          "kind": "handle",
+          "type": "chs_cancel",
+          "const": true,
+          "nullable": true
+        }
+      ]
+    },
+    {
+      "name": "chs_cancel_free",
+      "class": "api",
+      "thread": "handle_serial",
+      "init": "any",
+      "returns": {
+        "kind": "void"
+      },
+      "params": [
+        {
+          "name": "token",
+          "kind": "handle",
+          "type": "chs_cancel",
+          "nullable": true
+        }
       ]
     }
   ]
