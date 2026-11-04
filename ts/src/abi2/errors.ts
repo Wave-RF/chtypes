@@ -99,6 +99,22 @@ export class UsageError extends CallError {
   }
 }
 
+/**
+ * The library answered `canceled`: the call's cancel token fired before it finished. Its `name` is
+ * `'AbortError'`, the `AbortSignal` convention, so both `err.name === 'AbortError'` and
+ * `err instanceof CallCanceledError` work.
+ */
+export class CallCanceledError extends CallError {
+  override name = 'AbortError';
+
+  constructor(f: CallErrorFields, options?: { cause?: unknown }) {
+    super('canceled', f);
+    if (options?.cause !== undefined) {
+      this.cause = options.cause;
+    }
+  }
+}
+
 /** The library answered `internal`, or sent a status outside the closed set, or a document that does not decode: a library bug. */
 export class InternalError extends CallError {
   constructor(f: CallErrorFields) {
