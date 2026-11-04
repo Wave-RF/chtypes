@@ -81,6 +81,16 @@ defaults:
   run:
     shell: bash
 
+# In this repository's CI every shared fixture under tests/fixtures exists, so
+# a binding test that would skip because its fixture is missing (the insert
+# projection fixture, tests/fixtures/abi-v2/insert-projection.json) fails
+# instead: a path change that drops a fixture cannot go green with 0 cases.
+# Outside CI, and in scripts/check-standalone.sh's bare copy of go/ (which has
+# no tests/fixtures by design), the variable is unset and those tests skip
+# loudly.
+env:
+  CHTYPES_REQUIRE_FIXTURES: "1"
+
 jobs:
   checks:
     name: "checks — repository scripts and their selftests (no network, no artifact)"
