@@ -437,24 +437,27 @@ extern "C" {
  *   CREATE runs, under the settings layers (`chs_schema_create`).
  * - `load`: the statement is the stored definition of a table the server already holds, as that
  *   server reports it (`system.tables.create_table_query`, `SHOW CREATE TABLE`, or the table's
- *   metadata file), compiled as the server loads it when it starts. It is one switch, and
- *   ClickHouse's own: every check on the compile's path that reads the loading posture reads
- *   `FORCE_ATTACH` instead of `CREATE`, in ClickHouse's own code, and nothing else changes. So the
- *   checks a server applies only to a new table are not applied: the type gates
- *   (`allow_suspicious_low_cardinality_types`, `allow_suspicious_fixed_string_types` and the rest,
- *   at the compile and at every call on the schema), the codec, statistics and suspicious-index
- *   checks, the DEFAULT validation of a typed column, the TTL checks, the MergeTree settings'
- *   constraint and sanity checks, and the floating-point partition-key, nullable-key and
- *   deprecated-syntax gates. `flatten_nested` and `data_type_default_nullable` are not applied
- *   either: a stored definition is already flattened and typed. Which checks these are on each
- *   supported line is the artifact producer's enumeration from the vendored source; no list is kept
- *   here. A projection that a starting server skips because it no longer parses is declined,
- *   because whether a given server still holds it depends on that server's history. A Replicated
- *   engine's ZooKeeper path and replica name never change a row verdict, so under `load` a stored
- *   definition whose engine arguments read a macro the server's `macros` cannot expand (or carry
- *   none, as a Replicated database's table does) compiles as the server loads it:
- *   `schema_description` then carries no `replicated` member, and only an answer that depends on
- *   the path (none today) is declined.
+ *   metadata file), compiled as the server loads it when it starts. A statement rebuilt only from a
+ *   held table's own column definitions, as `system.columns` reports them, on `MergeTree ORDER BY
+ *   tuple()` with no partition key, TTL, index, projection, constraint or setting, also counts as
+ *   read back and may compile under `load`; a statement in which any column definition was edited
+ *   is the caller's own, so it compiles under `create`. It is one switch, and ClickHouse's own:
+ *   every check on the compile's path that reads the loading posture reads `FORCE_ATTACH` instead
+ *   of `CREATE`, in ClickHouse's own code, and nothing else changes. So the checks a server applies
+ *   only to a new table are not applied: the type gates (`allow_suspicious_low_cardinality_types`,
+ *   `allow_suspicious_fixed_string_types` and the rest, at the compile and at every call on the
+ *   schema), the codec, statistics and suspicious-index checks, the DEFAULT validation of a typed
+ *   column, the TTL checks, the MergeTree settings' constraint and sanity checks, and the
+ *   floating-point partition-key, nullable-key and deprecated-syntax gates. `flatten_nested` and
+ *   `data_type_default_nullable` are not applied either: a stored definition is already flattened
+ *   and typed. Which checks these are on each supported line is the artifact producer's enumeration
+ *   from the vendored source; no list is kept here. A projection that a starting server skips
+ *   because it no longer parses is declined, because whether a given server still holds it depends
+ *   on that server's history. A Replicated engine's ZooKeeper path and replica name never change a
+ *   row verdict, so under `load` a stored definition whose engine arguments read a macro the
+ *   server's `macros` cannot expand (or carry none, as a Replicated database's table does) compiles
+ *   as the server loads it: `schema_description` then carries no `replicated` member, and only an
+ *   answer that depends on the path (none today) is declined.
  *
  * **The caller's obligation.** `load` asserts that the server holds a table defined by exactly this
  * statement. The library cannot check that assertion, because it never connects to the server. A
