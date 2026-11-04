@@ -17,8 +17,8 @@ import (
 
 // CallError is the six fields every call error carries, verbatim and with
 // nothing synthesized. It is embedded in *SchemaError, *UnsupportedError,
-// *UsageError and *InternalError, so the fields read directly
-// (se.ChCode); AsCallError reads them from any of the four.
+// *UsageError, *CanceledError and *InternalError, so the fields read directly
+// (se.ChCode); AsCallError reads them from any of the five.
 type CallError struct {
 	// Status is the raw chs_status value; compare with the Status constants.
 	Status Status
@@ -57,7 +57,7 @@ func (e *CallError) text(class string) string {
 	return b.String()
 }
 
-// Error implements error for a bare CallError (the four classes below each
+// Error implements error for a bare CallError (the classes below each
 // override it with their own label).
 func (e *CallError) Error() string { return e.text("call failed") }
 
@@ -82,13 +82,27 @@ type UsageError struct{ CallError }
 
 func (e *UsageError) Error() string { return e.text("usage error") }
 
+// CanceledError is CHS_CANCELED: the call's cancel token fired before it
+// finished. Cause is the error that caused the cancellation, nil unless the
+// binding knows one (a context-driven call sets it to context.Cause(ctx), so
+// errors.Is(err, context.Canceled) holds); Unwrap returns it.
+type CanceledError struct {
+	CallError
+	Cause error
+}
+
+func (e *CanceledError) Error() string { return e.text("canceled") }
+
+// Unwrap returns Cause.
+func (e *CanceledError) Unwrap() error { return e.Cause }
+
 // InternalError is CHS_INTERNAL, a status outside the closed set, or a
 // document that does not decode: a library bug.
 type InternalError struct{ CallError }
 
 func (e *InternalError) Error() string { return e.text("internal error") }
 
-// AsCallError reads the five call-error fields from any of the four classes,
+// AsCallError reads the five call-error fields from any of the five classes,
 // however deeply err wraps one.
 func AsCallError(err error) (*CallError, bool) {
 	var se *SchemaError
@@ -102,6 +116,10 @@ func AsCallError(err error) (*CallError, bool) {
 	var us *UsageError
 	if errors.As(err, &us) {
 		return &us.CallError, true
+	}
+	var ca *CanceledError
+	if errors.As(err, &ca) {
+		return &ca.CallError, true
 	}
 	var ie *InternalError
 	if errors.As(err, &ie) {
@@ -149,6 +167,8 @@ func callError(c *abi2.CallError) error {
 		return &UnsupportedError{ce}
 	case "usage":
 		return &UsageError{ce}
+	case "canceled":
+		return &CanceledError{CallError: ce}
 	default:
 		return &InternalError{ce}
 	}
