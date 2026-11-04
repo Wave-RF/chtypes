@@ -315,6 +315,7 @@ fn every_case_of_the_shared_fixture_gives_its_expected_projection_result() {
     // rust/ (the packaged crate) does not hold it: skip LOUDLY, by name. A
     // fixture that is present but unreadable or malformed still fails.
     if !path.exists() {
+        fail_if_fixtures_required(&path);
         eprintln!(
             "SKIPPED (loudly): every_case_of_the_shared_fixture_gives_its_expected_projection_result: fixture absent ({}); nothing was exercised",
             path.display()
@@ -399,11 +400,22 @@ fn the_line_counter_and_the_suffix_match_the_checkers_primitives() {
     assert!(!is_row_suffix(b" (at row 1) "));
 }
 
+/// Where `CHTYPES_REQUIRE_FIXTURES` is "1" (the repository's main CI) an absent
+/// shared fixture fails instead of skipping.
+fn fail_if_fixtures_required(path: &std::path::Path) {
+    assert!(
+        std::env::var("CHTYPES_REQUIRE_FIXTURES").as_deref() != Ok("1"),
+        "CHTYPES_REQUIRE_FIXTURES=1 and the insert projection fixture is absent: {}",
+        path.display()
+    );
+}
+
 /// Read the shared fixture, or `None` (after a loud skip line) when it is absent.
 fn fixture_cases(test: &str) -> Option<Vec<Json>> {
     let path = super::registry_stub_tests::repo_root()
         .join("tests/fixtures/abi-v2/insert-projection.json");
     if !path.exists() {
+        fail_if_fixtures_required(&path);
         eprintln!(
             "SKIPPED (loudly): {test}: fixture absent ({}); nothing was exercised",
             path.display()
