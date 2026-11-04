@@ -256,3 +256,46 @@ func TestInsertProjectionFixture(t *testing.T) {
 		t.Errorf("equal=%d exceptions=%d, want 11 and 1", equal, exceptions)
 	}
 }
+
+func TestInsertDeclinedOutputIsAbsent(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "tests", "fixtures", "abi-v2", "insert-projection.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fx struct {
+		Cases []projectionCase `json:"cases"`
+	}
+	if err := json.Unmarshal(raw, &fx); err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]projectionCase{}
+	for _, c := range fx.Cases {
+		byID[c.ID] = c
+	}
+	// A declined export that still came with bytes: the public output is absent.
+	declined := byID["red-e-row-output-present"]
+	rawOut := b64Or(t, declined.InsertRowsB64)
+	if len(rawOut) == 0 {
+		t.Fatal("the planted case carries no output bytes")
+	}
+	res, err := decodeInsertResult(declined.Insert, rawOut)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.ExportDeclined == "" {
+		t.Fatal("the planted case is not declined")
+	}
+	if res.Output != nil {
+		t.Errorf("declined output = %q, want absent", res.Output)
+	}
+	// A case that was not declined keeps its bytes.
+	ok := byID["equal-csv-filter-mixed"]
+	want := b64Or(t, ok.InsertRowsB64)
+	res, err = decodeInsertResult(ok.Insert, want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.ExportDeclined != "" || len(want) == 0 || !bytes.Equal(res.Output, want) {
+		t.Errorf("non-declined output = %q, want %q", res.Output, want)
+	}
+}
