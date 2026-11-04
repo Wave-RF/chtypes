@@ -101,6 +101,7 @@ parameter-kind vocabulary model.py already enforces.
 
 from __future__ import annotations
 
+import model as abimodel
 from model import BUF_HANDLE, ERROR_HANDLE, STATUS_ENUM
 
 from . import _stubshared
@@ -1324,6 +1325,35 @@ def _r2_members(model, fn) -> list[str]:
     ]
 
 
+def _null_input(model, fn) -> list[str]:
+    """Generation 2, the null_input decode cells: under CHS_STUB_NULL_INPUT
+    (variant "null-input", see _stubshared.NULL_INPUT_DOCS) chs_preview_row
+    and chs_preview_batch answer that kind's document, after the input checks
+    and the status injection. Each document is validated against the
+    description's own schema for its kind before it is compiled in."""
+    if model.abi < 2 or fn.name not in ("chs_preview_row", "chs_preview_batch"):
+        return []
+    import json
+
+    out, others = _doc_out(fn)
+    kind = None if out is None else out.content[len("document:") :]
+    doc = _stubshared.NULL_INPUT_DOCS.get(kind)
+    if doc is None:
+        raise ValueError(f"{fn.name}: the shape _null_input answers has changed")
+    problems = abimodel.validate(doc, model.documents[kind].schema)
+    if problems:
+        raise ValueError(f"NULL_INPUT_DOCS[{kind!r}] fails documents.{kind}.schema: {problems}")
+    text = json.dumps(doc, separators=(",", ":"), ensure_ascii=True)
+    return [
+        "#if defined(CHS_STUB_NULL_INPUT)",
+        "    {",
+        f"        static const char rule_doc[] = {_c_str(text)};",
+        *_answer_doc(out, others, "rule_doc"),
+        "    }",
+        "#endif",
+    ]
+
+
 def _filter_observable(model, fn) -> list[str]:
     """Generation 2, rule r7: under CHS_STUB_FILTER_OBSERVABLE (variant
     "filter-observable", see _stubshared.FILTER_OBSERVABLE_DOCS) a call that
@@ -1508,6 +1538,7 @@ def _gen_generic(model, fn) -> str:
     body += _r3_values(model, fn)
     body += _declined_settings(model, fn)
     body += _filter_observable(model, fn)
+    body += _null_input(model, fn)
     body += _fill_outputs(model, fn)
     err_param = next((p for p in fn.params if p.kind == "out_error"), None)
     if err_param is not None:

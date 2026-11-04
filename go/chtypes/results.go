@@ -30,6 +30,12 @@ type Value struct {
 	Source Source
 	// IsStored is the description's is_stored fact for Source.
 	IsStored bool
+	// NullInput is whether the input field was the format's NULL literal (a
+	// JSON null, a TSV \N), from null_input; false when the document carries
+	// none. It is a fact about the input, where Null is one about the stored
+	// value: the two differ where a NULL literal is read into a column that
+	// is not Nullable.
+	NullInput bool
 }
 
 // Transform is one silent change the library reports.

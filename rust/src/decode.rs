@@ -459,6 +459,7 @@ fn value_of(o: &Obj<'_>) -> Result<Value> {
         source,
         is_stored,
         value: o.value()?,
+        null_input: o.boolean("null_input")?,
     })
 }
 

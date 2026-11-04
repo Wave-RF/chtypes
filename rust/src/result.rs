@@ -57,6 +57,12 @@ pub struct Value {
     /// `value_b64`), whether or not they are valid UTF-8; `None` otherwise. A
     /// value nested in another type has none in 1.0.
     pub value: Option<RawText>,
+    /// Whether the input field was the format's NULL literal (a JSON `null`, a
+    /// TSV `\N`), from `null_input`; `false` when the document carries none. A
+    /// fact about the input, where [`Value::null`] is one about the stored
+    /// value: the two differ where a NULL literal is read into a column that
+    /// is not Nullable.
+    pub null_input: bool,
 }
 
 /// One transformation: a value the library stored differently from the input.

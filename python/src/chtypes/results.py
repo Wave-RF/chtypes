@@ -73,7 +73,11 @@ class Value:
     bytes of a scalar String or FixedString leaf (from `value_b64`), None where
     the document carries none. `null`: the library's verdict, poison included.
     `source`: the `value_src` spelling (from `src`); `Source` lists them.
-    `is_stored`: the description's own fact for `source`.
+    `is_stored`: the description's own fact for `source`. `null_input`: whether
+    the input field was the format's NULL literal (a JSON null, a TSV `\\N`),
+    from `null_input`, False where the document carries none; a fact about the
+    input, where `null` is one about the stored value, so the two differ where
+    a NULL literal is read into a column that is not Nullable.
     """
 
     column: bytes
@@ -82,6 +86,7 @@ class Value:
     source: str
     is_stored: bool
     value: bytes | None = None
+    null_input: bool = False
 
 
 @dataclass(frozen=True, slots=True)

@@ -322,6 +322,7 @@ def _value(obj: dict[str, Any], where: str) -> Value:
         source=source,
         is_stored=Source.is_stored(source),
         value=_opt_b64(obj, "value_b64", where),
+        null_input=_bool(obj, "null_input", where),
     )
 
 

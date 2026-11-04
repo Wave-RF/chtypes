@@ -244,6 +244,93 @@ def _strip_unknown(v):
     return v
 
 
+# The null_input cells, variant "null-input" (-DCHS_STUB_NULL_INPUT):
+# chs_preview_row answers NULL_INPUT_DOCS["row"] and chs_preview_batch
+# NULL_INPUT_DOCS["batch"], whatever the call's inputs. Each document carries,
+# for every format and type of NULL_INPUT_CELLS, the entry a NULL literal (a
+# JSON null, a TSV \N) read into that NON-Nullable column gives: `null_input`
+# true, the column's default stored, `null` false. The stub is not ClickHouse:
+# these are DECODE cells, proving every binding exposes the member the library
+# sets, under the name bindings-v1.md section 5 gives it. Two control entries
+# per document hold `null_input` false and `null_input` absent, which every
+# binding must read as false. A runner keys each entry's expected value on its
+# name: NULL_INPUT_CONTROL_PREFIX names a control, and every other entry is a
+# cell, NULL_INPUT_CELL_COUNT of them in the row document and as many across
+# the batch's rows, so a document that lost its cells fails rather than
+# passing on its controls alone.
+NULL_INPUT_FORMATS = (("JSONEachRow", "null"), ("TSV", "\\N"))
+# (name, type, base, the stored rendering of the type's default, value_b64 or None)
+NULL_INPUT_TYPES = (
+    ("uuid", "UUID", "UUID", '"00000000-0000-0000-0000-000000000000"', None),
+    ("fixed", "FixedString(4)", "FixedString(4)", '"\\u0000\\u0000\\u0000\\u0000"', "AAAAAA=="),
+    ("int32", "Int32", "Int32", "0", None),
+    ("datetime", "DateTime", "DateTime", '"1970-01-01 00:00:00"', None),
+    ("lowcard", "LowCardinality(String)", "String", '""', ""),
+    ("enum8", "Enum8('a' = 1, 'b' = 2)", "Enum8('a' = 1, 'b' = 2)", '"a"', None),
+)
+NULL_INPUT_CONTROL_PREFIX = "control."
+NULL_INPUT_CELL_COUNT = len(NULL_INPUT_FORMATS) * len(NULL_INPUT_TYPES)
+
+
+def _null_input_cell(fmt: str, literal: str, t: tuple) -> dict:
+    name, typ, base, stored, value_b64 = t
+    cell = {
+        "name": f"{fmt}.{name}",
+        "type": typ,
+        "base": base,
+        "src": "input",
+        "input": literal,
+        "stored": stored,
+        "nullable": False,
+        "poison": False,
+        "null_input": True,
+        "dup_dropped": False,
+        "null": False,
+    }
+    if value_b64 is not None:
+        cell["value_b64"] = value_b64
+    return cell
+
+
+def _null_input_controls() -> list[dict]:
+    base = {"type": "Int32", "base": "Int32", "src": "input", "input": "1", "stored": "1", "null": False}
+    return [
+        {"name": NULL_INPUT_CONTROL_PREFIX + "false", **base, "null_input": False},
+        {"name": NULL_INPUT_CONTROL_PREFIX + "absent", **base},
+    ]
+
+
+def _null_input_row(formats) -> dict:
+    cols = [_null_input_cell(fmt, lit, t) for fmt, lit in formats for t in NULL_INPUT_TYPES]
+    return {
+        "outcome": "accepted",
+        "code": 0,
+        "err": "",
+        "input_span": {"off": 0, "len": 1},
+        "unknown_fields": [],
+        "cols": cols + _null_input_controls(),
+        "computed": [],
+        "transformed": [],
+    }
+
+
+NULL_INPUT_DOCS = {
+    "row": _null_input_row(NULL_INPUT_FORMATS),
+    "batch": {
+        "outcome": "accepted",
+        "code": 0,
+        "err": "",
+        "rows_read": len(NULL_INPUT_FORMATS),
+        "rows_skipped": 0,
+        "rows": [_null_input_row((f,)) for f in NULL_INPUT_FORMATS],
+        "transformed": [],
+        "unsupported_settings": [],
+        "unconsumed": [],
+        "framing": {"bom_skipped": False, "container": "stream", "header": None},
+    },
+}
+
+
 # Rule r7, variant "filter-observable" (-DCHS_STUB_FILTER_OBSERVABLE):
 # chs_preview_batch answers one of these two batch documents, by whether its
 # filter reached it. rows_passed is the only difference.
@@ -658,6 +745,8 @@ def plan(model) -> list[Variant]:
             Variant("r3-unknown-capabilities", (("CHS_STUB_R3_CAPABILITIES", "1"),), "accepted"),
             # Rule r7: whether a batch's filter reached the library.
             Variant("filter-observable", (("CHS_STUB_FILTER_OBSERVABLE", "1"),), "accepted"),
+            # The null_input decode cells: see NULL_INPUT_DOCS above.
+            Variant("null-input", (("CHS_STUB_NULL_INPUT", "1"),), "accepted"),
             # The filter-declined settings, and describe's deep-input
             # refusal: see DECLINED and DEEP above.
             Variant("declined-settings", (("CHS_STUB_DECLINED_SETTINGS", "1"),), "accepted"),

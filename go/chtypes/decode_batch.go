@@ -508,7 +508,7 @@ type colDoc struct {
 	RefUnclass fIgnore `json:"ref_unclassified"`
 	Nullable   fIgnore `json:"nullable"`
 	Poison     fIgnore `json:"poison"`
-	NullInput  fIgnore `json:"null_input"`
+	NullInput  fBool   `json:"null_input"`
 	DupDropped fIgnore `json:"dup_dropped"`
 	IsStored   fIgnore `json:"is_stored"`
 }
@@ -912,7 +912,7 @@ func (d *batchRowDoc) result(slabs *rowSlabs) (RowResult, bool) {
 		for i := range cols {
 			c := &cols[i]
 			src := Source(c.Src.s)
-			v := Value{Source: src, IsStored: src.IsStored(), Null: c.Null.v}
+			v := Value{Source: src, IsStored: src.IsStored(), Null: c.Null.v, NullInput: c.NullInput.v}
 			if v.Column, ok = nameOf(&c.Name.fString, &c.NameB64); !ok {
 				return res, false
 			}

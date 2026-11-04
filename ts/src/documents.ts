@@ -87,6 +87,12 @@ export interface Value {
   readonly isStored: boolean;
   /** The raw bytes of a scalar String or FixedString value (rule 6), when the document carries them. */
   readonly value: Buffer | undefined;
+  /**
+   * Whether the input field was the format's NULL literal (a JSON `null`, a TSV `\N`), from `null_input`; `false`
+   * when the document carries none. A fact about the input, where `null` is one about the stored value: the two
+   * differ where a NULL literal is read into a column that is not Nullable.
+   */
+  readonly nullInput: boolean;
 }
 
 /** One cell of an engine row: ClickHouse's rendering of a stored value after the engine's insert-time merge. */
@@ -535,6 +541,7 @@ function decodeValue(doc: string, v: unknown): Value {
     source,
     isStored,
     value: bytesField(doc, o, 'value'),
+    nullInput: boolOr(doc, o, 'null_input', false),
   };
 }
 

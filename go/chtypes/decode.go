@@ -525,12 +525,13 @@ func (r *reader) row(m map[string]any, path string) RowResult {
 			}
 			src := Source(r.text(cm, "src", p))
 			v := Value{
-				Column:   r.name(cm, "name", p),
-				Text:     r.bytes(cm, "stored", p),
-				Value:    r.rawValue(cm, p),
-				Null:     r.boolean(cm, "null", p),
-				Source:   src,
-				IsStored: src.IsStored(),
+				Column:    r.name(cm, "name", p),
+				Text:      r.bytes(cm, "stored", p),
+				Value:     r.rawValue(cm, p),
+				Null:      r.boolean(cm, "null", p),
+				Source:    src,
+				IsStored:  src.IsStored(),
+				NullInput: r.boolean(cm, "null_input", p),
 			}
 			res.Columns = append(res.Columns, v)
 			if v.IsStored {
