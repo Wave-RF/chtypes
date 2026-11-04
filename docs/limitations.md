@@ -4,7 +4,7 @@ Every item here is a deliberate decline or a stated boundary, not a bug queue. T
 
 When you get one, fall back to the server: validate cautiously, forward the row unpreviewed, and never tell a user they are wrong on the strength of a decline.
 
-The builds this page names by id were measured while v2 was in development, on its pre-release channel. The SDK 2.0.0 libraries on the production channel are build `20261021.191313`: a claim tied to an earlier build id holds for that build once it is re-checked on it, and this page then names it.
+This page describes the libraries SDK 2.0.0 ships: build `20261104.061020`, on the four supported lines 26.3, 26.8, 26.9 and 26.10 (the exact patches are in [`support-v2.md`](support-v2.md)). 26.7 is served but unsupported. Each entry says what holds on that build and how it was measured.
 
 <a id="macos-is-a-development-floor-not-an-oracle"></a>
 
@@ -20,15 +20,13 @@ The darwin artifacts give exactly the answers ClickHouse itself gives on macOS, 
 
 **On 26.3, deep nesting** also differs on macOS: the macOS 26.3 server refuses deeply nested expressions and types that the library answers, because its threads have a smaller stack. That is a documented platform limitation of that one pair; the measured band is under [Not covered: `26.3` on `darwin-arm64`](#filters-are-enforcement-grade-against-a-same-platform-server-per-lifted-line-platform).
 
-(An earlier version of this page said every macOS float parse diverged from a server. That was measured on 25.8 and no longer holds on any supported line.)
-
 <a id="ephemeral-columns-cannot-be-previewed-through-a-format-stream"></a>
 
 ## EPHEMERAL columns are previewed through the call's column list
 
 An INSERT whose column list names an EPHEMERAL column is previewed by passing that list as `columns`: the value is read (`src` `ephemeral_input`, `is_stored` false) and feeds the DEFAULT and MATERIALIZED expressions that read it, but is not stored. With no `columns`, a body field naming it is an unknown field (`src` `skipped`).
 
-**Measured** by the artifact producer on the 2.0.0 libraries (build `20261021.191313`) of all four lines, through the batch preview, in JSON and CSV, with and without a column list; a 26.8 server stores the same rows. (An earlier version of this page said such an INSERT cannot be previewed, because a format stream carries no column list. The v2 calls take that list as `columns`.)
+**Measured** by the artifact producer on build `20261021.191313`, a pre-release build of the locked ABI, on all four lines, through the batch preview, in JSON and CSV, with and without a column list; a 26.8 server stores the same rows. Not re-measured on build `20261104.061020`.
 
 ## Declined by design
 
@@ -40,9 +38,9 @@ Each of these is `unsupported` — an `UnsupportedError`, `Error::Unsupported`, 
 - **Anything that would run a query or read storage.** A subquery, or a read of a table, a table function, a file, a remote host or a dictionary, in a `CREATE` (any clause), a filter or a `Values` expression is declined, never executed in your process. The decline reasons are `expression-executes-query` and `expression-reads-storage` (`CREATE` and filter) and `expression-subquery` and `values-reads-storage` (`Values`); the catalog entries in [`spec/abi-v2/declines/declines.json`](../spec/abi-v2/declines/declines.json) give the exact trigger of each.
 - **Server- and session-property DEFAULTs** — `hostName()`, `currentUser()` and the rest. Their value is a property of the server, and there is no server here.
 - **DEFAULT expressions past the admission budgets** — 256 MiB and one second by default, both adjustable through the process-wide settings in [`guides/settings.md`](guides/settings.md). This is what bounds a blocking DEFAULT: `sleep` and `sleepEachRow` are not declined by name, so `DEFAULT sleep(0)` is admitted, while `DEFAULT sleep(1.5)` exceeds the one-second budget and is declined when the schema compiles.
-- **Functions that need a server, in a column expression.** A `DEFAULT`, `MATERIALIZED`, `ALIAS` or `EPHEMERAL` expression that calls a function whose resolver cannot be built outside a running server declines the whole schema at create (`unsupported`; `CHS_DECLINED` at `chs_schema_create`). The message names the expression kind, the column and the function, and says the function "cannot be resolved without a server". Whether a server accepts such a `CREATE` depends on its own settings, resources and environment, so chtypes does not judge it. On build `20261012.142240` (v2-dev.13) the functions are, by line:
+- **Functions that need a server, in a column expression.** A `DEFAULT`, `MATERIALIZED`, `ALIAS` or `EPHEMERAL` expression that calls a function whose resolver cannot be built outside a running server declines the whole schema at create (`unsupported`; `CHS_DECLINED` at `chs_schema_create`). The message names the expression kind, the column and the function, and says the function "cannot be resolved without a server". Whether a server accepts such a `CREATE` depends on its own settings, resources and environment, so chtypes does not judge it. The functions are, by line, as measured on a pre-release build (see **Measured** below; 26.10 was not in that measurement):
 
-  - **all four lines (26.3, 26.7, 26.8, 26.9):** `fuzzQuery`; `neighbor`; `runningAccumulate`, `runningDifference`, `runningDifferenceStartingWithFirstValue`; `showCertificate`; `transactionLatestSnapshot`, `transactionOldestSnapshot`; the ten `region*` functions (`regionHierarchy`, `regionIn`, `regionToArea`, `regionToCity`, `regionToContinent`, `regionToCountry`, `regionToDistrict`, `regionToName`, `regionToPopulation`, `regionToTopContinent`); `serverUUID`; and the `timeSeries*` functions `timeSeriesCopyTag`, `timeSeriesCopyTags`, `timeSeriesExtractTag`, `timeSeriesGroupToTags`, `timeSeriesIdToGroup`, `timeSeriesIdToTags`, `timeSeriesIdToTagsGroup`, `timeSeriesJoinTags`, `timeSeriesRemoveAllTagsExcept`, `timeSeriesRemoveTag`, `timeSeriesRemoveTags`, `timeSeriesReplaceTag`, `timeSeriesStoreTags`, `timeSeriesTagsGroupToTags`, `timeSeriesTagsToGroup`, `timeSeriesThrowDuplicateSeriesIf` (16 names);
+  - **26.3, 26.7, 26.8 and 26.9:** `fuzzQuery`; `neighbor`; `runningAccumulate`, `runningDifference`, `runningDifferenceStartingWithFirstValue`; `showCertificate`; `transactionLatestSnapshot`, `transactionOldestSnapshot`; the ten `region*` functions (`regionHierarchy`, `regionIn`, `regionToArea`, `regionToCity`, `regionToContinent`, `regionToCountry`, `regionToDistrict`, `regionToName`, `regionToPopulation`, `regionToTopContinent`); `serverUUID`; and the `timeSeries*` functions `timeSeriesCopyTag`, `timeSeriesCopyTags`, `timeSeriesExtractTag`, `timeSeriesGroupToTags`, `timeSeriesIdToGroup`, `timeSeriesIdToTags`, `timeSeriesIdToTagsGroup`, `timeSeriesJoinTags`, `timeSeriesRemoveAllTagsExcept`, `timeSeriesRemoveTag`, `timeSeriesRemoveTags`, `timeSeriesReplaceTag`, `timeSeriesStoreTags`, `timeSeriesTagsGroupToTags`, `timeSeriesTagsToGroup`, `timeSeriesThrowDuplicateSeriesIf` (16 names);
   - **26.7, 26.8 and 26.9 also:** `timeSeriesGroupToSamplingKey` (17 `timeSeries*` names in all);
   - **26.7 also:** `AIClassify`, `AIExtract`, `AIGenerate`, `AITranslate`, `aiClassify`, `aiEmbed`, `aiExtract`, `aiGenerate`, `aiTranslate`.
 
@@ -54,9 +52,7 @@ Each of these is `unsupported` — an `UnsupportedError`, `Error::Unsupported`, 
 
   `getClientHTTPHeader` is not in this group. At default settings a server refuses it in a column expression with error 446, and so does this library (a rejection, as for the server). A `CHECK` constraint that calls it, for example `CHECK isNotNull(getClientHTTPHeader('X-A'))`, is declined at create: a stock server's `CREATE` accepts that constraint and refuses only at INSERT.
 
-  Builds `20261009.145808` and `20261010.180314` compiled schemas calling the functions above that a stock server refuses, and accepted rows for their `ALIAS` and `EPHEMERAL` forms (measured by the artifact producer).
-
-  **Measured**: the server half by the artifact producer, against stock servers of 26.3, 26.7, 26.8 and 26.9 on linux-amd64 and of 26.9 on linux-arm64, on a pre-release build of this change: for the functions listed above and the `getClientHTTPHeader` control, in the four column expressions and a `CHECK`, with constant and non-constant arguments (1805 cells), every cell agreed or declined, with zero over-accepts and zero over-rejects. The library half on build `20261012.142240` by this repository, through the Python SDK on darwin-arm64, on all four lines: every function listed above declines the schema in all four column expressions on each line it is listed for, and `getClientHTTPHeader` is refused with 446 in all four and declined in a `CHECK`.
+  **Measured**: the server half by the artifact producer, against stock servers of 26.3, 26.7, 26.8 and 26.9 on linux-amd64 and of 26.9 on linux-arm64, on a pre-release build of this change: for the functions listed above and the `getClientHTTPHeader` control, in the four column expressions and a `CHECK`, with constant and non-constant arguments (1805 cells), every cell agreed or declined, with zero over-accepts and zero over-rejects. The library half by this repository on the pre-release build `20261012.142240`, through the Python SDK on darwin-arm64, on 26.3, 26.7, 26.8 and 26.9 (26.10 not measured; not re-measured on build `20261104.061020`): every function listed above declines the schema in all four column expressions on each line it is listed for, and `getClientHTTPHeader` is refused with 446 in all four and declined in a `CHECK`.
 
 - **A body the server may read either serially or in parallel, when the error budget is non-zero.** A server's INSERT reads a CSV, TSV (and their `WithNames` forms), JSONEachRow or JSONCompactEachRow body in parallel segments when `max_parsing_threads` is above 1 and `input_format_parallel_parsing` is on. Each segment's reader starts its error count at zero, so `input_format_allow_errors_num` holds **per segment**, while the ratio (`input_format_allow_errors_ratio`) runs over the whole body. A single reader over the whole body stops at a different row. The library reads such a body in segments as the server does, each with the vendored reader, and declines it (`unsupported`, `CHS_DECLINED`, with a message naming both answers) when both of these hold:
 
@@ -69,7 +65,7 @@ Each of these is `unsupported` — an `UnsupportedError`, `Error::Unsupported`, 
 
   Treat the decline as no answer, never as a rejection.
 
-  **Measured** on build `20261012.142240` (v2-dev.13) by this repository, through the Python SDK on darwin-arm64, on all four lines: `k UInt32, x Date`, one good row, four bad, one good, under `input_format_allow_errors_num=2` and `max_insert_block_size=2`, in CSV, TSV, JSONEachRow and JSONCompactEachRow, is declined with the threads not named, refused with 38 under `max_parsing_threads=1` or `input_format_parallel_parsing=0`, and accepted with the two good rows stored under `max_parsing_threads=4` (per call, and for CSV also in the server profile). The artifact producer measured servers of all four lines storing the two good rows of that body.
+  **Measured** by this repository on the pre-release build `20261012.142240`, through the Python SDK on darwin-arm64, on 26.3, 26.7, 26.8 and 26.9 (26.10 not measured; not re-measured on build `20261104.061020`): `k UInt32, x Date`, one good row, four bad, one good, under `input_format_allow_errors_num=2` and `max_insert_block_size=2`, in CSV, TSV, JSONEachRow and JSONCompactEachRow, is declined with the threads not named, refused with 38 under `max_parsing_threads=1` or `input_format_parallel_parsing=0`, and accepted with the two good rows stored under `max_parsing_threads=4` (per call, and for CSV also in the server profile). The artifact producer measured servers of all four lines storing the two good rows of that body.
 
 ## Constants are not payloads
 
@@ -79,26 +75,11 @@ The rules genuinely differ: `256` into a `UInt8` column stores `0`, while `x = 2
 
 ## Filters are enforcement-grade against a same-platform server, per lifted (line, platform)
 
-**A filter verdict is enforcement-grade relative to a ClickHouse server of the same line, on the same operating system and CPU architecture, for the builds that passed the artifact producer's gate.** Artifact build `20261009.074908` (served on the v2-dev channel to SDK `2.0.0-dev.4`) is the first such build. A `t` verdict is a security claim; anything but a definite `t` is a no. That includes v2's `unknown(n)` verdict member, so a caller that maps an unknown verdict to a pass is wrong by contract. A closed filter is never passed to the library as NULL (which would mean "no filter"): the bindings refuse it.
+**A filter verdict is enforcement-grade relative to a ClickHouse server of the same line, on the same operating system and CPU architecture.** A `t` verdict is a security claim; anything but a definite `t` is a no. That includes v2's `unknown(n)` verdict member, so a caller that maps an unknown verdict to a pass is wrong by contract. A closed filter is never passed to the library as NULL (which would mean "no filter"): the bindings refuse it.
 
-**The criterion.** The artifact producer runs a standing filter differential against real servers of the same platform on each published build, before the push and after it. A build is enforcement-grade for a pair when that differential reports zero over-accepts and zero over-rejects for it. It reads `12/12` on that build as published.
+**The criterion.** The artifact producer runs a standing filter differential against real servers of the same platform on each published build, before the push and after it. A build is enforcement-grade for a `(ClickHouse line, platform)` pair when that differential reports zero over-accepts and zero over-rejects for it.
 
-**The gate lifts per `(ClickHouse line, platform)`, never all at once.** Eleven pairs are lifted, from artifact build `20261010.180314` (the build served on the v2-dev channel to SDK `2.0.0-dev.8`). The history, in plain words:
-
-- Build `20261009.074908` first lifted the same eleven pairs.
-- A known divergence then put every one of them back under the gate: a date-time column compared with a `String` constant or a `{p:String}` parameter, in text the server converts differently.
-- Build `20261010.180314` declines those shapes, and the producer's differential passed every pair on it as published, so the eleven are lifted again from that build.
-
-| line   | `linux-amd64`                 | `linux-arm64`                 | `darwin-arm64`                              |
-| ------ | ----------------------------- | ----------------------------- | ------------------------------------------- |
-| `26.3` | lifted from `20261010.180314` | lifted from `20261010.180314` | not covered: documented platform limitation |
-| `26.7` | lifted from `20261010.180314` | lifted from `20261010.180314` | lifted from `20261010.180314`               |
-| `26.8` | lifted from `20261010.180314` | lifted from `20261010.180314` | lifted from `20261010.180314`               |
-| `26.9` | lifted from `20261010.180314` | lifted from `20261010.180314` | lifted from `20261010.180314`               |
-
-The `darwin-arm64` lifts are measured: the producer's differential ran those pairs on that build and reported zero over-accepts, zero body over-accepts and zero over-rejects.
-
-This table is the record at build `20261010.180314`. It predates `26.10`, and `26.7` is now served but unsupported; the current set is in [`support-v2.md`](support-v2.md).
+**On build `20261104.061020`, every supported pair is lifted but one:** `26.3`, `26.8`, `26.9` and `26.10` on `linux-amd64` and `linux-arm64`, and `26.8`, `26.9` and `26.10` on `darwin-arm64`. **`26.3` on `darwin-arm64` is not covered**, a documented platform limitation (below). `26.7`, served but unsupported, is outside this statement. The producer's signed gate evidence for that build reads PASS on all 12 cells as published.
 
 **Not covered: `26.3` on `darwin-arm64`, a documented platform limitation.** The macOS 26.3 server runs queries on 512 KiB threads, so it refuses deeply nested expressions and types with 306 (TOO_DEEP_RECURSION) at depths where the library answers or accepts them. Measured on the official 26.3.38.2 macOS server, it refuses:
 
@@ -110,7 +91,7 @@ This table is the record at build `20261010.180314`. It predates `26.10`, and `2
 
 26.7 and later, and every Linux line, agree with the server. This is a documented platform difference, not a filter over-accept under the same-platform guarantee's terms. The pair is not lifted and has no CHANGELOG lift entry: run it beside your existing enforcement and compare, do not replace, or refuse inputs nested that deep yourself. The committed list is [`spec/abi-v2/documented-platform/documented-platform.tsv`](../spec/abi-v2/documented-platform/documented-platform.tsv). See also [macOS artifacts match ClickHouse on macOS; on 26.3, match the server's platform](#macos-artifacts-match-clickhouse-on-macos-on-263-match-the-servers-platform).
 
-**The date-time/String divergence is declined, not answered, from build `20261010.180314`.** A `Date`- or `DateTime`-family column compared with a `String` constant or a `{p:String}` parameter, in text the server reads differently from the library's comparison, is now refused when the filter is created: the library's `CHS_DECLINED` (each binding's unsupported error) names the reason, `string-reading`, or `equals-fold` for an `AND` of two equals comparisons of one expression with different constants that the comparison matches with one value. Builds before it, `20261009.145808` and earlier, still answer those shapes divergently (see [the Known divergences entry](#a-date-time-column-compared-with-a-string-constant-or-a-pstring-parameter-in-text-the-server-converts-differently)), so the lift applies from `20261010.180314` only. The forms that answer are a typed `{p:DateTime}` parameter and canonical `YYYY-MM-DD hh:mm:ss` text. Treat a declined filter as no filter, never as a pass.
+**A date-time column compared with a `String` constant or a `{p:String}` parameter is declined where the server reads the text differently.** On 26.8, 26.9 and 26.10, `chs_filter_create` refuses such a shape with `CHS_DECLINED` (each binding's unsupported error), naming the reason `string-reading`. On 26.3, an `AND` of two equals comparisons of one expression with different constants that the comparison matches with one value is declined `equals-fold`, and the rest of 26.3's date-time behavior is in the two 26.3 entries below. The forms that answer on every line are a typed `{p:DateTime}` parameter and canonical `YYYY-MM-DD hh:mm:ss` text; see [the Known divergences entry](#a-date-time-column-compared-with-a-string-constant-or-a-pstring-parameter-in-text-the-server-converts-differently). Treat a declined filter as no filter, never as a pass.
 
 **Each lift is announced in the CHANGELOG, by `(line, platform)`, as its own entry** — the fixed shape is in [`CONTRIBUTING.md`](../CONTRIBUTING.md#changelog-entries). A pair stays gated until its own CHANGELOG entry says otherwise.
 
@@ -135,7 +116,7 @@ Over-accepts and over-rejects have **no budget** in the differential proof the a
 
 **No budget is a rule about process, not a claim about state.** A non-zero count, in either direction, on any binding against any ClickHouse line, is refused unless a person has named that case and recorded why, with a tracking reference attached. Nothing non-zero passes quietly, and no threshold waves anything through.
 
-**So it does not mean there are none.** The cases known today, in either direction, are listed under [Known divergences](#known-divergences) below, each with the build it was measured on and the workaround until it is fixed. The three that were registered for 0.x (a DEFAULT over `demangle`, a CHECK constraint, and a filter whose result is not a boolean-context type) are fixed in every 1.0 build: this repository measured the `demangle` refusal (446) through the published Go binding on all four supported lines, and the artifact producer measured the filter and CHECK cases on production. Nothing in that list is a promise about tomorrow: the differential proof keeps finding cases, and each one is listed as soon as its server half is measured.
+**So it does not mean there are none.** The cases known today, in either direction, are listed under [Known divergences](#known-divergences) below, each with the build it was measured on and its workaround. Nothing in that list is a promise about tomorrow: the differential proof keeps finding cases, and each one is listed as soon as its server half is measured.
 
 ⚠️ **Zero in both directions is a statement about the verdict, not about the value or the error.** There are two other ways to disagree: both sides accept a row and **store different values**, or both refuse it and **report different codes**. Neither is an accept-or-reject disagreement, so the no-budget rule above does not cover them.
 
@@ -171,6 +152,22 @@ On 26.3, a MergeTree table writes a column whose values are mostly the type's de
 
 The ABI specification states the same limitation under "Known limitations" in [`spec/abi-v2/docs.md`](../spec/abi-v2/docs.md).
 
+## ClickHouse 26.3: a DateTime string the server cannot read is refused per row, not per query
+
+On 26.3, a filter that compares a `DateTime` column with a string constant that needs best-effort parsing (a `T`, a `Z` or an offset, as in `ts >= '2024-06-01T12:00:00Z'`) compiles without error, and every row it evaluates gets the verdict `e` with code 53, on the body, block and batch paths. A 26.3 server refuses the whole query with 53, even over an empty table. No row is ever reported as matching, but over an empty body the library returns no verdicts where the server refuses, so do not read "the filter compiled" as "the server accepts this query". On 26.8 and later these spellings are declined at create (`string-reading`).
+
+**Workaround:** write date-time constants in the canonical form (`'2024-06-01 12:00:00'`), or pass them as a typed parameter (`{p:DateTime}`).
+
+**Measured** by the artifact producer on build `20261104.061020`, line 26.3, against a stock 26.3.60.2 server.
+
+## ClickHouse 26.3: two spellings of one time in a DateTime filter refuse every row
+
+**On ClickHouse 26.3, comparing a DateTime column with two spellings of a time can refuse every row.** A filter such as `dt = '2024-06-01 12:00:00' AND dt = '2024-06-01T12:00:00Z'`, where one constant is canonical text and the other needs best-effort parsing (`T`, `Z`, an offset), is compiled without error, and every row it evaluates gets the verdict `e` with code 53. A 26.3 server answers the same query with no rows. No row is ever reported as matching. To avoid it, write date-time constants in the canonical form (`'2024-06-01 12:00:00'`) or pass them as a typed parameter (`{p:DateTime}`). ClickHouse 26.8 and later are not affected.
+
+This is a refusal where the server answers, never a wrong match. It is tracked for a 2.0.x patch.
+
+**Measured** by the artifact producer on build `20261104.061020`, all four lines, on linux-amd64, against stock servers.
+
 ## The merge-time TTL model does not see the server profile
 
 The model of a merge-time TTL (the batch document's `at_merge`) evaluates a TTL expression under the library's process-wide settings, not under the server profile given to `chs_server_create`, on every line. A server-profile setting that a TTL expression reads, for example `date_time_overflow_behavior`, can therefore move which rows the model reports as expired, in either direction. The INSERT-time evaluation follows the server profile on 26.10.
@@ -183,101 +180,22 @@ An entry disappears when an artifact stops diverging, or when the disagreement t
 
 ⚠️ **"A real server" means a real table engine** — a MergeTree table, the kind a tenant writes to. A `CREATE TEMPORARY TABLE` is `ENGINE=Memory`, has no parts, and accepts values that every ordinary table refuses at part-write time. If you reproduce an entry against a temporary table you will not get the answer recorded here, and the temporary table is the one that is wrong about your production write.
 
-Every entry here has a machine-checkable twin in [`docs/divergences.json`](divergences.json). The v0 job that drove each one against loaded artifacts is retired with the v0 registry layout, so nothing checks these entries until a v1 replacement lands; treat each as a claim about the build named, and re-measure before relying on it.
+Every entry here has a machine-checkable twin in [`docs/divergences.json`](divergences.json). No job drives those twins against a loaded library, so each entry is a claim about the build it names.
 
 **What gets an entry here, and when.** A divergence that changes the verdict or the stored value at default settings (an over-accept, an over-reject, or a row both sides accept but store differently) is listed as soon as the server's answer has been measured on each line it affects, and not before, because a wrong entry is worse than a late one. A divergence that is only a different error code, or that needs a non-default setting to reach, is listed if a published build still shows it seven days after it was found. Until then it's tracked with the artifact producer, whose comparison against real servers keeps finding such cases, and it's usually fixed in the next relink. Every entry is removed on the relink that fixes it.
 
-### The row preview skips the engine's insert-time merge step on Collapsing and Replacing-with-`is_deleted` tables
-
-**Over-accept, on every supported line, through the row preview only.** `chs_preview_row` (the row preview) does not run the table engine's insert-time merge step. A real server's single-row INSERT runs it, and it refuses a row whose `sign` or `is_deleted` is out of range. For example, a one-row preview is accepted for each of:
-
-- `CollapsingMergeTree(sign)` with `sign = 7`;
-- `ReplacingMergeTree(ver, is_deleted)` with `is_deleted = 2`.
-
-|                           |                                                          |
-| ------------------------- | -------------------------------------------------------- |
-| this library, row preview | accepts the row                                          |
-| a real server             | refuses the INSERT with error **117** (`INCORRECT_DATA`) |
-
-The batch preview (`chs_preview_batch`) of the same row answers correctly, with 117, so it agrees with the server.
-
-**Measured**: by the artifact producer, against the production library build `20261004.052404` on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64; the server half against the server's single-row INSERT. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
-
-Until then, use the batch preview, even for one row, on `CollapsingMergeTree`, `VersionedCollapsingMergeTree` and `ReplacingMergeTree` with an `is_deleted` column.
-
-### Creating a schema accepts MergeTree-family CREATE statements that a real server refuses
-
-**Over-accept, on every supported line, at schema creation.** `chs_schema_create` (the schema-create call) accepts some MergeTree-family `CREATE TABLE` statements that a real server refuses at the CREATE. The cases measured:
-
-- wrong engine arguments: `SummingMergeTree(a, b)`, `AggregatingMergeTree(x)`, `MergeTree(k)`;
-- a `String` version column, or a `UInt8` sign column;
-- a missing sign, version or columns-to-sum column;
-- `ReplacingMergeTree(ver)` with no `ORDER BY`;
-- the deprecated engine syntax;
-- `ReplacingMergeTree` with a projection (the server refuses with error **344**);
-- from 26.7, an `AggregatingMergeTree` dimension outside the keys (the server refuses with error **36**).
-
-For every other case in the list, the server refuses the CREATE.
-
-**Measured**: by the artifact producer, against the production library build `20261004.052404` on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
-
-Until then, do not treat a successful schema creation on these engines as proof that the server will accept the CREATE.
-
-### A DEFAULT that throws on a row which supplies the column can fail the server's INSERT while this library accepts it
-
-**Over-accept, on every supported line, with `input_format_defaults_for_omitted_fields=1` (the server's default).** A server evaluates a column's `DEFAULT` expression over the whole INSERT block, including the rows that supply the column, whenever some other row of the block omits it. This library accepts every row. For example, with `b Int32 DEFAULT intDiv(10, a)`, a batch in which some rows omit `b` and one row is `{"a":0,"b":5}`:
-
-|               |                                                                             |
-| ------------- | --------------------------------------------------------------------------- |
-| this library  | accepts every row                                                           |
-| a real server | refuses the INSERT, with error **153**, **395** or **70** by the expression |
-
-A batch in which every row supplies the column, and a single row, agree with the server. With `input_format_defaults_for_omitted_fields=0` the server also accepts a mixed batch, so there is no divergence.
-
-The reverse is an over-reject, and needs a non-default setting, so it is a line here and not an entry of its own. With `b Int32 DEFAULT intDiv(10, a)` and a column `m … MATERIALIZED b + 1`, in `JSONEachRow` with `input_format_defaults_for_omitted_fields=0`, a row that omits `b` with `a = 0` is accepted by a server (`b` takes its type's default) and refused by this library with error 153.
-
-**Measured**: by the artifact producer, against the production library build `20261004.052404` and its successor `20261006.170903`, on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 only, with identical results. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
-
-Until then, do not trust an accepted batch that mixes rows omitting and rows supplying a DEFAULT column whose expression can throw.
-
-### A Nullable sorting key is accepted
-
-**Over-accept, on every supported line, at schema creation, linux-amd64 only.** `ORDER BY k` (also `ORDER BY (k, v)`, or `PRIMARY KEY k`) over a `Nullable` column, without `allow_nullable_key`, is accepted by `chs_schema_create`. A real server refuses the CREATE with error **44**.
-
-`allow_nullable_key = 1`, and `ifNull` or `assumeNotNull` keys, are declined (`unsupported`) rather than accepted: an over-decline, not an entry here.
-
-**Measured**: by the artifact producer, against the production library build `20261004.052404` and its successor `20261006.170903`, on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 only. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
-
-Until then, do not treat a successful schema creation with a Nullable sorting key as proof that the server will accept the CREATE.
-
-### A clock-reading MATERIALIZED expression reports 1970 in a batch preview when no row omits a Volatile DEFAULT column
-
-**Value divergence, on every supported line, through the batch preview only.** In a batch preview with no pinned clock, where no row omits a Volatile DEFAULT column, a clock-reading `MATERIALIZED` expression (`now()`, `now64()`, `today()`) reports `1970-01-01` in the batch document's `computed` values. A real server stores the current time. In a mixed batch, the rows that supply the defaulted column get 1970, and the rows that omit it get the current time.
-
-With a pinned clock (`chtypes_now_epoch_nanos`) plus `chtypes_clock_offset_nanos`, an omitted DEFAULT applies the offset, but a `MATERIALIZED` expression ignores it. The row preview is not yet measured.
-
-**Measured**: by the artifact producer, against the production library build `20261004.052404` and its successor `20261006.170903`, on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 only, with identical results. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
-
-Until then, do not trust `computed` clock values from a batch preview unless at least one row omits a Volatile DEFAULT column, or the clock is pinned with no offset.
-
-### A projection with no ORDER BY is accepted at schema creation; a real server refuses the CREATE
-
-**Over-accept, on every supported line, at schema creation, linux-amd64 only.** A table whose `PROJECTION` has no `ORDER BY` is accepted by `chs_schema_create`, and a preview then accepts rows for it. A real server refuses the CREATE with error **36** (`ORDER BY cannot be empty`).
-
-**Measured**: by the artifact producer, against the production library build `20261006.170903` and its predecessor `20261004.052404`, on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 only. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
-
-Until then, do not treat a successful schema creation as proof that the server will accept a CREATE whose projections have no `ORDER BY`.
-
 ### A date-time column compared with a string constant or a `{p:String}` parameter, in text the server converts differently
 
-**Declined from build `20261010.180314`; over-accept in earlier builds.** A filter that compares a `Date`- or `DateTime`-family column with a `String` constant, or with a `{p:String}` query parameter, reads the text with a conversion that differs from the server's default for some spellings. Builds `20261009.145808` and earlier answer `t` where the server's `SELECT … WHERE` answers `f`: for example `dt = '20240601120000'`, or `dt >= {p:String}` with that value. From build `20261010.180314` the shapes the decline catalog describes are declined at `chs_filter_create` with `CHS_DECLINED` (each binding's unsupported error), naming the reason, rather than answered.
+**Declined on 26.8, 26.9 and 26.10; on 26.3, see the two 26.3 entries.** A filter that compares a `Date`- or `DateTime`-family column with a `String` constant, or with a `{p:String}` query parameter, reads the text with a conversion that differs from the server's default for some spellings, for example `dt = '20240601120000'`, or `dt >= {p:String}` with that value. The shapes the decline catalog describes are declined at `chs_filter_create` with `CHS_DECLINED` (each binding's unsupported error), naming the reason, rather than answered.
 
 The decline catalog (`spec/abi-v2/declines/declines.json`) gives two reasons, and this entry claims nothing beyond their entries:
 
-- **`string-reading`** (`26.3`, `26.7`, `26.8`, `26.9`): a comparison of a non-String expression with a `String` constant or `{p:String}` parameter whose text the server's own index or analyzer reading reads differently from the comparison. A comparison reads a `String` constant once, with `cast_string_to_date_time_mode`; the server reads the same text again with the default text format in its index analysis, `IN` sets and analyzer, and drops rows the comparison keeps or refuses a query over a key column. The create is declined, naming the column and both readings. Typed parameters and canonical text are answered.
+- **`string-reading`** (the catalog lists `26.3`, `26.8`, `26.9` and `26.10`): a comparison of a non-String expression with a `String` constant or `{p:String}` parameter whose text the server's own index or analyzer reading reads differently from the comparison. A comparison reads a `String` constant once, with `cast_string_to_date_time_mode`; the server reads the same text again with the default text format in its index analysis, `IN` sets and analyzer, and drops rows the comparison keeps or refuses a query over a key column. The create is declined, naming the column and both readings. Typed parameters and canonical text are answered. For this entry's date-time shapes it declines on 26.8, 26.9 and 26.10. On 26.3 those shapes are answered as the server answers them, or refused row by row: see [the two 26.3 entries](#clickhouse-263-a-datetime-string-the-server-cannot-read-is-refused-per-row-not-per-query).
 - **`equals-fold`** (`26.3` only; retires when `26.3` leaves the supported set): an `AND` of two equals comparisons of one expression with different constants that the comparison matches with one value, such as `dt = '2024-06-01 12:00:00' AND dt = '1717243200'`. On the lines whose analyzer folds an `AND` of two equals over different constants to false whatever the comparison reads, the server returns no row where the comparison keeps one; the create is declined. Constants the server's own constant test calls equal are answered.
 
-**Measured** by the artifact producer: direct server `SELECT`s against the library at artifact build `20261009.074908` for the divergence, and the producer's differential on build `20261010.180314` as published for the decline (zero over-accepts, zero over-rejects on every pair). **Safe forms**, which answer on every line: a typed `{p:DateTime}` parameter, and canonical `YYYY-MM-DD hh:mm:ss` text. On a build before `20261010.180314`, RFC 3339 spellings (`…T00:00:00Z`, or with an offset), compact forms and unix timestamps are not safe. The filter enforcement gate for the eleven covered pairs is lifted from build `20261010.180314`; on earlier builds the gate stays on.
+**Safe forms**, which answer on every line: a typed `{p:DateTime}` parameter, and canonical `YYYY-MM-DD hh:mm:ss` text.
+
+**Measured** by the artifact producer on build `20261104.061020`, all four lines, on linux-amd64, against stock servers.
 
 <a id="known-gaps-in-10"></a>
 
