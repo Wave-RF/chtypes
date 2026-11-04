@@ -221,11 +221,16 @@ func b64Or(t *testing.T, s *string) []byte {
 // loadProjectionFixture reads the shared fixture. It skips loudly, by name,
 // when the file is absent (a bare copy of the module, as
 // scripts/check-standalone.sh builds, has no tests/ tree); a file that is
-// present but unreadable or malformed still fails.
+// present but unreadable or malformed still fails. Where
+// CHTYPES_REQUIRE_FIXTURES is "1" (the repository's main CI), an absent
+// fixture fails instead of skipping.
 func loadProjectionFixture(t *testing.T) []projectionCase {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("..", "..", "tests", "fixtures", "abi-v2", "insert-projection.json"))
 	if errors.Is(err, fs.ErrNotExist) {
+		if os.Getenv("CHTYPES_REQUIRE_FIXTURES") == "1" {
+			t.Fatalf("CHTYPES_REQUIRE_FIXTURES=1 and the insert-projection fixture (tests/fixtures/abi-v2/insert-projection.json) is absent from this copy")
+		}
 		t.Skipf("SKIP %s: the insert-projection fixture (tests/fixtures/abi-v2/insert-projection.json) is absent from this copy", t.Name())
 	}
 	if err != nil {
