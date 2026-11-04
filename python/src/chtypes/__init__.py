@@ -67,6 +67,7 @@ from ._abi2._vocab import (
     Status,
     Verdict,
 )
+from ._cancel import CancelToken
 from ._input import (
     BytesIn,
     ColumnDefault,
@@ -176,6 +177,7 @@ __all__ = [
     "BytesIn",
     "CacheUnusableError",
     "CallCanceledError",
+    "CancelToken",
     "CallError",
     "Capabilities",
     "ChtypesError",
