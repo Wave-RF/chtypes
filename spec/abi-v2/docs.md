@@ -599,7 +599,7 @@ The output exists only if the whole call succeeds. `output_format` is `CHS_EXPOR
 - The output of a line format is byte-identical to the batch's `out_export` restricted to the `t` rows: the concatenation, in body order, of the `row_spans` of exactly the rows whose verdict is `t`, and with no filter `out_export` itself.
 - A `Native` output is byte-identical to the batch's Native export, which is already the one block of the `t` rows.
 - Each of these equalities is a conformance case over the same body through both calls [`insert.equals_batch`].
-- Two cases have no counterpart. A body with an `e` row, which the batch answers `accepted` with that row's `verdict_code` and `verdict_err`, is `rejected` here with that code and message. A value a generator DEFAULT draws is drawn per call, so two calls can draw differently; every other member is the same.
+- Two cases have no counterpart. A body with an `e` row, which the batch answers `accepted` with that row's `verdict_code` and `verdict_err`, is `rejected` here [`insert.e_row_rejects`]: `code` and `err` are those of the first `e` row in body order (equal to the batch's `verdict_code` and `verdict_err` for that row, and to the server's own error exactly), `refused_at` is `row`, `rows_passed`, `rows_cut` and `rows_undecided` are 0, `rows_read` is the batch's, and there is no output. A value a generator DEFAULT draws is drawn per call, so two calls can draw differently; every other member is the same.
 
 An output row whose verdict is not `t` is an over-accept, a security-severity defect, as a `t` where the server would not return the row is.
 
