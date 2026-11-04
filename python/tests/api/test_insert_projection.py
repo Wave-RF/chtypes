@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import re
 from pathlib import Path
 
@@ -255,7 +256,12 @@ def test_insert_output_absent_unless_accepted() -> None:
 
 
 def test_the_fixture_gate_ran_cases() -> None:
-    """A census that ran zero cases fails; an absent fixture skips by name."""
+    """A census that ran zero cases fails; an absent fixture skips by name, unless
+    CHTYPES_REQUIRE_FIXTURES=1 (the repository's main CI), where it fails."""
     if not FIXTURE.exists():
+        if os.environ.get("CHTYPES_REQUIRE_FIXTURES") == "1":
+            pytest.fail(
+                f"CHTYPES_REQUIRE_FIXTURES=1 and the insert-projection fixture is absent: {FIXTURE}"
+            )
         pytest.skip(f"insert-projection fixture absent ({FIXTURE}): not a full-repository tree")
     assert len(CASES) == 37
