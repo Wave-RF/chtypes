@@ -8,17 +8,118 @@
 package abi2
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"reflect"
+	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
-// rArg is a case argument including the `ref` form invoke()'s own Arg lacks.
+// cancelIDKey is where a `cancel` step records a token's id in the case's env,
+// beside the token itself (a name no `let` can bind: it holds a space).
+func cancelIDKey(name string) string { return "id " + name }
+
+var cancelIDShape = regexp.MustCompile(`^c[0-9a-f]{16}$`)
+
+// cancelOptions is the options document a `cancel_options` argument names:
+// {"cancel":"<id>"}, the id of the token bound to name.
+func cancelOptions(env map[string]interface{}, name string) ([]byte, error) {
+	id, ok := env[cancelIDKey(name)].(string)
+	if !ok {
+		return nil, fmt.Errorf("cancel_options %q: no token is bound to that name", name)
+	}
+	return []byte(`{"cancel":"` + id + `"}`), nil
+}
+
+// substituteCancelEcho replaces each {"cancel_echo": name} in an expectation
+// with the echo the stub gives of the cancel_options bytes for that name:
+// {head_hex, len, sha256}, computed here because the id is minted at run time.
+func substituteCancelEcho(env map[string]interface{}, v interface{}) (interface{}, error) {
+	switch x := v.(type) {
+	case map[string]interface{}:
+		if name, ok := x["cancel_echo"].(string); ok && len(x) == 1 {
+			b, err := cancelOptions(env, name)
+			if err != nil {
+				return nil, err
+			}
+			sum := sha256.Sum256(b)
+			head := b
+			if len(head) > 16 {
+				head = head[:16]
+			}
+			return map[string]interface{}{
+				"head_hex": hex.EncodeToString(head),
+				"len":      json.Number(strconv.Itoa(len(b))),
+				"sha256":   hex.EncodeToString(sum[:]),
+			}, nil
+		}
+		out := make(map[string]interface{}, len(x))
+		for k, vv := range x {
+			s, err := substituteCancelEcho(env, vv)
+			if err != nil {
+				return nil, err
+			}
+			out[k] = s
+		}
+		return out, nil
+	case []interface{}:
+		out := make([]interface{}, len(x))
+		for i, vv := range x {
+			s, err := substituteCancelEcho(env, vv)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = s
+		}
+		return out, nil
+	}
+	return v, nil
+}
+
+// isNilHandle is true for an absent handle, including a typed nil pointer
+// inside the interface (a canceled create returns a nil *Schema, not nil).
+func isNilHandle(h interface{}) bool {
+	if h == nil {
+		return true
+	}
+	v := reflect.ValueOf(h)
+	return v.Kind() == reflect.Ptr && v.IsNil()
+}
+
+// cancelInflight reads the stub's cancel probe: how many calls sit blocked in
+// its directive now.
+func cancelInflight(t *Table) (int64, error) {
+	probe := hex.EncodeToString([]byte("!C:"))
+	r, err := invoke(t, "chs_type_validate", []Arg{{BytesHex: &probe}})
+	if err != nil {
+		return 0, err
+	}
+	if r.Error != nil {
+		return 0, r.Error
+	}
+	doc, ok := r.Outputs["out"].(map[string]interface{})
+	if !ok {
+		return 0, fmt.Errorf("the cancel probe answered no document")
+	}
+	n, ok := doc["inflight"].(json.Number)
+	if !ok {
+		return 0, fmt.Errorf("the cancel probe has no inflight count: %v", doc)
+	}
+	return n.Int64()
+}
+
+// rArg is a case argument including the `ref` and `cancel_options` forms
+// invoke()'s own Arg lacks.
 type rArg struct {
 	Arg
-	Ref string `json:"ref,omitempty"`
+	Ref           string `json:"ref,omitempty"`
+	CancelOptions string `json:"cancel_options,omitempty"`
 }
 
 type callJSON struct {
@@ -27,11 +128,24 @@ type callJSON struct {
 }
 
 type stepJSON struct {
-	Let       string                 `json:"let,omitempty"`
-	Call      *callJSON              `json:"call,omitempty"`
-	Expect    map[string]interface{} `json:"expect,omitempty"`
-	Free      string                 `json:"free,omitempty"`
-	LiveDelta map[string]int64       `json:"live_delta,omitempty"`
+	Let         string                 `json:"let,omitempty"`
+	Call        *callJSON              `json:"call,omitempty"`
+	Expect      map[string]interface{} `json:"expect,omitempty"`
+	Free        string                 `json:"free,omitempty"`
+	LiveDelta   map[string]int64       `json:"live_delta,omitempty"`
+	Cancel      string                 `json:"cancel,omitempty"`
+	Fire        string                 `json:"fire,omitempty"`
+	Fired       string                 `json:"fired,omitempty"`
+	Want        *int64                 `json:"want,omitempty"`
+	BlockedCall *blockedCallJSON       `json:"blocked_call,omitempty"`
+}
+
+// blockedCallJSON is a `blocked_call` step: a call that blocks in the stub's
+// directive until `fire` is fired from this goroutine.
+type blockedCallJSON struct {
+	Call   callJSON               `json:"call"`
+	Fire   string                 `json:"fire"`
+	Expect map[string]interface{} `json:"expect"`
 }
 
 func plainArgs(in []rArg) []Arg {
@@ -50,13 +164,21 @@ type resolved struct {
 
 type handleCloser interface{ Close() error }
 
-// resolveArgs evaluates every argument once: a ref reads env, a nested handle
-// is minted through the generated invoke (and recorded in owned so the caller
-// can free it), anything else is a literal.
+// resolveArgs evaluates every argument once: a ref reads env, a
+// cancel_options builds the options document naming the bound token's id, a
+// nested handle is minted through the generated invoke (and recorded in owned
+// so the caller can free it), anything else is a literal.
 func resolveArgs(t *Table, env map[string]interface{}, args []rArg, owned *[]handleCloser) ([]resolved, error) {
 	out := make([]resolved, len(args))
 	for i, a := range args {
 		switch {
+		case a.CancelOptions != "":
+			b, err := cancelOptions(env, a.CancelOptions)
+			if err != nil {
+				return nil, fmt.Errorf("arg %d: %w", i, err)
+			}
+			h := hex.EncodeToString(b)
+			out[i] = resolved{arg: Arg{BytesHex: &h}}
 		case a.Ref != "":
 			h, ok := env[a.Ref]
 			if !ok {
@@ -282,6 +404,37 @@ func runLifecycleCase(t *Table, c caseJSON) (bool, string) {
 	}()
 	for i, st := range c.Steps {
 		switch {
+		case st.Cancel != "":
+			tok, id, ce := t.CancelCreate()
+			if ce != nil || tok == nil || id == nil {
+				return false, fmt.Sprintf("step %d: chs_cancel_create: %v", i, ce)
+			}
+			idText := string(copyBytes(t.BufData(id), int(t.BufLen(id))))
+			id.Close()
+			if !cancelIDShape.MatchString(idText) {
+				closeHandle(tok)
+				return false, fmt.Sprintf("step %d: chs_cancel_create's id %q is not c and 16 lowercase hex digits", i, idText)
+			}
+			env[st.Cancel] = tok
+			env[cancelIDKey(st.Cancel)] = idText
+		case st.Fire != "":
+			tok, ok := env[st.Fire].(*Cancel)
+			if !ok {
+				return false, fmt.Sprintf("step %d: fire of unbound token %q", i, st.Fire)
+			}
+			t.CancelFire(tok)
+		case st.Fired != "":
+			tok, ok := env[st.Fired].(*Cancel)
+			if !ok || st.Want == nil {
+				return false, fmt.Sprintf("step %d: fired of unbound token %q, or no want", i, st.Fired)
+			}
+			if got := int64(t.CancelFired(tok)); got != *st.Want {
+				return false, fmt.Sprintf("step %d: chs_cancel_fired = %d, want %d", i, got, *st.Want)
+			}
+		case st.BlockedCall != nil:
+			if ok, detail := runBlockedCall(t, env, *st.BlockedCall); !ok {
+				return false, fmt.Sprintf("step %d: %s", i, detail)
+			}
 		case st.Free != "":
 			h, ok := env[st.Free]
 			if !ok {
@@ -311,6 +464,13 @@ func runLifecycleCase(t *Table, c caseJSON) (bool, string) {
 			for _, o := range owned {
 				_ = o.Close()
 			}
+			if st.Expect != nil {
+				x, err := substituteCancelEcho(env, st.Expect)
+				if err != nil {
+					return false, fmt.Sprintf("step %d: %v", i, err)
+				}
+				st.Expect = x.(map[string]interface{})
+			}
 			if st.Let != "" {
 				if res.Error != nil || res.Handle == nil {
 					return false, fmt.Sprintf("step %d: %s produced no handle (%v)", i, st.Call.Fn, res.Error)
@@ -327,6 +487,72 @@ func runLifecycleCase(t *Table, c caseJSON) (bool, string) {
 		default:
 			return false, fmt.Sprintf("step %d: unrecognized step", i)
 		}
+	}
+	return true, ""
+}
+
+// runBlockedCall starts the call on another goroutine (its first bytes_in
+// begins the stub's block directive), waits until the stub's cancel probe
+// reads one more call in flight than before, fires the token from here, then
+// joins the call and checks it. Sequenced on the probe, never on a sleep: the
+// poll below only bounds how long a broken stub can hang the case.
+func runBlockedCall(t *Table, env map[string]interface{}, b blockedCallJSON) (bool, string) {
+	tok, ok := env[b.Fire].(*Cancel)
+	if !ok {
+		return false, fmt.Sprintf("blocked_call: fire of unbound token %q", b.Fire)
+	}
+	before, err := cancelInflight(t)
+	if err != nil {
+		return false, err.Error()
+	}
+	var owned []handleCloser
+	vals, err := resolveArgs(t, env, b.Call.Args, &owned)
+	if err != nil {
+		return false, err.Error()
+	}
+	defer func() {
+		for _, o := range owned {
+			_ = o.Close()
+		}
+	}()
+	type result struct {
+		res *InvokeResult
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		r, e := callResolved(t, b.Call.Fn, vals)
+		done <- result{r, e}
+	}()
+	entered := false
+	for i := 0; i < 5000 && !entered; i++ {
+		n, err := cancelInflight(t)
+		if err != nil {
+			t.CancelFire(tok)
+			<-done
+			return false, err.Error()
+		}
+		if n > before {
+			entered = true
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.CancelFire(tok)
+	r := <-done
+	if !entered {
+		return false, "blocked_call: the call never reached the stub's block directive"
+	}
+	if r.err != nil {
+		return false, r.err.Error()
+	}
+	defer closeHandle(r.res.Handle)
+	x, err := substituteCancelEcho(env, b.Expect)
+	if err != nil {
+		return false, err.Error()
+	}
+	if p := matchResult(x.(map[string]interface{}), r.res); len(p) > 0 {
+		return false, strings.Join(p, "; ")
 	}
 	return true, ""
 }
