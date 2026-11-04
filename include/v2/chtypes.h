@@ -441,23 +441,29 @@ extern "C" {
  *   held table's own column definitions, as `system.columns` reports them, on `MergeTree ORDER BY
  *   tuple()` with no partition key, TTL, index, projection, constraint or setting, also counts as
  *   read back and may compile under `load`; a statement in which any column definition was edited
- *   is the caller's own, so it compiles under `create`. It is one switch, and ClickHouse's own:
- *   every check on the compile's path that reads the loading posture reads `FORCE_ATTACH` instead
- *   of `CREATE`, in ClickHouse's own code, and nothing else changes. So the checks a server applies
- *   only to a new table are not applied: the type gates (`allow_suspicious_low_cardinality_types`,
- *   `allow_suspicious_fixed_string_types` and the rest, at the compile and at every call on the
- *   schema), the codec, statistics and suspicious-index checks, the DEFAULT validation of a typed
- *   column, the TTL checks, the MergeTree settings' constraint and sanity checks, and the
- *   floating-point partition-key, nullable-key and deprecated-syntax gates. `flatten_nested` and
- *   `data_type_default_nullable` are not applied either: a stored definition is already flattened
- *   and typed. Which checks these are on each supported line is the artifact producer's enumeration
- *   from the vendored source; no list is kept here. A projection that a starting server skips
- *   because it no longer parses is declined, because whether a given server still holds it depends
- *   on that server's history. A Replicated engine's ZooKeeper path and replica name never change a
- *   row verdict, so under `load` a stored definition whose engine arguments read a macro the
- *   server's `macros` cannot expand (or carry none, as a Replicated database's table does) compiles
- *   as the server loads it: `schema_description` then carries no `replicated` member, and only an
- *   answer that depends on the path (none today) is declined.
+ *   is the caller's own, so it compiles under `create`. A definition read back from a server
+ *   carries the server's masking: a secret argument appears as `'[HIDDEN]'`. Wherever such an
+ *   expression would be evaluated (a row that needs the column's DEFAULT or MATERIALIZED value, or
+ *   a filter that reads it), the call declines with `expression-masked-secret`, because the true
+ *   argument is unknown. A row that supplies the column is answered as usual. To have such a
+ *   DEFAULT computed, compile the definition with its real argument. It is one switch, and
+ *   ClickHouse's own: every check on the compile's path that reads the loading posture reads
+ *   `FORCE_ATTACH` instead of `CREATE`, in ClickHouse's own code, and nothing else changes. So the
+ *   checks a server applies only to a new table are not applied: the type gates
+ *   (`allow_suspicious_low_cardinality_types`, `allow_suspicious_fixed_string_types` and the rest,
+ *   at the compile and at every call on the schema), the codec, statistics and suspicious-index
+ *   checks, the DEFAULT validation of a typed column, the TTL checks, the MergeTree settings'
+ *   constraint and sanity checks, and the floating-point partition-key, nullable-key and
+ *   deprecated-syntax gates. `flatten_nested` and `data_type_default_nullable` are not applied
+ *   either: a stored definition is already flattened and typed. Which checks these are on each
+ *   supported line is the artifact producer's enumeration from the vendored source; no list is kept
+ *   here. A projection that a starting server skips because it no longer parses is declined,
+ *   because whether a given server still holds it depends on that server's history. A Replicated
+ *   engine's ZooKeeper path and replica name never change a row verdict, so under `load` a stored
+ *   definition whose engine arguments read a macro the server's `macros` cannot expand (or carry
+ *   none, as a Replicated database's table does) compiles as the server loads it:
+ *   `schema_description` then carries no `replicated` member, and only an answer that depends on
+ *   the path (none today) is declined.
  *
  * **The caller's obligation.** `load` asserts that the server holds a table defined by exactly this
  * statement. The library cannot check that assertion, because it never connects to the server. A
@@ -1029,16 +1035,20 @@ CHS_API chs_buf *chs_error_ch_name(const chs_error *error);
  * reason (`chs_error_reason`), never on message text. A syntax error's message (ClickHouse code 62,
  * for example a `chs_schema_create` refusal) quotes the statement from the error onward, exactly as
  * the server's does, credentials included: do not log refusal messages for statements that can
- * carry credentials unredacted. Every other message masks secrets as the server does. A refusal
- * message that names the table (a CHECK violation, 469; an unknown or duplicate column; the INSERT
- * privilege, 497) names it as the `CREATE`'s own `database.table`, `default.<name>` when the
- * `CREATE` is unqualified, as the server does. The server also prints, in parentheses, the table's
- * UUID, which it draws at `CREATE` time; the library prints the same text without the UUID unless
- * the `CREATE` has an explicit `UUID '…'` clause, and with one the message is exactly the server's.
- * A caller that needs byte-exact messages includes the UUID clause. For a refusal, these are the
- * only differences from the server's own message text: the omitted UUID, a 497's user, and
- * `chs_preview_batch`'s shorter form, which ends before the server's row-position suffix
- * (`chs_preview_insert` carries the server's message whole).
+ * carry credentials unredacted. Every other message masks secrets as the server does.
+ * `mongodb(...)` table-function arguments are always shown fully hidden in the library's messages:
+ * the server hides only its secret arguments, but this library cannot load that function's argument
+ * spec, so it hides every argument rather than risk showing a secret. Like every table function,
+ * mongodb is never executed by the library. A refusal message that names the table (a CHECK
+ * violation, 469; an unknown or duplicate column; the INSERT privilege, 497) names it as the
+ * `CREATE`'s own `database.table`, `default.<name>` when the `CREATE` is unqualified, as the server
+ * does. The server also prints, in parentheses, the table's UUID, which it draws at `CREATE` time;
+ * the library prints the same text without the UUID unless the `CREATE` has an explicit `UUID '…'`
+ * clause, and with one the message is exactly the server's. A caller that needs byte-exact messages
+ * includes the UUID clause. For a refusal, these are the only differences from the server's own
+ * message text: the omitted UUID, a 497's user, and `chs_preview_batch`'s shorter form, which ends
+ * before the server's row-position suffix (`chs_preview_insert` carries the server's message
+ * whole).
  *
  * Class: api. Thread: shared. Init: any. Returns a new chs_buf the caller owns and frees with
  * chs_buf_free; its content is a ClickHouse message: may quote input bytes, so may carry any byte;
@@ -1492,7 +1502,9 @@ CHS_API void chs_schema_free(chs_schema *schema);
 
 /*
  * chs_schema_describe: A JSON document describing the schema's columns, owned by the caller; it
- * replaces v0's borrowed column accessors.
+ * replaces v0's borrowed column accessors. Every expression the description carries (a column's
+ * default or materialized expression) is rendered as the server renders it in `system.columns` and
+ * `SHOW CREATE TABLE`, with secret arguments shown as `[HIDDEN]`.
  *
  * A schema compiled in `load` carries `"posture": "load"`; one compiled in `create` carries no
  * `posture`.
