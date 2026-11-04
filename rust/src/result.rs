@@ -296,6 +296,63 @@ pub struct BatchResult {
     pub framing: Option<Framing>,
 }
 
+/// An `insert_result` document and its output buffer, from
+/// `chs_preview_insert`: the whole body's outcome, its counts and the output's
+/// column list, and nothing per row. Every member has the meaning the member of
+/// the same name has in [`BatchResult`] (`spec/abi-v2/docs.md`, the projection
+/// rule).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub struct InsertResult {
+    /// The outcome of the whole body. One the description does not list is
+    /// [`Outcome::Unknown`] (rule r3).
+    pub outcome: Outcome,
+    /// ClickHouse's error code (`code`).
+    pub err_code: i32,
+    /// ClickHouse's message, verbatim (`err`): a reader refusal carries its
+    /// `(at row N)`. Empty when none.
+    pub err_msg: RawText,
+    /// The catalog id of a declined call (`reason`), present exactly where
+    /// [`InsertResult::err_code`] is `CHS_CODE_DECLINED` (-2). ASCII.
+    pub reason: Option<String>,
+    /// Where a refusal or decline sits (`refused_at`), present whenever the
+    /// outcome is not accepted. The document has no `refused_row`.
+    pub refused_at: Option<RefusalSite>,
+    /// Rows the reader read.
+    pub rows_read: u64,
+    /// Rows the reader skipped under error recovery.
+    pub rows_skipped: u64,
+    /// Rows an attached filter passed (the `t` rows, which are the output's
+    /// rows); `None` with no filter attached.
+    pub rows_passed: Option<u64>,
+    /// Rows withheld (the `f` rows and the `d` rows); `None` with no filter
+    /// attached.
+    pub rows_cut: Option<u64>,
+    /// The `d` rows, those the library declined to evaluate the WHERE for
+    /// (counted inside [`InsertResult::rows_cut`]); `None` with no filter
+    /// attached.
+    pub rows_undecided: Option<u64>,
+    /// The call's own settings the library declined (name objects), as bytes.
+    /// Empty when it names none.
+    pub unsupported_settings: Vec<RawText>,
+    /// What the reader decided about the body's framing.
+    pub framing: Option<Framing>,
+    /// How many distinct partitions the body touched.
+    pub partition_count: Option<u64>,
+    /// The output's one column list (`export_columns`, name objects); `None`
+    /// when the document carries none.
+    pub export_columns: Option<Vec<RawText>>,
+    /// Why the output was declined; empty when it was not.
+    pub export_declined: RawText,
+    /// The catalog id of a declined output (`export_declined_reason`). ASCII.
+    pub export_declined_reason: Option<String>,
+    /// The output rows, exactly the buffer the call returned: present for an
+    /// output that ran (possibly empty); `None` when none was asked for or the
+    /// call was not accepted ([`InsertResult::export_declined`]), where the
+    /// library returns none.
+    pub output: Option<Vec<u8>>,
+}
+
 /// One row's filter error.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[non_exhaustive]

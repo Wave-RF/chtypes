@@ -34,8 +34,8 @@ use crate::raw::RawText;
 use crate::result::{
     AtMergeEntry, BatchResult, BuildInfo, Capabilities, Column, Computed, DeclinedSetting,
     DiscoveredColumn, Discovery, EngineCell, ErrorCodeEntry, ErrorCodeTable, FilterResult,
-    FilterRowError, Framing, Header, RowResult, SchemaDescription, SchemaReplicated, SchemaServer,
-    Span, Transform, Value,
+    FilterRowError, Framing, Header, InsertResult, RowResult, SchemaDescription, SchemaReplicated,
+    SchemaServer, Span, Transform, Value,
 };
 
 // -------------------------------------------------------------- strict parse
@@ -637,6 +637,46 @@ pub(crate) fn batch(bytes: &[u8], payload: Option<Vec<u8>>) -> Result<BatchResul
         partition_count: o.opt_uint64("partition_count")?,
         unconsumed: spans(&o, "unconsumed")?,
         framing,
+    })
+}
+
+/// Decode one `insert_result` document and the output buffer the call returned.
+/// The members it shares with `batch` are read the way `batch` reads them.
+pub(crate) fn insert_result(bytes: &[u8], output: Option<Vec<u8>>) -> Result<InsertResult> {
+    let json = parse("insert_result", bytes)?;
+    let o = Obj::of("insert_result", "", &json)?;
+    let export_columns = match o.opt_array("export_columns")? {
+        None => None,
+        Some(_) => Some(o.name_objects("export_columns")?),
+    };
+    let framing = match o.object("framing")? {
+        None => None,
+        Some(f) => Some(framing_of(&f)?),
+    };
+    let export_declined = o.bytes("export_declined")?;
+    // The output is the buffer the call returned, as it is: a declined or
+    // refused call returns NULL, and a buffer there is the library's defect,
+    // which the projection gate (`e_row_rejects`) must be able to see.
+    Ok(InsertResult {
+        outcome: Outcome::from_wire(&o.string("outcome")?),
+        err_code: o.int32("code")?,
+        err_msg: o.bytes("err")?,
+        reason: o.opt_string("reason")?,
+        refused_at: o
+            .opt_string("refused_at")?
+            .map(|v| RefusalSite::from_wire(&v)),
+        rows_read: o.uint64("rows_read")?,
+        rows_skipped: o.uint64("rows_skipped")?,
+        rows_passed: o.opt_uint64("rows_passed")?,
+        rows_cut: o.opt_uint64("rows_cut")?,
+        rows_undecided: o.opt_uint64("rows_undecided")?,
+        unsupported_settings: o.name_objects("unsupported_settings")?,
+        framing,
+        partition_count: o.opt_uint64("partition_count")?,
+        export_columns,
+        export_declined,
+        export_declined_reason: o.opt_string("export_declined_reason")?,
+        output,
     })
 }
 
