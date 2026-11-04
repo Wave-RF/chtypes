@@ -88,7 +88,9 @@ exercised against real memory).
     fired before the call is CHS_CANCELED at entry, every output NULL, with
     reason `call-canceled`; a first bytes_in argument beginning the
     directive `!B:` blocks (a 1 ms poll, capped at 10 s) until the token
-    fires, then CHS_CANCELED; anything else is the echo, unchanged. Two
+    fires, then CHS_CANCELED; `!L:` is the same wait placed after the last
+    check point, so the answer is the echo, never CHS_CANCELED; anything else
+    is the echo, unchanged. Two
     counters (calls blocked in the directive, fires after free) are exported
     as `chs_stub_inflight` / `chs_stub_fire_after_free` for stubtest.c, and
     readable by a binding through the probe `chs_type_validate("!C:")`.
@@ -1164,6 +1166,7 @@ def _cancel(model, fn) -> list[str]:
     prefix, _, suffix = _stubshared.cancel_unknown_message(p.name, "\0").partition("\0")
     null_outs = [f"        if ({q.name} != NULL) *{q.name} = NULL;" for q in fn.params if q.kind == "out_handle"]
     directive = rule["directive"]
+    late = rule["late_directive"]
     return [
         "    {",
         "        /* the options' cancel member: see scripts/abi-v1/emit/_stubshared.py CANCEL */",
@@ -1188,6 +1191,8 @@ def _cancel(model, fn) -> list[str]:
         f"                canceled = {_c_str(rule['messages']['entry'])};",
         f"            }} else if ({first_bytes.name}_len >= {len(directive)} && memcmp({first_bytes.name}, {_c_str(directive)}, {len(directive)}) == 0) {{",
         f"                canceled = chs_stub_cancel_block(tok) ? {_c_str(rule['messages']['blocked'])} : {_c_str(rule['messages']['cap'])};",
+        f"            }} else if ({first_bytes.name}_len >= {len(late)} && memcmp({first_bytes.name}, {_c_str(late)}, {len(late)}) == 0) {{",
+        "                (void) chs_stub_cancel_block(tok); /* past the last check point: the fire is not observed, the answer is the echo */",
         "            }",
         "            chs_stub_release(&tok->common); /* the call's own reference: the last check point is behind it */",
         "            if (canceled != NULL) {",

@@ -672,6 +672,11 @@ static void *cancel_blocked_worker(void *p) {
     return NULL;
 }
 
+static void *cancel_late_worker(void *p) {
+    cancel_call((cancel_call_t *) p, "!L:{}");
+    return NULL;
+}
+
 static int buf_is(lib_t *l, chs_buf *b, const char *want) {
     if (b == NULL) return 0;
     size_t n = l->buf_len(b);
@@ -765,6 +770,30 @@ static void test_cancel(lib_t *l) {
         CHECK(buf_is(l, l->error_message(d.err), "call canceled at the stub's block check point"),
               "during: the message names the block check point");
         l->error_free(d.err);
+    }
+
+    /* fired after the last check point (!L:): blocks like !B:, then answers the echo */
+    {
+        chs_cancel *lt = NULL;
+        chs_buf *lid = NULL;
+        CHECK(create(&lt, &lid, &err) == CHS_OK && lt != NULL && lid != NULL, "chs_cancel_create (late)");
+        char lopts[64];
+        snprintf(lopts, sizeof lopts, "{\"cancel\":\"%.*s\"}", (int) (lid ? l->buf_len(lid) : 0),
+                 lid ? (const char *) l->buf_data(lid) : "");
+        if (lid) l->buf_free(lid);
+        long long before = inflight();
+        cancel_call_t e = {l, lopts, schema, 0, NULL, NULL};
+        pthread_t lth;
+        CHECK(pthread_create(&lth, NULL, cancel_late_worker, &e) == 0, "pthread_create (late)");
+        for (int i = 0; i < 5000 && inflight() <= before; i++) nanosleep(&ms, NULL);
+        CHECK(inflight() == before + 1, "the !L: call reached its wait (chs_stub_inflight)");
+        fire(lt);
+        pthread_join(lth, NULL);
+        CHECK(inflight() == before, "the !L: call left its wait");
+        CHECK(e.status == CHS_OK && e.out != NULL && e.err == NULL, "after the last check point: CHS_OK with the echo, not CHS_CANCELED");
+        if (e.out) l->buf_free(e.out);
+        if (e.err) l->error_free(e.err);
+        cfree(lt);
     }
 
     /* a fire on a freed token is counted, never applied; its id is gone */
