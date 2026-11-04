@@ -8,6 +8,8 @@
  * No library is needed. The fixture lives outside this package, so a bare copy of
  * `ts/` does not have it: then the suite below is skipped by name (and says so on
  * stderr); a fixture that is present but unreadable or malformed still fails.
+ * Where CHTYPES_REQUIRE_FIXTURES is "1" (the repository's main CI) an absent
+ * fixture fails instead of skipping.
  */
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -48,6 +50,11 @@ function expected(c: Case) {
   if ('exception' in c.expect) return { kind: 'exception', name: c.expect.exception };
   return { kind: 'violates', rule: c.expect.violates };
 }
+
+// An absent fixture fails, not skips, where the repository's CI requires every shared fixture.
+it.runIf(!present && process.env.CHTYPES_REQUIRE_FIXTURES === '1')('the insert projection fixture is present', () => {
+  throw new Error(`CHTYPES_REQUIRE_FIXTURES=1 and the insert projection fixture is absent: ${FIXTURE}`);
+});
 
 describe.skipIf(!present)('the insert projection gate over the shared fixture', () => {
   it('reads the fixture it was written for, and refuses a zero-run', () => {
