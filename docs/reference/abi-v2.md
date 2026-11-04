@@ -2168,7 +2168,7 @@ CHS_API chs_buf *chs_error_message(const chs_error *error);
 - Returns a new `chs_buf` the caller owns (message), freed with `chs_buf_free`.
 - `error`: handle, `chs_error`.
 
-A new buffer holding the message: ClickHouse's own text, verbatim, for `CHS_REJECTED`, and the library's explanation otherwise. A message may quote input bytes, so it is a byte string, not text. It is informative: a caller keys on the status, the code and the reason (`chs_error_reason`), never on message text.
+A new buffer holding the message: ClickHouse's own text, verbatim, for `CHS_REJECTED`, and the library's explanation otherwise. A message may quote input bytes, so it is a byte string, not text. It is informative: a caller keys on the status, the code and the reason (`chs_error_reason`), never on message text. A syntax error's message (ClickHouse code 62, for example a `chs_schema_create` refusal) quotes the statement from the error onward, exactly as the server's does, credentials included: do not log refusal messages for statements that can carry credentials unredacted. Every other message masks secrets as the server does.
 
 #### `chs_error_column`
 
