@@ -235,6 +235,18 @@ def _enum_text(value: object, what: str) -> str:
     raise TypeError(f"{what} must be a str or its enum, not {type(value).__name__}")
 
 
+def _decimal_text(value: object, what: str) -> str:
+    """A decimal-string member: an `int` is spelled in decimal digits, a `str` is
+    written as given (the library judges the value, rule r1)."""
+    if isinstance(value, bool):
+        raise TypeError(f"{what} must be an int or a decimal str, not bool")
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, str):
+        return value
+    raise TypeError(f"{what} must be an int or a decimal str, not {type(value).__name__}")
+
+
 def _column_default_objects(defaults: Sequence[ColumnDefault]) -> list[dict[str, str]]:
     if isinstance(defaults, str | bytes):
         raise TypeError("column_defaults must be a sequence of ColumnDefault")
@@ -292,10 +304,12 @@ def insert_options_json(
     column_defaults: Sequence[ColumnDefault] | None = None,
     verdict_basis: VerdictBasis | str | None = None,
     defer_defaults: DeferDefaults | str | None = None,
+    memory_limit_bytes: int | str | None = None,
     insert_options_extra: Mapping[str, str] | None = None,
 ) -> bytes | None:
     """`insert_options`, from the members set. None leaves a member out; an empty
-    list is sent as `[]`."""
+    list is sent as `[]`. `memory_limit_bytes` is a decimal string on the wire; an
+    `int` is written as its decimal digits, a `str` verbatim, neither validated."""
     members: dict[str, object] = {}
     if insertable_columns is not None:
         if isinstance(insertable_columns, str | bytes):
@@ -307,6 +321,8 @@ def insert_options_json(
         members["verdict_basis"] = _enum_text(verdict_basis, "verdict_basis")
     if defer_defaults is not None:
         members["defer_defaults"] = _enum_text(defer_defaults, "defer_defaults")
+    if memory_limit_bytes is not None:
+        members["memory_limit_bytes"] = _decimal_text(memory_limit_bytes, "memory_limit_bytes")
     return _options_json("insert", members, insert_options_extra)
 
 
