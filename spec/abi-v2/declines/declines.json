@@ -280,7 +280,7 @@
   {
    "id": "expression-reads-storage",
    "class": "create-decline",
-   "trigger": "a CREATE TABLE (any clause) or a filter WHERE that reads a table, a dictionary, a file or a remote host: the set of an IN-family operator that is a table name or a table function call, a joinGet, dictGet-family or (from 26.8) naiveBayesClassifier call, or a call of file, hasColumnInTable or catboostEvaluate",
+   "trigger": "a CREATE TABLE (any clause) or a filter WHERE that reads a table, a dictionary, a file or a remote host: the set of an IN-family operator that is a table name or a call of a table function (a name in both the table-function and the function registries included) or of a name no function is registered under (a scalar call, as the one element of `x IN (f(...))`, is a value and is not declined), a joinGet, dictGet-family or (from 26.8) naiveBayesClassifier call, or a call of file, hasColumnInTable or catboostEvaluate",
    "code": {
     "chs": "CHS_DECLINED",
     "ch": []
@@ -336,6 +336,23 @@
    ],
    "retirement": "when the new-analyzer filter path ships",
    "description": "A server on these lines rewrites a function name passed where a higher-order function takes a lambda into that lambda, in its analyzer; the filter compile cannot run that step and would refuse the name, so the create is declined and names the function. Write the lambda, such as x -> isNull(x), to get an answer."
+  },
+  {
+   "id": "in-set-reads-column",
+   "class": "create-decline",
+   "trigger": "an IN, NOT IN or GLOBAL IN whose set is an expression that reads a column of the table, such as col IN (lower(col)) or x IN (toString(y), 'a')",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "when the new-analyzer filter path ships",
+   "description": "A server answers an IN whose set reads the row's columns; on this line the filter compile builds every IN set as a constant first, where no column is in scope, and would refuse it, so the create is declined and names the column. Compare with = or has() over an array to get an answer."
   },
   {
    "id": "string-reading",
