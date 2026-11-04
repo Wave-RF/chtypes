@@ -80,7 +80,13 @@ enum CaseArgSpec {
     Handle(Box<CaseCallSpec>),
     /// A lifecycle step's named handle, bound earlier by a `let` step.
     Ref(String),
+    /// The options document `{"cancel":"<id>"}` naming the token a `cancel`
+    /// step bound to this name.
+    CancelOptions(String),
 }
+
+/// The id of each cancel token a `cancel` step bound, by the same name.
+type CancelIds = HashMap<String, Vec<u8>>;
 
 #[derive(Debug)]
 struct CaseCallSpec {
@@ -122,6 +128,13 @@ fn parse_arg(v: &Value) -> Result<CaseArgSpec, String> {
     if let Some(h) = obj.get("handle") {
         return Ok(CaseArgSpec::Handle(Box::new(parse_call(h)?)));
     }
+    if let Some(r) = obj.get("cancel_options") {
+        return Ok(CaseArgSpec::CancelOptions(
+            r.as_str()
+                .ok_or("\"cancel_options\" must be a string")?
+                .to_string(),
+        ));
+    }
     Err(format!("unrecognized case argument shape: {v}"))
 }
 
@@ -153,8 +166,10 @@ fn resolve_arg(
     spec: &CaseArgSpec,
     minted: &mut Vec<MintedHandle>,
     refs: &HashMap<String, MintedHandle>,
+    ids: &CancelIds,
 ) -> Result<ResolvedArg, String> {
     match spec {
+        CaseArgSpec::CancelOptions(name) => Ok(ResolvedArg::Bytes(cancel_options(ids, name)?)),
         CaseArgSpec::Ref(name) => refs
             .get(name)
             .map(MintedHandle::as_resolved_arg)
@@ -163,7 +178,7 @@ fn resolve_arg(
         CaseArgSpec::Bytes(b) => Ok(ResolvedArg::Bytes(b.clone())),
         CaseArgSpec::NullHandle => Ok(ResolvedArg::Null),
         CaseArgSpec::Handle(call) => {
-            let outcome = resolve_and_call(api, call, minted, refs)?;
+            let outcome = resolve_and_call(api, call, minted, refs, ids)?;
             let Outcome::Call {
                 status, outputs, ..
             } = outcome
@@ -195,10 +210,11 @@ fn resolve_and_call(
     call: &CaseCallSpec,
     minted: &mut Vec<MintedHandle>,
     refs: &HashMap<String, MintedHandle>,
+    ids: &CancelIds,
 ) -> Result<Outcome, String> {
     let mut args = Vec::with_capacity(call.args.len());
     for a in &call.args {
-        args.push(resolve_arg(api, a, minted, refs)?);
+        args.push(resolve_arg(api, a, minted, refs, ids)?);
     }
     // SAFETY: every `ResolvedArg::Handle` above was minted by this same
     // `api` (`resolve_arg` only ever builds one from an `outputs` entry this
@@ -356,10 +372,20 @@ fn check_call(api: &Api, outcome: &Outcome, expect: &Value) -> Result<(), String
                 "ch_name" => Value::from(got_err.ch_name.clone()),
                 "message" => Value::from(got_err.message.clone()),
                 "column" => Value::from(got_err.column.clone()),
+                "reason" => Value::from(got_err.reason.clone()),
                 other => return Err(format!("expect.error names an unknown field {other:?}")),
             };
             if &got_v != want_v {
                 return Err(format!("error.{field}: want {want_v}, got {got_v}"));
+            }
+        }
+    }
+    // null_outputs: every output of the call, handle or chs_buf, is NULL
+    // (invoke records every output pointer, NULL included).
+    if expect.get("null_outputs").and_then(Value::as_bool) == Some(true) {
+        for (name, h) in outputs {
+            if !h.raw_ptr().is_null() {
+                return Err(format!("null_outputs: output {name:?} is not NULL"));
             }
         }
     }
@@ -514,7 +540,7 @@ fn run_generic_case(api: &Api, case: &Value, kind: &str, expect: &Value) -> Resu
         args: specs,
     };
     let mut minted = Vec::new();
-    let outcome = resolve_and_call(api, &call, &mut minted, &HashMap::new());
+    let outcome = resolve_and_call(api, &call, &mut minted, &HashMap::new(), &CancelIds::new());
     let verdict = match &outcome {
         Ok(o) => check_call(api, o, expect),
         Err(e) => Err(e.clone()),
@@ -577,9 +603,10 @@ fn run_lifecycle_case(api: &Api, case: &Value) -> Result<(), String> {
         .ok_or("lifecycle case has no \"steps\"")?;
     let base = live_counts(api)?;
     let mut refs: HashMap<String, MintedHandle> = HashMap::new();
+    let mut ids = CancelIds::new();
     let mut verdict: Result<(), String> = Ok(());
     for (i, step) in steps.iter().enumerate() {
-        let r = run_lifecycle_step(api, step, &base, &mut refs);
+        let r = run_lifecycle_step(api, step, &base, &mut refs, &mut ids);
         if let Err(e) = r {
             verdict = Err(format!("step {i}: {e}"));
             break;
@@ -598,7 +625,58 @@ fn run_lifecycle_step(
     step: &Value,
     base: &BTreeMap<String, i64>,
     refs: &mut HashMap<String, MintedHandle>,
+    ids: &mut CancelIds,
 ) -> Result<(), String> {
+    if let Some(name) = step.get("cancel").and_then(Value::as_str) {
+        let mut token: *mut decls::ChsCancel = std::ptr::null_mut();
+        let mut id: *mut decls::ChsBuf = std::ptr::null_mut();
+        let mut err: *mut decls::ChsError = std::ptr::null_mut();
+        // SAFETY: `api` completed loader step 7; every output is this call's own local.
+        let status = unsafe { (api.chs_cancel_create)(&mut token, &mut id, &mut err) };
+        if !err.is_null() {
+            // SAFETY: a non-null `err` was just handed over by this call.
+            unsafe { (api.chs_error_free)(err) };
+        }
+        if status != 0 || token.is_null() || id.is_null() {
+            return Err(format!("chs_cancel_create returned status {status}"));
+        }
+        let id_bytes = read_buf_bytes(api, &MintedHandle::Buf(id));
+        free_handle(api, MintedHandle::Buf(id));
+        refs.insert(name.to_string(), MintedHandle::Cancel(token));
+        let id_bytes = id_bytes?;
+        let shaped = id_bytes.len() == 17
+            && id_bytes[0] == b'c'
+            && id_bytes[1..]
+                .iter()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(b));
+        if !shaped {
+            return Err(format!(
+                "chs_cancel_create's id {:?} is not c and 16 lowercase hex digits",
+                String::from_utf8_lossy(&id_bytes)
+            ));
+        }
+        ids.insert(name.to_string(), id_bytes);
+        return Ok(());
+    }
+    if let Some(name) = step.get("fire").and_then(Value::as_str) {
+        fire(api, cancel_ref(refs, name)?);
+        return Ok(());
+    }
+    if let Some(name) = step.get("fired").and_then(Value::as_str) {
+        let want = step
+            .get("want")
+            .and_then(Value::as_i64)
+            .ok_or("fired needs an integer \"want\"")?;
+        // SAFETY: the token is live: bound by a `cancel` step, not yet freed.
+        let got = i64::from(unsafe { (api.chs_cancel_fired)(cancel_ref(refs, name)?) });
+        if got != want {
+            return Err(format!("chs_cancel_fired = {got}, want {want}"));
+        }
+        return Ok(());
+    }
+    if let Some(blocked) = step.get("blocked_call") {
+        return run_blocked_call(api, blocked, refs, ids);
+    }
     if let Some(name) = step.get("free").and_then(Value::as_str) {
         let h = refs
             .remove(name)
@@ -625,7 +703,7 @@ fn run_lifecycle_step(
     let call_v = step.get("call").ok_or("step has no recognized key")?;
     let call = parse_call(call_v)?;
     let mut minted = Vec::new();
-    let outcome = resolve_and_call(api, &call, &mut minted, refs)?;
+    let outcome = resolve_and_call(api, &call, &mut minted, refs, ids)?;
     if let Some(name) = step.get("let").and_then(Value::as_str) {
         let Outcome::Call {
             status, outputs, ..
@@ -660,10 +738,196 @@ fn run_lifecycle_step(
     let expect = step
         .get("expect")
         .ok_or("a call step needs \"let\" or \"expect\"")?;
-    let verdict = check_call(api, &outcome, expect);
+    let expect = substitute_cancel_echo(expect, ids)?;
+    let verdict = check_call(api, &outcome, &expect);
     for h in minted {
         free_handle(api, h);
     }
+    verdict
+}
+
+/// The options document a `cancel_options` argument names.
+fn cancel_options(ids: &CancelIds, name: &str) -> Result<Vec<u8>, String> {
+    let id = ids
+        .get(name)
+        .ok_or_else(|| format!("cancel_options {name:?}: no token is bound to that name"))?;
+    let mut out = b"{\"cancel\":\"".to_vec();
+    out.extend_from_slice(id);
+    out.extend_from_slice(b"\"}");
+    Ok(out)
+}
+
+/// Each `{"cancel_echo": name}` in an expectation, replaced by the stub's echo
+/// of the `cancel_options` bytes for that name (the id is minted at run time).
+fn substitute_cancel_echo(v: &Value, ids: &CancelIds) -> Result<Value, String> {
+    match v {
+        Value::Object(map) => {
+            if let (1, Some(name)) = (map.len(), map.get("cancel_echo").and_then(Value::as_str)) {
+                let b = cancel_options(ids, name)?;
+                let head: String = b.iter().take(16).map(|x| format!("{x:02x}")).collect();
+                let sha: String = Sha256::digest(&b)
+                    .iter()
+                    .map(|x| format!("{x:02x}"))
+                    .collect();
+                return Ok(serde_json::json!({"head_hex": head, "len": b.len(), "sha256": sha}));
+            }
+            let mut out = serde_json::Map::new();
+            for (k, x) in map {
+                out.insert(k.clone(), substitute_cancel_echo(x, ids)?);
+            }
+            Ok(Value::Object(out))
+        }
+        Value::Array(items) => items
+            .iter()
+            .map(|x| substitute_cancel_echo(x, ids))
+            .collect::<Result<Vec<_>, _>>()
+            .map(Value::Array),
+        other => Ok(other.clone()),
+    }
+}
+
+/// The bound cancel token named `name`.
+fn cancel_ref(
+    refs: &HashMap<String, MintedHandle>,
+    name: &str,
+) -> Result<*const decls::ChsCancel, String> {
+    match refs.get(name) {
+        Some(MintedHandle::Cancel(p)) => Ok(*p as *const decls::ChsCancel),
+        _ => Err(format!("{name:?} names no bound cancel token")),
+    }
+}
+
+fn fire(api: &Api, token: *const decls::ChsCancel) {
+    // SAFETY: the token is live (bound by a `cancel` step, not yet freed), and
+    // chs_cancel_fire is thread class `shared`.
+    unsafe { (api.chs_cancel_fire)(token) };
+}
+
+/// The stub's cancel probe: how many calls sit blocked in its directive now.
+fn cancel_inflight(api: &Api) -> Result<i64, String> {
+    // SAFETY: the probe is one bytes argument; `api` completed loader step 6.
+    let outcome = unsafe {
+        invoke(
+            api,
+            "chs_type_validate",
+            &[ResolvedArg::Bytes(b"!C:".to_vec())],
+        )
+    }?;
+    let Outcome::Call {
+        status, outputs, ..
+    } = &outcome
+    else {
+        return Err("the cancel probe is not a status call".to_string());
+    };
+    let doc = match outputs.get("out") {
+        Some(h) if *status == "CHS_OK" => read_buf_bytes(api, h),
+        _ => Err(format!("the cancel probe answered {status}")),
+    };
+    free_outputs(api, &outcome);
+    let doc: Value = serde_json::from_slice(&doc?).map_err(|e| e.to_string())?;
+    doc.get("inflight")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| format!("the cancel probe has no inflight count: {doc}"))
+}
+
+/// One call made on another thread, with what it returned carried back.
+struct ThreadCall<'a> {
+    api: &'a Api,
+    name: &'a str,
+    args: &'a [ResolvedArg],
+}
+
+// SAFETY: the call's arguments are read-only for the scope's lifetime and
+// every function a `blocked_call` makes is thread class `shared`.
+unsafe impl Sync for ThreadCall<'_> {}
+
+/// The outcome a thread returns: raw pointers the joining thread owns next.
+struct SendOutcome(Result<Outcome, String>);
+
+// SAFETY: the outcome is handed over once, at the join; the thread that made
+// the call never touches it again.
+unsafe impl Send for SendOutcome {}
+
+/// `blocked_call`: the call runs on another thread (its first bytes_in begins
+/// the stub's block directive, so it waits); this thread waits until the
+/// stub's cancel probe reads one more call in flight than before, fires the
+/// token, joins and checks. Sequenced on the probe: the 1 ms wait between
+/// reads only bounds how long a broken stub can hang the case.
+fn run_blocked_call(
+    api: &Api,
+    blocked: &Value,
+    refs: &HashMap<String, MintedHandle>,
+    ids: &CancelIds,
+) -> Result<(), String> {
+    let call = parse_call(blocked.get("call").ok_or("blocked_call needs \"call\"")?)?;
+    let token = cancel_ref(
+        refs,
+        blocked
+            .get("fire")
+            .and_then(Value::as_str)
+            .ok_or("blocked_call needs \"fire\"")?,
+    )?;
+    let expect = substitute_cancel_echo(
+        blocked
+            .get("expect")
+            .ok_or("blocked_call needs \"expect\"")?,
+        ids,
+    )?;
+    let before = cancel_inflight(api)?;
+    let mut minted = Vec::new();
+    let mut args = Vec::with_capacity(call.args.len());
+    for a in &call.args {
+        match resolve_arg(api, a, &mut minted, refs, ids) {
+            Ok(r) => args.push(r),
+            Err(e) => {
+                for h in minted {
+                    free_handle(api, h);
+                }
+                return Err(e);
+            }
+        }
+    }
+    let shared = ThreadCall {
+        api,
+        name: &call.fn_name,
+        args: &args,
+    };
+    let shared = &shared;
+    let (entered, joined) = std::thread::scope(|scope| {
+        let worker = scope.spawn(move || {
+            // SAFETY: see ThreadCall; the arguments were minted by this same `api`.
+            SendOutcome(unsafe { invoke(shared.api, shared.name, shared.args) })
+        });
+        let mut entered = Ok(false);
+        for _ in 0..5000 {
+            match cancel_inflight(api) {
+                Ok(n) if n > before => {
+                    entered = Ok(true);
+                    break;
+                }
+                Ok(_) => std::thread::sleep(std::time::Duration::from_millis(1)),
+                Err(e) => {
+                    entered = Err(e);
+                    break;
+                }
+            }
+        }
+        fire(api, token);
+        (entered, worker.join())
+    });
+    for h in minted {
+        free_handle(api, h);
+    }
+    let outcome = match joined {
+        Ok(SendOutcome(r)) => r?,
+        Err(_) => return Err("the blocked call's thread panicked".to_string()),
+    };
+    let verdict = match entered {
+        Ok(true) => check_call(api, &outcome, &expect),
+        Ok(false) => Err("the call never reached the stub's block directive".to_string()),
+        Err(e) => Err(e),
+    };
+    free_outputs(api, &outcome);
     verdict
 }
 
@@ -725,7 +989,7 @@ fn run_concurrent_case(api: &Api, case: &Value) -> Result<(), String> {
     let mut resolved = Vec::new();
     let mut setup: Result<(), String> = Ok(());
     for spec in &specs {
-        match resolve_arg(api, spec, &mut minted, &refs) {
+        match resolve_arg(api, spec, &mut minted, &refs, &CancelIds::new()) {
             Ok(a) => resolved.push(a),
             Err(e) => {
                 setup = Err(e);
