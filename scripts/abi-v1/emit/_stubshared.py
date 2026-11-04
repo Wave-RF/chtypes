@@ -244,6 +244,241 @@ def _strip_unknown(v):
     return v
 
 
+# The null_input cells, variant "null-input" (-DCHS_STUB_NULL_INPUT):
+# chs_preview_row answers NULL_INPUT_DOCS["row"] and chs_preview_batch
+# NULL_INPUT_DOCS["batch"], whatever the call's inputs. Each document carries,
+# for every format and type of NULL_INPUT_CELLS, the entry a NULL literal (a
+# JSON null, a TSV \N) read into that NON-Nullable column gives: `null_input`
+# true, the column's default stored, `null` false. One type is the exception, as
+# measured on a real library build (all four lines): a NULL into a non-Nullable
+# Enum8 stores 0, outside the enum, so its entry also carries `poison` true and
+# an empty `stored`, the row's `transformed` names it with reason "poisoned",
+# and the document's outcome is accepted_poisoned with code 691 (the poison
+# cells below). The stub is not ClickHouse:
+# these are DECODE cells, proving every binding exposes the member the library
+# sets, under the name bindings-v1.md section 5 gives it. Two control entries
+# per document hold `null_input` false and `null_input` absent, which every
+# binding must read as false. A runner keys each entry's expected value on its
+# name: NULL_INPUT_CONTROL_PREFIX names a control, and every other entry is a
+# cell, NULL_INPUT_CELL_COUNT of them in the row document and as many across
+# the batch's rows, so a document that lost its cells fails rather than
+# passing on its controls alone.
+NULL_INPUT_FORMATS = (("JSONEachRow", "null"), ("TSV", "\\N"))
+# (name, type, base, the stored rendering of the type's default, value_b64 or None)
+NULL_INPUT_TYPES = (
+    ("uuid", "UUID", "UUID", '"00000000-0000-0000-0000-000000000000"', None),
+    ("fixed", "FixedString(4)", "FixedString(4)", '"\\u0000\\u0000\\u0000\\u0000"', "AAAAAA=="),
+    ("int32", "Int32", "Int32", "0", None),
+    ("datetime", "DateTime", "DateTime", '"1970-01-01 00:00:00"', None),
+    ("lowcard", "LowCardinality(String)", "String", '""', ""),
+    ("enum8", "Enum8('a' = 1, 'b' = 2)", "Enum8('a' = 1, 'b' = 2)", '""', None),
+)
+# The type whose NULL read is poisoned (stored 0 is outside the enum).
+NULL_INPUT_POISON_TYPE = "enum8"
+NULL_INPUT_CONTROL_PREFIX = "control."
+NULL_INPUT_CELL_COUNT = len(NULL_INPUT_FORMATS) * len(NULL_INPUT_TYPES)
+
+
+def _null_input_cell(fmt: str, literal: str, t: tuple) -> dict:
+    name, typ, base, stored, value_b64 = t
+    cell = {
+        "name": f"{fmt}.{name}",
+        "type": typ,
+        "base": base,
+        "src": "input",
+        "input": literal,
+        "stored": stored,
+        "nullable": False,
+        "poison": name == NULL_INPUT_POISON_TYPE,
+        "null_input": True,
+        "dup_dropped": False,
+        "null": False,
+    }
+    if value_b64 is not None:
+        cell["value_b64"] = value_b64
+    return cell
+
+
+def _null_input_controls() -> list[dict]:
+    base = {"type": "Int32", "base": "Int32", "src": "input", "input": "1", "stored": "1", "null": False}
+    return [
+        {"name": NULL_INPUT_CONTROL_PREFIX + "false", **base, "null_input": False},
+        {"name": NULL_INPUT_CONTROL_PREFIX + "absent", **base},
+    ]
+
+
+def _null_input_row(formats) -> dict:
+    cols = [_null_input_cell(fmt, lit, t) for fmt, lit in formats for t in NULL_INPUT_TYPES]
+    transformed = [
+        {
+            "row": 0,
+            "column": c["name"],
+            "input": c["input"],
+            "stored": c["stored"],
+            "reason": "poisoned",
+            "lossy": True,
+        }
+        for c in cols
+        if c["poison"]
+    ]
+    return {
+        "outcome": "accepted_poisoned",
+        "code": 691,
+        "err": "",
+        "input_span": {"off": 0, "len": 1},
+        "unknown_fields": [],
+        "cols": cols + _null_input_controls(),
+        "computed": [],
+        "transformed": transformed,
+    }
+
+
+NULL_INPUT_DOCS = {
+    "row": _null_input_row(NULL_INPUT_FORMATS),
+    "batch": {
+        "outcome": "accepted_poisoned",
+        "code": 691,
+        "err": "",
+        "rows_read": len(NULL_INPUT_FORMATS),
+        "rows_skipped": 0,
+        "rows": [_null_input_row((f,)) for f in NULL_INPUT_FORMATS],
+        "transformed": [],
+        "unsupported_settings": [],
+        "unconsumed": [],
+        "framing": {"bom_skipped": False, "container": "stream", "header": None},
+    },
+}
+
+
+# The poison and dup_dropped cells, variant "value-flags"
+# (-DCHS_STUB_VALUE_FLAGS): chs_preview_row answers VALUE_FLAGS_DOCS["row"] and
+# chs_preview_batch VALUE_FLAGS_DOCS["batch"], whatever the call's inputs. The
+# stub is not ClickHouse, so these are DECODE cells:
+#   poison: a JSON null (JSONEachRow) or a TSV \N read into a NON-Nullable
+#     Enum8('a' = 1, 'b' = 2). Measured on a real library build (all four
+#     lines): null-as-default stores 0, which is outside the enum, so the
+#     server accepts the insert and cannot read it back. The row's outcome is
+#     accepted_poisoned with code 691, the entry carries `poison` true (and
+#     `null_input` true, `stored` empty), and `transformed` names it with
+#     reason "poisoned" (docs/guides/transformations.md).
+#   dup_dropped: the row {"a":1,"a":2} read into `a Int32` (MergeTree). A
+#     repeated TOP-LEVEL JSONEachRow key that arrives after every column has
+#     been read is skipped at default settings
+#     (input_format_json_ignore_unnecessary_fields is true), so the server
+#     stores the FIRST value ("1"), the column's `dup_dropped` is true, and
+#     `transformed` carries a "duplicate_key_dropped" entry. Measured on the
+#     pinned servers (all four lines, both arches). Not modeled by the stub's
+#     one canned document: the control {"a":1,"a":2,"b":3} into (a, b), where
+#     the repeat arrives while b is still unread and the server refuses the
+#     row with code 117 (a refused row is a different document, not a column
+#     of this one); the real-library proof covers it. A repeated key INSIDE a
+#     Map value keeps both keys and leaves dup_dropped false.
+# A runner keys each entry's expected pair on its name: a "poison." name
+# expects poison true and dup_dropped false, a "dup." name the reverse (so a
+# binding that swaps the two members fails), and a VALUE_FLAGS_CONTROL_PREFIX
+# name expects both false. The controls hold each member false and absent.
+# VALUE_FLAGS_POISON_CELLS and VALUE_FLAGS_DUP_CELLS count the cells in the row
+# document and, as many, across the batch's rows, so a document that lost its
+# cells fails rather than passing on its controls alone.
+VALUE_FLAGS_FORMATS = ("JSONEachRow", "TSV")
+VALUE_FLAGS_CONTROL_PREFIX = "control."
+VALUE_FLAGS_POISON_PREFIX = "poison."
+VALUE_FLAGS_DUP_PREFIX = "dup."
+VALUE_FLAGS_POISON_CELLS = len(VALUE_FLAGS_FORMATS)  # the Enum8 NULL read, once per format
+VALUE_FLAGS_DUP_CELLS = 1  # one canned dup_dropped entry, in the JSONEachRow row only
+
+
+VALUE_FLAGS_NULL_LITERAL = {"JSONEachRow": "null", "TSV": "\\N"}
+
+
+def _value_flags_cols(fmt: str) -> list[dict]:
+    cols = [
+        {
+            "name": f"{VALUE_FLAGS_POISON_PREFIX}{fmt}.enum8_null",
+            "type": "Enum8('a' = 1, 'b' = 2)",
+            "base": "Enum8('a' = 1, 'b' = 2)",
+            "src": "input",
+            "input": VALUE_FLAGS_NULL_LITERAL[fmt],
+            "stored": '""',
+            "nullable": False,
+            "poison": True,
+            "null_input": True,
+            "dup_dropped": False,
+            "null": False,
+        }
+    ]
+    if fmt == "JSONEachRow":
+        cols.append(
+            {
+                "name": f"{VALUE_FLAGS_DUP_PREFIX}{fmt}.repeated_top_key",
+                "type": "Int32",
+                "base": "Int32",
+                "src": "input",
+                "input": '{"a":1,"a":2}',
+                "stored": "1",
+                "nullable": False,
+                "poison": False,
+                "null_input": False,
+                "dup_dropped": True,
+                "null": False,
+            }
+        )
+    return cols
+
+
+def _value_flags_controls() -> list[dict]:
+    base = {"type": "Int32", "base": "Int32", "src": "input", "input": "1", "stored": "1", "null": False}
+    p = VALUE_FLAGS_CONTROL_PREFIX
+    return [
+        {"name": p + "false", **base, "poison": False, "dup_dropped": False},
+        {"name": p + "poison_absent", **base, "dup_dropped": False},
+        {"name": p + "dup_absent", **base, "poison": False},
+        {"name": p + "absent", **base},
+    ]
+
+
+def _value_flags_row(formats) -> dict:
+    cols = [c for f in formats for c in _value_flags_cols(f)]
+    transformed = [
+        {
+            "row": 0,
+            "column": c["name"],
+            "input": c["input"],
+            "stored": c["stored"],
+            "reason": "poisoned" if c["poison"] else "duplicate_key_dropped",
+            "lossy": True,
+        }
+        for c in cols
+    ]
+    return {
+        "outcome": "accepted_poisoned",
+        "code": 691,
+        "err": "",
+        "input_span": {"off": 0, "len": 1},
+        "unknown_fields": [],
+        "cols": cols + _value_flags_controls(),
+        "computed": [],
+        "transformed": transformed,
+    }
+
+
+VALUE_FLAGS_DOCS = {
+    "row": _value_flags_row(VALUE_FLAGS_FORMATS),
+    "batch": {
+        "outcome": "accepted_poisoned",
+        "code": 691,
+        "err": "",
+        "rows_read": len(VALUE_FLAGS_FORMATS),
+        "rows_skipped": 0,
+        "rows": [_value_flags_row((f,)) for f in VALUE_FLAGS_FORMATS],
+        "transformed": [],
+        "unsupported_settings": [],
+        "unconsumed": [],
+        "framing": {"bom_skipped": False, "container": "stream", "header": None},
+    },
+}
+
+
 # Rule r7, variant "filter-observable" (-DCHS_STUB_FILTER_OBSERVABLE):
 # chs_preview_batch answers one of these two batch documents, by whether its
 # filter reached it. rows_passed is the only difference.
@@ -658,6 +893,10 @@ def plan(model) -> list[Variant]:
             Variant("r3-unknown-capabilities", (("CHS_STUB_R3_CAPABILITIES", "1"),), "accepted"),
             # Rule r7: whether a batch's filter reached the library.
             Variant("filter-observable", (("CHS_STUB_FILTER_OBSERVABLE", "1"),), "accepted"),
+            # The null_input decode cells: see NULL_INPUT_DOCS above.
+            Variant("null-input", (("CHS_STUB_NULL_INPUT", "1"),), "accepted"),
+            # The poison and dup_dropped decode cells: see VALUE_FLAGS_DOCS.
+            Variant("value-flags", (("CHS_STUB_VALUE_FLAGS", "1"),), "accepted"),
             # The filter-declined settings, and describe's deep-input
             # refusal: see DECLINED and DEEP above.
             Variant("declined-settings", (("CHS_STUB_DECLINED_SETTINGS", "1"),), "accepted"),

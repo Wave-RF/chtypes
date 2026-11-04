@@ -20,7 +20,7 @@
 # cases fail.
 #
 # The same cargo invocation also runs the public-API suites (api_v1,
-# api_v1_setup, api_v1_setup_cases, reader_rules) and the crate's own unit
+# api_v1_setup, api_v1_setup_cases, reader_rules, null_input) and the crate's own unit
 # tests (--lib: the registry over a real signed OCI layout lives there, because
 # only a unit test reaches the fetch layer's test-only seam), which read the
 # same CHTYPES_ABI<N>_STUBS and prove the public layer's plumbing over the
@@ -68,7 +68,7 @@ OUT="$(mktemp "${TMPDIR:-/tmp}/rust-stub-census.XXXXXX")"
 trap 'rm -f "$OUT"' EXIT
 rc=0
 echo "rust.sh: ABI v$MAJOR: cargo test ($STUBS_VAR=${!STUBS_VAR})"
-cargo test --locked --features abi-v1 --lib --test "abi${MAJOR}_conformance" --test api_v1 --test api_v1_setup --test api_v1_setup_cases --test reader_rules --test goldens_v1_runner -- --nocapture >"$OUT" 2>&1 || rc=$?
+cargo test --locked --features abi-v1 --lib --test "abi${MAJOR}_conformance" --test api_v1 --test api_v1_setup --test api_v1_setup_cases --test reader_rules --test null_input --test goldens_v1_runner -- --nocapture >"$OUT" 2>&1 || rc=$?
 cat "$OUT"
 echo "rust.sh: stub census"
 census_rc=0

@@ -87,6 +87,24 @@ export interface Value {
   readonly isStored: boolean;
   /** The raw bytes of a scalar String or FixedString value (rule 6), when the document carries them. */
   readonly value: Buffer | undefined;
+  /**
+   * Whether the input field was the format's NULL literal (a JSON `null`, a TSV `\N`), from `null_input`; `false`
+   * when the document carries none. A fact about the input, where `null` is one about the stored value: the two
+   * differ where a NULL literal is read into a column that is not Nullable.
+   */
+  readonly nullInput: boolean;
+  /**
+   * Whether the stored value is one the server cannot read back (the batch is then `accepted_poisoned` and exports
+   * nothing), from `poison`; `false` when the document carries none.
+   */
+  readonly poison: boolean;
+  /**
+   * Whether the reader dropped a duplicate key for this column, from `dup_dropped`; `false` when the document carries none.
+   * At default settings a repeated top-level JSONEachRow key that arrives after every column has been read is skipped:
+   * the first value is stored, this is `true`, and a `duplicate_key_dropped` transform is reported. A repeat while a
+   * column is still unread is refused with 117, and a repeated key inside a Map value keeps both keys.
+   */
+  readonly dupDropped: boolean;
 }
 
 /** One cell of an engine row: ClickHouse's rendering of a stored value after the engine's insert-time merge. */
@@ -535,6 +553,9 @@ function decodeValue(doc: string, v: unknown): Value {
     source,
     isStored,
     value: bytesField(doc, o, 'value'),
+    nullInput: boolOr(doc, o, 'null_input', false),
+    poison: boolOr(doc, o, 'poison', false),
+    dupDropped: boolOr(doc, o, 'dup_dropped', false),
   };
 }
 

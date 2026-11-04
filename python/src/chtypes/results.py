@@ -73,7 +73,20 @@ class Value:
     bytes of a scalar String or FixedString leaf (from `value_b64`), None where
     the document carries none. `null`: the library's verdict, poison included.
     `source`: the `value_src` spelling (from `src`); `Source` lists them.
-    `is_stored`: the description's own fact for `source`.
+    `is_stored`: the description's own fact for `source`. `null_input`: whether
+    the input field was the format's NULL literal (a JSON null, a TSV `\\N`),
+    from `null_input`, False where the document carries none; a fact about the
+    input, where `null` is one about the stored value, so the two differ where
+    a NULL literal is read into a column that is not Nullable. `poison`: the
+    stored value is one the server cannot read back (the batch is then
+    accepted_poisoned and exports nothing), from `poison`; `dup_dropped`: the
+    reader dropped a duplicate key for this column, from `dup_dropped` (at default
+    settings a repeated top-level JSONEachRow key that arrives after every column
+    has been read is skipped: the first value is stored, this is True, and a
+    `duplicate_key_dropped` transform is reported; a repeat while a column is
+    still unread is refused with 117; a repeated key inside a Map value keeps
+    both keys). Each is
+    False where the document carries none.
     """
 
     column: bytes
@@ -82,6 +95,9 @@ class Value:
     source: str
     is_stored: bool
     value: bytes | None = None
+    null_input: bool = False
+    poison: bool = False
+    dup_dropped: bool = False
 
 
 @dataclass(frozen=True, slots=True)
