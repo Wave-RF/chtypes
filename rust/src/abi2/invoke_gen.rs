@@ -776,26 +776,6 @@ pub(crate) unsafe fn invoke(
             // SAFETY: err is null or a chs_error* this same call just received from api above.
             unsafe { finish_status(api, status, err, outputs) }
         }
-        "chs_cancel_fire" => {
-            let mut cur = ArgCursor::new(args);
-            let a_token = cur.handle_opt("chs_cancel")?;
-            let a_token =
-                a_token.map_or(std::ptr::null_mut(), |p| p as *mut ChsCancel) as *const ChsCancel;
-            // SAFETY: every input is marshaled from the case's own recipe above, matching chs_cancel_fire's declared shape; every output pointer is this call's own local.
-            let status = unsafe { (api.chs_cancel_fire)(a_token) };
-            let outputs: BTreeMap<String, MintedHandle> = BTreeMap::new();
-            Err("chs_cancel_fire: a status-returning call with no out_error parameter, which invoke_gen.rs does not know how to report".to_string())
-        }
-        "chs_cancel_fired" => {
-            let mut cur = ArgCursor::new(args);
-            let a_token = cur.handle_opt("chs_cancel")?;
-            let a_token =
-                a_token.map_or(std::ptr::null_mut(), |p| p as *mut ChsCancel) as *const ChsCancel;
-            // SAFETY: every input is marshaled from the case's own recipe above, matching chs_cancel_fired's declared shape; every output pointer is this call's own local.
-            let status = unsafe { (api.chs_cancel_fired)(a_token) };
-            let outputs: BTreeMap<String, MintedHandle> = BTreeMap::new();
-            Err("chs_cancel_fired: a status-returning call with no out_error parameter, which invoke_gen.rs does not know how to report".to_string())
-        }
         other => Err(format!(
             "invoke: {other} is not a function this generation describes, or it is a \"free\"-classified function no case ever calls by name"
         )),

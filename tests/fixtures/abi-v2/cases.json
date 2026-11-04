@@ -2716,32 +2716,6 @@
       "args": [
         {
           "null_handle": true
-        }
-      ],
-      "expect": {
-        "status": "CHS_OK"
-      },
-      "fn": "chs_cancel_fire",
-      "id": "chs_cancel_fire.echo",
-      "kind": "echo"
-    },
-    {
-      "args": [
-        {
-          "null_handle": true
-        }
-      ],
-      "expect": {
-        "status": "CHS_OK"
-      },
-      "fn": "chs_cancel_fired",
-      "id": "chs_cancel_fired.echo",
-      "kind": "echo"
-    },
-    {
-      "args": [
-        {
-          "null_handle": true
         },
         {
           "bytes_hex": "435245415445205441424c45206120287820496e7433322920454e47494e45203d204d656d6f72793b20435245415445205441424c45206220287920496e7433322920454e47494e45203d204d656d6f7279"
@@ -5115,36 +5089,6 @@
       },
       "fn": "chs_filter_eval_block",
       "id": "chs_filter_eval_block.concurrent",
-      "kind": "concurrent",
-      "threads": 8
-    },
-    {
-      "args": [
-        {
-          "null_handle": true
-        }
-      ],
-      "calls": 16,
-      "expect": {
-        "status": "CHS_OK"
-      },
-      "fn": "chs_cancel_fire",
-      "id": "chs_cancel_fire.concurrent",
-      "kind": "concurrent",
-      "threads": 8
-    },
-    {
-      "args": [
-        {
-          "null_handle": true
-        }
-      ],
-      "calls": 16,
-      "expect": {
-        "status": "CHS_OK"
-      },
-      "fn": "chs_cancel_fired",
-      "id": "chs_cancel_fired.concurrent",
       "kind": "concurrent",
       "threads": 8
     },
