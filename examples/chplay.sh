@@ -74,12 +74,25 @@ fi
 # none (so the fetch then fails loudly, naming the line it could not find).
 DEV_BASE="https://registry-staging.wavehouse.dev/chtypes/v2-dev"
 major_of() { python3 "$HERE/../scripts/abi-v1/majors.py" get "$1" 2>/dev/null || echo 1; }
-line_for() {
-  local line=""
-  if [ -z "${CHPLAY_LINE:-}" ] && [ "$(major_of "$1")" != "1" ]; then
-    line="$(CHTYPES_ARTIFACTS_URL="$DEV_BASE" newest_published_line || true)"
+# A v2 binding's line is the newest line with a build at THIS SDK's
+# fingerprint (scripts/fetch-v1/own_fp_lines.py, which derives the fingerprint
+# from the generator and refuses fewer than two such lines), not the newest
+# listed: the dev registry can hold a newer line only at another fingerprint,
+# which a dev CLI correctly refuses. A refusal is an error, never a fallback.
+DEV_LINE_FILE="$(mktemp "${TMPDIR:-/tmp}/chplay-devline.XXXXXX")"
+dev_line() {
+  if [ ! -s "$DEV_LINE_FILE" ]; then
+    python3 -I "$HERE/../scripts/fetch-v1/own_fp_lines.py" --base "$DEV_BASE" --need 2 --first > "$DEV_LINE_FILE" || { : > "$DEV_LINE_FILE"; return 1; }
   fi
-  printf '%s\n' "${line:-$LINE}"
+  cat "$DEV_LINE_FILE"
+}
+line_for() {
+  if [ -z "${CHPLAY_LINE:-}" ] && [ "$(major_of "$1")" != "1" ]; then
+    dev_line && return 0
+    echo "chplay: no usable line for $1 on $DEV_BASE" >&2
+    return 1
+  fi
+  printf '%s\n' "$LINE"
 }
 # Every tour prints this many numbered section banners when it ran in full.
 EXPECTED_SECTIONS=18
@@ -103,13 +116,13 @@ usage() {
 # directory. A failed fetch fails that language's tour; it is never a skip.
 
 # shellcheck disable=SC2086  # CHPLAY_FETCH_ARGS is a word list on purpose
-fetch_go() { (cd "$HERE/../go" && go run ./cmd/chtypes fetch $CHPLAY_FETCH_ARGS "$(line_for go)"); }
+fetch_go() { local ln; ln="$(line_for go)" || return 1; (cd "$HERE/../go" && go run ./cmd/chtypes fetch $CHPLAY_FETCH_ARGS "$ln"); }
 # shellcheck disable=SC2086
-fetch_python() { (cd "$HERE/../python" && uv run python -m chtypes fetch $CHPLAY_FETCH_ARGS "$(line_for python)"); }
+fetch_python() { local ln; ln="$(line_for python)" || return 1; (cd "$HERE/../python" && uv run python -m chtypes fetch $CHPLAY_FETCH_ARGS "$ln"); }
 # shellcheck disable=SC2086
-fetch_ts() { (cd "$HERE/../ts" && pnpm install --frozen-lockfile --silent && pnpm build >/dev/null && node dist/cli.js fetch $CHPLAY_FETCH_ARGS "$(line_for ts)"); }
+fetch_ts() { local ln; ln="$(line_for ts)" || return 1; (cd "$HERE/../ts" && pnpm install --frozen-lockfile --silent && pnpm build >/dev/null && node dist/cli.js fetch $CHPLAY_FETCH_ARGS "$ln"); }
 # shellcheck disable=SC2086
-fetch_rust() { (cd "$HERE/../rust" && cargo run --quiet --locked --bin chtypes -- fetch $CHPLAY_FETCH_ARGS "$(line_for rust)"); }
+fetch_rust() { local ln; ln="$(line_for rust)" || return 1; (cd "$HERE/../rust" && cargo run --quiet --locked --bin chtypes -- fetch $CHPLAY_FETCH_ARGS "$ln"); }
 
 # ---------------------------------------------------------------- languages
 #
@@ -197,7 +210,7 @@ say "chplay: cache $CACHE_ROOT, fetching line $LINE through each binding's own C
 [ -n "${CHTYPES_VERSION:-}" ] && say "chplay: CHTYPES_VERSION=$CHTYPES_VERSION (tours will select it)"
 
 logdir="$(mktemp -d "${TMPDIR:-/tmp}/chplay.XXXXXX")"
-trap 'rm -rf "$logdir"' EXIT
+trap 'rm -rf "$logdir"; rm -f "$DEV_LINE_FILE"' EXIT
 
 declare -a results=()
 failed=0
@@ -220,10 +233,10 @@ for l in "${langs[@]}"; do
     continue
   fi
   say ""
-  say "$(bold "-- $l: running")  ($HERE/$l, ABI v$(major_of "$l"), line $(line_for "$l"))"
+  say "$(bold "-- $l: running")  ($HERE/$l, ABI v$(major_of "$l"), line $(line_for "$l" 2>/dev/null || echo UNSELECTED))"
   log="$logdir/$l.out"
   if ! { "fetch_$l" 2>&1 | tee "$log"; }; then
-    results+=("$l: FAILED — \`$l\` CLI fetch of line $(line_for "$l") failed (ABI v$(major_of "$l"))")
+    results+=("$l: FAILED — \`$l\` CLI fetch of line $(line_for "$l" 2>/dev/null || echo UNSELECTED) failed (ABI v$(major_of "$l"))")
     failed=1
     continue
   fi

@@ -1186,6 +1186,18 @@ def channel_from_script(script: Path = CHANNEL_SCRIPT) -> Channel:
     return ch
 
 
+def _own_fp_lines() -> Any:
+    """scripts/fetch-v1/own_fp_lines.py, loaded by path (this script may run with -I)."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("own_fp_lines", Path(__file__).with_name("own_fp_lines.py"))
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["own_fp_lines"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
 class NotFound(RuntimeError):
     """The registry answered 404 for a reference."""
 
@@ -1235,6 +1247,15 @@ class Registry:
         tags = self._get(f"{self.api}/tags/list", "application/json").get("tags") or []
         two = [t for t in tags if re.fullmatch(r"[0-9]+\.[0-9]+", t)]
         return sorted(two, key=lambda t: tuple(int(x) for x in t.split(".")), reverse=True)
+
+    def has_build(self, line: str) -> bool:
+        """Whether the registry serves the line's alias at the SDK's own
+        fingerprint (a listing never shows aliases, so it is asked for)."""
+        try:
+            self._get(f"{self.api}/manifests/{line}--fp-{self.alias_fp}", "application/vnd.oci.image.index.v1+json")
+        except NotFound:
+            return False
+        return True
 
     def index_for(self, line: str) -> Any:
         """The index the CLIs resolve for `line`: the alias tag's when this
@@ -1762,10 +1783,16 @@ def main_run_v2(
     if platform is None:
         print("cache-interop: --platform is required on a host the registry has no build for (it serves linux-amd64, linux-arm64 and darwin-arm64)", file=sys.stderr)
         return 2
-    lines = registry.lines()
-    if len(lines) < 2:
-        print(f"cache-interop: the registry lists {lines}; the line rows need two lines", file=sys.stderr)
+    # The two newest lines that have a build at THIS SDK's fingerprint, never
+    # merely the two newest listed (scripts/fetch-v1/own_fp_lines.py).
+    try:
+        lines = _own_fp_lines().select_lines(
+            registry.lines(), registry.has_build if registry.alias_fp else None, need=2, fp=registry.alias_fp or ""
+        )
+    except RuntimeError as e:
+        print(f"cache-interop: {e}", file=sys.stderr)
         return 1
+    print(f"cache-interop: fingerprint {registry.alias_fp or '(none: no alias step on this channel)'}; lines with a build at it: {lines}")
     high, low = lines[0], lines[1]
     digests = {ln: registry.digest(ln, platform) for ln in (high, low)}
     print(f"cache-interop: ABI v2 matrix: channel {channel.name}, registry {channel.base}, cache subroot {channel.subroot}/, "
@@ -2084,6 +2111,8 @@ else:
 class FakeRegistry:
     """The selftest's registry: fixed lines and digests, no network."""
 
+    alias_fp = None
+
     def __init__(self, served: dict[str, dict[str, str]]) -> None:
         self.served = served
 
@@ -2131,6 +2160,10 @@ def selftest_v2() -> None:
     asked.clear()
     assert probe({"26.9": idx("2")}).digest("26.9", "linux-amd64") == "sha256:" + "2" * 64, "an absent alias falls back"
     assert asked == [f"26.9--fp-{fp}", "26.9"], asked
+    asked.clear()
+    # has_build: only a published alias counts, a line's own tag at another fingerprint does not.
+    hb = probe({f"26.9--fp-{fp}": idx("1"), "26.10": idx("3")})
+    assert hb.has_build("26.9") and not hb.has_build("26.10"), "a line with only another fingerprint's tag has no build"
     asked.clear()
     assert Registry("https://r.example/chtypes/v2").alias_fp is None
     assert re.fullmatch(r"[0-9a-f]{64}", own_fingerprint())

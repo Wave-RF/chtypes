@@ -465,6 +465,8 @@ jobs:
             python3 scripts/abi-v1/majors.py announce "$b" --what "examples tour"
             python3 scripts/abi-v1/majors.py assert-layer "$b"
           done
+      - name: selftest — line selection skips a line with no build at this SDK's fingerprint, and forcing one or finding only one such line fails
+        run: python3 scripts/fetch-v1/own_fp_lines.py --selftest
       - name: every enrolled tour runs every section; every other tour is skipped by name
         run: scripts/check-examples-v1.sh
 
