@@ -61,6 +61,7 @@ from .results import (
     FilterRowError,
     Framing,
     Header,
+    InsertResult,
     RowResult,
     SchemaDescription,
     SchemaReplicated,
@@ -76,6 +77,7 @@ __all__ = [
     "decode_discovery",
     "decode_error_codes",
     "decode_filter_result",
+    "decode_insert_result",
     "decode_live_handles",
     "decode_row",
     "decode_schema_description",
@@ -487,6 +489,40 @@ def decode_batch(raw: bytes, export: bytes | None) -> BatchResult:
         else _framing(_obj(framing, where, "framing"), f"{where}.framing"),
         unsupported_settings=_name_list(obj, "unsupported_settings", where),
         at_merge=_objects(obj, "at_merge", where, _at_merge),
+    )
+
+
+def decode_insert_result(raw: bytes, output: bytes | None) -> InsertResult:
+    where = "insert_result"
+    obj = _obj(strict_loads(raw, where), where)
+    framing = obj.get("framing")
+    outcome = Outcome.of(_text(obj, "outcome", where))
+    # An insert output (and its column list) exists exactly when the call is
+    # accepted: a declined output is the call's decline. Keyed on the outcome,
+    # whatever bytes the library handed back.
+    accepted = outcome == Outcome.ACCEPTED
+    return InsertResult(
+        outcome=outcome,
+        err_code=_int(obj, "code", where),
+        err_msg=_bytes(obj, "err", where),
+        reason=_opt_text(obj, "reason", where),
+        refused_at=_refused_at(obj, where),
+        rows_read=_u64(obj, "rows_read", where),
+        rows_skipped=_u64(obj, "rows_skipped", where),
+        rows_passed=_opt_u64(obj, "rows_passed", where),
+        rows_cut=_opt_u64(obj, "rows_cut", where),
+        rows_undecided=_opt_u64(obj, "rows_undecided", where),
+        partition_count=_opt_u64(obj, "partition_count", where),
+        unsupported_settings=_name_list(obj, "unsupported_settings", where),
+        framing=None
+        if framing is None
+        else _framing(_obj(framing, where, "framing"), f"{where}.framing"),
+        export_columns=(
+            _name_list(obj, "export_columns", where)
+            if accepted and obj.get("export_columns") is not None
+            else None
+        ),
+        output=output if accepted else None,
     )
 
 

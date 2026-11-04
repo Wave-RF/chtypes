@@ -129,6 +129,17 @@ describe('the options documents (rule r1)', () => {
     );
   });
 
+  it('memory_limit_bytes is a decimal string: absent leaves it out, 0 is "0", and a bad value is a UsageError before any call', () => {
+    expect(encodeInsertOptions({ memoryLimitBytes: undefined })).toHaveLength(0);
+    expect(encodeInsertOptions({ memoryLimitBytes: 0 }).toString()).toBe('{"memory_limit_bytes":"0"}');
+    expect(encodeInsertOptions({ memoryLimitBytes: 1048576 }).toString()).toBe('{"memory_limit_bytes":"1048576"}');
+    expect(encodeInsertOptions({ memoryLimitBytes: 123456789012345678n }).toString()).toBe('{"memory_limit_bytes":"123456789012345678"}');
+    expect(encodeInsertOptions({ memoryLimitBytes: '42', deferDefaults: 'none' }).toString()).toBe('{"defer_defaults":"none","memory_limit_bytes":"42"}');
+    for (const bad of [-1, 1.5, Number.NaN, 2 ** 53, '007', '-3', '1e3', '', 1234567890123456789n, '1234567890123456789']) {
+      expect(() => encodeInsertOptions({ memoryLimitBytes: bad }), String(bad)).toThrow(UsageError);
+    }
+  });
+
   it('an absent list leaves the member out, and a present empty list is sent as []', () => {
     expect(doc(encodeInsertOptions({ insertableColumns: [], columnDefaults: [] }))).toEqual({ insertable_columns: [], column_defaults: [] });
     expect(encodeInsertOptions({ insertableColumns: undefined })).toHaveLength(0);

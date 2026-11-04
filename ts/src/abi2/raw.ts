@@ -286,12 +286,31 @@ export async function rawCallInNewThread(
   const prepared = prepareCall(name, args);
   let result: unknown;
   try {
-    result = await rawFn(threaded, name)(prepared.paramsValue);
+    const pending = rawFn(threaded, name)(prepared.paramsValue);
+    if (!threadedKeepAlive.enabled) prepared.paramsValue.length = 0;
+    result = await pending;
   } catch (err) {
     for (const { slot } of prepared.outSlots) dropSlot(slot);
     throw err;
+  } finally {
+    // Keep-alive: ffi-rs hands each Buffer's bytes to the native thread
+    // without holding the Buffer, so this frame holds every argument (the
+    // bodies, the documents, the handles) until the native call has returned.
+    keepReferenced(prepared.paramsValue);
   }
   return finishCall(raw, name, prepared, result);
+}
+
+/**
+ * Test-only: `enabled: false` drops this frame's references to a threaded
+ * call's arguments as soon as the call is dispatched, the planted red of the
+ * keep-alive rule (`test/abi2/cancel.test.ts`). Never set outside a test.
+ */
+export const threadedKeepAlive = { enabled: true };
+
+/** A use of `v` after the await, so the frame keeps it reachable; it does nothing else. */
+function keepReferenced(v: unknown): void {
+  if (v === keepReferenced) throw new Error('unreachable');
 }
 
 interface PreparedCall {

@@ -1,7 +1,7 @@
 //! The options documents (`docs/reference/bindings-v1.md` §2, "The options
 //! documents"; rule r1 of `spec/abi-v2/docs.md`).
 //!
-//! Three calls take one: `insert_options` on the four calls that model an
+//! Three calls take one: `insert_options` on the five calls that model an
 //! INSERT of a body, `filter_options` on `chs_filter_create` and
 //! `schema_options` on `chs_schema_create`. Each member is its own field of
 //! the call's options struct, and the binding builds the document from the
@@ -169,6 +169,10 @@ pub(crate) struct InsertMembers<'a> {
     pub(crate) column_defaults: Option<&'a [ColumnDefault]>,
     pub(crate) verdict_basis: Option<VerdictBasis>,
     pub(crate) defer_defaults: Option<DeferDefaults>,
+    pub(crate) memory_limit_bytes: Option<u64>,
+    /// The id of the call's own C cancel token, when the caller gave a
+    /// [`crate::CancelToken`]; never set by a caller directly.
+    pub(crate) cancel: Option<&'a str>,
     pub(crate) extra: &'a [(String, String)],
 }
 
@@ -198,6 +202,13 @@ impl InsertMembers<'_> {
         if let Some(b) = self.defer_defaults {
             d.set("defer_defaults", &b.as_str())?;
         }
+        if let Some(n) = self.memory_limit_bytes {
+            // A decimal string, as the document spells it; the library checks it.
+            d.set("memory_limit_bytes", &n.to_string())?;
+        }
+        if let Some(id) = self.cancel {
+            d.set("cancel", &id)?;
+        }
         d.extras("insert options", self.extra)?;
         d.finish()
     }
@@ -219,11 +230,15 @@ pub(crate) fn filter_options(
 /// The `schema_options` document (empty for none).
 pub(crate) fn schema_options(
     posture: Option<&Posture>,
+    cancel: Option<&str>,
     extra: &[(String, String)],
 ) -> Result<Vec<u8>> {
     let mut d = Doc::default();
     if let Some(p) = posture {
         d.set("posture", &p.as_str())?;
+    }
+    if let Some(id) = cancel {
+        d.set("cancel", &id)?;
     }
     d.extras("schema options", extra)?;
     d.finish()
@@ -239,6 +254,8 @@ mod tests {
             column_defaults: None,
             verdict_basis: None,
             defer_defaults: None,
+            memory_limit_bytes: None,
+            cancel: None,
             extra: &[],
         }
     }
@@ -251,7 +268,7 @@ mod tests {
     fn no_member_set_is_no_document() {
         assert!(members().document().unwrap().is_empty());
         assert!(filter_options(None, &[]).unwrap().is_empty());
-        assert!(schema_options(None, &[]).unwrap().is_empty());
+        assert!(schema_options(None, None, &[]).unwrap().is_empty());
     }
 
     #[test]
@@ -272,6 +289,8 @@ mod tests {
             column_defaults: Some(&defaults),
             verdict_basis: Some(VerdictBasis::Export),
             defer_defaults: Some(DeferDefaults::Server),
+            memory_limit_bytes: Some(1048576),
+            cancel: None,
             extra: &[],
         }
         .document()
@@ -282,9 +301,53 @@ mod tests {
                 r#"{"column_defaults":[{"name":"c","value":"1"},{"name_b64":"/w==","value_b64":"/g=="}],"#,
                 r#""defer_defaults":"server","#,
                 r#""insertable_columns":[{"name":"a"},{"name_b64":"AP8="}],"#,
+                r#""memory_limit_bytes":"1048576","#,
                 r#""verdict_basis":"export"}"#
             )
         );
+    }
+
+    #[test]
+    fn the_cancel_id_is_merged_into_the_document_the_call_already_builds() {
+        let doc = InsertMembers {
+            memory_limit_bytes: Some(7),
+            cancel: Some("c0123456789abcdef"),
+            ..members()
+        }
+        .document()
+        .unwrap();
+        assert_eq!(
+            text(doc),
+            r#"{"cancel":"c0123456789abcdef","memory_limit_bytes":"7"}"#
+        );
+        let doc = InsertMembers {
+            cancel: Some("c0123456789abcdef"),
+            ..members()
+        }
+        .document()
+        .unwrap();
+        assert_eq!(text(doc), r#"{"cancel":"c0123456789abcdef"}"#);
+        assert_eq!(
+            text(schema_options(Some(&Posture::Load), Some("c00000000000000ff"), &[]).unwrap()),
+            r#"{"cancel":"c00000000000000ff","posture":"load"}"#
+        );
+    }
+
+    #[test]
+    fn memory_limit_bytes_is_a_decimal_string_and_zero_is_sent() {
+        let doc = |n| {
+            text(
+                InsertMembers {
+                    memory_limit_bytes: Some(n),
+                    ..members()
+                }
+                .document()
+                .unwrap(),
+            )
+        };
+        assert_eq!(doc(7), r#"{"memory_limit_bytes":"7"}"#);
+        // Zero is a supplied value (no limit, which the library reads as such).
+        assert_eq!(doc(0), r#"{"memory_limit_bytes":"0"}"#);
     }
 
     #[test]
@@ -386,7 +449,7 @@ mod tests {
                 Error::Usage(_)
             ));
             assert!(matches!(
-                schema_options(None, &extra).unwrap_err(),
+                schema_options(None, None, &extra).unwrap_err(),
                 Error::Usage(_)
             ));
         }
@@ -395,12 +458,12 @@ mod tests {
     #[test]
     fn posture_and_param_encoding_use_the_wire_spelling_and_keep_an_unknown() {
         assert_eq!(
-            text(schema_options(Some(&Posture::Load), &[]).unwrap()),
+            text(schema_options(Some(&Posture::Load), None, &[]).unwrap()),
             r#"{"posture":"load"}"#
         );
         // An unlisted posture is passed through as given: the library refuses it.
         assert_eq!(
-            text(schema_options(Some(&Posture::Unknown("later".into())), &[]).unwrap()),
+            text(schema_options(Some(&Posture::Unknown("later".into())), None, &[]).unwrap()),
             r#"{"posture":"later"}"#
         );
         assert_eq!(

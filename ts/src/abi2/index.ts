@@ -27,11 +27,21 @@ export {
   usageError,
 } from './errors.js';
 export { Abi2Handle, HANDLE_CLASSES, wrapHandle } from './handles.js';
-export { checkUnverifiedAllowed, type ImageSetup, LoadedImage, type LoadInput, openAbi2, openUnverified, type Predicate } from './loader.js';
+export {
+  checkUnverifiedAllowed,
+  type ImageSetup,
+  imageOfCalls,
+  LoadedImage,
+  type LoadInput,
+  openAbi2,
+  openUnverified,
+  type Predicate,
+} from './loader.js';
 export {
   asBuffer,
   checkStatus,
   defineRawFunctions,
+  rawCallInNewThread,
   type HandleRef,
   NULL_EXTERNAL,
   type RawApi,
