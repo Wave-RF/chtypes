@@ -548,6 +548,10 @@ jobs:
           fi
           bash "$script" --selftest
       - name: clippy, fmt and the unit tests with the abi-v1 feature
+        env:
+          # The unit tests include the insert projection fixture test; a
+          # missing shared fixture fails it rather than skipping (ci.yml).
+          CHTYPES_REQUIRE_FIXTURES: "1"
         run: |
           check="rust"
           bash "scripts/abi-v1/check-${check}.sh"

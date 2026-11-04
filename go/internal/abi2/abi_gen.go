@@ -1013,10 +1013,10 @@ func (t *Table) DiscoverColumns(rows []byte) (*Buf, *CallError) {
 // CancelCreate is the generated call wrapper for chs_cancel_create.
 func (t *Table) CancelCreate() (*Cancel, *Buf, *CallError) {
 	var outOut unsafe.Pointer
-	var outIdOut unsafe.Pointer
+	var outIDOut unsafe.Pointer
 	var errOut unsafe.Pointer
-	status := C.chtypes_abi2_call_chs_cancel_create(&t.tbl, &outOut, &outIdOut, &errOut)
-	return newCancel(t, outOut), newBuf(t, outIdOut), makeCallError(t, int32(status), newErrorHandle(t, errOut))
+	status := C.chtypes_abi2_call_chs_cancel_create(&t.tbl, &outOut, &outIDOut, &errOut)
+	return newCancel(t, outOut), newBuf(t, outIDOut), makeCallError(t, int32(status), newErrorHandle(t, errOut))
 }
 
 // CancelFire is the generated call wrapper for chs_cancel_fire.
