@@ -300,12 +300,37 @@ impl Library {
         // before the server profile existed. The schema options document is
         // empty (length 0) unless a member was set.
         let server = options.server.as_ref().map(Server::handle);
-        let schema_options =
-            options::schema_options(options.posture.as_ref(), &options.schema_options_extra)?;
-        let handle: SchemaHandle = self.call(|api| {
-            api.schema_create(server, create_table.as_ref(), &settings, &schema_options)
+        // Validated with no cancel id before any call; rebuilt with the id of
+        // the call's own C token when the caller gave a cancel source.
+        let plain = options::schema_options(
+            options.posture.as_ref(),
+            None,
+            &options.schema_options_extra,
+        )?;
+        let handle: SchemaHandle = self.call_cancelable(options.cancel.as_ref(), |id| {
+            let schema_options = match id {
+                None => plain,
+                Some(id) => options::schema_options(
+                    options.posture.as_ref(),
+                    Some(id),
+                    &options.schema_options_extra,
+                )?,
+            };
+            self.call(|api| {
+                api.schema_create(server, create_table.as_ref(), &settings, &schema_options)
+            })
         })?;
         Ok(Schema::new(Arc::clone(self), handle))
+    }
+
+    /// Run one cancelable call (`crate::cancel::call_with`): `f` gets the id
+    /// of the call's own C token, or `None` with no cancel source.
+    pub(crate) fn call_cancelable<T>(
+        &self,
+        token: Option<&crate::CancelToken>,
+        f: impl FnOnce(Option<&str>) -> Result<T>,
+    ) -> Result<T> {
+        crate::cancel::call_with(&self.api, token, f)
     }
 
     /// Run one generated call and map its error by `sdk.json`'s status table.
