@@ -29,6 +29,14 @@ func wireOf(t *testing.T, res InsertResult) (args []json.RawMessage) {
 	return e.Args
 }
 
+// insertEcho makes an Insert call and returns the out_rows buffer as the stub
+// echoed it in Output. The stub's document carries no outcome, so the public
+// Insert would (rightly) hide that buffer; the wire tests read it raw.
+func insertEcho(s *Schema, format Format, body []byte, out Format, opts ...InsertCallOption) (InsertResult, error) {
+	_, rows, err := s.insertRaw(format, body, out, opts...)
+	return InsertResult{Output: rows}, err
+}
+
 func wireNum(t *testing.T, raw json.RawMessage) float64 {
 	t.Helper()
 	var n float64
@@ -73,7 +81,7 @@ func stubInsertSchema(t *testing.T) (*Schema, *Filter) {
 func TestStubInsertFormatsReachTheABI(t *testing.T) {
 	schema, _ := stubInsertSchema(t)
 	for _, tc := range []struct{ in, out Format }{{JSONEachRow, CSV}, {CSV, Native}, {JSONEachRow, ExportNone}} {
-		res, err := schema.Insert(tc.in, []byte("ab"), tc.out)
+		res, err := insertEcho(schema, tc.in, []byte("ab"), tc.out)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -92,14 +100,14 @@ func TestStubInsertFormatsReachTheABI(t *testing.T) {
 
 func TestStubInsertFilterIsNullableOnTheWire(t *testing.T) {
 	schema, flt := stubInsertSchema(t)
-	res, err := schema.Insert(JSONEachRow, []byte("ab"), CSV)
+	res, err := insertEcho(schema, JSONEachRow, []byte("ab"), CSV)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := string(wireOf(t, res)[5]); got != "null" {
 		t.Errorf("filter without WithInsertFilter = %s, want null", got)
 	}
-	res, err = schema.Insert(JSONEachRow, []byte("ab"), CSV, WithInsertFilter(flt))
+	res, err = insertEcho(schema, JSONEachRow, []byte("ab"), CSV, WithInsertFilter(flt))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,14 +120,14 @@ func TestStubInsertFilterIsNullableOnTheWire(t *testing.T) {
 	// A closed filter is the binding's usage error, raised before the call.
 	flt.Close()
 	var ue *UsageError
-	if _, err := schema.Insert(JSONEachRow, []byte("ab"), CSV, WithInsertFilter(flt)); !errors.As(err, &ue) {
+	if _, err := insertEcho(schema, JSONEachRow, []byte("ab"), CSV, WithInsertFilter(flt)); !errors.As(err, &ue) {
 		t.Errorf("a closed filter = %v, want a *UsageError", err)
 	}
 }
 
 func TestStubInsertOptionsSettingsColumnsReachTheABI(t *testing.T) {
 	schema, _ := stubInsertSchema(t)
-	res, err := schema.Insert(JSONEachRow, []byte("ab"), CSV)
+	res, err := insertEcho(schema, JSONEachRow, []byte("ab"), CSV)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +135,7 @@ func TestStubInsertOptionsSettingsColumnsReachTheABI(t *testing.T) {
 	if s, c, o := wireBytes(t, a[3]), wireBytes(t, a[4]), wireBytes(t, a[7]); s != "" || c != "" || o != "" {
 		t.Errorf("with no options, settings %q, columns %q and options %q must be empty", s, c, o)
 	}
-	res, err = schema.Insert(JSONEachRow, []byte("ab"), CSV,
+	res, err = insertEcho(schema, JSONEachRow, []byte("ab"), CSV,
 		WithSettings(map[string]string{"a": "b"}), WithColumns([]string{"x"}), WithMemoryLimit(1048576), WithDeferDefaults(DeferDefaultsNone))
 	if err != nil {
 		t.Fatal(err)
@@ -201,8 +209,7 @@ func TestDecodeInsertResultEveryMember(t *testing.T) {
 	"rows_read":7,"rows_skipped":2,"rows_passed":3,"rows_cut":4,"rows_undecided":1,
 	"unsupported_settings":[{"name":"s1"},{"name_b64":"/w=="}],
 	"framing":{"bom_skipped":true,"container":"array","header":{"consumed":true,"lines":1,"names":[{"name":"x"}]}},
-	"partition_count":5,"export_columns":[{"name":"x"}],
-	"export_declined":"declined text","export_declined_reason":"call-memory-budget"}`
+	"partition_count":5,"export_columns":[{"name":"x"}]}`
 	res, err := decodeInsertResult([]byte(doc), []byte("bytes"))
 	if err != nil {
 		t.Fatal(err)
@@ -220,19 +227,27 @@ func TestDecodeInsertResultEveryMember(t *testing.T) {
 	if res.Framing == nil || res.Framing.Container != "array" || res.Framing.BomSkipped == nil || !*res.Framing.BomSkipped || res.Framing.Header == nil || res.Framing.Header.Lines != 1 {
 		t.Errorf("framing = %+v", res.Framing)
 	}
-	if res.PartitionCount == nil || *res.PartitionCount != 5 || len(res.ExportColumns) != 1 {
-		t.Errorf("partition_count/export_columns = %v %v", res.PartitionCount, res.ExportColumns)
+	if res.PartitionCount == nil || *res.PartitionCount != 5 {
+		t.Errorf("partition_count = %v", res.PartitionCount)
 	}
-	if res.ExportDeclined != "declined text" || res.ExportDeclinedReason != "call-memory-budget" || res.Output != nil {
-		t.Errorf("a declined output = %q %q %q: Output must be nil", res.ExportDeclined, res.ExportDeclinedReason, res.Output)
+	if res.Output != nil || res.ExportColumns != nil {
+		t.Errorf("a rejected call = %q %q: Output and ExportColumns must be absent unless accepted", res.Output, res.ExportColumns)
 	}
 	// Absent counts are nil, not 0; an unlisted outcome is kept, not accepted.
 	res, err = decodeInsertResult([]byte(`{"outcome":"future(9)","code":0,"rows_read":0,"rows_skipped":0,"unsupported_settings":[],"framing":{"bom_skipped":null,"container":null,"header":null},"export_columns":[{"name":"x"}]}`), []byte{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Outcome.Known() || res.Outcome == Accepted || res.RowsPassed != nil || res.RowsCut != nil || res.RowsUndecided != nil || res.Output == nil || len(res.Output) != 0 {
+	if res.Outcome.Known() || res.Outcome == Accepted || res.RowsPassed != nil || res.RowsCut != nil || res.RowsUndecided != nil || res.Output != nil || res.ExportColumns != nil {
 		t.Errorf("minimal result = %+v", res)
+	}
+	// An accepted call with an output keeps it, empty or not, and its columns.
+	res, err = decodeInsertResult([]byte(`{"outcome":"accepted","code":0,"rows_read":0,"rows_skipped":0,"unsupported_settings":[],"framing":{"bom_skipped":null,"container":null,"header":null},"export_columns":[{"name":"x"}]}`), []byte{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Output == nil || len(res.Output) != 0 || len(res.ExportColumns) != 1 {
+		t.Errorf("accepted result = %+v", res)
 	}
 	// A duplicate key is an internal error, as in every document.
 	if _, err := decodeInsertResult([]byte(`{"outcome":"accepted","outcome":"accepted"}`), nil); err == nil {

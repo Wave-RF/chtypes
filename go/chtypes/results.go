@@ -254,14 +254,11 @@ type InsertResult struct {
 	// ExportColumns is the output's positional column list: present exactly
 	// when an output was asked for and the outcome is accepted.
 	ExportColumns []string
-	// ExportDeclined names the cause of a declined output and
-	// ExportDeclinedReason its catalog id; both "" when the output ran or none
-	// was asked for.
-	ExportDeclined       string
-	ExportDeclinedReason string
-	// Output is the output rows in the asked format (non-nil, possibly empty,
-	// when the output ran); nil when none was asked for or it was declined,
-	// decided from ExportDeclined and never from the buffer.
+	// Output is the output rows in the asked format (non-nil, possibly empty).
+	// It exists exactly when Outcome is Accepted and an output format was asked
+	// for; it is nil otherwise, decided from the outcome and never from the
+	// buffer. A declined output is the whole call's decline (Outcome
+	// Unsupported, CodeDeclined, RefusedAt body_step), with no output.
 	Output []byte
 }
 

@@ -12,6 +12,8 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -20,7 +22,7 @@ import (
 	"testing"
 )
 
-var projectionRules = []string{"e_row_rejects", "shared_members", "counts", "err_prefix", "err_suffix",
+var projectionRules = []string{"e_row_rejects", "export_decline_is_call_decline", "shared_members", "counts", "err_prefix", "err_suffix",
 	"output_presence", "non_t_row", "line_output", "native_output"}
 
 var projectionSuffix = regexp.MustCompile(`^ \(at row [0-9]+\)$`)
@@ -28,9 +30,12 @@ var projectionSuffix = regexp.MustCompile(`^ \(at row [0-9]+\)$`)
 // projectionVerdict returns ("equal", ""), ("exception", name) or
 // ("violates", rule). batchExport is the batch's export bytes (nil when no
 // export ran) and output the insert's output bytes (nil when none exists); they
-// are passed apart from the decoded results because a decoder drops the bytes
-// of a declined export, which is the very thing the rule must see.
-func projectionVerdict(outFormat string, batch BatchResult, batchExport []byte, ins InsertResult, output []byte) (string, string) {
+// are passed apart from the decoded results because the public InsertResult
+// keeps an output only for an accepted call, and the rule must see what the
+// library handed back. insRaw is the insert document's raw members: the public
+// InsertResult has no export_declined member, so a document that carries one is
+// seen there.
+func projectionVerdict(outFormat string, batch BatchResult, batchExport []byte, ins InsertResult, insRaw map[string]json.RawMessage, output []byte) (string, string) {
 	verdicts := make([]string, len(batch.Rows))
 	for i, r := range batch.Rows {
 		if r.Verdict != nil {
@@ -68,21 +73,39 @@ func projectionVerdict(outFormat string, batch BatchResult, batchExport []byte, 
 		return "equal", ""
 	}
 
+	// export_decline_is_call_decline
+	declined := batch.Outcome == Accepted && batch.ExportDeclined != ""
+	if declined {
+		if !(ins.Outcome == Unsupported && ins.Reason == batch.ExportDeclinedReason && ins.ErrCode == CodeDeclined &&
+			ins.RefusedAt == RefusedAtBodyStep && insRaw["export_columns"] == nil && output == nil) {
+			return "violates", "export_decline_is_call_decline"
+		}
+	}
+
 	// shared_members
+	for _, k := range []string{"export_declined", "export_declined_b64", "export_declined_reason"} {
+		if _, ok := insRaw[k]; ok {
+			return "violates", "shared_members"
+		}
+	}
 	eqCount := func(batchValue uint64, p *uint64) bool {
 		if !filtered {
 			return p == nil
 		}
 		return p != nil && *p == batchValue
 	}
-	if batch.Outcome != ins.Outcome || batch.ErrCode != ins.ErrCode || batch.Reason != ins.Reason ||
-		batch.RefusedAt != ins.RefusedAt || batch.RowsRead != ins.RowsRead || batch.RowsSkipped != ins.RowsSkipped ||
+	if batch.RowsRead != ins.RowsRead || batch.RowsSkipped != ins.RowsSkipped ||
 		!slices.Equal(batch.UnsupportedSettings, ins.UnsupportedSettings) ||
 		!reflect.DeepEqual(batch.Framing, ins.Framing) || !reflect.DeepEqual(batch.PartitionCount, ins.PartitionCount) ||
-		(batch.ExportColumns == nil) != (ins.ExportColumns == nil) || !slices.Equal(batch.ExportColumns, ins.ExportColumns) ||
-		batch.ExportDeclined != ins.ExportDeclined || batch.ExportDeclinedReason != ins.ExportDeclinedReason ||
 		!eqCount(batch.RowsPassed, ins.RowsPassed) || !eqCount(batch.RowsCut, ins.RowsCut) {
 		return "violates", "shared_members"
+	}
+	if !declined {
+		if batch.Outcome != ins.Outcome || batch.ErrCode != ins.ErrCode || batch.Reason != ins.Reason ||
+			batch.RefusedAt != ins.RefusedAt ||
+			(batch.ExportColumns == nil) != (insRaw["export_columns"] == nil) || !slices.Equal(batch.ExportColumns, ins.ExportColumns) {
+			return "violates", "shared_members"
+		}
 	}
 
 	// counts
@@ -195,8 +218,16 @@ func b64Or(t *testing.T, s *string) []byte {
 	return b
 }
 
-func TestInsertProjectionFixture(t *testing.T) {
+// loadProjectionFixture reads the shared fixture. It skips loudly, by name,
+// when the file is absent (a bare copy of the module, as
+// scripts/check-standalone.sh builds, has no tests/ tree); a file that is
+// present but unreadable or malformed still fails.
+func loadProjectionFixture(t *testing.T) []projectionCase {
+	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("..", "..", "tests", "fixtures", "abi-v2", "insert-projection.json"))
+	if errors.Is(err, fs.ErrNotExist) {
+		t.Skipf("SKIP %s: the insert-projection fixture (tests/fixtures/abi-v2/insert-projection.json) is absent from this copy", t.Name())
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,12 +237,20 @@ func TestInsertProjectionFixture(t *testing.T) {
 	if err := json.Unmarshal(raw, &fx); err != nil {
 		t.Fatal(err)
 	}
-	if len(fx.Cases) != 33 {
-		t.Fatalf("the fixture holds %d cases, want 33", len(fx.Cases))
+	if len(fx.Cases) == 0 {
+		t.Fatal("the insert-projection fixture holds no cases")
+	}
+	return fx.Cases
+}
+
+func TestInsertProjectionFixture(t *testing.T) {
+	cases := loadProjectionFixture(t)
+	if len(cases) != 37 {
+		t.Fatalf("the fixture holds %d cases, want 37", len(cases))
 	}
 	reds := map[string]bool{}
 	var equal, exceptions int
-	for _, c := range fx.Cases {
+	for _, c := range cases {
 		t.Run(c.ID, func(t *testing.T) {
 			export, output := b64Or(t, c.BatchExportB64), b64Or(t, c.InsertRowsB64)
 			batch, err := decodeBatch(c.Batch, export)
@@ -222,7 +261,11 @@ func TestInsertProjectionFixture(t *testing.T) {
 			if err != nil {
 				t.Fatalf("decoding the insert_result document: %v", err)
 			}
-			kind, name := projectionVerdict(c.OutputFormat, batch, export, ins, output)
+			var insRaw map[string]json.RawMessage
+			if err := json.Unmarshal(c.Insert, &insRaw); err != nil {
+				t.Fatal(err)
+			}
+			kind, name := projectionVerdict(c.OutputFormat, batch, export, ins, insRaw, output)
 			var want struct {
 				Exception string `json:"exception"`
 				Violates  string `json:"violates"`
@@ -252,50 +295,40 @@ func TestInsertProjectionFixture(t *testing.T) {
 			t.Errorf("no planted red for rule %s", r)
 		}
 	}
-	if exceptions != 1 || equal != 11 {
-		t.Errorf("equal=%d exceptions=%d, want 11 and 1", equal, exceptions)
+	if exceptions != 1 || equal != 12 {
+		t.Errorf("equal=%d exceptions=%d, want 12 and 1", equal, exceptions)
 	}
 }
 
-func TestInsertDeclinedOutputIsAbsent(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "tests", "fixtures", "abi-v2", "insert-projection.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var fx struct {
-		Cases []projectionCase `json:"cases"`
-	}
-	if err := json.Unmarshal(raw, &fx); err != nil {
-		t.Fatal(err)
-	}
+func TestInsertOutputAbsentUnlessAccepted(t *testing.T) {
 	byID := map[string]projectionCase{}
-	for _, c := range fx.Cases {
+	for _, c := range loadProjectionFixture(t) {
 		byID[c.ID] = c
 	}
-	// A declined export that still came with bytes: the public output is absent.
-	declined := byID["red-e-row-output-present"]
-	rawOut := b64Or(t, declined.InsertRowsB64)
-	if len(rawOut) == 0 {
-		t.Fatal("the planted case carries no output bytes")
+	// A declined output is the call's decline: unsupported, and the public
+	// output is absent even though the case hands back bytes.
+	declined, ok := byID["equal-declined-output-is-the-call-decline"]
+	if !ok {
+		t.Fatal("the fixture has no equal-declined-output-is-the-call-decline case")
 	}
-	res, err := decodeInsertResult(declined.Insert, rawOut)
+	res, err := decodeInsertResult(declined.Insert, []byte("bytes the library handed back"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.ExportDeclined == "" {
-		t.Fatal("the planted case is not declined")
+	if res.Outcome != Unsupported || res.ErrCode != CodeDeclined || res.RefusedAt != RefusedAtBodyStep {
+		t.Errorf("declined insert = %v %d %q, want unsupported -2 body_step", res.Outcome, res.ErrCode, res.RefusedAt)
 	}
-	if res.Output != nil {
-		t.Errorf("declined output = %q, want absent", res.Output)
+	if res.Output != nil || res.ExportColumns != nil {
+		t.Errorf("declined output = %q columns %q, want absent", res.Output, res.ExportColumns)
 	}
-	// A case that was not declined keeps its bytes.
-	ok := byID["equal-csv-filter-mixed"]
-	want := b64Or(t, ok.InsertRowsB64)
-	res, err = decodeInsertResult(ok.Insert, want)
+	// A case accepted with output keeps its bytes.
+	acc := byID["equal-csv-filter-mixed"]
+	want := b64Or(t, acc.InsertRowsB64)
+	res, err = decodeInsertResult(acc.Insert, want)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.ExportDeclined != "" || len(want) == 0 || !bytes.Equal(res.Output, want) {
-		t.Errorf("non-declined output = %q, want %q", res.Output, want)
+	if res.Outcome != Accepted || len(want) == 0 || !bytes.Equal(res.Output, want) {
+		t.Errorf("accepted output = %q, want %q", res.Output, want)
 	}
 }

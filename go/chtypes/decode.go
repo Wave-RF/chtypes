@@ -714,8 +714,10 @@ func (r *reader) framing(m map[string]any, path string) *Framing {
 
 // decodeInsertResult reads an insert_result document (chs_preview_insert). It
 // shares the batch's field readers, so a member means what it means there. The
-// output is the out_rows buffer the call returned: nil when none was asked for
-// or it was declined (decided from export_declined, never from the buffer).
+// output is the out_rows buffer the call returned. The public Output (and
+// ExportColumns) exist exactly when the outcome is accepted and an output was
+// asked for; they are nil in every other case, even if the library handed back
+// bytes, so the rule is keyed on the outcome and never on the buffer.
 func decodeInsertResult(raw []byte, output []byte) (InsertResult, error) {
 	v, err := parseDocument("insert_result", raw)
 	if err != nil {
@@ -724,26 +726,25 @@ func decodeInsertResult(raw []byte, output []byte) (InsertResult, error) {
 	r := &reader{doc: "insert_result"}
 	m := r.object(v, "$")
 	res := InsertResult{
-		Outcome:              parseBatchOutcome(r.text(m, "outcome", "$")),
-		ErrCode:              r.i32(m, "code", "$"),
-		ErrMsg:               r.bytes(m, "err", "$"),
-		Reason:               r.text(m, "reason", "$"),
-		RefusedAt:            RefusalSite(r.text(m, "refused_at", "$")),
-		RowsRead:             r.u64(m, "rows_read", "$"),
-		RowsSkipped:          r.u64(m, "rows_skipped", "$"),
-		RowsPassed:           r.optU64(m, "rows_passed", "$"),
-		RowsCut:              r.optU64(m, "rows_cut", "$"),
-		RowsUndecided:        r.optU64(m, "rows_undecided", "$"),
-		UnsupportedSettings:  r.nameList(m, "unsupported_settings", "$"),
-		PartitionCount:       r.optU64(m, "partition_count", "$"),
-		ExportColumns:        r.nameList(m, "export_columns", "$"),
-		ExportDeclined:       r.bytes(m, "export_declined", "$"),
-		ExportDeclinedReason: r.text(m, "export_declined_reason", "$"),
-		Framing:              r.framing(m, "$"),
-		Output:               output,
+		Outcome:             parseBatchOutcome(r.text(m, "outcome", "$")),
+		ErrCode:             r.i32(m, "code", "$"),
+		ErrMsg:              r.bytes(m, "err", "$"),
+		Reason:              r.text(m, "reason", "$"),
+		RefusedAt:           RefusalSite(r.text(m, "refused_at", "$")),
+		RowsRead:            r.u64(m, "rows_read", "$"),
+		RowsSkipped:         r.u64(m, "rows_skipped", "$"),
+		RowsPassed:          r.optU64(m, "rows_passed", "$"),
+		RowsCut:             r.optU64(m, "rows_cut", "$"),
+		RowsUndecided:       r.optU64(m, "rows_undecided", "$"),
+		UnsupportedSettings: r.nameList(m, "unsupported_settings", "$"),
+		PartitionCount:      r.optU64(m, "partition_count", "$"),
+		ExportColumns:       r.nameList(m, "export_columns", "$"),
+		Framing:             r.framing(m, "$"),
+		Output:              output,
 	}
-	if _, declined, _ := byteField(m, "export_declined", "$"); declined {
+	if res.Outcome != Accepted {
 		res.Output = nil
+		res.ExportColumns = nil
 	}
 	return res, r.err
 }

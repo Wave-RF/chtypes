@@ -162,29 +162,39 @@ func (s *Schema) Rows(format Format, body []byte, opts ...RowsOption) (BatchResu
 // decline is a result, never an error; only misuse and internal errors are.
 // Nothing of a refused body is ever output.
 func (s *Schema) Insert(format Format, body []byte, outFormat Format, opts ...InsertCallOption) (InsertResult, error) {
-	c := insertConfig(opts)
-	settings, columns, options, err := callInputs(c)
+	raw, rows, err := s.insertRaw(format, body, outFormat, opts...)
 	if err != nil {
 		return InsertResult{}, err
 	}
+	return decodeInsertResult(raw, rows)
+}
+
+// insertRaw makes the chs_preview_insert call and returns the insert_result
+// document and the out_rows buffer exactly as the library handed them back,
+// before the outcome decides whether the output is public.
+func (s *Schema) insertRaw(format Format, body []byte, outFormat Format, opts ...InsertCallOption) (doc, rows []byte, err error) {
+	c := insertConfig(opts)
+	settings, columns, options, err := callInputs(c)
+	if err != nil {
+		return nil, nil, err
+	}
 	if err := s.enter(); err != nil {
-		return InsertResult{}, err
+		return nil, nil, err
 	}
 	defer s.g.leave()
 	var fh *abi2.Filter
 	if c.filter != nil {
 		if err := c.filter.enter(); err != nil {
-			return InsertResult{}, err
+			return nil, nil, err
 		}
 		defer c.filter.g.leave()
 		fh = c.filter.h
 	}
 	docBuf, rowsBuf, cerr := s.lib.tbl.PreviewInsert(s.h, int32(format), body, settings, columns, fh, int32(outFormat), options)
 	if cerr != nil {
-		return InsertResult{}, callError(cerr)
+		return nil, nil, callError(cerr)
 	}
-	raw := s.lib.tbl.Take(docBuf)
-	return decodeInsertResult(raw, s.lib.tbl.Take(rowsBuf))
+	return s.lib.tbl.Take(docBuf), s.lib.tbl.Take(rowsBuf), nil
 }
 
 // docBufs holds the document buffers of Rows between calls; one larger than
