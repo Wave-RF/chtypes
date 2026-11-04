@@ -98,8 +98,8 @@ const (
 // discovery query (system.columns), shaped like a stock HTTP server's output
 // (quoted UInt64s and all). Swap in your own HTTP client's bytes and nothing
 // else changes. The server's version, and the settings it changed from stock,
-// are the CALLER's to supply in v1 (the library has no call that asks a
-// server), so they are plain values here.
+// are the CALLER's to supply in 2.0 (the library has no call that asks a
+// server; docs/limitations.md, Known gaps), so they are plain values here.
 const (
 	cannedServerVersion = "25.8.28.1"
 	cannedColumnsResult = `{"name":"ts","type":"DateTime64(3)","default_kind":"DEFAULT","default_expression":"now64(3)"}` + "\n" +
@@ -1028,7 +1028,8 @@ func section11(reg *chtypes.Registry, base *chtypes.Library) {
 	blank()
 
 	// Step 3: the payoff. Declared settings become the compile profile. They
-	// are the CALLER's to supply: v1 has no call that asks a server for them.
+	// are the CALLER's to supply: 2.0 has no call that asks a server for them
+	// (docs/limitations.md, Known gaps).
 	profile := map[string]string{"date_time_input_format": "best_effort"}
 	ddl := "CREATE TABLE t (" + disc.ColumnsSQL + ") ENGINE = MergeTree ORDER BY tuple()"
 	sProf, err := lib.CompileTable(ddl, chtypes.WithSettings(profile))

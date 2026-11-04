@@ -784,7 +784,7 @@ function section11(lib: Library): void {
   note('a deployment that declared date_time_input_format=best_effort takes the ISO-8601');
   note('timestamp; a stock compile answers for a server the tenant does not have.');
   note('Discovering the deployment\'s settings is what closes that gap (the caller supplies');
-  note('them: 1.0 has no call that reads a server\'s settings).');
+  note('them: 2.0 has no call that reads a server\'s settings; docs/limitations.md, Known gaps).');
 }
 
 // ---------------------------------------------------------------------------

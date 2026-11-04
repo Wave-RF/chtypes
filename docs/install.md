@@ -18,7 +18,7 @@ import "github.com/wave-rf/chtypes/go/v2/chtypes"
 
 The default build is **dlopen-only**: it compiles with cgo (for `dlfcn`) but links nothing, includes no header, and needs no build tree. That is what `go get` gives a consumer, and it is all you need.
 
-**cgo is required to build, and glibc to run.** The package's untagged `import "C"` is a thin layer of C shims over each artifact's `chs_*` function table, so a build needs `CGO_ENABLED=1` and a C compiler on `PATH`. Go switches cgo off by itself when it finds no compiler or is cross-compiling, and the build then fails with an undefined-name error that does not mention cgo. At run time the artifact is a shared object that needs only the C library and carries its C++ runtime inside. On Linux it needs a glibc at or above the floor the build records in its own signed statement; a host below it is refused at open with `CHTYPES_ARTIFACT_INCOMPATIBLE` ([`support-v1.md`](support-v1.md#platforms)). So a glibc image such as `debian:bookworm-slim` can run it, while `FROM scratch`, `gcr.io/distroless/static` and musl distributions such as Alpine cannot (`inferred` from the loader; musl is support unknown). Build in a glibc image that has a compiler, such as the Debian-based `golang` images.
+**cgo is required to build, and glibc to run.** The package's untagged `import "C"` is a thin layer of C shims over each artifact's `chs_*` function table, so a build needs `CGO_ENABLED=1` and a C compiler on `PATH`. Go switches cgo off by itself when it finds no compiler or is cross-compiling, and the build then fails with an undefined-name error that does not mention cgo. At run time the artifact is a shared object that needs only the C library and carries its C++ runtime inside. On Linux it needs a glibc at or above the floor the build records in its own signed statement; a host below it is refused at open with `CHTYPES_ARTIFACT_INCOMPATIBLE` ([`support-v2.md`](support-v2.md#platforms)). So a glibc image such as `debian:bookworm-slim` can run it, while `FROM scratch`, `gcr.io/distroless/static` and musl distributions such as Alpine cannot (`inferred` from the loader; musl is support unknown). Build in a glibc image that has a compiler, such as the Debian-based `golang` images.
 
 </details>
 
@@ -43,7 +43,7 @@ npm install @wavehouse/chtypes
 
 ESM only, Node 22.21 or newer. Native calls go through `ffi-rs`, prebuilt for darwin arm64/x64 and linux arm64/x64 (gnu and musl), so there is no build step.
 
-⚠️ That is the FFI loader's matrix, not the artifact's. chtypes artifacts are published for **darwin-arm64, linux-amd64 and linux-arm64 only** ([`support-v1.md`](support-v1.md#platforms)). On an Intel Mac or a musl distribution the package installs and `ffi-rs` resolves, and then `chtypes fetch <line>` answers `CHTYPES_ARTIFACT_UNPUBLISHED`.
+⚠️ That is the FFI loader's matrix, not the artifact's. chtypes artifacts are published for **darwin-arm64, linux-amd64 and linux-arm64 only** ([`support-v2.md`](support-v2.md#platforms)). On an Intel Mac or a musl distribution the package installs and `ffi-rs` resolves, and then `chtypes fetch <line>` answers `CHTYPES_ARTIFACT_UNPUBLISHED`.
 
 </details>
 
@@ -57,7 +57,7 @@ Rust 1.87 or newer, edition 2024. The fetch layer and the `chtypes` binary are p
 
 </details>
 
-Version requirements per language and the platforms artifacts are published for are in [`support-v1.md`](support-v1.md). The ClickHouse lines that are available are whatever the registry publishes (`chtypes list`); the v1 channel carries no statement of which are supported, so a line's support reads **unknown**, never unsupported.
+Version requirements per language and the platforms artifacts are published for are in [`support-v2.md`](support-v2.md). The ClickHouse lines that are available are whatever the registry publishes (`chtypes list`); where the page has no statement for a line, its support reads **unknown**, never unsupported.
 
 ## 2. An artifact
 
