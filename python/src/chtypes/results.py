@@ -278,9 +278,10 @@ class InsertResult:
     Every member has the meaning of the `BatchResult` member of the same name (the
     projection rule, spec/abi-v2/docs.md `chs_preview_insert`). A refusal or a
     decline is this result, never an exception. `output` is the output rows in the
-    output format: None when no output was asked for, and None when the outcome is
-    not accepted (`export_declined` and `export_declined_reason` say why); an empty
-    `bytes` is an accepted output of no rows.
+    output format: None when no output was asked for, and None whenever the outcome
+    is not accepted. A declined output is the whole call's decline (`outcome`
+    `unsupported`, `reason` the decline id, `err_code` -2, `refused_at` `body_step`);
+    an empty `bytes` is an accepted output of no rows.
 
     `rows_passed`, `rows_cut` and `rows_undecided` are present with a filter
     attached and None without one: `rows_passed` the `t` rows (the output's rows),
@@ -288,7 +289,8 @@ class InsertResult:
     inside `rows_cut`). An `e` row fails the call: it is in no count, and the
     outcome is `rejected` with that row's code and message. There is no per-row
     document and no `refused_row`: a reader refusal's row is inside `err_msg`.
-    `export_columns` is the output's one column list (None when no output ran)."""
+    `export_columns` is the output's one column list (None unless the call is
+    accepted and an output was asked for)."""
 
     outcome: Outcome
     err_code: int
@@ -304,8 +306,6 @@ class InsertResult:
     unsupported_settings: tuple[bytes, ...]
     framing: Framing | None
     export_columns: tuple[bytes, ...] | None
-    export_declined: bytes
-    export_declined_reason: str | None
     output: bytes | None
 
 

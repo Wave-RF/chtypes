@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { type CallErrorFields, InternalError, internalError, SchemaError, UnsupportedError, usageError, UsageError } from '../src/abi2/errors.js';
+import { CallCanceledError, type CallErrorFields, InternalError, internalError, SchemaError, UnsupportedError, usageError, UsageError } from '../src/abi2/errors.js';
 import { errorForStatus } from '../src/abi2/errmap.gen.js';
 import { Status } from '../src/abi2/vocab.gen.js';
 
@@ -47,5 +47,22 @@ describe('a call error carries the six fields of chs_error, verbatim', () => {
       expect(e.chName).toBe('');
       expect(e.column).toHaveLength(0);
     }
+  });
+});
+
+describe('status 5 (CHS_CANCELED) is a CallCanceledError', () => {
+  it('maps to CallCanceledError, named AbortError, and is not any of the other four', () => {
+    const e = errorForStatus(5, fields(5));
+    expect(e).toBeInstanceOf(CallCanceledError);
+    expect(e.name).toBe('AbortError');
+    expect(e).not.toBeInstanceOf(SchemaError);
+    expect(e).not.toBeInstanceOf(UnsupportedError);
+    expect(e).not.toBeInstanceOf(UsageError);
+    expect(e).not.toBeInstanceOf(InternalError);
+  });
+
+  it('carries an optional cause', () => {
+    const cause = new Error('aborted');
+    expect(new CallCanceledError(fields(5), { cause }).cause).toBe(cause);
   });
 });

@@ -364,6 +364,22 @@ def _spy(lib, monkeypatch, name):
     return calls
 
 
+def _spy_insert_outputs(lib, monkeypatch) -> list:
+    """The raw output buffer each `preview_insert` returned. The stub's echo has no
+    `outcome`, so the public `InsertResult.output` (present only for an accepted
+    call) is absent for it; the stub's account of what reached it is read here."""
+    outs: list = []
+    real = lib._api.preview_insert
+
+    def spy(*args):
+        raw, output = real(*args)
+        outs.append(output)
+        return raw, output
+
+    monkeypatch.setattr(lib._api, "preview_insert", spy)
+    return outs
+
+
 def test_insert_options_reach_the_four_insert_calls_and_nothing_else(lib, monkeypatch) -> None:
     """Spec batch 2: `options` on preview_row, preview_batch, block_create and
     filter_eval_body, the `columns` of filter_eval_body, and no document at all
@@ -459,6 +475,7 @@ def test_insert_marshals_formats_filter_null_and_options(lib, monkeypatch) -> No
     reach the ABI as the stub received them (the format, the output format, the
     filter NULL or set, `memory_limit_bytes` in the options document)."""
     calls = _spy(lib, monkeypatch, "preview_insert")
+    outs = _spy_insert_outputs(lib, monkeypatch)
     with lib.compile_table(CREATE) as schema, schema.compile_filter("a > 1") as flt:
         result = schema.insert(
             Format.JSON_EACH_ROW,
@@ -470,8 +487,8 @@ def test_insert_marshals_formats_filter_null_and_options(lib, monkeypatch) -> No
             verdict_basis=VerdictBasis.EXPORT,
             settings={"x": "y"},
         )
-        validate_only = schema.insert(Format.CSV, bytearray(b"1\n"), None)
-        native = schema.insert(Format.CSV, b"1\n", Format.NATIVE, memory_limit_bytes="0")
+        schema.insert(Format.CSV, bytearray(b"1\n"), None)
+        schema.insert(Format.CSV, b"1\n", Format.NATIVE, memory_limit_bytes="0")
     assert isinstance(result, InsertResult)
     (_, fmt, body, settings, columns, handle, out_fmt, options), plain, nat = calls
     assert fmt == int(Format.JSON_EACH_ROW) and body == b'{"a":1}\n'
@@ -486,20 +503,24 @@ def test_insert_marshals_formats_filter_null_and_options(lib, monkeypatch) -> No
     assert not result.outcome.known and result.outcome is not Outcome.ACCEPTED
     # The stub's own account of what reached it, echoed into out_rows and decoded
     # here as the output bytes: the stub, not the test, says what it received.
-    seen = echo(result.output)
+    assert result.output is None  # not accepted, so no public output
+    seen = echo(outs[0])
     assert seen["fn"] == "chs_preview_insert" and seen["out"] == "out_rows"
     args = seen["args"]
     assert args[1] == int(Format.JSON_EACH_ROW) and args[6] == int(Format.CSV)
     assert args[5] is not None and args[7]["len"] == len(options)
-    assert echo(validate_only.output)["args"][5] is None
-    assert echo(validate_only.output)["args"][6] == -1
-    assert echo(native.output)["args"][6] == int(Format.NATIVE)
+    assert echo(outs[1])["args"][5] is None
+    assert echo(outs[1])["args"][6] == -1
+    assert echo(outs[2])["args"][6] == int(Format.NATIVE)
 
 
-def test_insert_result_decodes_the_echoed_out_rows(lib) -> None:
+def test_insert_result_decodes_the_echoed_out_rows(lib, monkeypatch) -> None:
+    outs = _spy_insert_outputs(lib, monkeypatch)
     with lib.compile_table(CREATE) as schema:
         result = schema.insert(Format.CSV, b"1\n", Format.CSV)
-    assert isinstance(result.output, bytes) and len(result.output) > 0
+    # The stub's echo is no accepted insert_result, so the public output is absent.
+    assert result.output is None
+    assert isinstance(outs[0], bytes) and len(outs[0]) > 0
 
 
 def test_insert_options_memory_limit_reaches_every_insert_options_call(lib, monkeypatch) -> None:

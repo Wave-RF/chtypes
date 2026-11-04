@@ -375,8 +375,8 @@ class Schema(_Handle):
         (`CHS_EXPORT_NONE`): no output and no `export_columns`. The other keywords
         are `rows`'. The output exists only when the whole call is accepted; a
         refusal or a decline (a `rejected` outcome, an `e` row, a memory limit
-        reached) is the result, with `output` None and `export_declined` set, never
-        an exception. Only misuse and an internal error raise."""
+        reached, a declined output) is the result, with `output` None, never an
+        exception. Only misuse and an internal error raise."""
         payload = body_bytes(body)
         settings_bytes = settings_json(settings, session_timezone)
         columns_bytes = columns_json(columns)

@@ -1,6 +1,7 @@
 package chtypes
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strconv"
@@ -20,6 +21,7 @@ func TestCallErrorClasses(t *testing.T) {
 		{"CHS_DECLINED", "*chtypes.UnsupportedError", StatusDeclined},
 		{"CHS_INVALID_ARGUMENT", "*chtypes.UsageError", StatusInvalidArgument},
 		{"CHS_INTERNAL", "*chtypes.InternalError", StatusInternal},
+		{"CHS_CANCELED", "*chtypes.CanceledError", StatusCanceled},
 	}
 	for _, c := range cases {
 		err := callError(&abi2.CallError{Status: c.status, ChCode: 53, ChName: "TYPE_MISMATCH", Message: "m\xff", Column: "c\x00", Reason: "option-not-implemented"})
@@ -38,6 +40,21 @@ func TestCallErrorClasses(t *testing.T) {
 		if s := err.Error(); strings.ContainsRune(s, 0xfffd) == false || strings.ToValidUTF8(s, "") != s {
 			t.Errorf("%s: Error() = %q: invalid UTF-8 must be replaced for display", c.status, s)
 		}
+	}
+}
+
+func TestCanceledStatusIsACanceledError(t *testing.T) {
+	err := callError(&abi2.CallError{Status: "CHS_CANCELED", Message: "canceled by token"})
+	var ce *CanceledError
+	if !errors.As(err, &ce) || ce.Status != StatusCanceled {
+		t.Fatalf("CHS_CANCELED = %T %v, want a *CanceledError", err, err)
+	}
+	if ce.Cause != nil || errors.Unwrap(err) != nil {
+		t.Errorf("Cause = %v, want nil until a context variant sets it", ce.Cause)
+	}
+	ce.Cause = context.Canceled
+	if !errors.Is(err, context.Canceled) {
+		t.Error("a Cause of context.Canceled must satisfy errors.Is(err, context.Canceled)")
 	}
 }
 

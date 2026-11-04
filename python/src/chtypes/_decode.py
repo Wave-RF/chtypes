@@ -496,9 +496,13 @@ def decode_insert_result(raw: bytes, output: bytes | None) -> InsertResult:
     where = "insert_result"
     obj = _obj(strict_loads(raw, where), where)
     framing = obj.get("framing")
-    export_declined = _bytes(obj, "export_declined", where)
+    outcome = Outcome.of(_text(obj, "outcome", where))
+    # An insert output (and its column list) exists exactly when the call is
+    # accepted: a declined output is the call's decline. Keyed on the outcome,
+    # whatever bytes the library handed back.
+    accepted = outcome == Outcome.ACCEPTED
     return InsertResult(
-        outcome=Outcome.of(_text(obj, "outcome", where)),
+        outcome=outcome,
         err_code=_int(obj, "code", where),
         err_msg=_bytes(obj, "err", where),
         reason=_opt_text(obj, "reason", where),
@@ -514,11 +518,11 @@ def decode_insert_result(raw: bytes, output: bytes | None) -> InsertResult:
         if framing is None
         else _framing(_obj(framing, where, "framing"), f"{where}.framing"),
         export_columns=(
-            None if obj.get("export_columns") is None else _name_list(obj, "export_columns", where)
+            _name_list(obj, "export_columns", where)
+            if accepted and obj.get("export_columns") is not None
+            else None
         ),
-        export_declined=export_declined,
-        export_declined_reason=_opt_text(obj, "export_declined_reason", where),
-        output=output,
+        output=output if accepted else None,
     )
 
 

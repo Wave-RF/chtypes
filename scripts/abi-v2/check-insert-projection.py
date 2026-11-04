@@ -20,8 +20,15 @@ Rules, checked in this order (the first that fails is the answer):
                    rejected with the FIRST e row's code and err, refused_at row,
                    rows_passed, rows_cut and rows_undecided 0, rows_read the
                    batch's, and no output
+  export_decline_is_call_decline
+                   a batch that is accepted with `export_declined` R (reason id
+                   I): the insert is `unsupported`, reason I, code -2, refused_at
+                   `body_step`, no export_columns, no output (those members
+                   are then not compared with the batch's)
   shared_members   every member both documents may carry is equal, absent where
-                   absent
+                   absent (outcome, code, reason, refused_at and export_columns
+                   are skipped under a declined output); an insert never carries
+                   export_declined or export_declined_reason
   counts           rows_passed = #t, rows_cut = #f + #d, rows_undecided = #d
                    (rows_passed and rows_cut read 0 and 0 on a batch that is
                    not accepted); all three absent with no filter
@@ -64,13 +71,16 @@ import model as abimodel  # noqa: E402
 FIXTURE = ROOT / "tests" / "fixtures" / "abi-v2" / "insert-projection.json"
 SCHEMA = "chtypes.abi-v2.insert-projection-fixture/1"
 
-RULES = ("e_row_rejects", "shared_members", "counts", "err_prefix", "err_suffix",
+RULES = ("e_row_rejects", "export_decline_is_call_decline", "shared_members", "counts", "err_prefix", "err_suffix",
          "output_presence", "non_t_row", "line_output", "native_output")
 EXCEPTIONS = ("generator_draw",)
 
 # docs.md, chs_preview_insert, "The projection rule", first bullet.
 SHARED = ("outcome", "code", "reason", "refused_at", "rows_read", "rows_skipped", "unsupported_settings", "framing",
-          "partition_count", "export_columns", "export_declined", "export_declined_reason", "rows_passed", "rows_cut")
+          "partition_count", "export_columns", "rows_passed", "rows_cut")
+# Members a declined output replaces: the insert's own values, by export_decline_is_call_decline.
+DECLINE_REPLACES = ("outcome", "code", "reason", "refused_at", "export_columns")
+INSERT_NEVER = ("export_declined", "export_declined_b64", "export_declined_reason")
 SUFFIX = re.compile(rb"^ \(at row [0-9]+\)$")
 _ABSENT = object()
 
@@ -89,8 +99,6 @@ def _bytes(doc: dict, name: str):
 
 
 def _member(doc: dict, name: str):
-    if name in ("export_declined",):
-        return _bytes(doc, name)
     return doc.get(name, _ABSENT)
 
 
@@ -199,8 +207,20 @@ def evaluate(case: dict):
             return "violates", "e_row_rejects"
         return "equal", None
 
+    # export_decline_is_call_decline
+    declined = batch["outcome"] == "accepted" and any(k in batch for k in ("export_declined", "export_declined_b64"))
+    if declined:
+        if not (ins["outcome"] == "unsupported" and ins.get("reason") == batch.get("export_declined_reason")
+                and ins["code"] == -2 and ins.get("refused_at") == "body_step"
+                and "export_columns" not in ins and out is None):
+            return "violates", "export_decline_is_call_decline"
+
     # shared_members
+    if any(k in ins for k in INSERT_NEVER):
+        return "violates", "shared_members"
     for m in SHARED:
+        if declined and m in DECLINE_REPLACES:
+            continue
         if _member(batch, m) != _member(ins, m):
             return "violates", "shared_members"
 
