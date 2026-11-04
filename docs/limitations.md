@@ -151,6 +151,10 @@ In Python specifically, `UnsupportedError` is a **peer** of `SchemaError` rather
 
 The ABI header is the full contract.
 
+## A syntax error's message can quote credentials
+
+A syntax error's message (ClickHouse code 62, for example when `chs_schema_create` refuses a `CREATE` statement) quotes the statement from the error onward, exactly as the server's own message does, credentials included. Do not log refusal messages for statements that can carry credentials unredacted. Every other message masks secrets as the server does.
+
 ## An out-of-domain Enum DEFAULT is refused at compile
 
 This is by design, because the server does too: on every supported line, compiling such a schema refuses it (`691`, or `70`). The rule and the codes are in [`transformations.md`](guides/transformations.md#an-out-of-domain-enum-default-follows-the-server).
