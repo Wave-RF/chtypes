@@ -107,7 +107,10 @@ fn insert_reaches_the_abi_with_its_arguments_and_decodes_over_the_stub() {
         )
         .expect("the echo decodes");
     assert_eq!(result.outcome, Outcome::Unknown(String::new()));
-    assert!(result.output.is_some());
+    assert!(
+        result.output.is_none(),
+        "the output is present only for an accepted outcome"
+    );
 
     // Misuse is raised before any call.
     let bad = InsertOptions {

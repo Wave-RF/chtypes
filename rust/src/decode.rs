@@ -653,12 +653,18 @@ pub(crate) fn insert_result(bytes: &[u8], output: Option<Vec<u8>>) -> Result<Ins
         None => None,
         Some(f) => Some(framing_of(&f)?),
     };
-    let export_declined = o.bytes("export_declined")?;
-    // The output is the buffer the call returned, as it is: a declined or
-    // refused call returns NULL, and a buffer there is the library's defect,
-    // which the projection gate (`e_row_rejects`) must be able to see.
+    let outcome = Outcome::from_wire(&o.string("outcome")?);
+    // An output exists exactly when the outcome is accepted and an output
+    // format was asked for (the library returns NULL otherwise, and no
+    // `export_columns` either). It is keyed on the outcome, never on a
+    // document member: a buffer handed back for any other outcome is dropped.
+    let output = if outcome == Outcome::Accepted {
+        output
+    } else {
+        None
+    };
     Ok(InsertResult {
-        outcome: Outcome::from_wire(&o.string("outcome")?),
+        outcome,
         err_code: o.int32("code")?,
         err_msg: o.bytes("err")?,
         reason: o.opt_string("reason")?,
@@ -674,8 +680,6 @@ pub(crate) fn insert_result(bytes: &[u8], output: Option<Vec<u8>>) -> Result<Ins
         framing,
         partition_count: o.opt_uint64("partition_count")?,
         export_columns,
-        export_declined,
-        export_declined_reason: o.opt_string("export_declined_reason")?,
         output,
     })
 }

@@ -342,14 +342,11 @@ pub struct InsertResult {
     /// The output's one column list (`export_columns`, name objects); `None`
     /// when the document carries none.
     pub export_columns: Option<Vec<RawText>>,
-    /// Why the output was declined; empty when it was not.
-    pub export_declined: RawText,
-    /// The catalog id of a declined output (`export_declined_reason`). ASCII.
-    pub export_declined_reason: Option<String>,
-    /// The output rows, exactly the buffer the call returned: present for an
-    /// output that ran (possibly empty); `None` when none was asked for or the
-    /// call was not accepted ([`InsertResult::export_declined`]), where the
-    /// library returns none.
+    /// The output rows, exactly the buffer the call returned: present (possibly
+    /// empty) only when the outcome is [`Outcome::Accepted`] and an output
+    /// format was asked for; `None` in every other case. A declined output is
+    /// the whole call's decline (outcome `Unsupported`, code -2, refused at
+    /// `body_step`), so it has no output and no `export_columns`.
     pub output: Option<Vec<u8>>,
 }
 

@@ -4,14 +4,17 @@
 //!
 //! [`evaluate`] mirrors `scripts/abi-v2/check-insert-projection.py`'s
 //! `evaluate`, rule by rule and in the same order: it takes a decoded
-//! [`InsertResult`] (its `output` bytes included) and a decoded
-//! [`BatchResult`] (its export `payload` and `spans` included) and returns the
-//! FIRST rule the pair violates, or `Equal`, or the one `Exception`. Both
-//! documents of every case go through this crate's real decoders
-//! (`decode::batch` and `decode::insert_result`), never raw JSON, so a case
-//! proves the decoders as well as the rule. Each case carries its expected
-//! result; the fixture's 21 planted reds and its exception keep the gate
-//! honest: a rule that cannot fire fails here.
+//! [`InsertResult`], a decoded [`BatchResult`] (its export `payload` and
+//! `spans` included), the RAW insert document and the raw output bytes the
+//! call returned, and returns the FIRST rule the pair violates, or `Equal`, or
+//! the one `Exception`. The public [`InsertResult`] has no `export_declined`
+//! members and its `output` is present only for an accepted call, so the rule
+//! that an insert never carries them, and the check that no output was handed
+//! back for a refusal, read the raw document and the raw bytes. Both documents
+//! of every case go through this crate's real decoders (`decode::batch` and
+//! `decode::insert_result`), so a case proves the decoders as well as the
+//! rule. Each case carries its expected result; the fixture's 24 planted reds
+//! and its exception keep the gate honest: a rule that cannot fire fails here.
 //!
 //! This is a unit test of the crate (src/lib.rs declares it with `#[path]`)
 //! because the decoders are crate-internal. It needs no library.
@@ -81,9 +84,15 @@ fn line_count(bytes: &[u8]) -> usize {
 
 /// The projection rule, in `check-insert-projection.py`'s order. `format` is
 /// the output format (`None` for NONE).
-fn evaluate(batch: &BatchResult, ins: &InsertResult, format: Option<Format>) -> Projection {
+fn evaluate(
+    batch: &BatchResult,
+    ins: &InsertResult,
+    raw_batch: &Json,
+    raw_ins: &Json,
+    out: Option<&[u8]>,
+    format: Option<Format>,
+) -> Projection {
     let verdicts: Vec<Option<&Verdict>> = batch.rows.iter().map(|r| r.verdict.as_ref()).collect();
-    let out = ins.output.as_deref();
     let exp = batch.payload.as_deref();
     let filtered = batch_filtered(batch);
 
@@ -110,19 +119,45 @@ fn evaluate(batch: &BatchResult, ins: &InsertResult, format: Option<Format>) -> 
         };
     }
 
-    // shared_members
-    let shared = batch.outcome == ins.outcome
-        && batch.err_code == ins.err_code
-        && batch.reason == ins.reason
-        && batch.refused_at == ins.refused_at
+    // export_decline_is_call_decline
+    let declined = batch.outcome == Outcome::Accepted
+        && (raw_batch.get("export_declined").is_some()
+            || raw_batch.get("export_declined_b64").is_some());
+    if declined {
+        let ok = ins.outcome == Outcome::Unsupported
+            && ins.reason == batch.export_declined_reason
+            && ins.err_code == -2
+            && ins.refused_at == Some(RefusalSite::BodyStep)
+            && ins.export_columns.is_none()
+            && out.is_none();
+        if !ok {
+            return Projection::Violates("export_decline_is_call_decline");
+        }
+    }
+
+    // shared_members: an insert never carries export_declined*; under a
+    // declined output the call's own decline replaces five members.
+    if [
+        "export_declined",
+        "export_declined_b64",
+        "export_declined_reason",
+    ]
+    .iter()
+    .any(|k| raw_ins.get(k).is_some())
+    {
+        return Projection::Violates("shared_members");
+    }
+    let replaced = |same: bool| declined || same;
+    let shared = replaced(batch.outcome == ins.outcome)
+        && replaced(batch.err_code == ins.err_code)
+        && replaced(batch.reason == ins.reason)
+        && replaced(batch.refused_at == ins.refused_at)
         && batch.rows_read == ins.rows_read
         && batch.rows_skipped == ins.rows_skipped
         && batch.unsupported_settings == ins.unsupported_settings
         && batch.framing == ins.framing
         && batch.partition_count == ins.partition_count
-        && batch.export_columns == ins.export_columns
-        && batch.export_declined == ins.export_declined
-        && batch.export_declined_reason == ins.export_declined_reason
+        && replaced(batch.export_columns == ins.export_columns)
         && filtered.then_some(batch.rows_passed) == ins.rows_passed
         && filtered.then_some(batch.rows_cut) == ins.rows_cut;
     if !shared {
@@ -242,7 +277,9 @@ fn expected(case: &Json) -> Projection {
     }
 }
 
-/// Decode a case's two documents with the crate's real decoders.
+/// Decode a case's two documents with the crate's real decoders. The insert's
+/// raw output bytes are read separately (`b64(case, "insert_rows_b64")`): the
+/// public `output` is absent unless the call was accepted.
 fn decode_case(case: &Json) -> (BatchResult, InsertResult) {
     let batch = decode::batch(
         &serde_json::to_vec(&case["batch"]).unwrap(),
@@ -257,8 +294,9 @@ fn decode_case(case: &Json) -> (BatchResult, InsertResult) {
     (batch, ins)
 }
 
-const RULES: [&str; 9] = [
+const RULES: [&str; 10] = [
     "e_row_rejects",
+    "export_decline_is_call_decline",
     "shared_members",
     "counts",
     "err_prefix",
@@ -273,11 +311,24 @@ const RULES: [&str; 9] = [
 fn every_case_of_the_shared_fixture_gives_its_expected_projection_result() {
     let path = super::registry_stub_tests::repo_root()
         .join("tests/fixtures/abi-v2/insert-projection.json");
+    // The fixture is shared and lives outside this crate, so a bare copy of
+    // rust/ (the packaged crate) does not hold it: skip LOUDLY, by name. A
+    // fixture that is present but unreadable or malformed still fails.
+    if !path.exists() {
+        eprintln!(
+            "SKIPPED (loudly): every_case_of_the_shared_fixture_gives_its_expected_projection_result: fixture absent ({}); nothing was exercised",
+            path.display()
+        );
+        return;
+    }
     let text = std::fs::read_to_string(&path).expect("read the projection fixture");
     let doc: Json = serde_json::from_str(&text).expect("parse the projection fixture");
     assert_eq!(doc["schema"], "chtypes.abi-v2.insert-projection-fixture/1");
     let cases = doc["cases"].as_array().expect("cases");
-    assert!(!cases.is_empty(), "the fixture holds no case");
+    assert!(
+        !cases.is_empty(),
+        "the fixture holds no case (a zero-run fails)"
+    );
 
     let mut fired = std::collections::BTreeSet::new();
     let (mut equal, mut exceptions, mut reds) = (0, 0, 0);
@@ -288,6 +339,9 @@ fn every_case_of_the_shared_fixture_gives_its_expected_projection_result() {
         let got = evaluate(
             &batch,
             &ins,
+            &case["batch"],
+            &case["insert"],
+            b64(case, "insert_rows_b64").as_deref(),
             format_of(case["output_format"].as_str().unwrap()),
         );
         let want = expected(case);
@@ -343,4 +397,67 @@ fn the_line_counter_and_the_suffix_match_the_checkers_primitives() {
     assert!(!is_row_suffix(b" (at row 1x)"));
     assert!(!is_row_suffix(b"(at row 1)"));
     assert!(!is_row_suffix(b" (at row 1) "));
+}
+
+/// Read the shared fixture, or `None` (after a loud skip line) when it is absent.
+fn fixture_cases(test: &str) -> Option<Vec<Json>> {
+    let path = super::registry_stub_tests::repo_root()
+        .join("tests/fixtures/abi-v2/insert-projection.json");
+    if !path.exists() {
+        eprintln!(
+            "SKIPPED (loudly): {test}: fixture absent ({}); nothing was exercised",
+            path.display()
+        );
+        return None;
+    }
+    let doc: Json =
+        serde_json::from_str(&std::fs::read_to_string(&path).expect("read the fixture"))
+            .expect("parse the fixture");
+    Some(doc["cases"].as_array().expect("cases").clone())
+}
+
+#[test]
+fn insert_output_absent_unless_accepted() {
+    let Some(cases) = fixture_cases("insert_output_absent_unless_accepted") else {
+        return;
+    };
+    let by_id = |id: &str| -> &Json {
+        cases
+            .iter()
+            .find(|c| c["id"] == id)
+            .unwrap_or_else(|| panic!("the fixture has no case {id}"))
+    };
+
+    // 1. A declined output is the call's decline: unsupported, no output,
+    // whatever bytes the library handed back.
+    let case = by_id("equal-declined-output-is-the-call-decline");
+    let (_, ins) = decode_case(case);
+    assert_eq!(ins.outcome, Outcome::Unsupported);
+    assert!(ins.output.is_none());
+    assert!(ins.export_columns.is_none());
+    let doc = serde_json::to_vec(&case["insert"]).unwrap();
+    let stray = decode::insert_result(&doc, Some(b"stray".to_vec())).unwrap();
+    assert!(
+        stray.output.is_none(),
+        "an output outside accepted is dropped"
+    );
+
+    // 2. An accepted call with an output keeps its bytes, present and equal.
+    let mut kept = 0;
+    for case in &cases {
+        let Some(raw) = b64(case, "insert_rows_b64") else {
+            continue;
+        };
+        let (_, ins) = decode_case(case);
+        if ins.outcome == Outcome::Accepted {
+            assert_eq!(
+                ins.output.as_deref(),
+                Some(raw.as_slice()),
+                "{}",
+                case["id"]
+            );
+            kept += 1;
+        }
+    }
+    assert!(kept > 0, "no accepted case carries an output");
 }
