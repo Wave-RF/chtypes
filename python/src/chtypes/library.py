@@ -45,6 +45,7 @@ from .results import (
     Discovery,
     ErrorCodeTable,
     FilterResult,
+    InsertResult,
     RowResult,
     SchemaDescription,
 )
@@ -211,6 +212,7 @@ class Filter(_Handle):
         column_defaults: Sequence[ColumnDefault] | None = None,
         verdict_basis: VerdictBasis | str | None = None,
         defer_defaults: DeferDefaults | str | None = None,
+        memory_limit_bytes: int | str | None = None,
         insert_options_extra: Mapping[str, str] | None = None,
     ) -> FilterResult:
         """Evaluate over a body. `settings` and `session_timezone` are the body's
@@ -226,6 +228,7 @@ class Filter(_Handle):
             column_defaults=column_defaults,
             verdict_basis=verdict_basis,
             defer_defaults=defer_defaults,
+            memory_limit_bytes=memory_limit_bytes,
             insert_options_extra=insert_options_extra,
         )
         with _hold(self._guard):
@@ -269,6 +272,7 @@ class Schema(_Handle):
         column_defaults: Sequence[ColumnDefault] | None = None,
         verdict_basis: VerdictBasis | str | None = None,
         defer_defaults: DeferDefaults | str | None = None,
+        memory_limit_bytes: int | str | None = None,
         insert_options_extra: Mapping[str, str] | None = None,
     ) -> RowResult:
         """One row, as a server's INSERT would validate and coerce it. The keywords
@@ -284,6 +288,7 @@ class Schema(_Handle):
             column_defaults=column_defaults,
             verdict_basis=verdict_basis,
             defer_defaults=defer_defaults,
+            memory_limit_bytes=memory_limit_bytes,
             insert_options_extra=insert_options_extra,
         )
         with _hold(self._guard):
@@ -304,6 +309,7 @@ class Schema(_Handle):
         column_defaults: Sequence[ColumnDefault] | None = None,
         verdict_basis: VerdictBasis | str | None = None,
         defer_defaults: DeferDefaults | str | None = None,
+        memory_limit_bytes: int | str | None = None,
         insert_options_extra: Mapping[str, str] | None = None,
         row_filter: Filter | None = None,
         export: Format | int | None = None,
@@ -323,6 +329,7 @@ class Schema(_Handle):
             column_defaults=column_defaults,
             verdict_basis=verdict_basis,
             defer_defaults=defer_defaults,
+            memory_limit_bytes=memory_limit_bytes,
             insert_options_extra=insert_options_extra,
         )
         if row_filter is not None and not isinstance(row_filter, Filter):
@@ -341,6 +348,61 @@ class Schema(_Handle):
                 options,
             )
         return _decode.decode_batch(raw, exported if export is not None else None)
+
+    def insert(
+        self,
+        format: Format | int,
+        body: bytes,
+        out_format: Format | int | None,
+        *,
+        settings: Settings | None = None,
+        session_timezone: str | None = None,
+        columns: Sequence[BytesIn] | None = None,
+        insertable_columns: Sequence[BytesIn] | None = None,
+        column_defaults: Sequence[ColumnDefault] | None = None,
+        verdict_basis: VerdictBasis | str | None = None,
+        defer_defaults: DeferDefaults | str | None = None,
+        memory_limit_bytes: int | str | None = None,
+        insert_options_extra: Mapping[str, str] | None = None,
+        row_filter: Filter | None = None,
+    ) -> InsertResult:
+        """One INSERT of a whole body, streamed block by block as a server's INSERT
+        streams it (`chs_preview_insert`): the `insert_result` document and, when
+        `out_format` names a format, the output rows in it.
+
+        `row_filter` is the INSERT's WHERE: only its `t` rows are output, in body
+        order; with none, every accepted row is. `out_format=None` validates only
+        (`CHS_EXPORT_NONE`): no output and no `export_columns`. The other keywords
+        are `rows`'. The output exists only when the whole call is accepted; a
+        refusal or a decline (a `rejected` outcome, an `e` row, a memory limit
+        reached, a declined output) is the result, with `output` None, never an
+        exception. Only misuse and an internal error raise."""
+        payload = body_bytes(body)
+        settings_bytes = settings_json(settings, session_timezone)
+        columns_bytes = columns_json(columns)
+        options = insert_options_json(
+            insertable_columns=insertable_columns,
+            column_defaults=column_defaults,
+            verdict_basis=verdict_basis,
+            defer_defaults=defer_defaults,
+            memory_limit_bytes=memory_limit_bytes,
+            insert_options_extra=insert_options_extra,
+        )
+        if row_filter is not None and not isinstance(row_filter, Filter):
+            raise TypeError(f"row_filter must be a Filter, not {type(row_filter).__name__}")
+        guards = [self._guard] + ([] if row_filter is None else [row_filter._guard])
+        with _hold(*guards):
+            raw, output = self._library._api.preview_insert(
+                self._handle,
+                int(format),
+                payload,
+                settings_bytes,
+                columns_bytes,
+                None if row_filter is None else row_filter._handle,
+                EXPORT_NONE if out_format is None else int(out_format),
+                options,
+            )
+        return _decode.decode_insert_result(raw, output)
 
     def compile_filter(
         self,
@@ -382,6 +444,7 @@ class Schema(_Handle):
         column_defaults: Sequence[ColumnDefault] | None = None,
         verdict_basis: VerdictBasis | str | None = None,
         defer_defaults: DeferDefaults | str | None = None,
+        memory_limit_bytes: int | str | None = None,
         insert_options_extra: Mapping[str, str] | None = None,
     ) -> Block:
         """Parse a body once, for evaluating many filters over it. The keywords
@@ -394,6 +457,7 @@ class Schema(_Handle):
             column_defaults=column_defaults,
             verdict_basis=verdict_basis,
             defer_defaults=defer_defaults,
+            memory_limit_bytes=memory_limit_bytes,
             insert_options_extra=insert_options_extra,
         )
         with _hold(self._guard):

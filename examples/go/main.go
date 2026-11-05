@@ -32,6 +32,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -141,6 +142,9 @@ func main() {
 	section16(lib)
 	section17(lib)
 	section18(lib)
+	section19(lib)
+	section20(lib)
+	section21(lib)
 
 	blank()
 	line("Done. Every value above was measured by this run.")
@@ -1519,6 +1523,238 @@ func section18(lib *chtypes.Library) {
 	}
 	note("tz came from the server's own timezone(): Asia/Tokyo, not the image")
 	note("zone. The schema holds the server, so closing either first is safe.")
+}
+
+// ---------------------------------------------------------------------------
+// SECTIONS 19-21 — The insert call
+//
+// WHAT: Schema.Insert models one synchronous INSERT of a whole body and
+// returns the OUTPUT rows (the rows the table would receive) in the format
+// you ask for. Three facts about it: it agrees with the batch call, Native
+// output reads back as the same rows, and a memory limit declines the call.
+// WHY: a gateway that forwards accepted rows to a server wants the bytes to
+// send, not a verdict per row it must re-serialize itself.
+// LOOK FOR: the insert's bytes being the batch export's t rows, byte for byte;
+// the Native bytes fed back as a Native body giving the same values; and the
+// 1-byte memory limit declining with no output at all. A build that does not
+// implement the insert call declines it, and each section says SKIPPED by name.
+// C API: chs_preview_insert (insert_options.memory_limit_bytes), against
+// chs_preview_batch.
+// ---------------------------------------------------------------------------
+
+const insertDDL = "CREATE TABLE t (k UInt32, s String) ENGINE = MergeTree ORDER BY k"
+
+var insertBody = []byte(`{"k":1,"s":"one"}` + "\n" +
+	`{"k":2,"s":"two"}` + "\n" +
+	`{"k":3,"s":"three"}` + "\n" +
+	`{"k":4,"s":"four"}` + "\n" +
+	`{"k":5,"s":"five"}` + "\n" +
+	`{"k":6,"s":"six"}` + "\n")
+
+// The capability names the insert sections key on, in ONE place: a rename is a
+// one-line change. A section runs exactly when the build ADVERTISES what it
+// needs in build_info.capabilities; it never keys on the call's answer alone.
+const (
+	featPreviewInsert = "preview_insert"
+	featMemoryLimit   = "insert_options.memory_limit_bytes"
+	exportNative      = "Native"
+	exportCompact     = "JSONCompactEachRow"
+)
+
+// missingCaps names what the build does not advertise, out of the features and
+// export formats a section needs.
+func missingCaps(lib *chtypes.Library, features, formats []string) []string {
+	caps := lib.BuildInfo().Capabilities
+	return missingFrom(caps.Features, caps.ExportFormats, features, formats)
+}
+
+func missingFrom(haveFeatures, haveFormats, features, formats []string) []string {
+	has := func(list []string, x string) bool {
+		for _, v := range list {
+			if v == x {
+				return true
+			}
+		}
+		return false
+	}
+	var out []string
+	for _, f := range features {
+		if !has(haveFeatures, f) {
+			out = append(out, "features:"+f)
+		}
+	}
+	for _, f := range formats {
+		if !has(haveFormats, f) {
+			out = append(out, "export_formats:"+f)
+		}
+	}
+	return out
+}
+
+// insertGate decides one insert section. missing is what the build does not
+// advertise; notImplemented is the call's own answer (a whole-call decline, or
+// unsupported with reason option-not-implemented). Not advertised: skip by
+// name. Advertised: the section MUST run, so any decline is a failure.
+func insertGate(missing []string, notImplemented bool) (skip bool, failure string) {
+	if len(missing) > 0 {
+		return true, ""
+	}
+	if notImplemented {
+		return false, "the build advertises the insert call and declined it"
+	}
+	return false, ""
+}
+
+// insertNotImplemented reports whether the library's own answer to an insert
+// call is a decline as not implemented. It never reads a version string.
+func insertNotImplemented(res chtypes.InsertResult, err error) (string, bool) {
+	if err != nil {
+		if declined(err) {
+			return truncate(err.Error(), 66), true
+		}
+		fatal("insert call failed: %v", err)
+	}
+	if res.Outcome == chtypes.Unsupported && res.Reason == "option-not-implemented" {
+		return "unsupported, reason " + res.Reason, true
+	}
+	return "", false
+}
+
+// insertCall gates a section on the advertised capabilities, makes the insert
+// call, and returns ok=false when the section skipped (already printed).
+func insertCall(lib *chtypes.Library, n int, features, formats []string, call func() (chtypes.InsertResult, error)) (chtypes.InsertResult, bool) {
+	missing := missingCaps(lib, features, formats)
+	if skip, _ := insertGate(missing, false); skip {
+		kv("SKIPPED", fmt.Sprintf("section %d: this build does not advertise %s", n, strings.Join(missing, ", ")))
+		note("a build that advertises the insert call runs this section, and a")
+		note("decline there fails the tour")
+		return chtypes.InsertResult{}, false
+	}
+	res, err := call()
+	why, ni := insertNotImplemented(res, err)
+	if _, failure := insertGate(nil, ni); failure != "" {
+		fatal("section %d: %s (%s)", n, failure, why)
+	}
+	return res, true
+}
+
+func section19(lib *chtypes.Library) {
+	section(19, "Insert equals batch")
+
+	s, err := lib.CompileTable(insertDDL)
+	must(err)
+	defer s.Close()
+	f, err := s.CompileFilter("k > 2")
+	must(err)
+	defer f.Close()
+
+	ins, ok := insertCall(lib, 19, []string{featPreviewInsert}, []string{exportCompact}, func() (chtypes.InsertResult, error) {
+		return s.Insert(chtypes.JSONEachRow, insertBody, chtypes.JSONCompactEachRow, chtypes.WithRowFilter(f))
+	})
+	if !ok {
+		return
+	}
+	bat, err := s.Rows(chtypes.JSONEachRow, insertBody, chtypes.WithRowFilter(f),
+		chtypes.WithExport(chtypes.JSONCompactEachRow), chtypes.WithDocFlags(chtypes.DocAll))
+	must(err)
+
+	if ins.Outcome != chtypes.Accepted || bat.Outcome != chtypes.Accepted {
+		fatal("section 19: insert %s (%s), batch %s", ins.Outcome, ins.Reason, bat.Outcome)
+	}
+	if ins.RowsPassed == nil || ins.RowsCut == nil {
+		fatal("section 19: the insert result carries no filter counts")
+	}
+	if *ins.RowsPassed != bat.RowsPassed || *ins.RowsCut != bat.RowsCut {
+		fatal("section 19: counts differ: insert passed=%d cut=%d, batch passed=%d cut=%d",
+			*ins.RowsPassed, *ins.RowsCut, bat.RowsPassed, bat.RowsCut)
+	}
+	// The batch export restricted to the t rows: those rows' spans, in body order.
+	var want []byte
+	for i, r := range bat.Rows {
+		if r.Verdict != nil && *r.Verdict == chtypes.VerdictTrue {
+			sp := bat.Spans[i]
+			if sp == nil {
+				fatal("section 19: row %d passed the filter and has no span", i)
+			}
+			want = append(want, bat.Payload[sp.Off:sp.Off+sp.Len]...)
+		}
+	}
+	if !bytes.Equal(ins.Output, want) {
+		fatal("section 19: insert output %q differs from the batch export's t rows %q", ins.Output, want)
+	}
+	kv("insert", fmt.Sprintf("%s  rows_passed=%d rows_cut=%d  %d bytes", ins.Outcome, *ins.RowsPassed, *ins.RowsCut, len(ins.Output)))
+	kv("batch", fmt.Sprintf("%s  rows_passed=%d rows_cut=%d", bat.Outcome, bat.RowsPassed, bat.RowsCut))
+	kv("equal", fmt.Sprintf("insert output == batch export of the t rows (%d bytes)", len(want)))
+	note("with filter `k > 2` the insert outputs the rows the INSERT's WHERE passes;")
+	note("the batch call says which those are (verdict t) and where their bytes sit")
+}
+
+func section20(lib *chtypes.Library) {
+	section(20, "Native round trip")
+
+	s, err := lib.CompileTable(insertDDL)
+	must(err)
+	defer s.Close()
+
+	ins, ok := insertCall(lib, 20, []string{featPreviewInsert}, []string{exportNative}, func() (chtypes.InsertResult, error) {
+		return s.Insert(chtypes.JSONEachRow, insertBody, chtypes.Native)
+	})
+	if !ok {
+		return
+	}
+	if ins.Outcome != chtypes.Accepted {
+		fatal("section 20: insert %s (%s)", ins.Outcome, ins.Reason)
+	}
+	orig, err := s.Rows(chtypes.JSONEachRow, insertBody, chtypes.WithDocFlags(chtypes.DocAll))
+	must(err)
+	back, err := s.Rows(chtypes.Native, ins.Output, chtypes.WithDocFlags(chtypes.DocAll))
+	must(err)
+	if back.Outcome != chtypes.Accepted {
+		fatal("section 20: the Native body was %s (%s)", back.Outcome, back.Reason)
+	}
+	if len(back.Rows) != len(orig.Rows) {
+		fatal("section 20: %d rows came back, %d went in", len(back.Rows), len(orig.Rows))
+	}
+	cells := 0
+	for i := range orig.Rows {
+		a, b := orig.Rows[i].Values, back.Rows[i].Values
+		if len(a) != len(b) {
+			fatal("section 20: row %d has %d values, then %d", i, len(a), len(b))
+		}
+		for j := range a {
+			if a[j].Column != b[j].Column || a[j].Text != b[j].Text || a[j].Null != b[j].Null {
+				fatal("section 20: row %d column %s: %q then %q", i, a[j].Column, a[j].Text, b[j].Text)
+			}
+			cells++
+		}
+	}
+	kv("native output", fmt.Sprintf("%d bytes", len(ins.Output)))
+	kv("read back", fmt.Sprintf("%s  %d rows, %d values equal", back.Outcome, len(back.Rows), cells))
+	note("the insert's Native bytes are a valid Native body for the same schema")
+}
+
+func section21(lib *chtypes.Library) {
+	section(21, "Memory limit declines")
+
+	s, err := lib.CompileTable(insertDDL)
+	must(err)
+	defer s.Close()
+
+	res, ok := insertCall(lib, 21, []string{featPreviewInsert, featMemoryLimit}, []string{exportCompact}, func() (chtypes.InsertResult, error) {
+		return s.Insert(chtypes.JSONEachRow, insertBody, chtypes.JSONCompactEachRow, chtypes.WithMemoryLimit(1))
+	})
+	if !ok {
+		return
+	}
+	if res.Outcome != chtypes.Unsupported || res.Reason != "call-memory-budget" {
+		fatal("section 21: outcome %s reason %q, want unsupported call-memory-budget", res.Outcome, res.Reason)
+	}
+	if res.Output != nil {
+		fatal("section 21: a declined call output %d bytes", len(res.Output))
+	}
+	kv("memory_limit_bytes", "1")
+	kv("insert", fmt.Sprintf("%s  reason %s  output nil", res.Outcome, res.Reason))
+	note("a call that reaches its own memory bound declines whole: no partial output")
 }
 
 // declined reports whether err is this build declining (*UnsupportedError).

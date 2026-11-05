@@ -37,7 +37,7 @@ use crate::options::{
     ColumnDefault, DeferDefaults, InsertMembers, ParamEncoding, VerdictBasis, filter_options,
     name_object,
 };
-use crate::result::{BatchResult, FilterResult, RowResult, SchemaDescription};
+use crate::result::{BatchResult, FilterResult, InsertResult, RowResult, SchemaDescription};
 
 /// The settings key a call's zone travels under.
 const SESSION_TIMEZONE: &str = "session_timezone";
@@ -120,8 +120,8 @@ pub struct CompileOptions {
     pub schema_options_extra: Vec<(String, String)>,
 }
 
-/// Implement `insert_options_document` over a struct's six insert-option
-/// fields, so the three structs that carry them build one document one way.
+/// Implement `insert_options_document` over a struct's insert-option
+/// fields, so the four structs that carry them build one document one way.
 macro_rules! insert_options_document {
     ($t:ty) => {
         impl $t {
@@ -131,6 +131,7 @@ macro_rules! insert_options_document {
                     column_defaults: self.column_defaults.as_deref(),
                     verdict_basis: self.verdict_basis,
                     defer_defaults: self.defer_defaults,
+                    memory_limit_bytes: self.memory_limit_bytes,
                     extra: &self.insert_options_extra,
                 }
                 .document()
@@ -163,6 +164,12 @@ pub struct RowOptions {
     pub verdict_basis: Option<VerdictBasis>,
     /// `insert_options`' `defer_defaults` (ABI v2).
     pub defer_defaults: Option<DeferDefaults>,
+    /// `insert_options`' `memory_limit_bytes` (ABI v2): a bound, in bytes, on
+    /// the call's own memory; reaching it declines the whole call
+    /// (`call-memory-budget`) with no partial output. `None` leaves the member
+    /// out; `Some(0)` is sent and means no limit. It is sent as a decimal
+    /// string.
+    pub memory_limit_bytes: Option<u64>,
     /// An `insert_options` member this binding has no name for: its key and
     /// its value as JSON text, passed through as given (rule r1). The library
     /// refuses a key it does not know; text that is not valid JSON is
@@ -195,6 +202,12 @@ pub struct RowsOptions {
     pub verdict_basis: Option<VerdictBasis>,
     /// `insert_options`' `defer_defaults` (ABI v2).
     pub defer_defaults: Option<DeferDefaults>,
+    /// `insert_options`' `memory_limit_bytes` (ABI v2): a bound, in bytes, on
+    /// the call's own memory; reaching it declines the whole call
+    /// (`call-memory-budget`) with no partial output. `None` leaves the member
+    /// out; `Some(0)` is sent and means no limit. It is sent as a decimal
+    /// string.
+    pub memory_limit_bytes: Option<u64>,
     /// An `insert_options` member this binding has no name for: its key and
     /// its value as JSON text, passed through as given (rule r1). The library
     /// refuses a key it does not know; text that is not valid JSON is
@@ -253,6 +266,12 @@ pub struct EvalOptions {
     pub verdict_basis: Option<VerdictBasis>,
     /// `insert_options`' `defer_defaults` (ABI v2).
     pub defer_defaults: Option<DeferDefaults>,
+    /// `insert_options`' `memory_limit_bytes` (ABI v2): a bound, in bytes, on
+    /// the call's own memory; reaching it declines the whole call
+    /// (`call-memory-budget`) with no partial output. `None` leaves the member
+    /// out; `Some(0)` is sent and means no limit. It is sent as a decimal
+    /// string.
+    pub memory_limit_bytes: Option<u64>,
     /// An `insert_options` member this binding has no name for: its key and
     /// its value as JSON text, passed through as given (rule r1). The library
     /// refuses a key it does not know; text that is not valid JSON is
@@ -261,6 +280,50 @@ pub struct EvalOptions {
 }
 
 insert_options_document!(EvalOptions);
+
+/// What `insert` takes: the options of [`RowsOptions`] without an export or
+/// document groups (the call returns no per-row documents), with the output
+/// format given as the call's own argument.
+#[derive(Debug, Clone, Default)]
+pub struct InsertOptions {
+    /// The call's settings (the `output_format_*` settings among them). Values
+    /// are strings.
+    pub settings: Vec<(String, String)>,
+    /// The `session_timezone` key, written into the settings verbatim.
+    pub session_timezone: Option<String>,
+    /// The INSERT column list, each name as bytes; empty for none.
+    pub columns: Vec<Vec<u8>>,
+    /// `insert_options`' `insertable_columns` (ABI v2): the columns an INSERT
+    /// may supply (the server's column-level INSERT grant), checked on the
+    /// INSERT's header before any byte of the body is read. `None` leaves the
+    /// member out (every column); `Some` of an empty list is sent as `[]` (no
+    /// column). Each name is bytes.
+    pub insertable_columns: Option<Vec<Vec<u8>>>,
+    /// `insert_options`' `column_defaults` (ABI v2): per-call DEFAULT
+    /// overrides. `None` leaves the member out; `Some` of an empty list is sent
+    /// as `[]`.
+    pub column_defaults: Option<Vec<ColumnDefault>>,
+    /// `insert_options`' `verdict_basis` (ABI v2).
+    pub verdict_basis: Option<VerdictBasis>,
+    /// `insert_options`' `defer_defaults` (ABI v2).
+    pub defer_defaults: Option<DeferDefaults>,
+    /// `insert_options`' `memory_limit_bytes` (ABI v2): a bound, in bytes, on
+    /// the call's own memory; reaching it declines the whole call
+    /// (`call-memory-budget`) with no output. `None` leaves the member out;
+    /// `Some(0)` is sent and means no limit. It is sent as a decimal string.
+    pub memory_limit_bytes: Option<u64>,
+    /// An `insert_options` member this binding has no name for: its key and
+    /// its value as JSON text, passed through as given (rule r1). The library
+    /// refuses a key it does not know; text that is not valid JSON is
+    /// [`Error::Usage`]. A key set twice keeps the last value.
+    pub insert_options_extra: Vec<(String, String)>,
+    /// The INSERT's WHERE: an attached filter, which must have been compiled
+    /// on the same schema. `None` outputs every accepted row. Its WHERE runs
+    /// in the zone it was compiled under.
+    pub filter: Option<Filter>,
+}
+
+insert_options_document!(InsertOptions);
 
 /// A compiled table. Immutable; `Clone` shares one handle.
 #[derive(Clone)]
@@ -364,6 +427,56 @@ impl Schema {
             )
         })?;
         decode::batch(&doc, payload)
+    }
+
+    /// Model one synchronous INSERT of a whole body (`chs_preview_insert`) and
+    /// return the [`InsertResult`]: the body's outcome and counts, and the
+    /// output rows in `out_format` (`None` validates only and outputs
+    /// nothing). With a filter in the options, only the rows it passes are
+    /// output; without one, every accepted row is.
+    ///
+    /// A refusal or a decline is the result, never an error: only misuse and
+    /// internal errors are an [`Error`], as with [`Schema::rows`]. The output
+    /// exists only if the whole call succeeds, and an `e` row (one the WHERE
+    /// throws on) rejects the whole call with ClickHouse's own code and
+    /// message. The call is synchronous and cannot be canceled.
+    pub fn insert(
+        &self,
+        format: Format,
+        body: &[u8],
+        out_format: Option<Format>,
+        options: &InsertOptions,
+    ) -> Result<InsertResult> {
+        let (doc, output) = self.insert_raw(format, body, out_format, options)?;
+        decode::insert_result(&doc, output)
+    }
+
+    /// The one ABI call behind [`Schema::insert`]: the document and the output
+    /// buffer, undecoded.
+    pub(crate) fn insert_raw(
+        &self,
+        format: Format,
+        body: &[u8],
+        out_format: Option<Format>,
+        options: &InsertOptions,
+    ) -> Result<(Vec<u8>, Option<Vec<u8>>)> {
+        let settings = settings_object(&options.settings, options.session_timezone.as_deref())?;
+        let columns = columns_array(&options.columns)?;
+        let insert = options.insert_options_document()?;
+        let filter = options.filter.as_ref().map(|f| &*f.handle);
+        let output = out_format.map_or(EXPORT_NONE, Format::code);
+        self.library.call(|api| {
+            api.preview_insert(
+                &self.handle,
+                format.code(),
+                body,
+                &settings,
+                &columns,
+                filter,
+                output,
+                &insert,
+            )
+        })
     }
 
     /// Compile a boolean expression over this schema's columns
@@ -515,56 +628,40 @@ mod tests {
     }
 
     #[test]
-    fn the_four_insert_calls_build_one_insert_options_document() {
-        let members = || {
-            (
-                Some(vec![b"a".to_vec()]),
-                Some(vec![ColumnDefault {
-                    name: b"b".to_vec(),
-                    value: b"7".to_vec(),
-                }]),
-                Some(VerdictBasis::Export),
-                Some(DeferDefaults::Server),
-                vec![("x_future".to_string(), "{\"k\":[1]}".to_string())],
-            )
-        };
-        let (ic, cd, vb, dd, ex) = members();
-        let row = RowOptions {
-            insertable_columns: ic,
-            column_defaults: cd,
-            verdict_basis: vb,
-            defer_defaults: dd,
-            insert_options_extra: ex,
-            ..Default::default()
-        };
-        let (ic, cd, vb, dd, ex) = members();
-        let rows = RowsOptions {
-            insertable_columns: ic,
-            column_defaults: cd,
-            verdict_basis: vb,
-            defer_defaults: dd,
-            insert_options_extra: ex,
-            ..Default::default()
-        };
-        let (ic, cd, vb, dd, ex) = members();
-        let eval = EvalOptions {
-            insertable_columns: ic,
-            column_defaults: cd,
-            verdict_basis: vb,
-            defer_defaults: dd,
-            insert_options_extra: ex,
-            ..Default::default()
-        };
+    fn the_five_insert_calls_build_one_insert_options_document() {
+        // One macro-free construction per struct, from the same members.
+        macro_rules! built {
+            ($t:ident) => {
+                $t {
+                    insertable_columns: Some(vec![b"a".to_vec()]),
+                    column_defaults: Some(vec![ColumnDefault {
+                        name: b"b".to_vec(),
+                        value: b"7".to_vec(),
+                    }]),
+                    verdict_basis: Some(VerdictBasis::Export),
+                    defer_defaults: Some(DeferDefaults::Server),
+                    memory_limit_bytes: Some(4096),
+                    insert_options_extra: vec![("x_future".to_string(), "{\"k\":[1]}".to_string())],
+                    ..Default::default()
+                }
+            };
+        }
+        let row = built!(RowOptions);
+        let rows = built!(RowsOptions);
+        let eval = built!(EvalOptions);
+        let insert = built!(InsertOptions);
         let want = row.insert_options_document().unwrap();
         assert_eq!(
             String::from_utf8(want.clone()).unwrap(),
             concat!(
                 r#"{"column_defaults":[{"name":"b","value":"7"}],"defer_defaults":"server","#,
-                r#""insertable_columns":[{"name":"a"}],"verdict_basis":"export","x_future":{"k":[1]}}"#
+                r#""insertable_columns":[{"name":"a"}],"memory_limit_bytes":"4096","#,
+                r#""verdict_basis":"export","x_future":{"k":[1]}}"#
             )
         );
         assert_eq!(rows.insert_options_document().unwrap(), want);
         assert_eq!(eval.insert_options_document().unwrap(), want);
+        assert_eq!(insert.insert_options_document().unwrap(), want);
         // Nothing set sends nothing: the call before the document existed.
         assert!(
             RowOptions::default()
@@ -574,6 +671,12 @@ mod tests {
         );
         assert!(
             EvalOptions::default()
+                .insert_options_document()
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            InsertOptions::default()
                 .insert_options_document()
                 .unwrap()
                 .is_empty()

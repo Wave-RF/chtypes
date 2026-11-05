@@ -678,26 +678,73 @@ func decodeBatchGeneric(raw []byte, payload []byte) (BatchResult, error) {
 		n := r.u64Of(v, "$.partition_count")
 		res.PartitionCount = &n
 	}
-	if v := r.field(m, "framing"); v != nil {
-		fm := r.object(v, "$.framing")
-		if fm != nil {
-			res.Framing = &Framing{
-				BomSkipped: r.optBool(fm, "bom_skipped", "$.framing"),
-				Header:     r.header(r.field(fm, "header"), "$.framing.header"),
-			}
-			if c := r.field(fm, "container"); c != nil {
-				s, ok := c.(string)
-				if !ok {
-					r.fail("$.framing.container", "want a JSON string or null")
-				}
-				res.Framing.Container = s
-			}
-		}
-	}
+	res.Framing = r.framing(m, "$")
 	// A declined export has no payload and no spans, whatever buffer the call
 	// returned (decode_batch.go does the same on the production path).
 	if res.ExportDeclined != "" {
 		res.Payload, res.Spans = nil, nil
+	}
+	return res, r.err
+}
+
+// framing reads the framing member of a batch or insert_result document; nil
+// when the member is absent.
+func (r *reader) framing(m map[string]any, path string) *Framing {
+	v := r.field(m, "framing")
+	if v == nil {
+		return nil
+	}
+	fm := r.object(v, path+".framing")
+	if fm == nil {
+		return nil
+	}
+	f := &Framing{
+		BomSkipped: r.optBool(fm, "bom_skipped", path+".framing"),
+		Header:     r.header(r.field(fm, "header"), path+".framing.header"),
+	}
+	if c := r.field(fm, "container"); c != nil {
+		s, ok := c.(string)
+		if !ok {
+			r.fail(path+".framing.container", "want a JSON string or null")
+		}
+		f.Container = s
+	}
+	return f
+}
+
+// decodeInsertResult reads an insert_result document (chs_preview_insert). It
+// shares the batch's field readers, so a member means what it means there. The
+// output is the out_rows buffer the call returned. The public Output (and
+// ExportColumns) exist exactly when the outcome is accepted and an output was
+// asked for; they are nil in every other case, even if the library handed back
+// bytes, so the rule is keyed on the outcome and never on the buffer.
+func decodeInsertResult(raw []byte, output []byte) (InsertResult, error) {
+	v, err := parseDocument("insert_result", raw)
+	if err != nil {
+		return InsertResult{}, err
+	}
+	r := &reader{doc: "insert_result"}
+	m := r.object(v, "$")
+	res := InsertResult{
+		Outcome:             parseBatchOutcome(r.text(m, "outcome", "$")),
+		ErrCode:             r.i32(m, "code", "$"),
+		ErrMsg:              r.bytes(m, "err", "$"),
+		Reason:              r.text(m, "reason", "$"),
+		RefusedAt:           RefusalSite(r.text(m, "refused_at", "$")),
+		RowsRead:            r.u64(m, "rows_read", "$"),
+		RowsSkipped:         r.u64(m, "rows_skipped", "$"),
+		RowsPassed:          r.optU64(m, "rows_passed", "$"),
+		RowsCut:             r.optU64(m, "rows_cut", "$"),
+		RowsUndecided:       r.optU64(m, "rows_undecided", "$"),
+		UnsupportedSettings: r.nameList(m, "unsupported_settings", "$"),
+		PartitionCount:      r.optU64(m, "partition_count", "$"),
+		ExportColumns:       r.nameList(m, "export_columns", "$"),
+		Framing:             r.framing(m, "$"),
+		Output:              output,
+	}
+	if res.Outcome != Accepted {
+		res.Output = nil
+		res.ExportColumns = nil
 	}
 	return res, r.err
 }
