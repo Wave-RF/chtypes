@@ -89,7 +89,7 @@ func isNilHandle(h interface{}) bool {
 		return true
 	}
 	v := reflect.ValueOf(h)
-	return v.Kind() == reflect.Ptr && v.IsNil()
+	return v.Kind() == reflect.Pointer && v.IsNil()
 }
 
 // cancelInflight reads the stub's cancel probe: how many calls sit blocked in
