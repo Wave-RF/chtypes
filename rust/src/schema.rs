@@ -30,6 +30,7 @@ use serde_json::{Map, Value as Json};
 
 use crate::abi2::calls_gen::{BlockHandle, FilterHandle, SchemaHandle};
 use crate::abi2::vocab_gen::{DocFlags, EXPORT_NONE, Format, Posture};
+use crate::cancel::CancelToken;
 use crate::decode;
 use crate::error::{Error, Result};
 use crate::library::Library;
@@ -118,6 +119,11 @@ pub struct CompileOptions {
     /// value as JSON text, passed through as given. The library refuses a key
     /// it does not know; text that is not valid JSON is [`Error::Usage`].
     pub schema_options_extra: Vec<(String, String)>,
+    /// `schema_options`' `cancel` (ABI v2): a cancellation source
+    /// ([`CancelToken`]). Canceling it stops the compile at its next phase
+    /// boundary with [`Error::Canceled`] and no schema. `None` (the default)
+    /// creates no C token and makes no extra ABI call.
+    pub cancel: Option<CancelToken>,
 }
 
 /// Implement `insert_options_document` over a struct's insert-option
@@ -125,18 +131,69 @@ pub struct CompileOptions {
 macro_rules! insert_options_document {
     ($t:ty) => {
         impl $t {
-            fn insert_options_document(&self) -> Result<Vec<u8>> {
+            /// The `insert_options` document, with the call's own cancel id
+            /// when it has a token.
+            fn insert_options_document(&self, cancel: Option<&str>) -> Result<Vec<u8>> {
                 InsertMembers {
                     insertable_columns: self.insertable_columns.as_deref(),
                     column_defaults: self.column_defaults.as_deref(),
                     verdict_basis: self.verdict_basis,
                     defer_defaults: self.defer_defaults,
                     memory_limit_bytes: self.memory_limit_bytes,
+                    cancel,
                     extra: &self.insert_options_extra,
                 }
                 .document()
             }
+
+            /// The document with no cancel id (validated before any call), and
+            /// a way to rebuild it with the id once the call's token exists.
+            fn insert_options_for(&self) -> Result<InsertDoc<'_, Self>> {
+                Ok(InsertDoc {
+                    plain: self.insert_options_document(None)?,
+                    options: self,
+                })
+            }
         }
+
+        impl InsertDocument for $t {
+            fn with_cancel(&self, id: &str) -> Result<Vec<u8>> {
+                self.insert_options_document(Some(id))
+            }
+        }
+    };
+}
+
+/// Rebuilds an options struct's `insert_options` with a cancel id.
+trait InsertDocument {
+    fn with_cancel(&self, id: &str) -> Result<Vec<u8>>;
+}
+
+/// An `insert_options` document already validated without a cancel id, and
+/// the options to rebuild it from with one.
+struct InsertDoc<'a, T: ?Sized> {
+    plain: Vec<u8>,
+    options: &'a T,
+}
+
+impl<T: InsertDocument + ?Sized> InsertDoc<'_, T> {
+    /// The document the call sends: the plain one with no token, the one
+    /// naming the call's own C token otherwise.
+    fn for_call(self, cancel: Option<&str>) -> Result<Vec<u8>> {
+        match cancel {
+            None => Ok(self.plain),
+            Some(id) => self.options.with_cancel(id),
+        }
+    }
+}
+
+/// The cancel field's documentation, the same on every cancelable call's
+/// options.
+macro_rules! cancel_field_doc {
+    () => {
+        "A cancellation source ([`CancelToken`]): canceling it stops this call \
+         at its next check point with [`Error::Canceled`] and no output. `None` \
+         (the default) creates no C token and makes no extra ABI call."
     };
 }
 
@@ -175,6 +232,8 @@ pub struct RowOptions {
     /// refuses a key it does not know; text that is not valid JSON is
     /// [`Error::Usage`]. A key set twice keeps the last value.
     pub insert_options_extra: Vec<(String, String)>,
+    #[doc = cancel_field_doc!()]
+    pub cancel: Option<CancelToken>,
 }
 
 insert_options_document!(RowOptions);
@@ -213,6 +272,8 @@ pub struct RowsOptions {
     /// refuses a key it does not know; text that is not valid JSON is
     /// [`Error::Usage`]. A key set twice keeps the last value.
     pub insert_options_extra: Vec<(String, String)>,
+    #[doc = cancel_field_doc!()]
+    pub cancel: Option<CancelToken>,
     /// An attached filter. Its WHERE runs in the zone it was compiled under.
     pub filter: Option<Filter>,
     /// An export format; `None` asks for no export.
@@ -277,6 +338,8 @@ pub struct EvalOptions {
     /// refuses a key it does not know; text that is not valid JSON is
     /// [`Error::Usage`]. A key set twice keeps the last value.
     pub insert_options_extra: Vec<(String, String)>,
+    #[doc = cancel_field_doc!()]
+    pub cancel: Option<CancelToken>,
 }
 
 insert_options_document!(EvalOptions);
@@ -317,6 +380,8 @@ pub struct InsertOptions {
     /// refuses a key it does not know; text that is not valid JSON is
     /// [`Error::Usage`]. A key set twice keeps the last value.
     pub insert_options_extra: Vec<(String, String)>,
+    #[doc = cancel_field_doc!()]
+    pub cancel: Option<CancelToken>,
     /// The INSERT's WHERE: an attached filter, which must have been compiled
     /// on the same schema. `None` outputs every accepted row. Its WHERE runs
     /// in the zone it was compiled under.
@@ -390,17 +455,22 @@ impl Schema {
     pub fn row(&self, format: Format, body: &[u8], options: &RowOptions) -> Result<RowResult> {
         let settings = settings_object(&options.settings, options.session_timezone.as_deref())?;
         let columns = columns_array(&options.columns)?;
-        let insert = options.insert_options_document()?;
-        let doc = self.library.call(|api| {
-            api.preview_row(
-                &self.handle,
-                format.code(),
-                body,
-                &settings,
-                &columns,
-                &insert,
-            )
-        })?;
+        let insert = options.insert_options_for()?;
+        let doc = self
+            .library
+            .call_cancelable(options.cancel.as_ref(), |id| {
+                let insert = insert.for_call(id)?;
+                self.library.call(|api| {
+                    api.preview_row(
+                        &self.handle,
+                        format.code(),
+                        body,
+                        &settings,
+                        &columns,
+                        &insert,
+                    )
+                })
+            })?;
         decode::row(&doc)
     }
 
@@ -409,23 +479,28 @@ impl Schema {
     pub fn rows(&self, format: Format, body: &[u8], options: &RowsOptions) -> Result<BatchResult> {
         let settings = settings_object(&options.settings, options.session_timezone.as_deref())?;
         let columns = columns_array(&options.columns)?;
-        let insert = options.insert_options_document()?;
+        let insert = options.insert_options_for()?;
         let filter = options.filter.as_ref().map(|f| &*f.handle);
         let export = options.export.map_or(EXPORT_NONE, Format::code);
         let flags = effective_doc_flags(options).bits();
-        let (doc, payload) = self.library.call(|api| {
-            api.preview_batch(
-                &self.handle,
-                format.code(),
-                body,
-                &settings,
-                &columns,
-                filter,
-                export,
-                flags,
-                &insert,
-            )
-        })?;
+        let (doc, payload) = self
+            .library
+            .call_cancelable(options.cancel.as_ref(), |id| {
+                let insert = insert.for_call(id)?;
+                self.library.call(|api| {
+                    api.preview_batch(
+                        &self.handle,
+                        format.code(),
+                        body,
+                        &settings,
+                        &columns,
+                        filter,
+                        export,
+                        flags,
+                        &insert,
+                    )
+                })
+            })?;
         decode::batch(&doc, payload)
     }
 
@@ -439,7 +514,8 @@ impl Schema {
     /// internal errors are an [`Error`], as with [`Schema::rows`]. The output
     /// exists only if the whole call succeeds, and an `e` row (one the WHERE
     /// throws on) rejects the whole call with ClickHouse's own code and
-    /// message. The call is synchronous and cannot be canceled.
+    /// message. The call is synchronous; with [`InsertOptions::cancel`] it can
+    /// be canceled from another thread ([`Error::Canceled`], no output).
     pub fn insert(
         &self,
         format: Format,
@@ -462,20 +538,23 @@ impl Schema {
     ) -> Result<(Vec<u8>, Option<Vec<u8>>)> {
         let settings = settings_object(&options.settings, options.session_timezone.as_deref())?;
         let columns = columns_array(&options.columns)?;
-        let insert = options.insert_options_document()?;
+        let insert = options.insert_options_for()?;
         let filter = options.filter.as_ref().map(|f| &*f.handle);
         let output = out_format.map_or(EXPORT_NONE, Format::code);
-        self.library.call(|api| {
-            api.preview_insert(
-                &self.handle,
-                format.code(),
-                body,
-                &settings,
-                &columns,
-                filter,
-                output,
-                &insert,
-            )
+        self.library.call_cancelable(options.cancel.as_ref(), |id| {
+            let insert = insert.for_call(id)?;
+            self.library.call(|api| {
+                api.preview_insert(
+                    &self.handle,
+                    format.code(),
+                    body,
+                    &settings,
+                    &columns,
+                    filter,
+                    output,
+                    &insert,
+                )
+            })
         })
     }
 
@@ -502,17 +581,22 @@ impl Schema {
     pub fn parse_block(&self, format: Format, body: &[u8], options: &RowOptions) -> Result<Block> {
         let settings = settings_object(&options.settings, options.session_timezone.as_deref())?;
         let columns = columns_array(&options.columns)?;
-        let insert = options.insert_options_document()?;
-        let handle = self.library.call(|api| {
-            api.block_create(
-                &self.handle,
-                format.code(),
-                body,
-                &settings,
-                &columns,
-                &insert,
-            )
-        })?;
+        let insert = options.insert_options_for()?;
+        let handle = self
+            .library
+            .call_cancelable(options.cancel.as_ref(), |id| {
+                let insert = insert.for_call(id)?;
+                self.library.call(|api| {
+                    api.block_create(
+                        &self.handle,
+                        format.code(),
+                        body,
+                        &settings,
+                        &columns,
+                        &insert,
+                    )
+                })
+            })?;
         Ok(Block {
             handle: Arc::new(handle),
         })
@@ -527,24 +611,30 @@ impl Filter {
     pub fn rows(&self, format: Format, body: &[u8], options: &EvalOptions) -> Result<FilterResult> {
         let settings = settings_object(&options.settings, options.session_timezone.as_deref())?;
         let columns = columns_array(&options.columns)?;
-        let insert = options.insert_options_document()?;
-        let doc = self.library.call(|api| {
-            api.filter_eval_body(
-                &self.handle,
-                format.code(),
-                body,
-                &settings,
-                &columns,
-                &insert,
-            )
-        })?;
+        let insert = options.insert_options_for()?;
+        let doc = self
+            .library
+            .call_cancelable(options.cancel.as_ref(), |id| {
+                let insert = insert.for_call(id)?;
+                self.library.call(|api| {
+                    api.filter_eval_body(
+                        &self.handle,
+                        format.code(),
+                        body,
+                        &settings,
+                        &columns,
+                        &insert,
+                    )
+                })
+            })?;
         decode::filter_result(&doc)
     }
 
     /// Evaluate over a parsed block (`chs_filter_eval_block`). It takes no
     /// settings: the filter brings its zone, and the block brought its parse
     /// zone when it was parsed. A block from another library is the library's
-    /// to refuse ([`Error::Usage`]).
+    /// to refuse ([`Error::Usage`]). It is not cancelable: the ABI call takes
+    /// no options document and never returns `CHS_CANCELED`.
     pub fn eval(&self, block: &Block) -> Result<FilterResult> {
         let doc = self
             .library
@@ -650,7 +740,7 @@ mod tests {
         let rows = built!(RowsOptions);
         let eval = built!(EvalOptions);
         let insert = built!(InsertOptions);
-        let want = row.insert_options_document().unwrap();
+        let want = row.insert_options_document(None).unwrap();
         assert_eq!(
             String::from_utf8(want.clone()).unwrap(),
             concat!(
@@ -659,25 +749,25 @@ mod tests {
                 r#""verdict_basis":"export","x_future":{"k":[1]}}"#
             )
         );
-        assert_eq!(rows.insert_options_document().unwrap(), want);
-        assert_eq!(eval.insert_options_document().unwrap(), want);
-        assert_eq!(insert.insert_options_document().unwrap(), want);
+        assert_eq!(rows.insert_options_document(None).unwrap(), want);
+        assert_eq!(eval.insert_options_document(None).unwrap(), want);
+        assert_eq!(insert.insert_options_document(None).unwrap(), want);
         // Nothing set sends nothing: the call before the document existed.
         assert!(
             RowOptions::default()
-                .insert_options_document()
+                .insert_options_document(None)
                 .unwrap()
                 .is_empty()
         );
         assert!(
             EvalOptions::default()
-                .insert_options_document()
+                .insert_options_document(None)
                 .unwrap()
                 .is_empty()
         );
         assert!(
             InsertOptions::default()
-                .insert_options_document()
+                .insert_options_document(None)
                 .unwrap()
                 .is_empty()
         );
