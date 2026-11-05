@@ -28,10 +28,12 @@ reading there, so its rows end at the refused row while the body goes on.
 provenance, on any case and required with batch_of_t_rows, says where each of
 the case's documents came from: {"batch": P, "insert": P} plus
 "batch_of_t_rows": P exactly when the case carries one, each P either
-{"build": "<build>", "line": "<line>"} (recorded from that library build),
-"unrecorded" (written from the docs, awaiting a recording) or "planted" (a
-document a planted red changed by hand). The plain run prints how many of
-each there are; --require-recorded fails while any is "unrecorded".
+{"build": "<build>", "line": "<line>"} (recorded from that published library
+build), "unrecorded" (written from the docs, awaiting a recording from a
+published build) or "planted" (a document a planted red changed by hand). The
+plain run prints how many of each there are; --require-recorded fails while
+any is "unrecorded". Every run ends on its verdict line, and that line and the
+exit code agree: "ok" or PASS with 0, FAIL with 1.
 
 Why that document. When the batch is not accepted every verdict in it is `d`,
 so the batch alone cannot say which rows the WHERE cut, and no other call
@@ -666,6 +668,22 @@ def selftest() -> int:
         marked[PROVENANCE]["insert"] = "unrecorded"
         if not require_recorded(planted):
             fails.append("--require-recorded passes a fixture with one unrecorded document")
+    # The verdict line and the exit code agree in every outcome: a plain pass, a fixture problem, and
+    # --require-recorded both failing and passing. Each outcome must also be the one its input calls for.
+    broken = copy.deepcopy(flipped)
+    broken["cases"][0]["expect"] = {"violates": RULES[0]} if broken["cases"][0]["expect"] == "equal" else "equal"
+    for what, d, require, want_rc in (
+        ("a plain run", flipped, False, 0),
+        ("a run over a fixture with a problem", broken, False, 1),
+        ("--require-recorded with every document recorded", flipped, True, 0),
+        ("--require-recorded with one unrecorded document", planted, True, 1),
+        ("--require-recorded over a fixture with a problem", broken, True, 1),
+    ):
+        rc, out, _ = run(d, require)
+        if rc != want_rc:
+            fails.append(f"{what}: exit {rc}, want {want_rc}")
+        if not verdict_agrees(rc, out):
+            fails.append(f"{what}: the verdict line {out[-1] if out else ''!r} disagrees with exit {rc}")
     if fails:
         for f in fails:
             print(f"check-insert-projection selftest FAILED: {f}", file=sys.stderr)
@@ -676,6 +694,34 @@ def selftest() -> int:
     return 0
 
 
+def run(doc: dict, require: bool) -> tuple[int, list[str], list[str]]:
+    """The run's exit code, its stdout lines and its stderr lines. The last stdout line is the verdict, and it
+    names the outcome the exit code gives: "ok" or PASS with 0, FAIL with 1."""
+    out: list[str] = []
+    problems = check(doc)
+    if problems:
+        out.append(f"check-insert-projection: FAIL ({len(problems)} problems)")
+        return 1, out, problems
+    out.append(census_line(doc))
+    if not require:
+        out.append("check-insert-projection: ok")
+        return 0, out, []
+    missing = require_recorded(doc)
+    if missing:
+        out.append(f"check-insert-projection --require-recorded: FAIL ({len(missing)} unrecorded)")
+        return 1, out, [f"check-insert-projection --require-recorded: {m}" for m in missing]
+    out.append("check-insert-projection --require-recorded: PASS (0 unrecorded)")
+    return 0, out, []
+
+
+def verdict_agrees(rc: int, out: list[str]) -> bool:
+    """The last stdout line and the exit code tell the same outcome."""
+    last = out[-1] if out else ""
+    passed = last.endswith(": ok") or ": PASS (" in last
+    failed = ": FAIL (" in last
+    return passed != failed and passed == (rc == 0)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="the insert projection rule over the shared fixture")
     ap.add_argument("--selftest", action="store_true", help="prove every rule fires on the fixture's planted cases")
@@ -684,21 +730,12 @@ def main() -> int:
     args = ap.parse_args()
     if args.selftest:
         return selftest()
-    doc = json.loads(FIXTURE.read_text(encoding="utf-8"))
-    problems = check(doc)
-    for p in problems:
-        print(p, file=sys.stderr)
-    if problems:
-        return 1
-    print("check-insert-projection: ok")
-    print(census_line(doc))
-    if args.require_recorded:
-        missing = require_recorded(doc)
-        for m in missing:
-            print(f"check-insert-projection --require-recorded: {m}", file=sys.stderr)
-        if missing:
-            return 1
-    return 0
+    rc, out, err = run(json.loads(FIXTURE.read_text(encoding="utf-8")), args.require_recorded)
+    for line in err:
+        print(line, file=sys.stderr)
+    for line in out:
+        print(line)
+    return rc
 
 
 if __name__ == "__main__":
