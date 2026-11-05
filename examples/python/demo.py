@@ -1323,9 +1323,14 @@ def section18(lib: chtypes.Library) -> None:
 # C API: chs_preview_insert (with chs_preview_batch for the comparison).
 # ---------------------------------------------------------------------------
 INSERT_DDL = "CREATE TABLE t (k UInt32, s String) ENGINE = MergeTree ORDER BY k"
-INSERT_BODY = b"".join(
-    b'{"k":%d,"s":"row %d"}\n' % (k, k) for k in (1, 2, 3, 4, 5, 6)
-)  # fmt: skip
+INSERT_BODY = (
+    b'{"k":1,"s":"one"}\n'
+    b'{"k":2,"s":"two"}\n'
+    b'{"k":3,"s":"three"}\n'
+    b'{"k":4,"s":"four"}\n'
+    b'{"k":5,"s":"five"}\n'
+    b'{"k":6,"s":"six"}\n'
+)
 
 
 # The capability names the insert sections key on, in ONE place: a rename in the
