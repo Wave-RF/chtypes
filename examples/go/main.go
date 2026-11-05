@@ -1649,7 +1649,7 @@ func section19(lib *chtypes.Library) {
 	defer f.Close()
 
 	ins, ok := insertCall(lib, 19, []string{featPreviewInsert}, []string{exportCompact}, func() (chtypes.InsertResult, error) {
-		return s.Insert(chtypes.JSONEachRow, insertBody, chtypes.JSONCompactEachRow, chtypes.WithInsertFilter(f))
+		return s.Insert(chtypes.JSONEachRow, insertBody, chtypes.JSONCompactEachRow, chtypes.WithRowFilter(f))
 	})
 	if !ok {
 		return

@@ -157,7 +157,7 @@ func (s *Schema) Rows(format Format, body []byte, opts ...RowsOption) (BatchResu
 // Insert models one synchronous INSERT of a whole body (chs_preview_insert) and
 // returns its insert_result: the outcome, the counts and, when outFormat is
 // not ExportNone and the outcome is Accepted, the output rows in that format.
-// With WithInsertFilter the filter is the INSERT's WHERE: only the t rows are
+// With WithRowFilter the filter is the INSERT's WHERE: only the t rows are
 // output, and an e row fails the whole call (a Rejected result). A refusal or
 // decline is a result, never an error; only misuse and internal errors are.
 // Nothing of a refused body is ever output.
