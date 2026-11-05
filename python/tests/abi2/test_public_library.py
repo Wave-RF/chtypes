@@ -19,6 +19,7 @@ from chtypes import (
     DeferDefaults,
     DocFlags,
     Format,
+    InsertResult,
     InternalError,
     Outcome,
     ParamEncoding,
@@ -363,6 +364,22 @@ def _spy(lib, monkeypatch, name):
     return calls
 
 
+def _spy_insert_outputs(lib, monkeypatch) -> list:
+    """The raw output buffer each `preview_insert` returned. The stub's echo has no
+    `outcome`, so the public `InsertResult.output` (present only for an accepted
+    call) is absent for it; the stub's account of what reached it is read here."""
+    outs: list = []
+    real = lib._api.preview_insert
+
+    def spy(*args):
+        raw, output = real(*args)
+        outs.append(output)
+        return raw, output
+
+    monkeypatch.setattr(lib._api, "preview_insert", spy)
+    return outs
+
+
 def test_insert_options_reach_the_four_insert_calls_and_nothing_else(lib, monkeypatch) -> None:
     """Spec batch 2: `options` on preview_row, preview_batch, block_create and
     filter_eval_body, the `columns` of filter_eval_body, and no document at all
@@ -451,3 +468,90 @@ def test_a_call_error_carries_the_librarys_reason(monkeypatch) -> None:
         api._check(2, ctypes.c_void_p(1))
     assert info.value.reason == "zone-declined" and info.value.ch_name == "CH"
     assert info.value.message == b"msg"
+
+
+def test_insert_marshals_formats_filter_null_and_options(lib, monkeypatch) -> None:
+    """`chs_preview_insert` is the sixth insert-options call: its eight arguments
+    reach the ABI as the stub received them (the format, the output format, the
+    filter NULL or set, `memory_limit_bytes` in the options document)."""
+    calls = _spy(lib, monkeypatch, "preview_insert")
+    outs = _spy_insert_outputs(lib, monkeypatch)
+    with lib.compile_table(CREATE) as schema, schema.compile_filter("a > 1") as flt:
+        result = schema.insert(
+            Format.JSON_EACH_ROW,
+            b'{"a":1}\n',
+            Format.CSV,
+            columns=["a", b"\xff"],
+            row_filter=flt,
+            memory_limit_bytes=4096,
+            verdict_basis=VerdictBasis.EXPORT,
+            settings={"x": "y"},
+        )
+        schema.insert(Format.CSV, bytearray(b"1\n"), None)
+        schema.insert(Format.CSV, b"1\n", Format.NATIVE, memory_limit_bytes="0")
+    assert isinstance(result, InsertResult)
+    (_, fmt, body, settings, columns, handle, out_fmt, options), plain, nat = calls
+    assert fmt == int(Format.JSON_EACH_ROW) and body == b'{"a":1}\n'
+    assert json.loads(settings) == {"x": "y"}
+    assert json.loads(columns) == [{"name": "a"}, {"name_b64": "/w=="}]
+    assert handle is not None and out_fmt == int(Format.CSV)
+    assert json.loads(options) == {"verdict_basis": "export", "memory_limit_bytes": "4096"}
+    # no filter is NULL, no output is CHS_EXPORT_NONE (-1), no option is no document
+    assert plain[5] is None and plain[6] == -1 and plain[7] is None and plain[2] == b"1\n"
+    assert nat[6] == int(Format.NATIVE) and json.loads(nat[7]) == {"memory_limit_bytes": "0"}
+    # The stub's echo is no insert_result (no `outcome`): the unknown(n) member, never accepted.
+    assert not result.outcome.known and result.outcome is not Outcome.ACCEPTED
+    # The stub's own account of what reached it, echoed into out_rows and decoded
+    # here as the output bytes: the stub, not the test, says what it received.
+    assert result.output is None  # not accepted, so no public output
+    seen = echo(outs[0])
+    assert seen["fn"] == "chs_preview_insert" and seen["out"] == "out_rows"
+    args = seen["args"]
+    assert args[1] == int(Format.JSON_EACH_ROW) and args[6] == int(Format.CSV)
+    assert args[5] is not None and args[7]["len"] == len(options)
+    assert echo(outs[1])["args"][5] is None
+    assert echo(outs[1])["args"][6] == -1
+    assert echo(outs[2])["args"][6] == int(Format.NATIVE)
+
+
+def test_insert_result_decodes_the_echoed_out_rows(lib, monkeypatch) -> None:
+    outs = _spy_insert_outputs(lib, monkeypatch)
+    with lib.compile_table(CREATE) as schema:
+        result = schema.insert(Format.CSV, b"1\n", Format.CSV)
+    # The stub's echo is no accepted insert_result, so the public output is absent.
+    assert result.output is None
+    assert isinstance(outs[0], bytes) and len(outs[0]) > 0
+
+
+def test_insert_options_memory_limit_reaches_every_insert_options_call(lib, monkeypatch) -> None:
+    row = _spy(lib, monkeypatch, "preview_row")
+    batch = _spy(lib, monkeypatch, "preview_batch")
+    block = _spy(lib, monkeypatch, "block_create")
+    body = _spy(lib, monkeypatch, "filter_eval_body")
+    with lib.compile_table(CREATE) as schema, schema.compile_filter("a > 1") as flt:
+        schema.row(Format.CSV, b"1", memory_limit_bytes=7)
+        schema.rows(Format.CSV, b"1", memory_limit_bytes=7)
+        schema.parse_block(Format.CSV, b"1", memory_limit_bytes=7).close()
+        flt.rows(Format.CSV, b"1", memory_limit_bytes=7)
+    for calls in (row, batch, block, body):
+        assert json.loads(calls[0][-1]) == {"memory_limit_bytes": "7"}
+
+
+def test_insert_misuse_raises_before_any_call(lib, monkeypatch) -> None:
+    calls = _spy(lib, monkeypatch, "preview_insert")
+    with lib.compile_table(CREATE) as schema:
+        with pytest.raises(TypeError):
+            schema.insert(Format.CSV, "text", Format.CSV)  # type: ignore[arg-type]
+        with pytest.raises(TypeError):
+            schema.insert(Format.CSV, b"1", Format.CSV, row_filter=object())  # type: ignore[arg-type]
+        with pytest.raises(UsageError):
+            schema.insert(
+                Format.CSV,
+                b"1",
+                Format.CSV,
+                settings={"session_timezone": "UTC"},
+                session_timezone="UTC",
+            )
+    assert calls == []
+    with pytest.raises(UsageError):
+        schema.insert(Format.CSV, b"1", Format.CSV)  # a closed schema
