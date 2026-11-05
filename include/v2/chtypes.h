@@ -1757,16 +1757,17 @@ CHS_API chs_status chs_preview_batch(
  *   `refused_at` is `row`, `rows_passed`, `rows_cut` and `rows_undecided` are 0, `rows_read` is the
  *   batch's, and there is no output. An `e` row decides the call even where the batch's export was
  *   declined. A body-step refusal raised only by rows the filter cuts is answered here as the
- *   insert of the passing rows [`insert.post_where_cut`]: the outcome, the counts and the output
- *   are those of the `t` rows' insert, while the batch, which models the whole body, still refuses.
- *   With a filter attached, when a step after the WHERE (a CHECK, a MATERIALIZED expression that
- *   throws, the partition limit, a TTL, a projection or the sink) refuses a row the filter kept,
- *   `chs_preview_insert` answers `rejected` with the server's own `code` and `err` for the first
- *   failing kept row (numbered over the kept rows, as the server numbers them) and the `rows_read`
- *   its reader reached, while `chs_preview_batch` answers the same `code` with its own per-row
- *   `err` and `rows_read` for the whole body's refusal, so `err` and `rows_read` have no batch
- *   counterpart there [`insert.post_where_refusal`]; the outcome class and `code` stay equal. A
- *   value a generator DEFAULT draws is drawn per call, so two calls can draw differently; every
+ *   insert of the passing rows [`insert.post_where_cut`]: the outcome, `rows_passed` and the output
+ *   are those of the `t` rows' insert and `rows_read` is the records its reader reached, while the
+ *   batch, which models the whole body, still refuses, so `rows_read` and `rows_cut` have no batch
+ *   counterpart there. With a filter attached, when a step after the WHERE (a CHECK, a MATERIALIZED
+ *   expression that throws, the partition limit, a TTL, a projection or the sink) refuses a row the
+ *   filter kept, `chs_preview_insert` answers `rejected` with the server's own `code` and `err` for
+ *   the first failing kept row (numbered over the kept rows, as the server numbers them) and the
+ *   `rows_read` its reader reached, while `chs_preview_batch` answers the same `code` with its own
+ *   per-row `err` and `rows_read` for the whole body's refusal, so `err` and `rows_read` have no
+ *   batch counterpart there [`insert.post_where_refusal`]; the outcome class and `code` stay equal.
+ *   A value a generator DEFAULT draws is drawn per call, so two calls can draw differently; every
  *   other member is the same.
  *
  * An output row whose verdict is not `t` is an over-accept, a security-severity defect, as a `t`
