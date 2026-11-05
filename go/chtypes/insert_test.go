@@ -106,9 +106,9 @@ func TestStubInsertFilterIsNullableOnTheWire(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := string(wireOf(t, res)[5]); got != "null" {
-		t.Errorf("filter without WithInsertFilter = %s, want null", got)
+		t.Errorf("filter without WithRowFilter = %s, want null", got)
 	}
-	res, err = insertEcho(schema, JSONEachRow, []byte("ab"), CSV, WithInsertFilter(flt))
+	res, err = insertEcho(schema, JSONEachRow, []byte("ab"), CSV, WithRowFilter(flt))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,12 +116,12 @@ func TestStubInsertFilterIsNullableOnTheWire(t *testing.T) {
 		Kind string `json:"kind"`
 	}
 	if err := json.Unmarshal(wireOf(t, res)[5], &h); err != nil || h.Kind != "chs_filter" {
-		t.Errorf("filter with WithInsertFilter = %s (%v), want a chs_filter handle", wireOf(t, res)[5], err)
+		t.Errorf("filter with WithRowFilter = %s (%v), want a chs_filter handle", wireOf(t, res)[5], err)
 	}
 	// A closed filter is the binding's usage error, raised before the call.
 	flt.Close()
 	var ue *UsageError
-	if _, err := insertEcho(schema, JSONEachRow, []byte("ab"), CSV, WithInsertFilter(flt)); !errors.As(err, &ue) {
+	if _, err := insertEcho(schema, JSONEachRow, []byte("ab"), CSV, WithRowFilter(flt)); !errors.As(err, &ue) {
 		t.Errorf("a closed filter = %v, want a *UsageError", err)
 	}
 }
