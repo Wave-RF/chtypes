@@ -7,7 +7,7 @@
 // come from ClickHouse's own C++, vendored per release into a shared library
 // behind the C ABI, which is why they are exact rather than approximately right.
 //
-// This file is a tutorial you RUN. Eighteen numbered sections walk the whole
+// This file is a tutorial you RUN. Twenty-one numbered sections walk the whole
 // public API of the TypeScript SDK, from opening a library to the end of the
 // process, each with a comment saying what it demonstrates, why an ingest
 // pipeline cares and what to look at in the output. The same sections, with the
@@ -35,6 +35,7 @@ import {
   DefaultKind,
   DocFlags,
   type FilterResult,
+  type InsertResult,
   Format,
   formatChName,
   InternalError,
@@ -134,6 +135,9 @@ async function main(): Promise<void> {
   section16(lib);
   section17(lib);
   section18(lib);
+  section19(lib);
+  section20(lib);
+  section21(lib);
 
   blank();
   console.log('Done. Every value above was measured by this run.');
@@ -1165,6 +1169,240 @@ function section18(lib: Library): void {
   } finally {
     server.close();
   }
+}
+
+// ---------------------------------------------------------------------------
+// SECTIONS 19-21: Schema.insert, the whole body in one call (ABI v2)
+//
+// WHAT: insert() runs a whole INSERT of a body, optionally with the INSERT's
+// WHERE, and hands back the outcome, the counts and the OUTPUT rows in a format
+// the build can write. No per-row documents.
+// WHY: an ingest gateway that only wants the rows to forward does not need a
+// document per row. These three sections check that the short call agrees with
+// the long one (19), that its Native output reads back as the same data (20),
+// and that a memory limit is a whole-call decline, never a partial output (21).
+// LOOK FOR: a build that does not implement the call declines it, and each
+// section then says SKIPPED by name with the library's own reason. The skip is
+// read from the library's answer (outcome unsupported, reason
+// option-not-implemented, or the whole call declining), never from a version.
+// C API: chs_preview_insert.
+// ---------------------------------------------------------------------------
+const INSERT_DDL = 'CREATE TABLE t (k UInt32, s String) ENGINE = MergeTree ORDER BY k';
+const INSERT_BODY =
+  '{"k":1,"s":"one"}\n{"k":2,"s":"two"}\n{"k":3,"s":"three"}\n{"k":4,"s":"four"}\n{"k":5,"s":"five"}\n{"k":6,"s":"six"}\n';
+
+// The capability names the three sections key on, in ONE place: a rename in
+// chs_build_info is a one-line change here.
+const CAP_INSERT = 'preview_insert';
+const CAP_INSERT_MEMORY = 'insert_options.memory_limit_bytes';
+const CAP_NATIVE = 'Native';
+const CAP_COMPACT = 'JSONCompactEachRow';
+
+interface Advertised {
+  readonly features: readonly string[];
+  readonly exportFormats: readonly string[];
+}
+
+/** What the build advertises (chs_build_info capabilities) that the section needs and the build lacks. */
+function missingCaps(caps: Advertised, needFeatures: readonly string[], needFormats: readonly string[]): string[] {
+  return [
+    ...needFeatures.filter((f) => !caps.features.includes(f)).map((f) => `features:${f}`),
+    ...needFormats.filter((f) => !caps.exportFormats.includes(f)).map((f) => `export_formats:${f}`),
+  ];
+}
+
+/**
+ * Run an insert section, keyed on what the library ADVERTISES. Not advertised: SKIPPED by name, saying which
+ * capability is absent. Advertised: `body` must run and pass, and `body` returning 'skipped' (a decline) FAILS.
+ */
+function insertGate(
+  n: number,
+  caps: Advertised,
+  needFeatures: readonly string[],
+  needFormats: readonly string[],
+  body: () => 'ran' | 'skipped',
+  quiet = false,
+): void {
+  const missing = missingCaps(caps, needFeatures, needFormats);
+  if (missing.length > 0) {
+    if (quiet) return;
+    kv('SKIPPED', `section ${n}: this build does not advertise ${missing.join(', ')}`);
+    note('a build that advertises it runs this section and any decline then fails the tour');
+    return;
+  }
+  if (body() === 'skipped') throw new Error(`playground: section ${n}: the build advertises its capabilities but declined the call`);
+}
+
+/** Planted case: an advertised capability set with the section forced to skip must fail the tour. */
+function insertGateSelfCheck(): void {
+  const caps: Advertised = {
+    features: [CAP_INSERT, CAP_INSERT_MEMORY],
+    exportFormats: [CAP_NATIVE],
+  };
+  let failed = false;
+  try {
+    insertGate(0, caps, [CAP_INSERT], [], () => 'skipped');
+  } catch {
+    failed = true;
+  }
+  check(failed, 'self-check: an advertised capability with a forced skip must fail');
+  let ran = false;
+  insertGate(
+    0,
+    { features: [], exportFormats: [] },
+    [CAP_INSERT],
+    [],
+    () => {
+      ran = true;
+      return 'ran';
+    },
+    true,
+  );
+  check(!ran, 'self-check: an unadvertised capability must skip without running');
+}
+
+/** Run insert(); a decline as not implemented is reported as 'skipped' (the gate turns it into a failure). */
+function tryInsert(run: () => InsertResult): {
+  result?: InsertResult;
+  note?: string;
+} {
+  try {
+    const result = run();
+    if (result.outcome === 'unsupported' && result.reason === 'option-not-implemented') {
+      return {
+        note: `outcome unsupported, reason ${result.reason}: ${truncate(result.errMsg.toString(), 50)}`,
+      };
+    }
+    return { result };
+  } catch (err) {
+    if (!(err instanceof UnsupportedError)) throw err;
+    return {
+      note: `the call declines: ${truncate(err.messageBytes.toString(), 60)}`,
+    };
+  }
+}
+
+function check(cond: boolean, what: string): void {
+  if (!cond) throw new Error(`playground: section check failed: ${what}`);
+}
+
+// Section 19: the insert's output is the batch export of the passing rows.
+function section19(lib: Library): void {
+  section(19, 'Insert equals batch');
+  insertGateSelfCheck();
+  insertGate(19, lib.buildInfo.capabilities, [CAP_INSERT], [CAP_COMPACT], () => {
+    let status: 'ran' | 'skipped' = 'ran';
+    withSchema(lib, INSERT_DDL, (schema) => {
+      const filter = schema.compileFilter('k > 2');
+      try {
+        const body = utf8(INSERT_BODY);
+        const { result: ins, note: skip } = tryInsert(() =>
+          schema.insert(Format.JSONEachRow, body, Format.JSONCompactEachRow, {
+            rowFilter: filter,
+          }),
+        );
+        if (ins === undefined) {
+          status = 'skipped';
+          note(skip ?? '');
+          return;
+        }
+        const batch = schema.rows(Format.JSONEachRow, body, {
+          rowFilter: filter,
+          exportFormat: Format.JSONCompactEachRow,
+          docFlags: DocFlags.All,
+        });
+        check(ins.outcome === 'accepted', `insert outcome ${ins.outcome} (${ins.errMsg.toString()})`);
+        check(batch.outcome === 'accepted', `batch outcome ${batch.outcome}`);
+        check(ins.rowsPassed === batch.rowsPassed, `rows_passed ${ins.rowsPassed} != ${batch.rowsPassed}`);
+        check(ins.rowsCut === batch.rowsCut, `rows_cut ${ins.rowsCut} != ${batch.rowsCut}`);
+        const payload = batch.payload ?? Buffer.alloc(0);
+        const parts: Buffer[] = [];
+        batch.rows.forEach((row, i) => {
+          const span = batch.spans?.[i];
+          if (row.verdict === 't' && span) parts.push(payload.subarray(span.off, span.off + span.len));
+        });
+        const expected = Buffer.concat(parts);
+        const got = ins.output ?? Buffer.alloc(0);
+        check(
+          Buffer.compare(got, expected) === 0,
+          `insert output ${JSON.stringify(got.toString())} != batch t-rows ${JSON.stringify(expected.toString())}`,
+        );
+        kv('insert, filter k > 2', `${ins.outcome}  rows_passed=${ins.rowsPassed} rows_cut=${ins.rowsCut}  ${got.length} output bytes`);
+        kv('batch,  same filter', `${batch.outcome}  rows_passed=${batch.rowsPassed} rows_cut=${batch.rowsCut}`);
+        note(`insert equals batch: the output is the ${parts.length} span(s) of the t rows, in body order`);
+      } finally {
+        filter.close();
+      }
+    });
+    return status;
+  });
+}
+
+// Section 20: Native output feeds back in as a Native body.
+function section20(lib: Library): void {
+  section(20, 'Native round trip');
+  insertGate(20, lib.buildInfo.capabilities, [CAP_INSERT], [CAP_NATIVE], () => {
+    let status: 'ran' | 'skipped' = 'ran';
+    withSchema(lib, INSERT_DDL, (schema) => {
+      const body = utf8(INSERT_BODY);
+      const { result: ins, note: skip } = tryInsert(() => schema.insert(Format.JSONEachRow, body, Format.Native));
+      if (ins === undefined) {
+        status = 'skipped';
+        note(skip ?? '');
+        return;
+      }
+      check(ins.outcome === 'accepted', `insert outcome ${ins.outcome} (${ins.errMsg.toString()})`);
+      const native = ins.output;
+      check(native !== undefined && native.length > 0, 'a Native output');
+      const first = schema.rows(Format.JSONEachRow, body, {
+        docFlags: DocFlags.All,
+      });
+      const back = schema.rows(Format.Native, native as Buffer, {
+        docFlags: DocFlags.All,
+      });
+      check(back.outcome === 'accepted', `Native batch outcome ${back.outcome} (${back.errMsg.toString()})`);
+      check(back.rows.length === first.rows.length, `row count ${back.rows.length} != ${first.rows.length}`);
+      const cells = (r: BatchResult): string[] =>
+        r.rows.map((row) => row.values.map((v) => `${v.column.toString()}=${v.text.toString()}`).join(','));
+      const want = cells(first);
+      const got = cells(back);
+      check(want.length > 0 && want.every((w, i) => w === got[i]), `values differ: ${JSON.stringify(got)} != ${JSON.stringify(want)}`);
+      kv('Native output', `${native?.length} bytes`);
+      kv('read back as Native', `${back.outcome}  ${back.rows.length} rows, every column equal`);
+      note(`first row: ${want[0]}`);
+    });
+    return status;
+  });
+}
+
+// Section 21: a memory limit of one byte declines the whole call.
+function section21(lib: Library): void {
+  section(21, 'Memory limit declines');
+  insertGate(21, lib.buildInfo.capabilities, [CAP_INSERT, CAP_INSERT_MEMORY], [CAP_COMPACT], () => {
+    let status: 'ran' | 'skipped' = 'ran';
+    withSchema(lib, INSERT_DDL, (schema) => {
+      const body = utf8(INSERT_BODY);
+      const { result: ins, note: skip } = tryInsert(() =>
+        schema.insert(Format.JSONEachRow, body, Format.JSONCompactEachRow, {
+          memoryLimitBytes: 1,
+        }),
+      );
+      if (ins === undefined) {
+        status = 'skipped';
+        note(skip ?? '');
+        return;
+      }
+      check(ins.outcome === 'unsupported', `outcome ${ins.outcome}, want unsupported`);
+      check(ins.reason === 'call-memory-budget', `reason ${ins.reason}, want call-memory-budget`);
+      check(ins.output === undefined, 'a declined call has no output');
+      kv(
+        'insert, memory limit 1',
+        `${ins.outcome}  reason=${ins.reason}  output=${ins.output === undefined ? 'none' : `${ins.output.length} bytes`}`,
+      );
+      note('the limit is reached: the whole call declines and no partial output exists');
+    });
+    return status;
+  });
 }
 
 // ------------------------------------------------------------- plumbing
