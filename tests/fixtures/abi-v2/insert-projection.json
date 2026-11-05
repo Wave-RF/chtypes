@@ -3858,57 +3858,52 @@
     "outcome": "rejected",
     "code": 469,
     "err": "Constraint `n_nonneg` for table default.t is violated at row 2. Expression: (n >= 0). Column values: n = -1",
-    "rows": [
-     {
-      "outcome": "accepted",
-      "code": 0,
-      "input_span": {
-       "off": 0,
-       "len": 12
-      },
-      "verdict": "d",
-      "verdict_code": 0,
-      "verdict_err": "declined"
-     },
-     {
-      "outcome": "rejected",
-      "code": 469,
-      "input_span": {
-       "off": 12,
-       "len": 13
-      },
-      "err": "Constraint `n_nonneg` for table default.t is violated at row 2. Expression: (n >= 0). Column values: n = -1",
-      "verdict": "d",
-      "verdict_code": 0,
-      "verdict_err": "declined"
-     },
-     {
-      "outcome": "accepted",
-      "code": 0,
-      "input_span": {
-       "off": 25,
-       "len": 14
-      },
-      "verdict": "d",
-      "verdict_code": 0,
-      "verdict_err": "declined"
-     }
-    ],
-    "rows_read": 3,
+    "rows_read": 2,
     "rows_skipped": 0,
-    "unsupported_settings": [],
-    "unconsumed": [],
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "export_declined": "batch outcome is 'rejected': only a fully accepted batch exports bytes",
+    "export_declined_reason": "export-batch-not-accepted",
     "framing": {
      "bom_skipped": false,
      "container": null,
      "header": null
     },
+    "unconsumed": [],
+    "rows": [
+     {
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_err": "batch outcome is 'rejected': only a fully accepted batch has filter verdicts",
+      "outcome": "accepted",
+      "code": 0,
+      "err": "",
+      "cols": [],
+      "input_span": {
+       "off": 0,
+       "len": 12
+      },
+      "transformed": []
+     },
+     {
+      "verdict": "d",
+      "verdict_code": 469,
+      "verdict_err": "Constraint `n_nonneg` for table default.t is violated at row 2. Expression: (n >= 0). Column values: n = -1",
+      "outcome": "rejected",
+      "code": 469,
+      "err": "Constraint `n_nonneg` for table default.t is violated at row 2. Expression: (n >= 0). Column values: n = -1",
+      "cols": [],
+      "input_span": {
+       "off": 12,
+       "len": 13
+      },
+      "transformed": []
+     }
+    ],
+    "unsupported_settings": [],
     "refused_at": "row",
     "refused_row": 1,
-    "export_declined": "batch outcome is 'rejected'",
-    "export_declined_reason": "export-batch-not-accepted",
-    "rows_passed": 0,
-    "rows_cut": 0
+    "transformed": []
    },
    "batch_export_b64": null,
    "batch_of_t_rows": {
@@ -3920,47 +3915,57 @@
      "outcome": "accepted",
      "code": 0,
      "err": "",
-     "rows": [
-      {
-       "outcome": "accepted",
-       "code": 0,
-       "input_span": {
-        "off": 0,
-        "len": 12
-       },
-       "verdict": "t",
-       "verdict_code": 0
-      },
-      {
-       "outcome": "accepted",
-       "code": 0,
-       "input_span": {
-        "off": 12,
-        "len": 14
-       },
-       "verdict": "t",
-       "verdict_code": 0
-      }
-     ],
      "rows_read": 2,
      "rows_skipped": 0,
-     "unsupported_settings": [],
-     "unconsumed": [],
+     "rows_passed": 2,
+     "rows_cut": 0,
+     "row_spans": [
+      {
+       "off": 0,
+       "len": 13
+      },
+      {
+       "off": 13,
+       "len": 15
+      }
+     ],
      "framing": {
       "bom_skipped": false,
       "container": null,
       "header": null
      },
-     "row_spans": [
+     "unconsumed": [],
+     "rows": [
       {
-       "off": 0,
-       "len": 12
+       "verdict": "t",
+       "verdict_code": 0,
+       "verdict_err": "",
+       "outcome": "accepted",
+       "code": 0,
+       "err": "",
+       "cols": [],
+       "input_span": {
+        "off": 0,
+        "len": 12
+       },
+       "transformed": []
       },
       {
-       "off": 12,
-       "len": 14
+       "verdict": "t",
+       "verdict_code": 0,
+       "verdict_err": "",
+       "outcome": "accepted",
+       "code": 0,
+       "err": "",
+       "cols": [],
+       "input_span": {
+        "off": 12,
+        "len": 14
+       },
+       "transformed": []
       }
      ],
+     "unsupported_settings": [],
      "export_columns": [
       {
        "name": "n"
@@ -3969,23 +3974,38 @@
        "name": "s"
       }
      ],
-     "rows_passed": 2,
-     "rows_cut": 0
+     "transformed": []
     },
-    "export_b64": "WzEsImFscGhhIl0KWzIsImNoYXJsaWUiXQo="
+    "export_b64": "WzEsICJhbHBoYSJdClsyLCAiY2hhcmxpZSJdCg=="
    },
+   "body_records": [
+    {
+     "off": 0,
+     "len": 12
+    },
+    {
+     "off": 12,
+     "len": 13
+    },
+    {
+     "off": 25,
+     "len": 14
+    }
+   ],
    "insert": {
     "outcome": "accepted",
     "code": 0,
     "err": "",
     "rows_read": 3,
     "rows_skipped": 0,
-    "unsupported_settings": [],
+    "rows_passed": 2,
+    "rows_cut": 1,
     "framing": {
      "bom_skipped": false,
      "container": null,
      "header": null
     },
+    "unsupported_settings": [],
     "export_columns": [
      {
       "name": "n"
@@ -3994,12 +4014,21 @@
       "name": "s"
      }
     ],
-    "rows_passed": 2,
-    "rows_cut": 1,
     "rows_undecided": 0
    },
-   "insert_rows_b64": "WzEsImFscGhhIl0KWzIsImNoYXJsaWUiXQo=",
-   "expect": "equal"
+   "insert_rows_b64": "WzEsICJhbHBoYSJdClsyLCAiY2hhcmxpZSJdCg==",
+   "expect": "equal",
+   "provenance": {
+    "batch": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    },
+    "batch_of_t_rows": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    },
+    "insert": "unrecorded"
+   }
   },
   {
    "id": "red-post-where-refusal-insert-accepted-though-a-t-row-refused",
@@ -4007,136 +4036,127 @@
    "batch": {
     "outcome": "rejected",
     "code": 469,
-    "err": "Constraint `n_nonneg` for table default.t is violated at row 2. Expression: (n >= 0). Column values: n = -1",
-    "rows": [
-     {
-      "outcome": "accepted",
-      "code": 0,
-      "input_span": {
-       "off": 0,
-       "len": 12
-      },
-      "verdict": "d",
-      "verdict_code": 0,
-      "verdict_err": "declined"
-     },
-     {
-      "outcome": "rejected",
-      "code": 469,
-      "input_span": {
-       "off": 12,
-       "len": 13
-      },
-      "err": "Constraint `n_nonneg` for table default.t is violated at row 2. Expression: (n >= 0). Column values: n = -1",
-      "verdict": "d",
-      "verdict_code": 0,
-      "verdict_err": "declined"
-     },
-     {
-      "outcome": "accepted",
-      "code": 0,
-      "input_span": {
-       "off": 25,
-       "len": 14
-      },
-      "verdict": "d",
-      "verdict_code": 0,
-      "verdict_err": "declined"
-     }
-    ],
-    "rows_read": 3,
+    "err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = -20",
+    "rows_read": 1,
     "rows_skipped": 0,
-    "unsupported_settings": [],
-    "unconsumed": [],
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "export_declined": "batch outcome is 'rejected': only a fully accepted batch exports bytes",
+    "export_declined_reason": "export-batch-not-accepted",
     "framing": {
      "bom_skipped": false,
      "container": null,
      "header": null
     },
+    "unconsumed": [],
+    "rows": [
+     {
+      "verdict": "d",
+      "verdict_code": 469,
+      "verdict_err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = -20",
+      "outcome": "rejected",
+      "code": 469,
+      "err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = -20",
+      "cols": [],
+      "input_span": {
+       "off": 0,
+       "len": 14
+      },
+      "transformed": []
+     }
+    ],
+    "unsupported_settings": [],
     "refused_at": "row",
-    "refused_row": 1,
-    "export_declined": "batch outcome is 'rejected'",
-    "export_declined_reason": "export-batch-not-accepted",
-    "rows_passed": 0,
-    "rows_cut": 0
+    "refused_row": 0,
+    "transformed": []
    },
    "batch_export_b64": null,
    "batch_of_t_rows": {
     "rows": [
-     0,
      1,
      2
     ],
     "batch": {
      "outcome": "rejected",
      "code": 469,
-     "err": "Constraint `n_nonneg` for table default.t is violated at row 2. Expression: (n >= 0). Column values: n = -1",
-     "rows": [
-      {
-       "outcome": "accepted",
-       "code": 0,
-       "input_span": {
-        "off": 0,
-        "len": 12
-       },
-       "verdict": "d",
-       "verdict_code": 0,
-       "verdict_err": "declined"
-      },
-      {
-       "outcome": "rejected",
-       "code": 469,
-       "input_span": {
-        "off": 12,
-        "len": 13
-       },
-       "err": "Constraint `n_nonneg` for table default.t is violated at row 2. Expression: (n >= 0). Column values: n = -1",
-       "verdict": "d",
-       "verdict_code": 0,
-       "verdict_err": "declined"
-      },
-      {
-       "outcome": "accepted",
-       "code": 0,
-       "input_span": {
-        "off": 25,
-        "len": 14
-       },
-       "verdict": "d",
-       "verdict_code": 0,
-       "verdict_err": "declined"
-      }
-     ],
-     "rows_read": 3,
+     "err": "Constraint `n_abs` for table default.t is violated at row 2. Expression: (abs(n) < 10). Column values: n = 30",
+     "rows_read": 2,
      "rows_skipped": 0,
-     "unsupported_settings": [],
-     "unconsumed": [],
+     "rows_passed": 0,
+     "rows_cut": 0,
+     "export_declined": "batch outcome is 'rejected': only a fully accepted batch exports bytes",
+     "export_declined_reason": "export-batch-not-accepted",
      "framing": {
       "bom_skipped": false,
       "container": null,
       "header": null
      },
+     "unconsumed": [],
+     "rows": [
+      {
+       "verdict": "d",
+       "verdict_code": -2,
+       "verdict_err": "batch outcome is 'rejected': only a fully accepted batch has filter verdicts",
+       "outcome": "accepted",
+       "code": 0,
+       "err": "",
+       "cols": [],
+       "input_span": {
+        "off": 0,
+        "len": 12
+       },
+       "transformed": []
+      },
+      {
+       "verdict": "d",
+       "verdict_code": 469,
+       "verdict_err": "Constraint `n_abs` for table default.t is violated at row 2. Expression: (abs(n) < 10). Column values: n = 30",
+       "outcome": "rejected",
+       "code": 469,
+       "err": "Constraint `n_abs` for table default.t is violated at row 2. Expression: (abs(n) < 10). Column values: n = 30",
+       "cols": [],
+       "input_span": {
+        "off": 12,
+        "len": 15
+       },
+       "transformed": []
+      }
+     ],
+     "unsupported_settings": [],
      "refused_at": "row",
      "refused_row": 1,
-     "export_declined": "batch outcome is 'rejected'",
-     "export_declined_reason": "export-batch-not-accepted",
-     "rows_passed": 0,
-     "rows_cut": 0
+     "transformed": []
     },
     "export_b64": null
    },
+   "body_records": [
+    {
+     "off": 0,
+     "len": 14
+    },
+    {
+     "off": 14,
+     "len": 12
+    },
+    {
+     "off": 26,
+     "len": 15
+    }
+   ],
    "insert": {
     "outcome": "accepted",
     "code": 0,
     "err": "",
     "rows_read": 3,
     "rows_skipped": 0,
-    "unsupported_settings": [],
+    "rows_passed": 2,
+    "rows_cut": 1,
     "framing": {
      "bom_skipped": false,
      "container": null,
      "header": null
     },
+    "unsupported_settings": [],
     "export_columns": [
      {
       "name": "n"
@@ -4145,13 +4165,22 @@
       "name": "s"
      }
     ],
-    "rows_passed": 2,
-    "rows_cut": 1,
     "rows_undecided": 0
    },
-   "insert_rows_b64": "WzEsImFscGhhIl0KWzIsImNoYXJsaWUiXQo=",
+   "insert_rows_b64": "WzEsICJicmF2byJdClszMCwgImNoYXJsaWUiXQo=",
    "expect": {
     "violates": "post_where_refusal"
+   },
+   "provenance": {
+    "batch": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    },
+    "batch_of_t_rows": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    },
+    "insert": "planted"
    }
   },
   {
@@ -4161,71 +4190,82 @@
     "outcome": "rejected",
     "code": 469,
     "err": "Constraint `n_nonneg` for table default.t is violated at row 2. Expression: (n >= 0). Column values: n = -1",
-    "rows": [
-     {
-      "outcome": "accepted",
-      "code": 0,
-      "input_span": {
-       "off": 0,
-       "len": 12
-      },
-      "verdict": "d",
-      "verdict_code": 0,
-      "verdict_err": "declined"
-     },
-     {
-      "outcome": "rejected",
-      "code": 469,
-      "input_span": {
-       "off": 12,
-       "len": 13
-      },
-      "err": "Constraint `n_nonneg` for table default.t is violated at row 2. Expression: (n >= 0). Column values: n = -1",
-      "verdict": "d",
-      "verdict_code": 0,
-      "verdict_err": "declined"
-     },
-     {
-      "outcome": "accepted",
-      "code": 0,
-      "input_span": {
-       "off": 25,
-       "len": 14
-      },
-      "verdict": "d",
-      "verdict_code": 0,
-      "verdict_err": "declined"
-     }
-    ],
-    "rows_read": 3,
+    "rows_read": 2,
     "rows_skipped": 0,
-    "unsupported_settings": [],
-    "unconsumed": [],
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "export_declined": "batch outcome is 'rejected': only a fully accepted batch exports bytes",
+    "export_declined_reason": "export-batch-not-accepted",
     "framing": {
      "bom_skipped": false,
      "container": null,
      "header": null
     },
+    "unconsumed": [],
+    "rows": [
+     {
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_err": "batch outcome is 'rejected': only a fully accepted batch has filter verdicts",
+      "outcome": "accepted",
+      "code": 0,
+      "err": "",
+      "cols": [],
+      "input_span": {
+       "off": 0,
+       "len": 12
+      },
+      "transformed": []
+     },
+     {
+      "verdict": "d",
+      "verdict_code": 469,
+      "verdict_err": "Constraint `n_nonneg` for table default.t is violated at row 2. Expression: (n >= 0). Column values: n = -1",
+      "outcome": "rejected",
+      "code": 469,
+      "err": "Constraint `n_nonneg` for table default.t is violated at row 2. Expression: (n >= 0). Column values: n = -1",
+      "cols": [],
+      "input_span": {
+       "off": 12,
+       "len": 13
+      },
+      "transformed": []
+     }
+    ],
+    "unsupported_settings": [],
     "refused_at": "row",
     "refused_row": 1,
-    "export_declined": "batch outcome is 'rejected'",
-    "export_declined_reason": "export-batch-not-accepted",
-    "rows_passed": 0,
-    "rows_cut": 0
+    "transformed": []
    },
    "batch_export_b64": null,
+   "body_records": [
+    {
+     "off": 0,
+     "len": 12
+    },
+    {
+     "off": 12,
+     "len": 13
+    },
+    {
+     "off": 25,
+     "len": 14
+    }
+   ],
    "insert": {
     "outcome": "accepted",
     "code": 0,
     "err": "",
     "rows_read": 3,
     "rows_skipped": 0,
-    "unsupported_settings": [],
+    "rows_passed": 2,
+    "rows_cut": 1,
     "framing": {
      "bom_skipped": false,
      "container": null,
      "header": null
     },
+    "unsupported_settings": [],
     "export_columns": [
      {
       "name": "n"
@@ -4234,13 +4274,18 @@
       "name": "s"
      }
     ],
-    "rows_passed": 2,
-    "rows_cut": 1,
     "rows_undecided": 0
    },
-   "insert_rows_b64": "WzEsImFscGhhIl0KWzIsImNoYXJsaWUiXQo=",
+   "insert_rows_b64": "WzEsICJhbHBoYSJdClsyLCAiY2hhcmxpZSJdCg==",
    "expect": {
     "violates": "post_where_cut"
+   },
+   "provenance": {
+    "batch": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    },
+    "insert": "unrecorded"
    }
   },
   {
@@ -4250,57 +4295,52 @@
     "outcome": "rejected",
     "code": 469,
     "err": "Constraint `n_nonneg` for table default.t is violated at row 2. Expression: (n >= 0). Column values: n = -1",
-    "rows": [
-     {
-      "outcome": "accepted",
-      "code": 0,
-      "input_span": {
-       "off": 0,
-       "len": 12
-      },
-      "verdict": "d",
-      "verdict_code": 0,
-      "verdict_err": "declined"
-     },
-     {
-      "outcome": "rejected",
-      "code": 469,
-      "input_span": {
-       "off": 12,
-       "len": 13
-      },
-      "err": "Constraint `n_nonneg` for table default.t is violated at row 2. Expression: (n >= 0). Column values: n = -1",
-      "verdict": "d",
-      "verdict_code": 0,
-      "verdict_err": "declined"
-     },
-     {
-      "outcome": "accepted",
-      "code": 0,
-      "input_span": {
-       "off": 25,
-       "len": 14
-      },
-      "verdict": "d",
-      "verdict_code": 0,
-      "verdict_err": "declined"
-     }
-    ],
-    "rows_read": 3,
+    "rows_read": 2,
     "rows_skipped": 0,
-    "unsupported_settings": [],
-    "unconsumed": [],
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "export_declined": "batch outcome is 'rejected': only a fully accepted batch exports bytes",
+    "export_declined_reason": "export-batch-not-accepted",
     "framing": {
      "bom_skipped": false,
      "container": null,
      "header": null
     },
+    "unconsumed": [],
+    "rows": [
+     {
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_err": "batch outcome is 'rejected': only a fully accepted batch has filter verdicts",
+      "outcome": "accepted",
+      "code": 0,
+      "err": "",
+      "cols": [],
+      "input_span": {
+       "off": 0,
+       "len": 12
+      },
+      "transformed": []
+     },
+     {
+      "verdict": "d",
+      "verdict_code": 469,
+      "verdict_err": "Constraint `n_nonneg` for table default.t is violated at row 2. Expression: (n >= 0). Column values: n = -1",
+      "outcome": "rejected",
+      "code": 469,
+      "err": "Constraint `n_nonneg` for table default.t is violated at row 2. Expression: (n >= 0). Column values: n = -1",
+      "cols": [],
+      "input_span": {
+       "off": 12,
+       "len": 13
+      },
+      "transformed": []
+     }
+    ],
+    "unsupported_settings": [],
     "refused_at": "row",
     "refused_row": 1,
-    "export_declined": "batch outcome is 'rejected'",
-    "export_declined_reason": "export-batch-not-accepted",
-    "rows_passed": 0,
-    "rows_cut": 0
+    "transformed": []
    },
    "batch_export_b64": null,
    "batch_of_t_rows": {
@@ -4312,47 +4352,57 @@
      "outcome": "accepted",
      "code": 0,
      "err": "",
-     "rows": [
-      {
-       "outcome": "accepted",
-       "code": 0,
-       "input_span": {
-        "off": 0,
-        "len": 12
-       },
-       "verdict": "t",
-       "verdict_code": 0
-      },
-      {
-       "outcome": "accepted",
-       "code": 0,
-       "input_span": {
-        "off": 12,
-        "len": 14
-       },
-       "verdict": "t",
-       "verdict_code": 0
-      }
-     ],
      "rows_read": 2,
      "rows_skipped": 0,
-     "unsupported_settings": [],
-     "unconsumed": [],
+     "rows_passed": 2,
+     "rows_cut": 0,
+     "row_spans": [
+      {
+       "off": 0,
+       "len": 13
+      },
+      {
+       "off": 13,
+       "len": 15
+      }
+     ],
      "framing": {
       "bom_skipped": false,
       "container": null,
       "header": null
      },
-     "row_spans": [
+     "unconsumed": [],
+     "rows": [
       {
-       "off": 0,
-       "len": 12
+       "verdict": "t",
+       "verdict_code": 0,
+       "verdict_err": "",
+       "outcome": "accepted",
+       "code": 0,
+       "err": "",
+       "cols": [],
+       "input_span": {
+        "off": 0,
+        "len": 12
+       },
+       "transformed": []
       },
       {
-       "off": 12,
-       "len": 14
+       "verdict": "t",
+       "verdict_code": 0,
+       "verdict_err": "",
+       "outcome": "accepted",
+       "code": 0,
+       "err": "",
+       "cols": [],
+       "input_span": {
+        "off": 12,
+        "len": 14
+       },
+       "transformed": []
       }
      ],
+     "unsupported_settings": [],
      "export_columns": [
       {
        "name": "n"
@@ -4361,23 +4411,38 @@
        "name": "s"
       }
      ],
-     "rows_passed": 2,
-     "rows_cut": 0
+     "transformed": []
     },
-    "export_b64": "WzEsImFscGhhIl0KWzIsImNoYXJsaWUiXQo="
+    "export_b64": "WzEsICJhbHBoYSJdClsyLCAiY2hhcmxpZSJdCg=="
    },
+   "body_records": [
+    {
+     "off": 0,
+     "len": 12
+    },
+    {
+     "off": 12,
+     "len": 13
+    },
+    {
+     "off": 25,
+     "len": 14
+    }
+   ],
    "insert": {
     "outcome": "accepted",
     "code": 0,
     "err": "",
     "rows_read": 3,
     "rows_skipped": 0,
-    "unsupported_settings": [],
+    "rows_passed": 2,
+    "rows_cut": 1,
     "framing": {
      "bom_skipped": false,
      "container": null,
      "header": null
     },
+    "unsupported_settings": [],
     "export_columns": [
      {
       "name": "n"
@@ -4386,13 +4451,203 @@
       "name": "s"
      }
     ],
-    "rows_passed": 2,
-    "rows_cut": 1,
     "rows_undecided": 0
    },
-   "insert_rows_b64": "WzEsImFscGhhIl0KWy0xLCJicmF2byJdClsyLCJjaGFybGllIl0K",
+   "insert_rows_b64": "WzEsICJhbHBoYSJdClstMSwgImJyYXZvIl0KWzIsICJjaGFybGllIl0K",
    "expect": {
     "violates": "post_where_cut"
+   },
+   "provenance": {
+    "batch": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    },
+    "batch_of_t_rows": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    },
+    "insert": "planted"
+   }
+  },
+  {
+   "id": "red-post-where-cut-insert-stops-early",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "rejected",
+    "code": 469,
+    "err": "Constraint `n_nonneg` for table default.t is violated at row 2. Expression: (n >= 0). Column values: n = -1",
+    "rows_read": 2,
+    "rows_skipped": 0,
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "export_declined": "batch outcome is 'rejected': only a fully accepted batch exports bytes",
+    "export_declined_reason": "export-batch-not-accepted",
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "unconsumed": [],
+    "rows": [
+     {
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_err": "batch outcome is 'rejected': only a fully accepted batch has filter verdicts",
+      "outcome": "accepted",
+      "code": 0,
+      "err": "",
+      "cols": [],
+      "input_span": {
+       "off": 0,
+       "len": 12
+      },
+      "transformed": []
+     },
+     {
+      "verdict": "d",
+      "verdict_code": 469,
+      "verdict_err": "Constraint `n_nonneg` for table default.t is violated at row 2. Expression: (n >= 0). Column values: n = -1",
+      "outcome": "rejected",
+      "code": 469,
+      "err": "Constraint `n_nonneg` for table default.t is violated at row 2. Expression: (n >= 0). Column values: n = -1",
+      "cols": [],
+      "input_span": {
+       "off": 12,
+       "len": 13
+      },
+      "transformed": []
+     }
+    ],
+    "unsupported_settings": [],
+    "refused_at": "row",
+    "refused_row": 1,
+    "transformed": []
+   },
+   "batch_export_b64": null,
+   "batch_of_t_rows": {
+    "rows": [
+     0,
+     2
+    ],
+    "batch": {
+     "outcome": "accepted",
+     "code": 0,
+     "err": "",
+     "rows_read": 2,
+     "rows_skipped": 0,
+     "rows_passed": 2,
+     "rows_cut": 0,
+     "row_spans": [
+      {
+       "off": 0,
+       "len": 13
+      },
+      {
+       "off": 13,
+       "len": 15
+      }
+     ],
+     "framing": {
+      "bom_skipped": false,
+      "container": null,
+      "header": null
+     },
+     "unconsumed": [],
+     "rows": [
+      {
+       "verdict": "t",
+       "verdict_code": 0,
+       "verdict_err": "",
+       "outcome": "accepted",
+       "code": 0,
+       "err": "",
+       "cols": [],
+       "input_span": {
+        "off": 0,
+        "len": 12
+       },
+       "transformed": []
+      },
+      {
+       "verdict": "t",
+       "verdict_code": 0,
+       "verdict_err": "",
+       "outcome": "accepted",
+       "code": 0,
+       "err": "",
+       "cols": [],
+       "input_span": {
+        "off": 12,
+        "len": 14
+       },
+       "transformed": []
+      }
+     ],
+     "unsupported_settings": [],
+     "export_columns": [
+      {
+       "name": "n"
+      },
+      {
+       "name": "s"
+      }
+     ],
+     "transformed": []
+    },
+    "export_b64": "WzEsICJhbHBoYSJdClsyLCAiY2hhcmxpZSJdCg=="
+   },
+   "body_records": [
+    {
+     "off": 0,
+     "len": 12
+    },
+    {
+     "off": 12,
+     "len": 13
+    },
+    {
+     "off": 25,
+     "len": 14
+    }
+   ],
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 2,
+    "rows_skipped": 0,
+    "rows_passed": 2,
+    "rows_cut": 1,
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "unsupported_settings": [],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_undecided": 0
+   },
+   "insert_rows_b64": "WzEsICJhbHBoYSJdClsyLCAiY2hhcmxpZSJdCg==",
+   "expect": {
+    "violates": "post_where_cut"
+   },
+   "provenance": {
+    "batch": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    },
+    "batch_of_t_rows": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    },
+    "insert": "planted"
    }
   },
   {
@@ -4402,57 +4657,38 @@
     "outcome": "rejected",
     "code": 469,
     "err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = -20",
-    "rows": [
-     {
-      "outcome": "rejected",
-      "code": 469,
-      "input_span": {
-       "off": 0,
-       "len": 14
-      },
-      "err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = -20",
-      "verdict": "d",
-      "verdict_code": 0,
-      "verdict_err": "declined"
-     },
-     {
-      "outcome": "accepted",
-      "code": 0,
-      "input_span": {
-       "off": 14,
-       "len": 12
-      },
-      "verdict": "d",
-      "verdict_code": 0,
-      "verdict_err": "declined"
-     },
-     {
-      "outcome": "accepted",
-      "code": 0,
-      "input_span": {
-       "off": 26,
-       "len": 15
-      },
-      "verdict": "d",
-      "verdict_code": 0,
-      "verdict_err": "declined"
-     }
-    ],
-    "rows_read": 3,
+    "rows_read": 1,
     "rows_skipped": 0,
-    "unsupported_settings": [],
-    "unconsumed": [],
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "export_declined": "batch outcome is 'rejected': only a fully accepted batch exports bytes",
+    "export_declined_reason": "export-batch-not-accepted",
     "framing": {
      "bom_skipped": false,
      "container": null,
      "header": null
     },
+    "unconsumed": [],
+    "rows": [
+     {
+      "verdict": "d",
+      "verdict_code": 469,
+      "verdict_err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = -20",
+      "outcome": "rejected",
+      "code": 469,
+      "err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = -20",
+      "cols": [],
+      "input_span": {
+       "off": 0,
+       "len": 14
+      },
+      "transformed": []
+     }
+    ],
+    "unsupported_settings": [],
     "refused_at": "row",
     "refused_row": 0,
-    "export_declined": "batch outcome is 'rejected'",
-    "export_declined_reason": "export-batch-not-accepted",
-    "rows_passed": 0,
-    "rows_cut": 0
+    "transformed": []
    },
    "batch_export_b64": null,
    "batch_of_t_rows": {
@@ -4464,68 +4700,99 @@
      "outcome": "rejected",
      "code": 469,
      "err": "Constraint `n_abs` for table default.t is violated at row 2. Expression: (abs(n) < 10). Column values: n = 30",
-     "rows": [
-      {
-       "outcome": "accepted",
-       "code": 0,
-       "input_span": {
-        "off": 0,
-        "len": 12
-       },
-       "verdict": "d",
-       "verdict_code": 0,
-       "verdict_err": "declined"
-      },
-      {
-       "outcome": "rejected",
-       "code": 469,
-       "input_span": {
-        "off": 12,
-        "len": 15
-       },
-       "err": "Constraint `n_abs` for table default.t is violated at row 2. Expression: (abs(n) < 10). Column values: n = 30",
-       "verdict": "d",
-       "verdict_code": 0,
-       "verdict_err": "declined"
-      }
-     ],
      "rows_read": 2,
      "rows_skipped": 0,
-     "unsupported_settings": [],
-     "unconsumed": [],
+     "rows_passed": 0,
+     "rows_cut": 0,
+     "export_declined": "batch outcome is 'rejected': only a fully accepted batch exports bytes",
+     "export_declined_reason": "export-batch-not-accepted",
      "framing": {
       "bom_skipped": false,
       "container": null,
       "header": null
      },
+     "unconsumed": [],
+     "rows": [
+      {
+       "verdict": "d",
+       "verdict_code": -2,
+       "verdict_err": "batch outcome is 'rejected': only a fully accepted batch has filter verdicts",
+       "outcome": "accepted",
+       "code": 0,
+       "err": "",
+       "cols": [],
+       "input_span": {
+        "off": 0,
+        "len": 12
+       },
+       "transformed": []
+      },
+      {
+       "verdict": "d",
+       "verdict_code": 469,
+       "verdict_err": "Constraint `n_abs` for table default.t is violated at row 2. Expression: (abs(n) < 10). Column values: n = 30",
+       "outcome": "rejected",
+       "code": 469,
+       "err": "Constraint `n_abs` for table default.t is violated at row 2. Expression: (abs(n) < 10). Column values: n = 30",
+       "cols": [],
+       "input_span": {
+        "off": 12,
+        "len": 15
+       },
+       "transformed": []
+      }
+     ],
+     "unsupported_settings": [],
      "refused_at": "row",
      "refused_row": 1,
-     "export_declined": "batch outcome is 'rejected'",
-     "export_declined_reason": "export-batch-not-accepted",
-     "rows_passed": 0,
-     "rows_cut": 0
+     "transformed": []
     },
     "export_b64": null
    },
+   "body_records": [
+    {
+     "off": 0,
+     "len": 14
+    },
+    {
+     "off": 14,
+     "len": 12
+    },
+    {
+     "off": 26,
+     "len": 15
+    }
+   ],
    "insert": {
     "outcome": "rejected",
     "code": 469,
     "err": "Constraint `n_abs` for table default.t is violated at row 2. Expression: (abs(n) < 10). Column values: n = 30",
     "rows_read": 3,
     "rows_skipped": 0,
-    "unsupported_settings": [],
+    "rows_passed": 0,
+    "rows_cut": 0,
     "framing": {
      "bom_skipped": false,
      "container": null,
      "header": null
     },
+    "unsupported_settings": [],
     "refused_at": "row",
-    "rows_passed": 0,
-    "rows_cut": 0,
     "rows_undecided": 0
    },
    "insert_rows_b64": null,
-   "expect": "equal"
+   "expect": "equal",
+   "provenance": {
+    "batch": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    },
+    "batch_of_t_rows": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    },
+    "insert": "unrecorded"
+   }
   },
   {
    "id": "red-post-where-refusal-err-is-the-whole-batch-s",
@@ -4534,57 +4801,38 @@
     "outcome": "rejected",
     "code": 469,
     "err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = -20",
-    "rows": [
-     {
-      "outcome": "rejected",
-      "code": 469,
-      "input_span": {
-       "off": 0,
-       "len": 14
-      },
-      "err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = -20",
-      "verdict": "d",
-      "verdict_code": 0,
-      "verdict_err": "declined"
-     },
-     {
-      "outcome": "accepted",
-      "code": 0,
-      "input_span": {
-       "off": 14,
-       "len": 12
-      },
-      "verdict": "d",
-      "verdict_code": 0,
-      "verdict_err": "declined"
-     },
-     {
-      "outcome": "accepted",
-      "code": 0,
-      "input_span": {
-       "off": 26,
-       "len": 15
-      },
-      "verdict": "d",
-      "verdict_code": 0,
-      "verdict_err": "declined"
-     }
-    ],
-    "rows_read": 3,
+    "rows_read": 1,
     "rows_skipped": 0,
-    "unsupported_settings": [],
-    "unconsumed": [],
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "export_declined": "batch outcome is 'rejected': only a fully accepted batch exports bytes",
+    "export_declined_reason": "export-batch-not-accepted",
     "framing": {
      "bom_skipped": false,
      "container": null,
      "header": null
     },
+    "unconsumed": [],
+    "rows": [
+     {
+      "verdict": "d",
+      "verdict_code": 469,
+      "verdict_err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = -20",
+      "outcome": "rejected",
+      "code": 469,
+      "err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = -20",
+      "cols": [],
+      "input_span": {
+       "off": 0,
+       "len": 14
+      },
+      "transformed": []
+     }
+    ],
+    "unsupported_settings": [],
     "refused_at": "row",
     "refused_row": 0,
-    "export_declined": "batch outcome is 'rejected'",
-    "export_declined_reason": "export-batch-not-accepted",
-    "rows_passed": 0,
-    "rows_cut": 0
+    "transformed": []
    },
    "batch_export_b64": null,
    "batch_of_t_rows": {
@@ -4596,69 +4844,100 @@
      "outcome": "rejected",
      "code": 469,
      "err": "Constraint `n_abs` for table default.t is violated at row 2. Expression: (abs(n) < 10). Column values: n = 30",
-     "rows": [
-      {
-       "outcome": "accepted",
-       "code": 0,
-       "input_span": {
-        "off": 0,
-        "len": 12
-       },
-       "verdict": "d",
-       "verdict_code": 0,
-       "verdict_err": "declined"
-      },
-      {
-       "outcome": "rejected",
-       "code": 469,
-       "input_span": {
-        "off": 12,
-        "len": 15
-       },
-       "err": "Constraint `n_abs` for table default.t is violated at row 2. Expression: (abs(n) < 10). Column values: n = 30",
-       "verdict": "d",
-       "verdict_code": 0,
-       "verdict_err": "declined"
-      }
-     ],
      "rows_read": 2,
      "rows_skipped": 0,
-     "unsupported_settings": [],
-     "unconsumed": [],
+     "rows_passed": 0,
+     "rows_cut": 0,
+     "export_declined": "batch outcome is 'rejected': only a fully accepted batch exports bytes",
+     "export_declined_reason": "export-batch-not-accepted",
      "framing": {
       "bom_skipped": false,
       "container": null,
       "header": null
      },
+     "unconsumed": [],
+     "rows": [
+      {
+       "verdict": "d",
+       "verdict_code": -2,
+       "verdict_err": "batch outcome is 'rejected': only a fully accepted batch has filter verdicts",
+       "outcome": "accepted",
+       "code": 0,
+       "err": "",
+       "cols": [],
+       "input_span": {
+        "off": 0,
+        "len": 12
+       },
+       "transformed": []
+      },
+      {
+       "verdict": "d",
+       "verdict_code": 469,
+       "verdict_err": "Constraint `n_abs` for table default.t is violated at row 2. Expression: (abs(n) < 10). Column values: n = 30",
+       "outcome": "rejected",
+       "code": 469,
+       "err": "Constraint `n_abs` for table default.t is violated at row 2. Expression: (abs(n) < 10). Column values: n = 30",
+       "cols": [],
+       "input_span": {
+        "off": 12,
+        "len": 15
+       },
+       "transformed": []
+      }
+     ],
+     "unsupported_settings": [],
      "refused_at": "row",
      "refused_row": 1,
-     "export_declined": "batch outcome is 'rejected'",
-     "export_declined_reason": "export-batch-not-accepted",
-     "rows_passed": 0,
-     "rows_cut": 0
+     "transformed": []
     },
     "export_b64": null
    },
+   "body_records": [
+    {
+     "off": 0,
+     "len": 14
+    },
+    {
+     "off": 14,
+     "len": 12
+    },
+    {
+     "off": 26,
+     "len": 15
+    }
+   ],
    "insert": {
     "outcome": "rejected",
     "code": 469,
     "err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = -20",
     "rows_read": 3,
     "rows_skipped": 0,
-    "unsupported_settings": [],
+    "rows_passed": 0,
+    "rows_cut": 0,
     "framing": {
      "bom_skipped": false,
      "container": null,
      "header": null
     },
+    "unsupported_settings": [],
     "refused_at": "row",
-    "rows_passed": 0,
-    "rows_cut": 0,
     "rows_undecided": 0
    },
    "insert_rows_b64": null,
    "expect": {
     "violates": "post_where_refusal"
+   },
+   "provenance": {
+    "batch": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    },
+    "batch_of_t_rows": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    },
+    "insert": "planted"
    }
   },
   {
@@ -4668,57 +4947,38 @@
     "outcome": "rejected",
     "code": 469,
     "err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = -20",
-    "rows": [
-     {
-      "outcome": "rejected",
-      "code": 469,
-      "input_span": {
-       "off": 0,
-       "len": 14
-      },
-      "err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = -20",
-      "verdict": "d",
-      "verdict_code": 0,
-      "verdict_err": "declined"
-     },
-     {
-      "outcome": "accepted",
-      "code": 0,
-      "input_span": {
-       "off": 14,
-       "len": 12
-      },
-      "verdict": "d",
-      "verdict_code": 0,
-      "verdict_err": "declined"
-     },
-     {
-      "outcome": "accepted",
-      "code": 0,
-      "input_span": {
-       "off": 26,
-       "len": 15
-      },
-      "verdict": "d",
-      "verdict_code": 0,
-      "verdict_err": "declined"
-     }
-    ],
-    "rows_read": 3,
+    "rows_read": 1,
     "rows_skipped": 0,
-    "unsupported_settings": [],
-    "unconsumed": [],
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "export_declined": "batch outcome is 'rejected': only a fully accepted batch exports bytes",
+    "export_declined_reason": "export-batch-not-accepted",
     "framing": {
      "bom_skipped": false,
      "container": null,
      "header": null
     },
+    "unconsumed": [],
+    "rows": [
+     {
+      "verdict": "d",
+      "verdict_code": 469,
+      "verdict_err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = -20",
+      "outcome": "rejected",
+      "code": 469,
+      "err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = -20",
+      "cols": [],
+      "input_span": {
+       "off": 0,
+       "len": 14
+      },
+      "transformed": []
+     }
+    ],
+    "unsupported_settings": [],
     "refused_at": "row",
     "refused_row": 0,
-    "export_declined": "batch outcome is 'rejected'",
-    "export_declined_reason": "export-batch-not-accepted",
-    "rows_passed": 0,
-    "rows_cut": 0
+    "transformed": []
    },
    "batch_export_b64": null,
    "batch_of_t_rows": {
@@ -4730,67 +4990,242 @@
      "outcome": "rejected",
      "code": 252,
      "err": "Too many partitions for single INSERT block (more than 1). The limit is controlled by 'max_partitions_per_insert_block' setting",
-     "rows": [
-      {
-       "outcome": "accepted",
-       "code": 0,
-       "input_span": {
-        "off": 0,
-        "len": 12
-       },
-       "verdict": "d",
-       "verdict_code": 0,
-       "verdict_err": "declined"
-      },
-      {
-       "outcome": "accepted",
-       "code": 0,
-       "input_span": {
-        "off": 12,
-        "len": 15
-       },
-       "verdict": "d",
-       "verdict_code": 0,
-       "verdict_err": "declined"
-      }
-     ],
      "rows_read": 2,
      "rows_skipped": 0,
-     "unsupported_settings": [],
-     "unconsumed": [],
+     "rows_passed": 0,
+     "rows_cut": 0,
+     "export_declined": "batch outcome is 'rejected': only a fully accepted batch exports bytes",
+     "export_declined_reason": "export-batch-not-accepted",
      "framing": {
       "bom_skipped": false,
       "container": null,
       "header": null
      },
+     "unconsumed": [],
+     "rows": [
+      {
+       "verdict": "d",
+       "verdict_code": -2,
+       "verdict_err": "batch outcome is 'rejected': only a fully accepted batch has filter verdicts",
+       "outcome": "accepted",
+       "code": 0,
+       "err": "",
+       "cols": [],
+       "input_span": {
+        "off": 0,
+        "len": 12
+       },
+       "transformed": []
+      },
+      {
+       "verdict": "d",
+       "verdict_code": -2,
+       "verdict_err": "batch outcome is 'rejected': only a fully accepted batch has filter verdicts",
+       "outcome": "accepted",
+       "code": 0,
+       "err": "",
+       "cols": [],
+       "input_span": {
+        "off": 12,
+        "len": 15
+       },
+       "transformed": []
+      }
+     ],
+     "unsupported_settings": [],
      "refused_at": "body_step",
-     "export_declined": "batch outcome is 'rejected'",
-     "export_declined_reason": "export-batch-not-accepted",
-     "rows_passed": 0,
-     "rows_cut": 0
+     "transformed": []
     },
     "export_b64": null
    },
+   "body_records": [
+    {
+     "off": 0,
+     "len": 14
+    },
+    {
+     "off": 14,
+     "len": 12
+    },
+    {
+     "off": 26,
+     "len": 15
+    }
+   ],
    "insert": {
     "outcome": "rejected",
     "code": 252,
     "err": "Too many partitions for single INSERT block (more than 1). The limit is controlled by 'max_partitions_per_insert_block' setting",
     "rows_read": 3,
     "rows_skipped": 0,
-    "unsupported_settings": [],
+    "rows_passed": 0,
+    "rows_cut": 0,
     "framing": {
      "bom_skipped": false,
      "container": null,
      "header": null
     },
+    "unsupported_settings": [],
     "refused_at": "row",
-    "rows_passed": 0,
-    "rows_cut": 0,
     "rows_undecided": 0
    },
    "insert_rows_b64": null,
    "expect": {
     "violates": "post_where_refusal"
+   },
+   "provenance": {
+    "batch": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    },
+    "batch_of_t_rows": "planted",
+    "insert": "planted"
+   }
+  },
+  {
+   "id": "red-post-where-refusal-insert-stops-early",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "rejected",
+    "code": 469,
+    "err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = -20",
+    "rows_read": 1,
+    "rows_skipped": 0,
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "export_declined": "batch outcome is 'rejected': only a fully accepted batch exports bytes",
+    "export_declined_reason": "export-batch-not-accepted",
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "unconsumed": [],
+    "rows": [
+     {
+      "verdict": "d",
+      "verdict_code": 469,
+      "verdict_err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = -20",
+      "outcome": "rejected",
+      "code": 469,
+      "err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = -20",
+      "cols": [],
+      "input_span": {
+       "off": 0,
+       "len": 14
+      },
+      "transformed": []
+     }
+    ],
+    "unsupported_settings": [],
+    "refused_at": "row",
+    "refused_row": 0,
+    "transformed": []
+   },
+   "batch_export_b64": null,
+   "batch_of_t_rows": {
+    "rows": [
+     1,
+     2
+    ],
+    "batch": {
+     "outcome": "rejected",
+     "code": 469,
+     "err": "Constraint `n_abs` for table default.t is violated at row 2. Expression: (abs(n) < 10). Column values: n = 30",
+     "rows_read": 2,
+     "rows_skipped": 0,
+     "rows_passed": 0,
+     "rows_cut": 0,
+     "export_declined": "batch outcome is 'rejected': only a fully accepted batch exports bytes",
+     "export_declined_reason": "export-batch-not-accepted",
+     "framing": {
+      "bom_skipped": false,
+      "container": null,
+      "header": null
+     },
+     "unconsumed": [],
+     "rows": [
+      {
+       "verdict": "d",
+       "verdict_code": -2,
+       "verdict_err": "batch outcome is 'rejected': only a fully accepted batch has filter verdicts",
+       "outcome": "accepted",
+       "code": 0,
+       "err": "",
+       "cols": [],
+       "input_span": {
+        "off": 0,
+        "len": 12
+       },
+       "transformed": []
+      },
+      {
+       "verdict": "d",
+       "verdict_code": 469,
+       "verdict_err": "Constraint `n_abs` for table default.t is violated at row 2. Expression: (abs(n) < 10). Column values: n = 30",
+       "outcome": "rejected",
+       "code": 469,
+       "err": "Constraint `n_abs` for table default.t is violated at row 2. Expression: (abs(n) < 10). Column values: n = 30",
+       "cols": [],
+       "input_span": {
+        "off": 12,
+        "len": 15
+       },
+       "transformed": []
+      }
+     ],
+     "unsupported_settings": [],
+     "refused_at": "row",
+     "refused_row": 1,
+     "transformed": []
+    },
+    "export_b64": null
+   },
+   "body_records": [
+    {
+     "off": 0,
+     "len": 14
+    },
+    {
+     "off": 14,
+     "len": 12
+    },
+    {
+     "off": 26,
+     "len": 15
+    }
+   ],
+   "insert": {
+    "outcome": "rejected",
+    "code": 469,
+    "err": "Constraint `n_abs` for table default.t is violated at row 2. Expression: (abs(n) < 10). Column values: n = 30",
+    "rows_read": 1,
+    "rows_skipped": 0,
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "unsupported_settings": [],
+    "refused_at": "row",
+    "rows_undecided": 0
+   },
+   "insert_rows_b64": null,
+   "expect": {
+    "violates": "post_where_refusal"
+   },
+   "provenance": {
+    "batch": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    },
+    "batch_of_t_rows": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    },
+    "insert": "planted"
    }
   }
  ]

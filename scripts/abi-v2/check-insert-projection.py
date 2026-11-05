@@ -8,8 +8,10 @@ cases, each a batch document with its export bytes and an insert_result with
 its output bytes; every binding's projection-gate unit tests read the same file
 and mirror the rule names below.
 
-    check-insert-projection.py             check the fixture's cases
-    check-insert-projection.py --selftest  check them, then prove every rule fires
+    check-insert-projection.py                     check the fixture's cases
+    check-insert-projection.py --selftest          check them, then prove every rule fires
+    check-insert-projection.py --require-recorded  check them, and fail while any
+                                                   document is marked unrecorded
 
 A case: id, output_format (a chs_format name, or NONE), batch, batch_export_b64
 (null when no export ran), insert, insert_rows_b64 (null when no output), expect:
@@ -17,7 +19,19 @@ A case: id, output_format (a chs_format name, or NONE), batch, batch_export_b64
 body the post-WHERE steps refused, batch_of_t_rows: {rows, batch, export_b64}, where rows
 are the indexes of the body's rows the insert keeps (its t rows) and batch, with
 its export, is chs_preview_batch's document for the same inputs over those
-records alone (the filter attached, as for the whole body).
+records alone (the filter attached, as for the whole body). A case that carries
+batch_of_t_rows also carries body_records, [{off, len}, ...], one entry per
+record of the body in body order (its byte span in the body), and rows index
+those records, not the whole batch's rows: a batch refused at a row stops
+reading there, so its rows end at the refused row while the body goes on.
+
+provenance, on any case and required with batch_of_t_rows, says where each of
+the case's documents came from: {"batch": P, "insert": P} plus
+"batch_of_t_rows": P exactly when the case carries one, each P either
+{"build": "<build>", "line": "<line>"} (recorded from that library build),
+"unrecorded" (written from the docs, awaiting a recording) or "planted" (a
+document a planted red changed by hand). The plain run prints how many of
+each there are; --require-recorded fails while any is "unrecorded".
 
 Why that document. When the batch is not accepted every verdict in it is `d`,
 so the batch alone cannot say which rows the WHERE cut, and no other call
@@ -41,9 +55,17 @@ have no counterpart. The err equality is exact for a body the server reads as
 one chunk only: across chunks (max_insert_block_size, the squashing) the row the
 server names is a server fact, which only a server's INSERT over the same body
 can confirm. The insert's rows_read is where its reader stopped, which no batch
-document states; it is bounded, not compared: at least the body records up to
-and including the failing kept row (for a `body_step` refusal, the first kept
-row), at most the records the whole body's batch read.
+document states; it is bounded, not compared: at least the failing kept
+record's body index + 1 (for a `body_step` refusal, which names no row, the
+first kept record's), at most the body's record count. A refused INSERT stops at
+its refusing row, so the lead may tighten this to exact (the failing kept row's
+body index + 1, carried by the case and checked against a recorded insert) once
+a no-filter recording confirms the insert stops at the refused row.
+
+An accepted insert (post_where_cut) read the whole body, so its rows_read is
+exactly the body's record count and its rows_cut the rows read, less those
+skipped and those passed: neither has a batch counterpart, because the whole
+body's batch stopped at its refusal.
 
 Which carve-out a case with batch_of_t_rows is held to is decided by that batch
 alone: accepted, post_where_cut; refused, post_where_refusal. Without it, a
@@ -64,16 +86,18 @@ Rules, checked in this order (the first that fails is the answer):
                    are then not compared with the batch's)
   post_where_cut   a case whose batch_of_t_rows is `accepted`, or one with no
                    batch_of_t_rows whose filtered batch is `rejected` with an
-                   insert that is `accepted`: the case carries batch_of_t_rows; the batch is `rejected` at `row` or
-                   `body_step`, at a refused_row outside rows, and every row in
-                   rows is `accepted` in it; the t rows' batch reads exactly
-                   those records (one row each, the same input_span lengths,
-                   none skipped), is `accepted`, every verdict `t`; the insert's
-                   outcome, code, reason, refused_at, export_columns and
-                   partition_count are the t rows' batch's, its rows_read,
-                   rows_skipped, unsupported_settings and framing the whole
-                   batch's, rows_passed the number of t rows, rows_cut the rest
-                   of the rows read and not skipped, rows_undecided at most
+                   insert that is `accepted`: the case carries batch_of_t_rows;
+                   the batch is `rejected` at `row` or `body_step`, at a
+                   refused_row outside rows, and every row in rows that the
+                   batch read is `accepted` in it; the t rows' batch reads
+                   exactly those records (one row each, input_span lengths
+                   those of body_records, none skipped), is `accepted`, every
+                   verdict `t`; the insert's outcome, code, reason, refused_at,
+                   export_columns and partition_count are the t rows' batch's,
+                   its rows_skipped, unsupported_settings and framing the whole
+                   batch's, rows_read exactly the body's record count,
+                   rows_passed the number of t rows, rows_cut rows_read less
+                   rows_skipped and rows_passed, rows_undecided at most
                    rows_cut, err the t rows' batch's, and the output the t rows'
                    batch's export exactly (generator_draw still applies); the
                    rules below are not applied to such a case
@@ -87,9 +111,9 @@ Rules, checked in this order (the first that fails is the answer):
                    the t rows' batch's (no reader suffix: a post-WHERE step is
                    not the reader); its reason, refused_at, rows_skipped,
                    unsupported_settings, framing and partition_count the whole
-                   batch's; rows_read from the first failing kept record's
-                   position + 1 (the first kept row's, at `body_step`) up to
-                   the whole batch's rows_read; rows_passed, rows_cut and
+                   batch's; rows_read from the failing kept record's body
+                   index + 1 (the first kept record's, at `body_step`) up to
+                   the body's record count; rows_passed, rows_cut and
                    rows_undecided 0 (an insert that is not accepted), no
                    export_columns and no output; the rules below are not
                    applied to such a case
@@ -118,7 +142,9 @@ Exception (a case that is equal by the docs' own carve-out):
 
 A fixture whose documents break abi.json's schemas, or whose batch is
 inconsistent with itself (a span outside the export, positions that do not number
-the t rows), is a FixtureError, never a rule violation.
+the t rows) or with body_records (a row the batch read whose input_span is not
+that record's), or whose body_records or provenance are malformed, is a
+FixtureError, never a rule violation.
 
 Python standard library only (plus the repository's own validator).
 """
@@ -154,7 +180,10 @@ INSERT_NEVER = ("export_declined", "export_declined_b64", "export_declined_reaso
 # post_where_cut: the members the t rows' insert decides, and those the whole body's read decides.
 PWC = "batch_of_t_rows"
 PWC_FROM_T_ROWS = ("outcome", "code", "reason", "refused_at", "export_columns", "partition_count")
-PWC_FROM_BODY = ("rows_read", "rows_skipped", "unsupported_settings", "framing")
+PWC_FROM_BODY = ("rows_skipped", "unsupported_settings", "framing")
+BODY = "body_records"
+PROVENANCE = "provenance"
+PROVENANCE_MARKS = ("unrecorded", "planted")
 # post_where_refusal: the members still equal to the whole batch's (err and rows_read are not).
 POST_WHERE_REFUSAL_SHARED = ("reason", "refused_at", "rows_skipped", "unsupported_settings", "framing",
                              "partition_count")
@@ -214,6 +243,10 @@ def shape(case: dict, batch_schema, insert_schema) -> None:
     if errs:
         bad(f"insert is not a valid insert_result document: {errs[:3]}")
     ran = _batch_shape(case["batch"], _b64(case, "batch_export_b64"), batch_schema, bad, "batch")
+    if BODY in case:
+        _body_shape(case, bad)
+    if PROVENANCE in case:
+        _provenance_shape(case, bad)
     if PWC in case:
         _pwc_shape(case, batch_schema, bad)
     if case["output_format"] == "NONE" and (ran or "export_columns" in case["insert"]):
@@ -225,16 +258,56 @@ def shape(case: dict, batch_schema, insert_schema) -> None:
         bad(f"expect {e!r} is not equal, a known exception or a known rule")
 
 
+def _is_int(v) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def _body_shape(case: dict, bad) -> None:
+    """body_records: one {off, len} per body record, in body order, none overlapping; every row the whole batch
+    read carries its record's span as its input_span."""
+    recs = case[BODY]
+    if not isinstance(recs, list):
+        bad(f"{BODY} is not a list")
+    end = 0
+    for i, r in enumerate(recs):
+        if not (isinstance(r, dict) and set(r) == {"off", "len"} and _is_int(r["off"]) and _is_int(r["len"])):
+            bad(f"{BODY}[{i}] is not {{off, len}} with integer members")
+        if r["len"] < 1 or r["off"] < end:
+            bad(f"{BODY}[{i}] is empty or overlaps the record before it")
+        end = r["off"] + r["len"]
+    batch = case["batch"]
+    if len(batch["rows"]) > len(recs) or batch["rows_read"] > len(recs):
+        bad(f"the batch read more rows than {BODY} holds")
+    for i, row in enumerate(batch["rows"]):
+        if row.get("input_span") != recs[i]:
+            bad(f"batch row {i}'s input_span is not {BODY}[{i}]")
+
+
+def _provenance_shape(case: dict, bad) -> None:
+    """provenance: one mark per document the case carries."""
+    prov = case[PROVENANCE]
+    want = {"batch", "insert"} | ({PWC} if PWC in case else set())
+    if not isinstance(prov, dict) or set(prov) != want:
+        bad(f"{PROVENANCE} does not name exactly {sorted(want)}")
+    for k, v in prov.items():
+        recorded = (isinstance(v, dict) and set(v) == {"build", "line"}
+                    and all(isinstance(x, str) and x for x in v.values()))
+        if not (recorded or v in PROVENANCE_MARKS):
+            bad(f"{PROVENANCE}.{k} is not {{build, line}}, {' or '.join(map(repr, PROVENANCE_MARKS))}")
+
+
 def _pwc_shape(case: dict, batch_schema, bad) -> None:
     """batch_of_t_rows: {rows, batch, export_b64}, its batch a consistent batch document over those rows."""
     ev = case[PWC]
     if not isinstance(ev, dict) or set(ev) != {"rows", "batch", "export_b64"}:
         bad(f"{PWC} is not {{rows, batch, export_b64}}")
+    if BODY not in case or PROVENANCE not in case:
+        bad(f"{PWC} without {BODY} and {PROVENANCE}")
     idx = ev["rows"]
-    if not (isinstance(idx, list) and all(isinstance(i, int) and not isinstance(i, bool) for i in idx)):
+    if not (isinstance(idx, list) and all(_is_int(i) for i in idx)):
         bad(f"{PWC}.rows is not a list of row indexes")
-    if idx != sorted(set(idx)) or any(i < 0 or i >= len(case["batch"]["rows"]) for i in idx):
-        bad(f"{PWC}.rows is not increasing indexes into the batch's rows")
+    if idx != sorted(set(idx)) or any(i < 0 or i >= len(case[BODY]) for i in idx):
+        bad(f"{PWC}.rows is not increasing indexes into {BODY}")
     if "rows_passed" not in case["batch"]:
         bad(f"{PWC} on a batch with no filter")
     if "rows_passed" not in ev["batch"]:
@@ -384,13 +457,15 @@ def _post_where_cut(case: dict, out):
     if ev is None:  # an accepted insert over a refused body, with no t rows' batch to answer for it
         return None
     rows, idx, sub = batch["rows"], ev["rows"], ev["batch"]
+    nbody = len(case[BODY])
     sexp = None if ev["export_b64"] is None else base64.b64decode(ev["export_b64"])
     # the whole body: refused by a post-WHERE step, at no row the insert keeps
     if batch["outcome"] != "rejected" or batch.get("refused_at") not in POST_WHERE_SITES:
         return None
     if batch.get("refused_at") == "row" and batch.get("refused_row") in idx:
         return None
-    if any(rows[i]["outcome"] != "accepted" for i in idx):
+    # the rows the batch read: it stops at its refusal, so a kept row past it is not among them
+    if any(rows[i]["outcome"] != "accepted" for i in idx if i < len(rows)):
         return None
     # the t rows' batch: those records, read alone, accepted, every one t
     if not _same_records(case):
@@ -406,7 +481,10 @@ def _post_where_cut(case: dict, out):
         return None
     if any(_member(batch, m) != _member(ins, m) for m in PWC_FROM_BODY):
         return None
-    cut = batch["rows_read"] - batch["rows_skipped"] - len(idx)
+    # the insert read the whole body, which the batch, stopped at its refusal, did not
+    if ins["rows_read"] != nbody:
+        return None
+    cut = ins["rows_read"] - ins["rows_skipped"] - len(idx)
     if not (ins.get("rows_passed") == len(idx) and ins.get("rows_cut") == cut
             and isinstance(ins.get("rows_undecided"), int) and 0 <= ins["rows_undecided"] <= cut):
         return None
@@ -423,12 +501,13 @@ def _post_where_cut(case: dict, out):
 
 
 def _same_records(case: dict) -> bool:
-    """The t rows' batch reads exactly the listed records: one row each, the same input_span lengths, none skipped."""
-    rows, ev = case["batch"]["rows"], case[PWC]
+    """The t rows' batch reads exactly the listed records: one row each, each input_span as long as its body
+    record, none skipped."""
+    recs, ev = case[BODY], case[PWC]
     idx, sub = ev["rows"], ev["batch"]
     if len(sub["rows"]) != len(idx) or sub["rows_read"] != len(idx) or sub["rows_skipped"] != 0:
         return False
-    return all(r["input_span"]["len"] == rows[i]["input_span"]["len"] for r, i in zip(sub["rows"], idx))
+    return all(r["input_span"]["len"] == recs[i]["len"] for r, i in zip(sub["rows"], idx))
 
 
 def _post_where_refusal(case: dict, out) -> bool:
@@ -454,9 +533,10 @@ def _post_where_refusal(case: dict, out) -> bool:
         return False
     if any(_member(batch, m) != _member(ins, m) for m in POST_WHERE_REFUSAL_SHARED):
         return False
-    # rows_read: where the insert's reader stopped, which no batch states; bounded only
+    # rows_read: where the insert's reader stopped, which no batch states; bounded only, from the failing kept
+    # record (the first kept record at a body step, which names no row) to the body's record count
     first = ev["rows"][sub["refused_row"]] if sub["refused_at"] == "row" else ev["rows"][0]
-    if not first + 1 <= ins["rows_read"] <= batch["rows_read"]:
+    if not first + 1 <= ins["rows_read"] <= len(case[BODY]):
         return False
     return all(ins.get(k) == 0 for k in COUNTS) and "export_columns" not in ins and out is None
 
@@ -472,6 +552,27 @@ def expected(case: dict):
     if "exception" in e:
         return ("exception", e["exception"])
     return ("violates", e["violates"])
+
+
+def provenance_census(doc: dict) -> dict:
+    """How many documents are recorded, planted and unrecorded, over every case that carries provenance."""
+    n = {"recorded": 0, "planted": 0, "unrecorded": 0}
+    for c in doc["cases"]:
+        for v in c.get(PROVENANCE, {}).values():
+            n[v if isinstance(v, str) else "recorded"] += 1
+    return n
+
+
+def census_line(doc: dict) -> str:
+    n = provenance_census(doc)
+    return (f"check-insert-projection provenance: {n['recorded']} recorded, {n['planted']} planted, "
+            f"{n['unrecorded']} unrecorded documents")
+
+
+def require_recorded(doc: dict) -> list[str]:
+    """Every document a case marks "unrecorded", by case and member."""
+    return [f"{c['id']}: {k} is unrecorded" for c in doc["cases"]
+            for k, v in c.get(PROVENANCE, {}).items() if v == "unrecorded"]
 
 
 def check(doc: dict) -> list[str]:
@@ -525,6 +626,19 @@ def selftest() -> int:
         (f"{PWC} rows past the body", pwc, lambda c: c[PWC]["rows"].append(len(c["batch"]["rows"]))),
         (f"{PWC} with an invalid batch", pwc, lambda c: c[PWC]["batch"].pop("rows")),
         (f"{PWC} with its export missing", pwc, lambda c: c[PWC].update(export_b64=None)),
+        (f"{PWC} without {BODY}", pwc, lambda c: c.pop(BODY)),
+        (f"{PWC} without {PROVENANCE}", pwc, lambda c: c.pop(PROVENANCE)),
+        (f"{PWC} rows past {BODY}", pwc, lambda c: c[PWC].update(rows=[len(c[BODY])])),
+        (f"{BODY} with a record overlapping the one before", pwc,
+         lambda c: c[BODY][1].update(off=c[BODY][0]["off"])),
+        (f"{BODY} with an empty record", pwc, lambda c: c[BODY][-1].update(len=0)),
+        (f"{BODY} with a string length", pwc, lambda c: c[BODY][0].update(len="12")),
+        (f"{BODY} disagreeing with a row the batch read", pwc,
+         lambda c: c["batch"]["rows"][0]["input_span"].update(len=c["batch"]["rows"][0]["input_span"]["len"] + 1)),
+        (f"{BODY} shorter than the rows the batch read", pwc, lambda c: c.update({BODY: c[BODY][:1]})),
+        (f"{PROVENANCE} with an unknown mark", pwc, lambda c: c[PROVENANCE].update(insert="guessed")),
+        (f"{PROVENANCE} without the t rows' batch", pwc, lambda c: c[PROVENANCE].pop(PWC)),
+        (f"{PROVENANCE} with a build but no line", pwc, lambda c: c[PROVENANCE].update(batch={"build": "x"})),
     ):
         c = copy.deepcopy(start)
         mutate(c)
@@ -533,27 +647,57 @@ def selftest() -> int:
             fails.append(f"shape: {what} was accepted")
         except FixtureError:
             pass
+    # --require-recorded: it fails on any "unrecorded" document and passes once every mark is a recording. Its
+    # verdict on today's fixture is #724's merge precondition, never this selftest's.
+    if provenance_census(doc)["unrecorded"] and not require_recorded(doc):
+        fails.append("--require-recorded passes a fixture that holds unrecorded documents")
+    flipped = copy.deepcopy(doc)
+    for c in flipped["cases"]:
+        for k, v in c.get(PROVENANCE, {}).items():
+            if v == "unrecorded":
+                c[PROVENANCE][k] = {"build": "selftest", "line": "selftest"}
+    if require_recorded(flipped):
+        fails.append("--require-recorded fails a fixture whose every document is recorded or planted")
+    planted = copy.deepcopy(flipped)
+    marked = next((c for c in planted["cases"] if PROVENANCE in c), None)
+    if marked is None:
+        fails.append(f"no case carries {PROVENANCE}")
+    else:
+        marked[PROVENANCE]["insert"] = "unrecorded"
+        if not require_recorded(planted):
+            fails.append("--require-recorded passes a fixture with one unrecorded document")
     if fails:
         for f in fails:
             print(f"check-insert-projection selftest FAILED: {f}", file=sys.stderr)
         return 1
     reds = sum(1 for c in cases if isinstance(c["expect"], dict) and "violates" in c["expect"])
     print(f"check-insert-projection selftest: ok ({len(cases)} cases, {reds} planted reds, every rule fired)")
+    print(census_line(doc))
     return 0
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="the insert projection rule over the shared fixture")
     ap.add_argument("--selftest", action="store_true", help="prove every rule fires on the fixture's planted cases")
+    ap.add_argument("--require-recorded", action="store_true",
+                    help="also fail while any document is marked unrecorded (a merge precondition, not a CI gate)")
     args = ap.parse_args()
     if args.selftest:
         return selftest()
-    problems = check(json.loads(FIXTURE.read_text(encoding="utf-8")))
+    doc = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    problems = check(doc)
     for p in problems:
         print(p, file=sys.stderr)
     if problems:
         return 1
     print("check-insert-projection: ok")
+    print(census_line(doc))
+    if args.require_recorded:
+        missing = require_recorded(doc)
+        for m in missing:
+            print(f"check-insert-projection --require-recorded: {m}", file=sys.stderr)
+        if missing:
+            return 1
     return 0
 
 

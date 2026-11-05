@@ -18,6 +18,7 @@ import json
 import os
 import re
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 
@@ -53,6 +54,17 @@ RULES = (
 SUFFIX = re.compile(rb": \(at row [0-9]+\)\n")
 INSERT_NEVER = ("export_declined", "export_declined_b64", "export_declined_reason")
 POST_WHERE_SITES = (RefusalSite.ROW, RefusalSite.BODY_STEP)
+PROVENANCE_MARKS = ("unrecorded", "planted")
+
+
+class TRows(NamedTuple):
+    """A case's batch_of_t_rows, decoded: `rows` index the body's records,
+    `batch` is the batch over those records alone, and `records` is the case's
+    body_records, each (off, len)."""
+
+    rows: list[int]
+    batch: BatchResult
+    records: list[tuple[int, int]]
 
 
 def _b64(case: dict, key: str) -> bytes | None:
@@ -67,14 +79,14 @@ def _raw_cols(raw: dict) -> tuple[bytes, ...] | None:
     return tuple(base64.b64decode(c["b64"]) if "b64" in c else c["name"].encode() for c in cols)
 
 
-def same_records(batch: BatchResult, idx: list[int], sub: BatchResult) -> bool:
-    """The t rows' batch reads exactly the listed records: one row each, the same
-    input_span lengths, none skipped."""
+def same_records(pwc: TRows) -> bool:
+    """The t rows' batch reads exactly the listed records: one row each, each
+    input_span as long as its body record, none skipped."""
+    idx, sub = pwc.rows, pwc.batch
     if len(sub.rows) != len(idx) or sub.rows_read != len(idx) or sub.rows_skipped != 0:
         return False
     for r, i in zip(sub.rows, idx, strict=True):
-        whole = batch.rows[i].input_span
-        if r.input_span is None or whole is None or r.input_span.len != whole.len:
+        if r.input_span is None or r.input_span.len != pwc.records[i][1]:
             return False
     return True
 
@@ -84,15 +96,15 @@ def post_where_refusal(
     ins: InsertResult,
     raw_insert: dict,
     out: bytes | None,
-    pwc: tuple[list[int], BatchResult],
+    pwc: TRows,
 ) -> bool:
     """The checker's `_post_where_refusal`: the insert is `rejected` with the code
     of both batches and the t rows' batch's err; err and rows_read have no whole
     batch counterpart, so rows_read is only bounded."""
-    idx, sub = pwc
+    idx, sub = pwc.rows, pwc.batch
     if batch.outcome != Outcome.REJECTED or batch.refused_at not in POST_WHERE_SITES:
         return False
-    if not same_records(batch, idx, sub):
+    if not same_records(pwc):
         return False
     if sub.outcome != Outcome.REJECTED or sub.refused_at not in POST_WHERE_SITES:
         return False
@@ -119,10 +131,11 @@ def post_where_refusal(
     )
     if any(a != b for a, b in shared):
         return False
-    # rows_read: where the insert's reader stopped, which no batch states; bounded only
+    # rows_read: where the insert's reader stopped, which no batch states; bounded only, from
+    # the failing kept record (the first kept record at a body step) to the body's record count
     at_row = sub.refused_at == RefusalSite.ROW and sub.refused_row is not None
     first = idx[sub.refused_row] if at_row else idx[0]
-    if not first + 1 <= ins.rows_read <= batch.rows_read:
+    if not first + 1 <= ins.rows_read <= len(pwc.records):
         return False
     return (
         (ins.rows_passed, ins.rows_cut, ins.rows_undecided) == (0, 0, 0)
@@ -136,20 +149,21 @@ def post_where_cut(
     ins: InsertResult,
     raw_insert: dict,
     out: bytes | None,
-    pwc: tuple[list[int], BatchResult] | None,
+    pwc: TRows | None,
 ) -> bool | tuple[str, str | None]:
     """The checker's `_post_where_cut`: the verdict when the pair holds, False when not."""
     if pwc is None:  # an accepted insert over a refused body, with no t rows' batch
         return False
-    idx, sub = pwc
+    idx, sub = pwc.rows, pwc.batch
     rows = batch.rows
     if batch.outcome != Outcome.REJECTED or batch.refused_at not in POST_WHERE_SITES:
         return False
     if batch.refused_at == RefusalSite.ROW and batch.refused_row in idx:
         return False
-    if any(rows[i].outcome != Outcome.ACCEPTED for i in idx):
+    # the rows the batch read: it stops at its refusal, so a kept row past it is not among them
+    if any(rows[i].outcome != Outcome.ACCEPTED for i in idx if i < len(rows)):
         return False
-    if not same_records(batch, idx, sub):
+    if not same_records(pwc):
         return False
     if sub.outcome != Outcome.ACCEPTED or any(r.verdict != Verdict.TRUE for r in sub.rows):
         return False
@@ -166,14 +180,16 @@ def post_where_cut(
         (sub.partition_count, ins.partition_count),
     )
     from_body = (
-        (batch.rows_read, ins.rows_read),
         (batch.rows_skipped, ins.rows_skipped),
         (batch.unsupported_settings, ins.unsupported_settings),
         (batch.framing, ins.framing),
     )
     if any(a != b for a, b in from_t_rows + from_body):
         return False
-    cut = batch.rows_read - batch.rows_skipped - len(idx)
+    # the insert read the whole body, which the batch, stopped at its refusal, did not
+    if ins.rows_read != len(pwc.records):
+        return False
+    cut = ins.rows_read - ins.rows_skipped - len(idx)
     if not (
         ins.rows_passed == len(idx)
         and ins.rows_cut == cut
@@ -199,7 +215,7 @@ def first_violation(
     out_format: str,
     raw_insert: dict,
     out: bytes | None,
-    pwc: tuple[list[int], BatchResult] | None = None,
+    pwc: TRows | None = None,
 ):
     """("equal", None), ("exception", name) or ("violates", rule).
 
@@ -247,7 +263,7 @@ def first_violation(
         return "violates", "export_decline_is_call_decline"
 
     # post_where_cut and post_where_refusal split on the t rows' batch, accepted or refused.
-    if pwc is not None and pwc[1].outcome != Outcome.ACCEPTED:
+    if pwc is not None and pwc.batch.outcome != Outcome.ACCEPTED:
         ok = post_where_refusal(batch, ins, raw_insert, out, pwc)
         return ("equal", None) if ok else ("violates", "post_where_refusal")
     if pwc is not None or (
@@ -339,18 +355,58 @@ def decode_case(case: dict):
     return batch, ins
 
 
-def decode_pwc(case: dict) -> tuple[list[int], BatchResult] | None:
+def check_provenance(case: dict) -> None:
+    """provenance names exactly the case's documents, each recorded ({build, line})
+    or marked; a malformed one is a fixture error."""
+    prov = case.get("provenance")
+    if prov is None:
+        assert "batch_of_t_rows" not in case, f"{case['id']}: batch_of_t_rows without provenance"
+        return
+    want = {"batch", "insert"} | ({"batch_of_t_rows"} if "batch_of_t_rows" in case else set())
+    assert isinstance(prov, dict) and set(prov) == want, case["id"]
+    for v in prov.values():
+        recorded = (
+            isinstance(v, dict)
+            and set(v) == {"build", "line"}
+            and all(isinstance(x, str) and x for x in v.values())
+        )
+        assert recorded or v in PROVENANCE_MARKS, f"{case['id']}: provenance mark {v!r}"
+
+
+def decode_body_records(case: dict, batch: BatchResult) -> list[tuple[int, int]]:
+    """body_records, each (off, len), in body order and not overlapping; every row
+    the whole batch read carries its record's span. A malformed one is a fixture
+    error."""
+    records: list[tuple[int, int]] = []
+    end = 0
+    for r in case["body_records"]:
+        assert isinstance(r, dict) and set(r) == {"off", "len"}, case["id"]
+        off, n = r["off"], r["len"]
+        assert type(off) is int and type(n) is int and n >= 1 and off >= end, case["id"]
+        records.append((off, n))
+        end = off + n
+    assert len(batch.rows) <= len(records) and batch.rows_read <= len(records), case["id"]
+    for row, (off, n) in zip(batch.rows, records, strict=False):
+        assert row.input_span is not None, case["id"]
+        assert (row.input_span.off, row.input_span.len) == (off, n), case["id"]
+    return records
+
+
+def decode_pwc(case: dict, batch: BatchResult) -> TRows | None:
     """The case's batch_of_t_rows through the real batch decoder; a malformed one
     is a fixture error (the checker's FixtureError), never a verdict."""
+    check_provenance(case)
+    records = decode_body_records(case, batch) if "body_records" in case else None
     ev = case.get("batch_of_t_rows")
     if ev is None:
         return None
+    assert records is not None, f"{case['id']}: batch_of_t_rows without body_records"
     assert set(ev) == {"rows", "batch", "export_b64"}, case["id"]
     idx = ev["rows"]
     assert idx == sorted(set(idx)), case["id"]
-    assert all(0 <= i < len(case["batch"]["rows"]) for i in idx), case["id"]
+    assert all(0 <= i < len(records) for i in idx), case["id"]
     sub = decode_batch(json.dumps(ev["batch"]).encode(), _b64(ev, "export_b64"))
-    return idx, sub
+    return TRows(idx, sub, records)
 
 
 def verdict(case: dict):
@@ -361,7 +417,7 @@ def verdict(case: dict):
         case["output_format"],
         case["insert"],
         _b64(case, "insert_rows_b64"),
-        decode_pwc(case),
+        decode_pwc(case, batch),
     )
 
 
@@ -372,7 +428,7 @@ def test_the_fixture_is_the_shape_this_gate_expects() -> None:
     for rule in RULES:
         assert any(c["expect"] == {"violates": rule} for c in CASES), rule
     assert any(c["expect"] == {"exception": "generator_draw"} for c in CASES)
-    assert sum(isinstance(c["expect"], dict) and "violates" in c["expect"] for c in CASES) == 31
+    assert sum(isinstance(c["expect"], dict) and "violates" in c["expect"] for c in CASES) == 33
 
 
 @needs_fixture
@@ -431,4 +487,4 @@ def test_the_fixture_gate_ran_cases() -> None:
                 f"CHTYPES_REQUIRE_FIXTURES=1 and the insert-projection fixture is absent: {FIXTURE}"
             )
         pytest.skip(f"insert-projection fixture absent ({FIXTURE}): not a full-repository tree")
-    assert len(CASES) == 51
+    assert len(CASES) == 53

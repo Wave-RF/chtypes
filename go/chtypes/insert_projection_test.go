@@ -33,21 +33,21 @@ var insertNever = []string{"export_declined", "export_declined_b64", "export_dec
 // projectionPWC is a case's batch_of_t_rows, decoded: the indexes of the rows
 // the insert keeps, and the batch over those records alone with its export.
 type projectionPWC struct {
-	Rows   []int
-	Batch  BatchResult
-	Export []byte
+	Rows    []int
+	Batch   BatchResult
+	Export  []byte
+	Records []Span // the case's body_records: one span per body record, in body order
 }
 
 // sameRecords: the t rows' batch reads exactly the listed records, one row
-// each, the same input_span lengths, none skipped.
-func sameRecords(batch BatchResult, pwc *projectionPWC) bool {
+// each, each input_span as long as its body record, none skipped.
+func sameRecords(pwc *projectionPWC) bool {
 	idx, sub := pwc.Rows, pwc.Batch
 	if len(sub.Rows) != len(idx) || sub.RowsRead != uint64(len(idx)) || sub.RowsSkipped != 0 {
 		return false
 	}
 	for j, r := range sub.Rows {
-		whole := batch.Rows[idx[j]].InputSpan
-		if r.InputSpan == nil || whole == nil || r.InputSpan.Len != whole.Len {
+		if r.InputSpan == nil || r.InputSpan.Len != pwc.Records[idx[j]].Len {
 			return false
 		}
 	}
@@ -61,7 +61,7 @@ func postWhereSite(s RefusalSite) bool { return s == RefusedAtRow || s == Refuse
 // rows_read have no whole batch counterpart, so rows_read is only bounded.
 func postWhereRefusal(batch BatchResult, ins InsertResult, insRaw map[string]json.RawMessage, output []byte, pwc *projectionPWC) bool {
 	sub := pwc.Batch
-	if batch.Outcome != Rejected || !postWhereSite(batch.RefusedAt) || !sameRecords(batch, pwc) {
+	if batch.Outcome != Rejected || !postWhereSite(batch.RefusedAt) || !sameRecords(pwc) {
 		return false
 	}
 	if sub.Outcome != Rejected || !postWhereSite(sub.RefusedAt) {
@@ -91,12 +91,13 @@ func postWhereRefusal(batch BatchResult, ins InsertResult, insRaw map[string]jso
 		!reflect.DeepEqual(batch.PartitionCount, ins.PartitionCount) {
 		return false
 	}
-	// rows_read: where the insert's reader stopped, which no batch states; bounded only
+	// rows_read: where the insert's reader stopped, which no batch states; bounded only, from
+	// the failing kept record (the first kept record at a body step) to the body's record count
 	first := pwc.Rows[0]
 	if sub.RefusedAt == RefusedAtRow {
 		first = pwc.Rows[*sub.RefusedRow]
 	}
-	if ins.RowsRead < uint64(first)+1 || ins.RowsRead > batch.RowsRead {
+	if ins.RowsRead < uint64(first)+1 || ins.RowsRead > uint64(len(pwc.Records)) {
 		return false
 	}
 	return isZero(ins.RowsPassed) && isZero(ins.RowsCut) && isZero(ins.RowsUndecided) &&
@@ -116,13 +117,14 @@ func postWhereCut(batch BatchResult, ins InsertResult, insRaw map[string]json.Ra
 	if batch.RefusedAt == RefusedAtRow && batch.RefusedRow != nil && slices.Contains(idx, int(*batch.RefusedRow)) {
 		return "", "", false
 	}
+	// the rows the batch read: it stops at its refusal, so a kept row past it is not among them
 	for _, i := range idx {
-		if batch.Rows[i].Outcome != Accepted {
+		if i < len(batch.Rows) && batch.Rows[i].Outcome != Accepted {
 			return "", "", false
 		}
 	}
 	n := uint64(len(idx))
-	if !sameRecords(batch, pwc) {
+	if !sameRecords(pwc) {
 		return "", "", false
 	}
 	for _, r := range sub.Rows {
@@ -144,14 +146,15 @@ func postWhereCut(batch BatchResult, ins InsertResult, insRaw map[string]json.Ra
 		!reflect.DeepEqual(sub.PartitionCount, ins.PartitionCount) {
 		return "", "", false
 	}
-	if batch.RowsRead != ins.RowsRead || batch.RowsSkipped != ins.RowsSkipped ||
+	if batch.RowsSkipped != ins.RowsSkipped ||
 		!slices.Equal(batch.UnsupportedSettings, ins.UnsupportedSettings) || !reflect.DeepEqual(batch.Framing, ins.Framing) {
 		return "", "", false
 	}
-	if batch.RowsRead < batch.RowsSkipped+n {
+	// the insert read the whole body, which the batch, stopped at its refusal, did not
+	if ins.RowsRead != uint64(len(pwc.Records)) || ins.RowsRead < ins.RowsSkipped+n {
 		return "", "", false
 	}
-	cut := batch.RowsRead - batch.RowsSkipped - n
+	cut := ins.RowsRead - ins.RowsSkipped - n
 	if !isCount(ins.RowsPassed, n) || !isCount(ins.RowsCut, cut) || ins.RowsUndecided == nil || *ins.RowsUndecided > cut {
 		return "", "", false
 	}
@@ -387,6 +390,74 @@ type projectionCase struct {
 		Batch     json.RawMessage `json:"batch"`
 		ExportB64 *string         `json:"export_b64"`
 	} `json:"batch_of_t_rows"`
+	BodyRecords []map[string]json.RawMessage `json:"body_records"`
+	Provenance  map[string]json.RawMessage   `json:"provenance"`
+}
+
+// bodyRecords reads a case's body_records: each exactly {off, len}, integers,
+// in body order and not overlapping, and every row the whole batch read
+// carrying its record's span. A malformed one is a fixture error.
+func bodyRecords(t *testing.T, c projectionCase, batch BatchResult) []Span {
+	t.Helper()
+	var recs []Span
+	var end uint64
+	for i, r := range c.BodyRecords {
+		var sp Span
+		if len(r) != 2 || json.Unmarshal(r["off"], &sp.Off) != nil || json.Unmarshal(r["len"], &sp.Len) != nil {
+			t.Fatalf("body_records[%d] is not {off, len} with integer members", i)
+		}
+		if sp.Len < 1 || sp.Off < end {
+			t.Fatalf("body_records[%d] is empty or overlaps the record before it", i)
+		}
+		end = sp.Off + sp.Len
+		recs = append(recs, sp)
+	}
+	if len(batch.Rows) > len(recs) || batch.RowsRead > uint64(len(recs)) {
+		t.Fatalf("the batch read more rows than body_records holds")
+	}
+	for i, row := range batch.Rows {
+		if row.InputSpan == nil || *row.InputSpan != recs[i] {
+			t.Fatalf("batch row %d's input_span is not body_records[%d]", i, i)
+		}
+	}
+	return recs
+}
+
+// checkProvenance: provenance names exactly the case's documents, each
+// recorded ({build, line}) or marked "unrecorded" or "planted". A malformed
+// one is a fixture error.
+func checkProvenance(t *testing.T, c projectionCase) {
+	t.Helper()
+	if c.Provenance == nil {
+		if c.BatchOfTRows != nil {
+			t.Fatalf("batch_of_t_rows without provenance")
+		}
+		return
+	}
+	want := []string{"batch", "insert"}
+	if c.BatchOfTRows != nil {
+		want = append(want, "batch_of_t_rows")
+	}
+	if len(c.Provenance) != len(want) {
+		t.Fatalf("provenance does not name exactly %v", want)
+	}
+	for _, k := range want {
+		raw, ok := c.Provenance[k]
+		if !ok {
+			t.Fatalf("provenance does not name %s", k)
+		}
+		var mark string
+		if json.Unmarshal(raw, &mark) == nil {
+			if mark != "unrecorded" && mark != "planted" {
+				t.Fatalf("provenance.%s is the mark %q", k, mark)
+			}
+			continue
+		}
+		var rec map[string]string
+		if json.Unmarshal(raw, &rec) != nil || len(rec) != 2 || rec["build"] == "" || rec["line"] == "" {
+			t.Fatalf("provenance.%s is not {build, line}, \"unrecorded\" or \"planted\"", k)
+		}
+	}
 }
 
 func b64Or(t *testing.T, s *string) []byte {
@@ -436,8 +507,8 @@ func loadProjectionFixture(t *testing.T) []projectionCase {
 
 func TestInsertProjectionFixture(t *testing.T) {
 	cases := loadProjectionFixture(t)
-	if len(cases) != 51 {
-		t.Fatalf("the fixture holds %d cases, want 51", len(cases))
+	if len(cases) != 53 {
+		t.Fatalf("the fixture holds %d cases, want 53", len(cases))
 	}
 	reds := map[string]int{}
 	var equal, exceptions int
@@ -456,19 +527,27 @@ func TestInsertProjectionFixture(t *testing.T) {
 			if err := json.Unmarshal(c.Insert, &insRaw); err != nil {
 				t.Fatal(err)
 			}
+			checkProvenance(t, c)
+			var records []Span
+			if c.BodyRecords != nil {
+				records = bodyRecords(t, c, batch)
+			}
 			var pwc *projectionPWC
 			if ev := c.BatchOfTRows; ev != nil {
 				// a malformed batch_of_t_rows is a fixture error, never a verdict
+				if c.BodyRecords == nil {
+					t.Fatalf("batch_of_t_rows without body_records")
+				}
 				if !slices.IsSorted(ev.Rows) || len(slices.Compact(slices.Clone(ev.Rows))) != len(ev.Rows) ||
-					(len(ev.Rows) > 0 && (ev.Rows[0] < 0 || ev.Rows[len(ev.Rows)-1] >= len(batch.Rows))) {
-					t.Fatalf("batch_of_t_rows.rows %v is not increasing indexes into the batch's rows", ev.Rows)
+					(len(ev.Rows) > 0 && (ev.Rows[0] < 0 || ev.Rows[len(ev.Rows)-1] >= len(records))) {
+					t.Fatalf("batch_of_t_rows.rows %v is not increasing indexes into body_records", ev.Rows)
 				}
 				subExport := b64Or(t, ev.ExportB64)
 				sub, err := decodeBatch(ev.Batch, subExport)
 				if err != nil {
 					t.Fatalf("decoding batch_of_t_rows.batch: %v", err)
 				}
-				pwc = &projectionPWC{Rows: ev.Rows, Batch: sub, Export: subExport}
+				pwc = &projectionPWC{Rows: ev.Rows, Batch: sub, Export: subExport, Records: records}
 			}
 			kind, name := projectionVerdict(c.OutputFormat, batch, export, ins, insRaw, output, pwc)
 			var want struct {
@@ -500,7 +579,7 @@ func TestInsertProjectionFixture(t *testing.T) {
 			t.Errorf("no planted red for rule %s", r)
 		}
 	}
-	wantReds := map[string]int{"e_row_rejects": 8, "export_decline_is_call_decline": 3, "post_where_cut": 2, "post_where_refusal": 3, "shared_members": 3, "counts": 2,
+	wantReds := map[string]int{"e_row_rejects": 8, "export_decline_is_call_decline": 3, "post_where_cut": 3, "post_where_refusal": 4, "shared_members": 3, "counts": 2,
 		"line_output": 2, "non_t_row": 2, "output_presence": 2, "err_prefix": 1, "err_suffix": 2, "native_output": 1}
 	if !reflect.DeepEqual(reds, wantReds) {
 		t.Errorf("planted reds per rule = %v, want %v", reds, wantReds)

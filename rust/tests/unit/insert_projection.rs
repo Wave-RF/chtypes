@@ -13,7 +13,7 @@
 //! back for a refusal, read the raw document and the raw bytes. Both documents
 //! of every case go through this crate's real decoders (`decode::batch` and
 //! `decode::insert_result`), so a case proves the decoders as well as the
-//! rule. Each case carries its expected result; the fixture's 31 planted reds
+//! rule. Each case carries its expected result; the fixture's 33 planted reds
 //! and its exception keep the gate honest: a rule that cannot fire fails here.
 //! A case's `batch_of_t_rows`, the batch over the rows the insert keeps, goes
 //! through the same `decode::batch`; whether it is accepted decides which of
@@ -49,6 +49,9 @@ enum Projection {
 struct BatchOfTRows {
     rows: Vec<usize>,
     batch: BatchResult,
+    /// The case's `body_records`, each `(off, len)`: one per body record, in
+    /// body order; `rows` index these.
+    records: Vec<(u64, u64)>,
 }
 
 const INSERT_NEVER: [&str; 3] = [
@@ -63,16 +66,15 @@ fn post_where_site(site: Option<&RefusalSite>) -> bool {
 
 /// The t rows' batch reads exactly the listed records: one row each, the same
 /// `input_span` lengths, none skipped.
-fn same_records(batch: &BatchResult, t_rows: &BatchOfTRows) -> bool {
+fn same_records(t_rows: &BatchOfTRows) -> bool {
     let (idx, sub) = (&t_rows.rows, &t_rows.batch);
     sub.rows.len() == idx.len()
         && sub.rows_read == idx.len() as u64
         && sub.rows_skipped == 0
         && sub.rows.iter().zip(idx).all(|(r, &i)| {
-            match (r.input_span.as_ref(), batch.rows[i].input_span.as_ref()) {
-                (Some(a), Some(b)) => a.len == b.len,
-                _ => false,
-            }
+            r.input_span
+                .as_ref()
+                .is_some_and(|a| a.len == t_rows.records[i].1)
         })
 }
 
@@ -89,7 +91,7 @@ fn post_where_refusal(
     let sub = &t_rows.batch;
     if batch.outcome != Outcome::Rejected
         || !post_where_site(batch.refused_at.as_ref())
-        || !same_records(batch, t_rows)
+        || !same_records(t_rows)
     {
         return false;
     }
@@ -116,7 +118,9 @@ fn post_where_refusal(
     }
     // the outcome class and code stay equal, to the whole batch and to the t
     // rows' batch; err is the server's for the first failing kept row,
-    // numbered over the kept rows; rows_read is bounded only
+    // numbered over the kept rows; rows_read is bounded only, from the failing
+    // kept record (the first kept record at a body step) to the body's record
+    // count
     ins.err_code == batch.err_code
         && ins.err_code == sub.err_code
         && ins.err_msg == sub.err_msg
@@ -124,7 +128,7 @@ fn post_where_refusal(
         && batch.refused_at == ins.refused_at
         && batch.partition_count == ins.partition_count
         && ins.rows_read > first as u64
-        && ins.rows_read <= batch.rows_read
+        && ins.rows_read <= t_rows.records.len() as u64
         && batch.rows_skipped == ins.rows_skipped
         && batch.unsupported_settings == ins.unsupported_settings
         && batch.framing == ins.framing
@@ -146,6 +150,7 @@ fn post_where_cut(
     let BatchOfTRows {
         rows: idx,
         batch: sub,
+        records,
     } = t_rows?;
     let rows = &batch.rows;
     if batch.outcome != Outcome::Rejected || !post_where_site(batch.refused_at.as_ref()) {
@@ -158,12 +163,17 @@ fn post_where_cut(
     {
         return None;
     }
-    if idx.iter().any(|&i| rows[i].outcome != Outcome::Accepted) {
+    // the rows the batch read: it stops at its refusal, so a kept row past it
+    // is not among them
+    if idx
+        .iter()
+        .any(|&i| rows.get(i).is_some_and(|r| r.outcome != Outcome::Accepted))
+    {
         return None;
     }
     // the t rows' batch: those records, read alone, accepted, every one t
     let n = idx.len() as u64;
-    if !same_records(batch, t_rows?)
+    if !same_records(t_rows?)
         || sub.outcome != Outcome::Accepted
         || sub.rows.iter().any(|r| r.verdict != Some(Verdict::True))
         || !sub.export_declined.as_bytes().is_empty()
@@ -181,14 +191,18 @@ fn post_where_cut(
         && sub.refused_at == ins.refused_at
         && sub.export_columns == ins.export_columns
         && sub.partition_count == ins.partition_count
-        && batch.rows_read == ins.rows_read
         && batch.rows_skipped == ins.rows_skipped
         && batch.unsupported_settings == ins.unsupported_settings
         && batch.framing == ins.framing;
     if !members {
         return None;
     }
-    let cut = batch.rows_read.checked_sub(batch.rows_skipped + n)?;
+    // the insert read the whole body, which the batch, stopped at its refusal,
+    // did not
+    if ins.rows_read != records.len() as u64 {
+        return None;
+    }
+    let cut = ins.rows_read.checked_sub(ins.rows_skipped + n)?;
     if !(ins.rows_passed == Some(n)
         && ins.rows_cut == Some(cut)
         && ins.rows_undecided.is_some_and(|u| u <= cut))
@@ -493,9 +507,12 @@ fn decode_case(case: &Json) -> (BatchResult, InsertResult) {
 
 /// Decode a case's `batch_of_t_rows` with the real batch decoder; a malformed
 /// one is a fixture error, never a verdict.
-fn decode_t_rows(case: &Json) -> Option<BatchOfTRows> {
+fn decode_t_rows(case: &Json, whole: &BatchResult) -> Option<BatchOfTRows> {
+    check_provenance(case);
+    let records = case.get("body_records").map(|_| body_records(case, whole));
     let ev = case.get("batch_of_t_rows")?;
-    let n = case["batch"]["rows"].as_array().expect("batch rows").len();
+    let records =
+        records.unwrap_or_else(|| panic!("{}: batch_of_t_rows without body_records", case["id"]));
     let rows: Vec<usize> = ev["rows"]
         .as_array()
         .unwrap_or_else(|| panic!("{}: batch_of_t_rows.rows is not a list", case["id"]))
@@ -503,8 +520,8 @@ fn decode_t_rows(case: &Json) -> Option<BatchOfTRows> {
         .map(|i| usize::try_from(i.as_u64().expect("a row index")).expect("a row index"))
         .collect();
     assert!(
-        rows.windows(2).all(|w| w[0] < w[1]) && rows.iter().all(|&i| i < n),
-        "{}: batch_of_t_rows.rows is not increasing indexes into the batch's rows",
+        rows.windows(2).all(|w| w[0] < w[1]) && rows.iter().all(|&i| i < records.len()),
+        "{}: batch_of_t_rows.rows is not increasing indexes into body_records",
         case["id"]
     );
     let batch = decode::batch(
@@ -512,7 +529,99 @@ fn decode_t_rows(case: &Json) -> Option<BatchOfTRows> {
         b64(ev, "export_b64"),
     )
     .unwrap_or_else(|e| panic!("{}: batch_of_t_rows.batch does not decode: {e}", case["id"]));
-    Some(BatchOfTRows { rows, batch })
+    Some(BatchOfTRows {
+        rows,
+        batch,
+        records,
+    })
+}
+
+/// A case's `body_records`: each exactly `{off, len}`, integers, in body
+/// order and not overlapping, and every row the whole batch read carrying its
+/// record's span. A malformed one is a fixture error.
+fn body_records(case: &Json, whole: &BatchResult) -> Vec<(u64, u64)> {
+    let id = &case["id"];
+    let mut records = Vec::new();
+    let mut end = 0u64;
+    for (i, r) in case["body_records"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{id}: body_records is not a list"))
+        .iter()
+        .enumerate()
+    {
+        let obj = r
+            .as_object()
+            .filter(|o| o.len() == 2)
+            .unwrap_or_else(|| panic!("{id}: body_records[{i}] is not {{off, len}}"));
+        let (Some(off), Some(len)) = (
+            obj.get("off").and_then(Json::as_u64),
+            obj.get("len").and_then(Json::as_u64),
+        ) else {
+            panic!("{id}: body_records[{i}] is not {{off, len}} with integer members");
+        };
+        assert!(
+            len >= 1 && off >= end,
+            "{id}: body_records[{i}] is empty or overlaps the record before it"
+        );
+        records.push((off, len));
+        end = off + len;
+    }
+    assert!(
+        whole.rows.len() <= records.len() && whole.rows_read <= records.len() as u64,
+        "{id}: the batch read more rows than body_records holds"
+    );
+    for (i, (row, &(off, len))) in whole.rows.iter().zip(&records).enumerate() {
+        assert!(
+            row.input_span
+                .as_ref()
+                .is_some_and(|s| s.off == off && s.len == len),
+            "{id}: batch row {i}'s input_span is not body_records[{i}]"
+        );
+    }
+    records
+}
+
+/// `provenance` names exactly the case's documents, each recorded (`{build,
+/// line}`) or marked "unrecorded" or "planted". A malformed one is a fixture
+/// error.
+fn check_provenance(case: &Json) {
+    let id = &case["id"];
+    let Some(prov) = case.get("provenance") else {
+        assert!(
+            case.get("batch_of_t_rows").is_none(),
+            "{id}: batch_of_t_rows without provenance"
+        );
+        return;
+    };
+    let prov = prov
+        .as_object()
+        .unwrap_or_else(|| panic!("{id}: provenance is not an object"));
+    let mut want = vec!["batch", "insert"];
+    if case.get("batch_of_t_rows").is_some() {
+        want.push("batch_of_t_rows");
+    }
+    let mut keys: Vec<&str> = prov.keys().map(String::as_str).collect();
+    keys.sort_unstable();
+    want.sort_unstable();
+    assert_eq!(
+        keys, want,
+        "{id}: provenance does not name exactly {want:?}"
+    );
+    for (k, v) in prov {
+        let recorded = v.as_object().is_some_and(|o| {
+            o.len() == 2
+                && ["build", "line"].iter().all(|f| {
+                    o.get(*f)
+                        .and_then(Json::as_str)
+                        .is_some_and(|x| !x.is_empty())
+                })
+        });
+        let marked = matches!(v.as_str(), Some("unrecorded" | "planted"));
+        assert!(
+            recorded || marked,
+            "{id}: provenance.{k} is not {{build, line}}, \"unrecorded\" or \"planted\""
+        );
+    }
 }
 
 const RULES: [&str; 12] = [
@@ -567,7 +676,7 @@ fn every_case_of_the_shared_fixture_gives_its_expected_projection_result() {
             &case["insert"],
             b64(case, "insert_rows_b64").as_deref(),
             format_of(case["output_format"].as_str().unwrap()),
-            decode_t_rows(case).as_ref(),
+            decode_t_rows(case, &batch).as_ref(),
         );
         let want = expected(case);
         eprintln!("projection case {id}: {got:?} (expected {want:?})");
@@ -594,7 +703,7 @@ fn every_case_of_the_shared_fixture_gives_its_expected_projection_result() {
     );
     assert_eq!(
         (cases.len(), equal, exceptions, reds),
-        (51, 19, 1, 31),
+        (53, 19, 1, 33),
         "the fixture's census (cases, equal, exception, planted reds)"
     );
     // A rule with no planted red is a rule the gate cannot see fail.

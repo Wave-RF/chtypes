@@ -15,8 +15,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { decodeBatch, decodeInsert } from '../../src/documents.js';
-import { type BatchOfTRows, EXCEPTIONS, projectionVerdict, RULES } from './insert-projection-rule.js';
+import { type BatchResult, decodeBatch, decodeInsert } from '../../src/documents.js';
+import { type BatchOfTRows, type BodyRecord, EXCEPTIONS, projectionVerdict, RULES } from './insert-projection-rule.js';
 
 interface Case {
   readonly id: string;
@@ -26,6 +26,8 @@ interface Case {
   readonly insert: unknown;
   readonly insert_rows_b64: string | null;
   readonly batch_of_t_rows?: { readonly rows: readonly number[]; readonly batch: unknown; readonly export_b64: string | null };
+  readonly body_records?: readonly unknown[];
+  readonly provenance?: Record<string, unknown>;
   readonly expect: 'equal' | { readonly exception: string } | { readonly violates: string };
 }
 
@@ -38,15 +40,58 @@ const doc = (present ? JSON.parse(readFileSync(FIXTURE, 'utf8')) : { schema: '',
 
 const bytes = (b64: string | null): Buffer | undefined => (b64 === null ? undefined : Buffer.from(b64, 'base64'));
 
+/** provenance names exactly the case's documents, each recorded (`{build, line}`) or marked; a malformed one is a fixture error. */
+function checkProvenance(c: Case): void {
+  const prov = c.provenance;
+  if (prov === undefined) {
+    if (c.batch_of_t_rows !== undefined) throw new Error(`${c.id}: batch_of_t_rows without provenance`);
+    return;
+  }
+  const want = ['batch', 'insert', ...(c.batch_of_t_rows === undefined ? [] : ['batch_of_t_rows'])].sort();
+  if (JSON.stringify(Object.keys(prov).sort()) !== JSON.stringify(want)) throw new Error(`${c.id}: provenance does not name exactly ${want.join(', ')}`);
+  for (const [k, v] of Object.entries(prov)) {
+    const recorded =
+      typeof v === 'object' &&
+      v !== null &&
+      JSON.stringify(Object.keys(v).sort()) === '["build","line"]' &&
+      Object.values(v).every((x) => typeof x === 'string' && x.length > 0);
+    if (!(recorded || v === 'unrecorded' || v === 'planted')) throw new Error(`${c.id}: provenance.${k} is not {build, line}, "unrecorded" or "planted"`);
+  }
+}
+
+/** body_records: each exactly {off, len}, integers, in body order and not overlapping; every row the whole batch read carries its record's span. */
+function bodyRecordsOf(c: Case, batch: BatchResult): BodyRecord[] {
+  const recs: BodyRecord[] = [];
+  let end = 0;
+  for (const [i, r] of (c.body_records ?? []).entries()) {
+    const ok =
+      typeof r === 'object' && r !== null && JSON.stringify(Object.keys(r).sort()) === '["len","off"]' && Number.isInteger((r as BodyRecord).off) && Number.isInteger((r as BodyRecord).len);
+    if (!ok) throw new Error(`${c.id}: body_records[${i}] is not {off, len} with integer members`);
+    const { off, len } = r as BodyRecord;
+    if (len < 1 || off < end) throw new Error(`${c.id}: body_records[${i}] is empty or overlaps the record before it`);
+    recs.push({ off, len });
+    end = off + len;
+  }
+  if (batch.rows.length > recs.length || batch.rowsRead > recs.length) throw new Error(`${c.id}: the batch read more rows than body_records holds`);
+  batch.rows.forEach((row, i) => {
+    const rec = recs[i] as BodyRecord;
+    if (row.inputSpan === undefined || row.inputSpan.off !== rec.off || row.inputSpan.len !== rec.len) throw new Error(`${c.id}: batch row ${i}'s input_span is not body_records[${i}]`);
+  });
+  return recs;
+}
+
 /** A case's batch_of_t_rows through the real batch decoder; a malformed one is a fixture error, never a verdict. */
-function tRowsOf(c: Case): BatchOfTRows | undefined {
+function tRowsOf(c: Case, batch: BatchResult): BatchOfTRows | undefined {
+  checkProvenance(c);
+  const records = c.body_records === undefined ? undefined : bodyRecordsOf(c, batch);
   const ev = c.batch_of_t_rows;
   if (ev === undefined) return undefined;
-  const n = (c.batch as { rows: unknown[] }).rows.length;
+  if (records === undefined) throw new Error(`${c.id}: batch_of_t_rows without body_records`);
+  const n = records.length;
   if (!ev.rows.every((i, k) => Number.isInteger(i) && i >= 0 && i < n && (k === 0 || i > (ev.rows[k - 1] as number)))) {
-    throw new Error(`${c.id}: batch_of_t_rows.rows is not increasing indexes into the batch's rows`);
+    throw new Error(`${c.id}: batch_of_t_rows.rows is not increasing indexes into body_records`);
   }
-  return { rows: ev.rows, batch: decodeBatch(Buffer.from(JSON.stringify(ev.batch)), undefined), exp: bytes(ev.export_b64) };
+  return { rows: ev.rows, batch: decodeBatch(Buffer.from(JSON.stringify(ev.batch)), undefined), exp: bytes(ev.export_b64), records };
 }
 
 function run(c: Case) {
@@ -54,7 +99,7 @@ function run(c: Case) {
   const ins = decodeInsert(Buffer.from(JSON.stringify(c.insert)), undefined);
   // The comparator is handed the RAW insert document and the raw output bytes: the public result has
   // no export_declined* member and hides an output that does not exist.
-  return projectionVerdict(ins, bytes(c.insert_rows_b64), batch, bytes(c.batch_export_b64), c.output_format, c.insert as Record<string, unknown>, tRowsOf(c));
+  return projectionVerdict(ins, bytes(c.insert_rows_b64), batch, bytes(c.batch_export_b64), c.output_format, c.insert as Record<string, unknown>, tRowsOf(c, batch));
 }
 
 function expected(c: Case) {
@@ -72,10 +117,10 @@ describe.skipIf(!present)('the insert projection gate over the shared fixture', 
   it('reads the fixture it was written for, and refuses a zero-run', () => {
     expect(doc.schema).toBe('chtypes.abi-v2.insert-projection-fixture/1');
     const reds = doc.cases.filter((c) => typeof c.expect === 'object' && 'violates' in c.expect);
-    expect(doc.cases).toHaveLength(51);
+    expect(doc.cases).toHaveLength(53);
     expect(doc.cases.filter((c) => c.expect === 'equal')).toHaveLength(19);
     expect(doc.cases.filter((c) => typeof c.expect === 'object' && 'exception' in c.expect)).toHaveLength(1);
-    expect(reds).toHaveLength(31);
+    expect(reds).toHaveLength(33);
     const byRule: Record<string, number> = {};
     for (const c of reds) byRule[(c.expect as { violates: string }).violates] = (byRule[(c.expect as { violates: string }).violates] ?? 0) + 1;
     expect(byRule).toEqual({
@@ -86,8 +131,8 @@ describe.skipIf(!present)('the insert projection gate over the shared fixture', 
       non_t_row: 2,
       output_presence: 2,
       export_decline_is_call_decline: 3,
-      post_where_cut: 2,
-      post_where_refusal: 3,
+      post_where_cut: 3,
+      post_where_refusal: 4,
       err_prefix: 1,
       err_suffix: 2,
       native_output: 1,
