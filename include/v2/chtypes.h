@@ -1051,9 +1051,11 @@ CHS_API chs_buf *chs_error_ch_name(const chs_error *error);
  * the library prints the same text without the UUID unless the `CREATE` has an explicit `UUID '…'`
  * clause, and with one the message is exactly the server's. A caller that needs byte-exact messages
  * includes the UUID clause. For a refusal, these are the only differences from the server's own
- * message text: the omitted UUID, a 497's user, and `chs_preview_batch`'s shorter form, which ends
+ * message text: the omitted UUID, a 497's user, `chs_preview_batch`'s shorter form, which ends
  * before the server's row-position suffix (`chs_preview_insert` carries the server's message
- * whole).
+ * whole), and, inside a reader diagnostic that quotes a nested exception, that exception's
+ * `(version …)` label, which names the library's vendored source version rather than the server's
+ * official build.
  *
  * Class: api. Thread: shared. Init: any. Returns a new chs_buf the caller owns and frees with
  * chs_buf_free; its content is a ClickHouse message: may quote input bytes, so may carry any byte;
