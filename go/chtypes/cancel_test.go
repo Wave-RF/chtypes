@@ -436,12 +436,12 @@ func TestCancelNilContextIsUsage(t *testing.T) {
 	// A context that can never be done makes no token: armCancel touches
 	// neither the table (nil here) nor the document.
 	doc := optionDoc{}
-	if a, err := armCancel(nil, context.Background(), &doc); a != nil || err != nil || len(doc) != 0 {
+	if a, err := armCancel(context.Background(), nil, &doc); a != nil || err != nil || len(doc) != 0 {
 		t.Errorf("context.Background = %v, %v, document %v; want nothing", a, err, doc)
 	}
 	var a *cancelArm
 	sentinel := errors.New("x")
-	if a.finish(sentinel) != sentinel {
+	if err := a.finish(sentinel); !errors.Is(err, sentinel) {
 		t.Error("a nil arm's finish must return the error unchanged")
 	}
 }

@@ -109,7 +109,7 @@ func (s *Schema) RowContext(ctx context.Context, format Format, body []byte, opt
 		return RowResult{}, err
 	}
 	defer s.g.leave()
-	arm, err := armCancel(s.lib.tbl, ctx, &c.insertOpts)
+	arm, err := armCancel(ctx, s.lib.tbl, &c.insertOpts)
 	if err != nil {
 		return RowResult{}, err
 	}
@@ -147,7 +147,7 @@ func (s *Schema) RowsContext(ctx context.Context, format Format, body []byte, op
 		defer c.filter.g.leave()
 		fh = c.filter.h
 	}
-	arm, err := armCancel(s.lib.tbl, ctx, &c.insertOpts)
+	arm, err := armCancel(ctx, s.lib.tbl, &c.insertOpts)
 	if err != nil {
 		return BatchResult{}, err
 	}
@@ -215,7 +215,7 @@ func (s *Schema) insertRaw(ctx context.Context, format Format, body []byte, outF
 		defer c.filter.g.leave()
 		fh = c.filter.h
 	}
-	arm, err := armCancel(s.lib.tbl, ctx, &c.insertOpts)
+	arm, err := armCancel(ctx, s.lib.tbl, &c.insertOpts)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -280,7 +280,7 @@ func (s *Schema) ParseBlockContext(ctx context.Context, format Format, body []by
 		return nil, err
 	}
 	defer s.g.leave()
-	arm, err := armCancel(s.lib.tbl, ctx, &c.insertOpts)
+	arm, err := armCancel(ctx, s.lib.tbl, &c.insertOpts)
 	if err != nil {
 		return nil, err
 	}
@@ -361,7 +361,7 @@ func (f *Filter) RowsContext(ctx context.Context, format Format, body []byte, op
 		return FilterResult{}, err
 	}
 	defer f.g.leave()
-	arm, err := armCancel(f.lib.tbl, ctx, &c.insertOpts)
+	arm, err := armCancel(ctx, f.lib.tbl, &c.insertOpts)
 	if err != nil {
 		return FilterResult{}, err
 	}
