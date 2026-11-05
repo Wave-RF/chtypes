@@ -9,6 +9,7 @@ from __future__ import annotations
 from chtypes.errors import (
     ArtifactCorruptError,
     ArtifactIncompatibleError,
+    CallCanceledError,
     CallError,
     ChtypesError,
     InternalError,
@@ -21,6 +22,7 @@ from chtypes.errors import _misuse as misuse
 __all__ = [
     "ArtifactCorruptError",
     "ArtifactIncompatibleError",
+    "CallCanceledError",
     "CallError",
     "ChtypesError",
     "InternalError",

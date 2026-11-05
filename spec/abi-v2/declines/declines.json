@@ -3,30 +3,30 @@
  "generator": "chtypes filter-declines generator",
  "lines": [
   "26.3",
-  "26.7",
   "26.8",
-  "26.9"
+  "26.9",
+  "26.10"
  ],
  "declines": [
   {
    "id": "param-not-string",
-   "class": "create-decline",
+   "class": "misuse",
    "trigger": "a query parameter whose JSON value is not a string",
    "code": {
-    "chs": "CHS_DECLINED",
+    "chs": "CHS_INVALID_ARGUMENT",
     "ch": []
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create"
    ],
    "retirement": "none",
-   "description": "A server receives every query parameter as text, so a JSON null, boolean, number, array or object has no meaning; the create is declined and names the parameter. Pass the parameter's text as a JSON string."
+   "description": "A server receives every query parameter as text, so a JSON null, boolean, number, array or object has no meaning; the create is refused as misuse (CHS_INVALID_ARGUMENT) and the message names the parameter. Pass the parameter's text as a JSON string."
   },
   {
    "id": "non-reproducible-expression",
@@ -38,9 +38,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create"
@@ -58,9 +58,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create"
@@ -70,23 +70,140 @@
   },
   {
    "id": "settings-not-json-object",
-   "class": "create-decline",
+   "class": "misuse",
    "trigger": "a settings input that is not a JSON object",
+   "code": {
+    "chs": "CHS_INVALID_ARGUMENT",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "none",
+   "description": "The filter's settings must be a JSON object of string values; any other JSON text is refused as misuse (CHS_INVALID_ARGUMENT, the message names settings) rather than read as no settings."
+  },
+  {
+   "id": "option-not-implemented",
+   "class": "call-decline",
+   "trigger": "an input document (insert_options, filter_options, schema_options) sets a member this build reserves to a value other than its default; also a call this dev build does not implement (an interim v2-dev build at an SDK spec change's head)",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_preview_row",
+    "chs_preview_batch",
+    "chs_preview_insert",
+    "chs_filter_eval_body",
+    "chs_block_create",
+    "chs_filter_eval_block",
+    "chs_filter_create",
+    "chs_schema_create"
+   ],
+   "retirement": "none",
+   "description": "A reserved member is never ignored, so a caller is told. At a call that answers with a document the decline is the document's (code -2, refused_at call, status CHS_OK); the other calls answer CHS_DECLINED with ch_code 0."
+  },
+  {
+   "id": "call-memory-budget",
+   "class": "call-decline",
+   "trigger": "insert_options.memory_limit_bytes names a limit and the call's own MemoryTracker reaches it",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_preview_row",
+    "chs_preview_batch",
+    "chs_filter_eval_body",
+    "chs_block_create"
+   ],
+   "retirement": "none",
+   "description": "The whole call is declined, never answered from a run the limit cut short; a decline is never a wrong answer."
+  },
+  {
+   "id": "call-canceled",
+   "class": "canceled",
+   "trigger": "the call's insert_options.cancel / schema_options.cancel token fired before the call's last check point",
+   "code": {
+    "chs": "CHS_CANCELED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create",
+    "chs_preview_row",
+    "chs_preview_batch",
+    "chs_filter_eval_body",
+    "chs_block_create"
+   ],
+   "retirement": "none",
+   "description": "The call stops at its next check point and answers CHS_CANCELED with every output NULL; a fire after its last check point is a no-op, and the call answers in full."
+  },
+  {
+   "id": "native-data-after-end-block",
+   "class": "call-decline",
+   "trigger": "a Native body with bytes after its end-of-stream block (a block of zero columns)",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_preview_row",
+    "chs_preview_batch",
+    "chs_block_create",
+    "chs_filter_eval_body"
+   ],
+   "retirement": "none",
+   "description": "A server's INSERT ends a Native stream at a block of zero columns and silently ignores every byte after it, rows included, so the library declines such a body rather than answer for data the server would drop; the message names the offset and length of the bytes left unread, and the batch document's unconsumed reports the same range. Send only the blocks, or end the body at the empty block."
+  },
+  {
+   "id": "reference-type-unpaired",
+   "class": "create-decline",
+   "trigger": "chs_reference_type with a type this build pairs no widened reference type with",
    "code": {
     "chs": "CHS_DECLINED",
     "ch": []
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
-    "chs_filter_create"
+    "chs_reference_type"
    ],
    "retirement": "none",
-   "description": "The filter's settings must be a JSON object of string values; any other JSON text is declined rather than read as no settings."
+   "description": "The reference type is the widened type a type's values are compared in; a type with none paired is declined rather than answered with a guess."
   },
   {
    "id": "server-profile-setting",
@@ -98,9 +215,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create"
@@ -118,9 +235,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create",
@@ -132,43 +249,225 @@
   },
   {
    "id": "library-not-initialized",
+   "class": "misuse",
+   "trigger": "a call made before chs_initialize, from any call that is valid only after the process setup",
+   "code": {
+    "chs": "CHS_INVALID_ARGUMENT",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_live_handles",
+    "chs_error_codes",
+    "chs_registered_families",
+    "chs_function_flags",
+    "chs_reference_type",
+    "chs_set_defaults",
+    "chs_type_validate",
+    "chs_back_quote",
+    "chs_back_quote_if_needed",
+    "chs_quote_string",
+    "chs_server_create",
+    "chs_schema_create",
+    "chs_schema_describe",
+    "chs_preview_row",
+    "chs_preview_batch",
+    "chs_filter_create",
+    "chs_filter_eval_body",
+    "chs_block_create",
+    "chs_filter_eval_block",
+    "chs_discover_query",
+    "chs_discover_columns"
+   ],
+   "retirement": "none",
+   "description": "Every call but the handshake, the frees and the accessors runs under the process setup chs_initialize makes. Before it the call is refused as misuse (CHS_INVALID_ARGUMENT); the message names the call and the setup, and the error carries this id."
+  },
+  {
+   "id": "query-context-unattachable",
    "class": "create-decline",
-   "trigger": "a filter created before the library process is initialized",
+   "trigger": "a filter created on a thread that cannot carry a query context",
    "code": {
     "chs": "CHS_DECLINED",
     "ch": []
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create"
    ],
    "retirement": "none",
-   "description": "The filter compile needs the process context that initialization builds; without it the create is declined."
+   "description": "A server resolves a WHERE's functions under its query's context, and which function a name resolves to can depend on that context's settings; on a thread that cannot carry one, the create is declined rather than answered under another resolution."
   },
   {
    "id": "server-dependent-function",
    "class": "create-decline",
-   "trigger": "a column's DEFAULT, MATERIALIZED, ALIAS or EPHEMERAL expression, or a CHECK refused by the access check, calling a function whose resolver needs a server: its settings, resources or environment",
+   "trigger": "a column's DEFAULT, MATERIALIZED, ALIAS or EPHEMERAL expression, or a CHECK refused by the access check, calling a function whose resolver needs a server, or a server constant whose analysis at CREATE needs one: its settings, resources, macros or environment",
    "code": {
     "chs": "CHS_DECLINED",
     "ch": []
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_schema_create"
    ],
-   "retirement": "when the compile runs in a server's environment (its identity and a query context), for the functions that need only those",
-   "description": "A server resolves such a function with its own certificate, dictionaries, settings or environment, so whether it accepts the schema is its own to say; the schema is declined, naming the column and the function. serverUUID and the timeSeries functions, which a stock server accepts, are declined with them."
+   "retirement": "when the compile runs in a server's environment (its identity, its macros and a query context), for the functions that need only those",
+   "description": "A server resolves such a function with its own resources, settings, macros or environment, so whether it accepts the schema is its own to say; it is declined, naming the column and the function. Declined although a stock server accepts: serverUUID, the timeSeries functions, getMacro of a configured macro, and on 26.9 getServerPort, filesystemAvailable, filesystemCapacity and filesystemUnreserved."
+  },
+  {
+   "id": "expression-executes-query",
+   "class": "create-decline",
+   "trigger": "a CREATE TABLE (any clause: a column expression, codec, TTL, constraint, index, projection, key or setting) or a filter WHERE that holds a subquery, at any depth, including a table function read inside one",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create",
+    "chs_filter_create"
+   ],
+   "retirement": "none",
+   "description": "A server runs a subquery as a query against its own tables and table functions. The library never runs a query in the caller's process, so the statement or filter is declined before any analysis; whether a server accepts it is its own to say."
+  },
+  {
+   "id": "expression-reads-storage",
+   "class": "create-decline",
+   "trigger": "a CREATE TABLE (any clause) or a filter WHERE that reads a table, a dictionary, a file or a remote host: the set of an IN-family operator that is a table name or a call of a table function (a name in both the table-function and the function registries included) or of a name no function is registered under (a scalar call, as the one element of `x IN (f(...))`, is a value and is not declined), a joinGet, dictGet-family or (from 26.8) naiveBayesClassifier call, or a call of file, hasColumnInTable or catboostEvaluate",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create",
+    "chs_filter_create"
+   ],
+   "retirement": "none",
+   "description": "A server reads its own catalog, dictionaries, files or a remote host for these. The library never does in the caller's process, so the statement or filter is declined before any analysis; whether a server accepts it is its own to say."
+  },
+  {
+   "id": "server-state-function",
+   "class": "create-decline",
+   "trigger": "a CREATE TABLE (any clause) or a filter WHERE that calls a function whose analysis reads the running server's own components (its caches, process list and access control, through the server settings' live values): getServerSetting from 26.8",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create",
+    "chs_filter_create"
+   ],
+   "retirement": "when the library's context holds the server's components",
+   "description": "A server answers these from its own running components, which the library does not hold, so the statement or filter is declined before any analysis; whether a server accepts it is its own to say."
+  },
+  {
+   "id": "storage-analysis-needs-server",
+   "class": "create-decline",
+   "trigger": "a CREATE TABLE whose storage clause (the engine, a partition, sorting, primary or sampling key, the TTL, a skip index, a projection or a column TTL) the server's own analysis cannot finish without state only a running server holds (its UUID or its disks): the analysis ends in the library's own error class, never a server's verdict",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "when the library's context holds that state",
+   "description": "A function such as serverUUID, generateSnowflakeID or filesystemAvailable reads the server's own identity or disks when its storage clause is analyzed, which the library does not hold, so the schema is declined, never refused with an error a server never gives; whether a server accepts it is its own to say."
+  },
+  {
+   "id": "storage-access-not-modeled",
+   "class": "create-decline",
+   "trigger": "a CREATE TABLE whose partition, sorting, primary or sampling key, or table TTL, calls an introspection function (demangle, and the address functions where the line has them) that the access check refuses at allow_introspection_functions = 0",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "when the library's storage context holds a server global's unrestricted access",
+   "description": "A server builds those clauses under its own global context, whose access the check does not restrict, so it creates the table; the library's contexts always carry a user, so the schema is declined, never refused. Enabling allow_introspection_functions in the server profile compiles it."
+  },
+  {
+   "id": "check-built-at-insert",
+   "class": "create-decline",
+   "trigger": "a CONSTRAINT ... CHECK that the server's CREATE describes without error but whose expression does not build, such as a call with arguments the function does not take or a constant argument it refuses",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "none",
+   "description": "A server's CREATE describes a CHECK and builds it only at INSERT, so it creates the table and refuses the rows; the library does not model a table whose every INSERT fails, so the schema is declined, never refused. A CHECK the server's own description refuses is refused with its code."
+  },
+  {
+   "id": "undeclared-gate",
+   "class": "create-decline",
+   "trigger": "a CREATE whose column type, column expression or aggregate function needs a setting that neither the schema's own settings, chs_set_defaults nor the server profile sets and that a stock server's CREATE names when it refuses it at its defaults: a type gate such as allow_suspicious_low_cardinality_types, or an experimental aggregate function's gate; never a codec's setting (allow_suspicious_codecs, allow_experimental_codecs, enable_<family>_codec), which the CREATE applies as the server does",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "none: the same CREATE with the setting in the schema's own settings or the server profile compiles",
+   "description": "A stock server refuses such a CREATE at its defaults, naming the setting, and creates the table under a profile that enables it; a server that already holds the table passed its CREATE under its own profile, so whether the table exists is that server's to say. The decline carries the stock server's code and message. A codec's setting is applied as the server applies it, never declined."
   },
   {
    "id": "function-name-as-lambda",
@@ -179,15 +478,32 @@
     "ch": []
    },
    "lines": [
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create"
    ],
    "retirement": "when the new-analyzer filter path ships",
    "description": "A server on these lines rewrites a function name passed where a higher-order function takes a lambda into that lambda, in its analyzer; the filter compile cannot run that step and would refuse the name, so the create is declined and names the function. Write the lambda, such as x -> isNull(x), to get an answer."
+  },
+  {
+   "id": "in-set-reads-column",
+   "class": "create-decline",
+   "trigger": "an IN, NOT IN or GLOBAL IN whose set is an expression that reads a column of the table, such as col IN (lower(col)) or x IN (toString(y), 'a')",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "when the new-analyzer filter path ships",
+   "description": "A server answers an IN whose set reads the row's columns; on this line the filter compile builds every IN set as a constant first, where no column is in scope, and would refuse it, so the create is declined and names the column. Compare with = or has() over an array to get an answer."
   },
   {
    "id": "string-reading",
@@ -199,9 +515,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create"
@@ -227,6 +543,227 @@
    "description": "On the lines whose analyzer folds an AND of two equals over different constants to false whatever the comparison reads, the server returns no row where the comparison keeps one; the create is declined. Constants the server's own constant test calls equal are answered."
   },
   {
+   "id": "enum-key-unknown-literal",
+   "class": "create-decline",
+   "trigger": "a comparison of an Enum column the table's primary key, partition key or a skip index reads with a String constant that is not a name of the enum, such as NOT (e = 'zz') on ORDER BY e, at validate_enum_literals_in_operators 0",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "when 26.3 leaves the supported set",
+   "description": "Where the index analysis converts a String constant to an Enum key's type, the server refuses the whole query (691) while the comparison, at the setting's default 0, folds an unknown name to a constant and answers; the create is declined, naming the column and the constant. A sorting-key column outside the PRIMARY KEY, IN, isNotDistinctFrom and the setting at 1 are answered."
+  },
+  {
+   "id": "enum-key-has-unknown-literal",
+   "class": "create-decline",
+   "trigger": "has() (or notHas()) of a constant array that holds a String which is not a name of the enum, over an Enum column the table's primary key, partition key, a minmax or set skip index, a projection's key, or a function of the column in one of them reads, such as has(['a', 'zz'], e) on ORDER BY e",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": [
+     691
+    ]
+   },
+   "lines": [
+    "26.3",
+    "26.8"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "when 26.3 and 26.8 leave the supported set",
+   "description": "Where the index analysis casts has()'s constant array to the key's type without testing the pair, a name the enum does not hold refuses the whole query (691) on a table with data parts, while has() answers; the create is declined whatever the table holds, an empty table included."
+  },
+  {
+   "id": "enum-not-has-wrong-answer",
+   "class": "create-decline",
+   "trigger": "has() of a constant array of Strings over an Enum column the table's primary key, partition key, a minmax or set skip index, a projection's key or a function of the column in one of them reads, and, read negated (NOT has(...), notHas(...), also inside AND or OR), on a line that prunes parts by automatic statistics, any column of a MergeTree-family table, such as NOT has(['b'], e)",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "when 26.3 and 26.8 leave the supported set",
+   "description": "The index analysis reads has()'s String array by the enum's names, while has() compares a String with the enum's number and never matches, so a server prunes, or reads unfiltered, the part holding a named value and answers against the comparison; the create is declined, naming the column and the value. A numeric array and a column nothing reads are answered."
+  },
+  {
+   "id": "expression-key-literal-throws",
+   "class": "create-decline",
+   "trigger": "a comparison of a column with a constant where the table's primary key, partition key or a minmax or set skip index reads a function of that column, and the server's index analysis, pushing the constant through that function, refuses it: c = 'abc' on ORDER BY toInt64(c) (26.3), e = 'zz' on ORDER BY toString(e) (26.3 to 26.9) or ORDER BY CAST(e, 'Int8') (every line), a name the enum does not hold",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": [
+     6,
+     691
+    ]
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "when this build runs the server's own index analysis",
+   "description": "The index analysis runs the key's function on the constant, or casts the constant to the column's type before a key transform, and a throw refuses the whole query on a table with data parts, where the comparison answers; the create is declined whatever the table holds, an empty table included. Which path and which cast follow each line's own analysis."
+  },
+  {
+   "id": "enum-key-converted-literal",
+   "class": "create-decline",
+   "trigger": "a comparison the server's index analysis converts the constant for (such as LIKE, isNotDistinctFrom, or any comparison at validate_enum_literals_in_operators 1), of an Enum column the table's primary key, partition key, a minmax or set skip index or a projection's key reads, with a String that is not a name of the enum, where the comparison answers: e LIKE 'zz%' on 26.3, NOT isNotDistinctFrom(e, 'zz') over a Nullable Enum key at 1 on 26.8 to 26.10",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": [
+     691
+    ]
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "when the last line that converts such a constant leaves the supported set",
+   "description": "The index analysis converts the constant to the Enum key's type (on 26.3 at any setting, later at validate_enum_literals_in_operators 1) and refuses the whole query (691) on a table with data parts, while the comparison answers; the create is declined whatever the table holds. Shapes enum-key-unknown-literal declines keep that id."
+  },
+  {
+   "id": "bloom-filter-index-literal-mismatch",
+   "class": "create-decline",
+   "trigger": "a comparison or has() over a column a bloom_filter skip index reads, with a constant the index's own condition cannot convert to the column's type: a number that is no value of an Enum column (e = 3, has([1, 3], e)), a name it does not hold inside has(), has() of an Array(Enum) column with such a name or number, a Decimal constant against an integer column, a FixedString constant longer than the column's",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": [
+     691,
+     53,
+     131
+    ]
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "none: it follows each line's own bloom_filter condition",
+   "description": "The server builds the bloom_filter index's condition while it plans the query on a table with data parts, and its conversion of the constant refuses the whole query (691, 53 or 131) where the comparison answers; this build builds the same condition at create and declines when it throws, so shapes and lines are each line's own, an empty table included."
+  },
+  {
+   "id": "token-index-array-literal",
+   "class": "create-decline",
+   "trigger": "a comparison = or != of a column an ngrambf_v1 or tokenbf_v1 skip index reads, or = of a column a text index reads, with an Array constant, such as c = ['zz'] or c = [] over an Array(String) column",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "when 26.3 leaves the supported set",
+   "description": "Where the index analysis reads the Array constant as a String, the server refuses the whole query (170) once the table holds data parts, while the comparison answers every row; the decline is made at create, whether or not the table holds rows, naming the column, the index and the constant. has, hasAny and hasAll with an Array constant are answered."
+  },
+  {
+   "id": "text-index-negated-token-nullable",
+   "class": "create-decline",
+   "trigger": "NOT over hasToken, hasAnyTokens or hasAllTokens (directly, or over an AND or OR holding it) of a Nullable or LowCardinality(Nullable) String or FixedString column a text index reads, such as NOT hasToken(c, 'hello'), and hasToken over a Nullable(FixedString) column a text index reads",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "when the server's text index answers NULL rows as the function does",
+   "description": "A server reads the token function off the text index, a 0 for a NULL row where the function is NULL, so NOT returns the NULL row the row path drops; over Nullable(FixedString) it also answers hasToken, which the function refuses (44). The create is declined, naming the column and the index. hasTokenOrNull, NOT LIKE and non-Nullable columns are answered."
+  },
+  {
+   "id": "text-index-mapkeys-or",
+   "class": "create-decline",
+   "trigger": "an OR one of whose operands is has(mapKeys(c), k), mapContains(c, k) or mapContainsKey(c, k) over a Map column whose keys a text index reads, and another operand of which reads the same column, such as has(mapKeys(c), 'a') OR c['b'] = 2",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "when the server's text index answers such an OR as its row path does",
+   "description": "Over rows held in separate data parts, a server drops a row that holds the key; the decline is made at create, whatever the table holds, naming the column and the index. The key lookup alone, and an OR whose other operands do not read the column, are answered."
+  },
+  {
+   "id": "bloom-filter-float-signed-zero",
+   "class": "create-decline",
+   "trigger": "an equals, has or IN, reached from the filter's root through AND and OR only, of a Float32 or Float64 column a bloom_filter skip index reads, that matches both +0.0 and -0.0, such as c = 0 or has([0.0], c)",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "when the server's bloom_filter index hashes the two zeros alike",
+   "description": "The bloom_filter index hashes a zero's bits, so a server drops the row holding the other zero that the comparison keeps (c = 0 drops a -0.0 row); the create is declined, naming the column and the index. The comparison's own function decides, run over one row of each zero: where it tells the zeros apart, as IN does on some lines, the filter is answered, and so is NOT over such a comparison."
+  },
+  {
+   "id": "partition-key-null-element-dropped",
+   "class": "create-decline",
+   "trigger": "a comparison, read by the partition key's index analysis as =, <, <= or isNotDistinctFrom, of a constant with a function of one Nullable or LowCardinality(Nullable) partition key column, bare (PARTITION BY c, (k, c), tuple(c)) or an expression the filter spells as the key does (PARTITION BY toString(c), intDiv(c, 10)), which matches a row where that column is NULL, such as has(['b'], c) = 0, indexOf(['b'], c) = 0, countEqual(['b'], c) = 0 or length([toString(c)]) = 1",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "when the server's partition pruner reads a NULL partition as its row path does",
+   "description": "A server's partition pruner reads the NULL partition as the largest key value through the function, so has(['b'], c) = 0, true for a NULL row, drops that row; the same under an expression key the filter spells (length([toString(c)]) = 1 under PARTITION BY toString(c)). Declined where the comparison over a NULL row is true; a bare column or key expression and a never-NULL key are answered."
+  },
+  {
    "id": "alias-expansion",
    "class": "decline",
    "trigger": "a WHERE that refers to an alias it defines",
@@ -236,9 +773,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -258,9 +795,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -269,6 +806,48 @@
    ],
    "retirement": "when the new-analyzer filter path ships",
    "description": "A server's planner refuses such a WHERE with 80 (INCORRECT_QUERY) while it builds the WHERE's actions from its analyzer's query tree, a step this build does not run, so every row is declined. A lambda passed as an array argument, outside another lambda's body, adds no depth."
+  },
+  {
+   "id": "lambda-depth-declined",
+   "class": "create-decline",
+   "trigger": "a filter whose lambdas nest more than 64 deep, each inside the body of the one before",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "when the new-analyzer filter path ships",
+   "description": "A server's planner refuses such a WHERE with 80 (INCORRECT_QUERY) while it builds the WHERE's actions from its analyzer's query tree, a step this build does not run, so no filter is made: chs_filter_create declines it. Where a filter is evaluated row by row (ABI v1), the same limit is lambda-depth, every row declined."
+  },
+  {
+   "id": "constant-condition-if",
+   "class": "decline",
+   "trigger": "an if (also written cond ? a : b, in any letter case) whose condition is a constant the rewrite reads: a numeric or NULL literal, or a CAST to UInt8 or Nullable(UInt8), toUInt8, toInt8 or identity of one, a {p:UInt8} query parameter included; a multiIf or CASE, and a condition such as 0 = 1, are not rewritten",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "when the new-analyzer filter path ships",
+   "description": "This build replaces such an if by the branch it takes before typing it; a server's analyzer types it with both, so toTypeName(if(0, [1, 2, 3], s)) is String here and Variant(Array(UInt8), String) there. It also declines ifs both answer alike, such as if(0, 1, n = 1000) and toString(if(0, [1, 2, 3], s)) = 'str_1'."
   },
   {
    "id": "index-hint",
@@ -280,9 +859,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -300,15 +879,13 @@
     "chs": "-2",
     "ch": []
    },
-   "lines": [
-    "26.7"
-   ],
+   "lines": [],
    "paths": [
     "chs_filter_eval_body",
     "chs_filter_eval_block",
     "chs_preview_batch"
    ],
-   "retirement": "when 26.7 leaves the supported set",
+   "retirement": "dormant: anchor line retired 2026-11-02",
    "description": "On the lines where the server rewrites such an arrayExists to has(), and has() compares a FixedString with a String differently from equals(), the server answers differently with the rewrite on and off; every row is declined."
   },
   {
@@ -320,7 +897,6 @@
     "ch": []
    },
    "lines": [
-    "26.7",
     "26.8"
    ],
    "paths": [
@@ -332,6 +908,87 @@
    "description": "On the lines where the server rewrites such an arrayExists to has() by default, and has() compares two native numbers with a plain machine comparison, a negative value can match a large unsigned constant or an integer a float; every row is declined."
   },
   {
+   "id": "array-exists-enum-string-const",
+   "class": "decline",
+   "trigger": "arrayExists over a lambda that compares an element with a String or FixedString constant (Nullable or LowCardinality of one included), where the array is a constant Array(Enum8), Array(Enum16) or Array(Nullable) of one",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.8",
+    "26.9"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "when 26.8 and 26.9 leave the supported set",
+   "description": "On the lines where the server rewrites such an arrayExists to has() by default, and has() compares a constant Enum array with a String by the enum's number while equals() compares by name, the server keeps no row where equals() matches; every row is declined when the two answer differently. A NULL constant, an unknown name and an array column are answered."
+  },
+  {
+   "id": "array-exists-enum-const-fixedstring-longer",
+   "class": "decline",
+   "trigger": "arrayExists over a lambda that compares an element with a FixedString constant (Nullable or LowCardinality of one included), where the array is a constant Array(Enum8), Array(Enum16) or Array(Nullable) of one",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "when 26.10 leaves the supported set",
+   "description": "On the lines where the server rewrites such an arrayExists to has() by default, and has() compares a constant Enum array by name, a FixedString longer than the name still matches it while equals() does not; every row is declined when the two answer differently."
+  },
+  {
+   "id": "array-exists-enum-column-fixedstring-longer",
+   "class": "decline",
+   "trigger": "arrayExists over a lambda that compares an element with a FixedString constant (Nullable or LowCardinality of one included), where the array is an Array(Enum8), Array(Enum16) or Array(Nullable) of one that is not a constant",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "when 26.8, 26.9 and 26.10 leave the supported set",
+   "description": "On the lines where the server rewrites such an arrayExists to has() by default, has() matches an Enum element with a longer FixedString while equals() does not, so under NOT the server drops a row equals() keeps; every row is declined when the two answer differently for some value of the enum. A String constant is answered."
+  },
+  {
+   "id": "array-exists-nullable-enum-null-element",
+   "class": "decline",
+   "trigger": "arrayExists over a lambda that compares an element with a String or FixedString constant (Nullable or LowCardinality of one included), where the array is an Array(Nullable(Enum8)) or Array(Nullable(Enum16)) that is not a constant",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "when 26.8, 26.9 and 26.10 leave the supported set",
+   "description": "On the lines where the server rewrites such an arrayExists to has() by default, has() refuses the whole query (691) when it reads a NULL element, where equals() answers; whether a NULL is stored is not known at compile, so every row is declined. An enum with a value 0, which does not refuse, and a NULL or number constant are answered."
+  },
+  {
    "id": "fixed-const-header",
    "class": "decline",
    "trigger": "a filter that is constant false over the server's empty header because length() of a FixedString or QBit, or a fixed-to-constant CRC, is 0 there",
@@ -340,8 +997,7 @@
     "ch": []
    },
    "lines": [
-    "26.3",
-    "26.7"
+    "26.3"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -369,6 +1025,25 @@
    ],
    "retirement": "when 26.3 leaves the supported set",
    "description": "On the lines where a CRC over a FixedString answers every row of a block with the CRC of the block's first row, a batch evaluated as one block gives a row another row's answer; every row of such a filter is declined."
+  },
+  {
+   "id": "nullable-const-block",
+   "class": "decline",
+   "trigger": "a filter with a function that answers a constant over a Nullable column, such as c != '300' over Nullable(UInt8) or NOT (e = 'zz') over Nullable(Enum8)",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "when 26.3 leaves the supported set",
+   "description": "On the lines where a function's constant answer over a Nullable column takes the NULL of its block's first row, a server keeps or drops every row of a block by that first row, whichever block an INSERT or a merge put it in; every row of such a filter is declined."
   },
   {
    "id": "projection-filter-type",
@@ -399,7 +1074,6 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8"
    ],
    "paths": [
@@ -420,9 +1094,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -442,9 +1116,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -464,9 +1138,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -486,9 +1160,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -508,9 +1182,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -530,9 +1204,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -552,9 +1226,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -574,9 +1248,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -596,9 +1270,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -618,9 +1292,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -640,7 +1314,8 @@
    },
    "lines": [
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -660,9 +1335,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -671,6 +1346,28 @@
    ],
    "retirement": "when the moved setting is honored (a reviewed change per setting)",
    "description": "The compatibility setting rewrites the default of a listed setting that this build does not apply; every row is declined and the message names the moved setting."
+  },
+  {
+   "id": "setting-server-check-not-run",
+   "class": "decline",
+   "trigger": "a server-check setting for which this build runs no check, named in the filter's own settings",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "when the build runs the check (a reviewed change per setting)",
+   "description": "A setting the reviewed table classifies as a server check, for which this build has no check to run at create, cannot be applied as the server does; every row is declined and the setting is named in unsupported_settings. No listed setting reaches this today."
   },
   {
    "id": "ast-limits",
@@ -687,9 +1384,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create"
@@ -709,16 +1406,15 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create",
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch",
-    "chs_schema_describe"
+    "chs_preview_batch"
    ],
    "retirement": "none",
    "description": "Each recursive walk the library itself writes runs the server's own stack check first: once the calling thread has used half its stack, the call is refused with the server's code and message (TOO_DEEP_RECURSION) instead of overflowing the stack. The depth this allows depends on the calling thread's stack size; on a small stack it is less than a server's."
@@ -736,9 +1432,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create"
@@ -758,9 +1454,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create"
@@ -771,19 +1467,20 @@
   {
    "id": "regex-pattern",
    "class": "server-check",
-   "trigger": "a regular-expression function whose constant pattern is invalid",
+   "trigger": "a regular-expression function (or, from 26.10, SIMILAR TO; from 26.8, LIKE with ESCAPE) whose constant pattern or escape is invalid",
    "code": {
     "chs": "CHS_REJECTED",
     "ch": [
      427,
-     36
+     36,
+     25
     ]
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create"
@@ -803,9 +1500,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create"
@@ -826,9 +1523,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create"
@@ -846,9 +1543,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create"
@@ -866,9 +1563,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -890,9 +1587,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create"
@@ -912,9 +1609,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_create"
@@ -934,9 +1631,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -956,9 +1653,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -978,9 +1675,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -1000,9 +1697,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -1022,9 +1719,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -1033,6 +1730,28 @@
    ],
    "retirement": "none",
    "description": "A server admits a MATERIALIZED column in the list only under insert_allow_materialized_columns, which this build does not model; the whole call is unsupported and the setting is named."
+  },
+  {
+   "id": "call-setting-statement-parse",
+   "class": "call-decline",
+   "trigger": "a setting the server's parse of the INSERT statement reads, at any layer of the call: max_query_size, max_parser_depth, max_parser_backtracks, max_ast_depth or max_ast_elements stricter than its default as the server's own readers read it, or dialect, implicit_select or allow_settings_after_format_in_insert other than its default",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "A server parses the INSERT statement under these settings before reading the body, and this build sees the body only, so it cannot tell whether a stricter limit or a switched parser refuses that statement: the call is unsupported with the setting named and every filter row is declined. A limit at or above its default is answered, under the call's value."
   },
   {
    "id": "call-setting-unappliable",
@@ -1044,9 +1763,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -1061,14 +1780,14 @@
    "class": "call-decline",
    "trigger": "chs_preview_batch with a filter whose create zone differs from the batch's zone",
    "code": {
-    "chs": "CHS_DECLINED",
+    "chs": "-2",
     "ch": []
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_preview_batch"
@@ -1086,9 +1805,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -1097,6 +1816,146 @@
    ],
    "retirement": "none",
    "description": "A server stores none of a refused body's rows, an unsupported batch is not the server's answer, and a poisoned one stores a value no SELECT reads back; every row is declined and the document's outcome mirrors the batch's."
+  },
+  {
+   "id": "export-batch-not-accepted",
+   "class": "batch-precedence",
+   "trigger": "chs_preview_batch with an export asked for, whose batch outcome is rejected, unsupported or accepted_poisoned",
+   "code": {
+    "chs": "ch",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "Only a fully accepted batch exports bytes: the export is declined (export_declined, export_declined_reason this id) and the batch's own code and reason say why. The export's twin of batch-not-accepted."
+  },
+  {
+   "id": "export-json-validate-utf8",
+   "class": "export-decline",
+   "trigger": "chs_preview_batch with an export asked for, under output_format_json_validate_utf8",
+   "code": {
+    "chs": "ch",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "The setting re-shapes the writer's byte stream outside the frame the export reproduces, so the export is declined and the batch answered."
+  },
+  {
+   "id": "export-listed-materialized",
+   "class": "export-decline",
+   "trigger": "chs_preview_batch with an export asked for, whose column list supplies a MATERIALIZED column (insert_allow_materialized_columns)",
+   "code": {
+    "chs": "ch",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "The export carries the stored columns only, and a re-insert of it would recompute the supplied MATERIALIZED value, so the export is declined and the batch answered."
+  },
+  {
+   "id": "export-incomplete-row",
+   "class": "export-decline",
+   "trigger": "chs_preview_batch with an export asked for, where a stored row lacks a column of the export",
+   "code": {
+    "chs": "ch",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "The export never emits a row with a column silently absent, so the export is declined and the batch answered."
+  },
+  {
+   "id": "export-format-not-serializable",
+   "class": "call-decline",
+   "trigger": "chs_preview_batch with an export asked for in a format this build cannot write (only JSONCompactEachRow)",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "The export writer serializes one format; asking for another declines the whole call before any byte is read, answers the batch document with outcome unsupported, code -2 and this reason, and exports nothing."
+  },
+  {
+   "id": "export-computed-value-not-carried",
+   "class": "export-decline",
+   "trigger": "chs_preview_batch with an export asked for, whose listed EPHEMERAL value changes a MATERIALIZED column",
+   "code": {
+    "chs": "ch",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "The export carries no EPHEMERAL column, so a re-insert of it would compute the MATERIALIZED value from the EPHEMERAL column's own expression: the export is declined and the batch answered."
+  },
+  {
+   "id": "export-serialization-failed",
+   "class": "export-decline",
+   "trigger": "chs_preview_batch with an export asked for, whose writer refuses a stored value",
+   "code": {
+    "chs": "ch",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "ClickHouse's own writer refused a value (its code is in export_declined), so the export is declined and the batch answered."
   },
   {
    "id": "skipped-key-in-squashed-block",
@@ -1108,7 +1967,29 @@
    },
    "lines": [
     "26.3",
-    "26.7",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "A server checks a body's MATERIALIZED and CHECK expressions over the blocks its squashing step forms, which drop a skipped row's LowCardinality key when its chunk joins a block, so its answer depends on how the body is cut into chunks; the batch is unsupported and every filter verdict over it is declined."
+  },
+  {
+   "id": "json-object-size-segmentation",
+   "class": "batch-precedence",
+   "trigger": "a JSONEachRow or JSONCompactEachRow body longer than input_format_json_max_object_size, one of whose objects the server's parallel-parsing segmentation engine refuses, where the server parses or may parse the body in parallel",
+   "code": {
+    "chs": "-2",
+    "ch": [
+     117
+    ]
+   },
+   "lines": [
     "26.8",
     "26.9"
    ],
@@ -1118,7 +1999,7 @@
     "chs_preview_batch"
    ],
    "retirement": "none",
-   "description": "A server checks a body's MATERIALIZED and CHECK expressions over the blocks its squashing step forms, which drop a skipped row's LowCardinality key when its chunk joins a block, so its answer depends on how the body is cut into chunks; the batch is unsupported and every filter verdict over it is declined."
+   "description": "The server's JSON segmentation engine refuses an object over the limit with 117 whenever it parses the body in parallel, which its settings or its CPU count decide; the body is declined unless the server's settings make it read the body serially, where the limit is not read."
   },
   {
    "id": "row-not-storable",
@@ -1130,9 +2011,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -1152,9 +2033,9 @@
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -1165,18 +2046,754 @@
    "description": "The library and the server each compute their own clock read or generated value, so a filter that reads such a column has no answer for a row that omitted it; supply the value to get a verdict."
   },
   {
-   "id": "admission-envelope",
+   "id": "expression-masked-secret",
    "class": "row-decline",
-   "trigger": "an evaluation that exceeds the admission memory or wall budget",
+   "trigger": "a column DEFAULT, MATERIALIZED or ALIAS expression whose call holds the server's mask '[HIDDEN]' in every argument the server's own secret finder names secret: a definition read back from a server (SHOW CREATE, system.columns), which hides the key",
    "code": {
     "chs": "-2",
     "ch": []
    },
    "lines": [
     "26.3",
-    "26.7",
     "26.8",
-    "26.9"
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_preview_row",
+    "chs_preview_batch",
+    "chs_filter_eval_body",
+    "chs_filter_eval_block"
+   ],
+   "retirement": "none",
+   "description": "The server holding the table computes the call with its real key; the read-back text carries only the mask, so a value computed here would be wrong. The schema compiles, a row that supplies the column is answered, and a row that would evaluate the expression is declined. Compile the definition with its real key to get the server's value."
+  },
+  {
+   "id": "float-negative-zero-sparse-default",
+   "class": "row-decline",
+   "trigger": "a filter that reads a Float32, Float64 or BFloat16 column, or such a Tuple element, holding -0.0 in a row of a MergeTree-family table",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "when 26.3 leaves the supported set",
+   "description": "On the lines where a MergeTree part's sparse serialization counts -0.0 as its type's default, a part whose rows are mostly defaults stores -0.0 as +0.0, which depends on the part's other rows; a filter that reads such a value in a row gives that row no verdict. Nullable and Array values, and plain engines, keep the sign and are answered."
+  },
+  {
+   "id": "admission-envelope",
+   "class": "row-decline",
+   "trigger": "an evaluation that exceeded the admission memory or wall-clock budget",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "retired: replaced by admission-memory-budget and admission-time-budget",
+   "description": "Retired and never emitted. The one reason for both budgets, when the time budget was wall-clock time: that decline depended on the host's load, and a retry could succeed. Key on admission-memory-budget and admission-time-budget, each of which states whether it depends on load."
+  },
+  {
+   "id": "admission-memory-budget",
+   "class": "row-decline",
+   "trigger": "an evaluation of a tenant expression (DEFAULT, MATERIALIZED, CHECK, TTL, index, projection, a Values expression or a filter) that allocates more than the admission memory budget",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create",
+    "chs_preview_row",
+    "chs_preview_batch",
+    "chs_filter_eval_body",
+    "chs_filter_eval_block"
+   ],
+   "retirement": "none",
+   "description": "The evaluation's allocations are charged to a thread-private ClickHouse memory tracker capped at chtypes_default_eval_memory_bytes; crossing it unwinds the evaluation. The row is declined; at chs_schema_create, the schema. It does not depend on load: the same input, build and profile declines again, so a retry does not help.",
+   "load_dependence": "deterministic"
+  },
+  {
+   "id": "admission-time-budget",
+   "class": "row-decline",
+   "trigger": "an evaluation of a tenant expression that spends more of the evaluating thread's CPU time than the admission time budget, or calls sleep",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create",
+    "chs_preview_row",
+    "chs_preview_batch",
+    "chs_filter_eval_body",
+    "chs_filter_eval_block"
+   ],
+   "retirement": "none",
+   "description": "Charged to the evaluating thread's CPU time, checked when the evaluation returns; sleep is capped at 1 microsecond per block. CPU time rose up to 1.03x (arm64) and 2.0x (amd64) under load. Over the budget on an idle core: declines on every retry (too expensive, not 503). Under half the budget: never. Between half and the whole: the host's load can decide.",
+   "load_dependence": "load-dependent"
+  },
+  {
+   "id": "vendored-crash-previously",
+   "class": "call-decline",
+   "trigger": "an input that a process of this build died on at an earlier start, found in the crash-loop breaker's record",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create",
+    "chs_filter_create",
+    "chs_server_create",
+    "chs_set_defaults",
+    "chs_type_validate",
+    "chs_reference_type",
+    "chs_discover_columns"
+   ],
+   "retirement": "when generation 3's containment answers the first crash too",
+   "description": "A process of this build died while the library was compiling exactly this input (same call, build, defaults, server profile, text, settings and options), so the library declines it before any vendored code runs and never compiles it again on this host until an operator removes its line from the record; outputs are NULL. A call that is not a hit is answered exactly as without the record."
+  },
+  {
+   "id": "encryption-codec",
+   "class": "create-decline",
+   "trigger": "a column whose CODEC chain holds an encryption codec (AES_128_GCM_SIV, AES_256_GCM_SIV)",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "when the schema is accepted and only its data paths decline",
+   "description": "An encryption codec's key is read from the server's own configuration when it writes the rows, so a keyed server stores them and an unkeyed one refuses every INSERT; the library holds no keyring, so the schema is declined, naming the column and the codec, and no filter over it can be made. The codec factory decides which codecs encrypt."
+  },
+  {
+   "id": "known-crash-declined",
+   "class": "create-decline",
+   "trigger": "a statement or filter holding a shape that the server of the line being built is known to terminate on (today: on 26.3, a lambda passed as the accumulator, or as any argument after the first, of arrayFold)",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3"
+   ],
+   "paths": [
+    "chs_filter_create",
+    "chs_schema_create"
+   ],
+   "retirement": "when the shape no longer terminates the server of that line, or the line is retired",
+   "description": "The build's known-crash list names a shape that a server of this line terminates on. It is found in the parsed statement before any analysis runs, so the create is declined and the shape is never analyzed. The message names the rule, the line, the clause and what to change. 26.7 and later refuse the shape with 43; the rule does not apply there."
+  },
+  {
+   "id": "engine-not-modeled",
+   "class": "create-decline",
+   "trigger": "a table engine this build does not model: the Graphite family, whose rollup rules are the server's configuration, or a MergeTree merging mode it does not read; and, under posture load, a CREATE VIEW, CREATE MATERIALIZED VIEW or CREATE DICTIONARY statement",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "none",
+   "description": "The engine or the object kind itself is the cause: its behavior comes from something this build does not hold, so the schema is declined rather than modeled. Under posture create a view kind stays CHS_INVALID_ARGUMENT. A decline for anything else in the statement carries its own id."
+  },
+  {
+   "id": "column-type-unsettled",
+   "class": "create-decline",
+   "trigger": "a column declared without a type whose type only the server's column description can derive, and that description cannot run here",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "none",
+   "description": "A typeless column takes its type from the expression the server analyses at CREATE; when that analysis cannot run here, or the column's own DEFAULT is declined, the type is unsettled and the schema is declined."
+  },
+  {
+   "id": "column-list-format-not-modeled",
+   "class": "call-decline",
+   "trigger": "an INSERT column list on a pre-decoded format (RowBinary, Native, Buffers)",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_preview_batch",
+    "chs_filter_eval_body"
+   ],
+   "retirement": "none",
+   "description": "The pre-decoded formats address the wire tuple by their own framing rules, and a column list over them is not measured, so the call is declined; pass no list for the no-list shape."
+  },
+  {
+   "id": "attach-statement-under-create",
+   "class": "create-decline",
+   "trigger": "a Replicated engine in an ATTACH statement, compiled in the CREATE posture",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "none",
+   "description": "A server loads a Replicated table in the ATTACH posture, which differs from the CREATE posture this call compiles in, so the schema is declined rather than modeled in the wrong posture."
+  },
+  {
+   "id": "server-macros-required",
+   "class": "create-decline",
+   "trigger": "an engine argument that reads the server's macros",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "none",
+   "description": "A stock server has no macros of its own to read, and the server that holds the table has its own, so the argument cannot be evaluated here and the schema is declined."
+  },
+  {
+   "id": "engine-deprecated-syntax",
+   "class": "create-decline",
+   "trigger": "a MergeTree engine written in the deprecated form that passes ORDER BY and PRIMARY KEY as engine arguments",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "none",
+   "description": "The deprecated engine-argument form is not modeled; write the engine with ORDER BY and PRIMARY KEY clauses."
+  },
+  {
+   "id": "engine-merge-columns-unbuilt",
+   "class": "create-decline",
+   "trigger": "an engine whose merge needs the table's columns, which could not be described",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "none",
+   "description": "The engine's merge reads the table's column description; when that description cannot be built the schema is declined rather than guessed."
+  },
+  {
+   "id": "engine-argument-not-column",
+   "class": "create-decline",
+   "trigger": "an engine argument that is not a plain column name",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "none",
+   "description": "The engine reads the argument as a column of the table; any other expression is not modeled, so the schema is declined."
+  },
+  {
+   "id": "sorting-key-unknown-column",
+   "class": "create-decline",
+   "trigger": "a sorting key that names a column the schema does not declare",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "none",
+   "description": "The key cannot be built from a column the schema does not hold, so the schema is declined."
+  },
+  {
+   "id": "create-as-other-object",
+   "class": "create-decline",
+   "trigger": "a table defined by another object: AS table, AS table function or AS SELECT",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "none",
+   "description": "The columns of such a table come from the other object, which this build cannot read; spell the columns out."
+  },
+  {
+   "id": "create-clause-not-modeled",
+   "class": "create-decline",
+   "trigger": "a CREATE clause that changes how the server processes the statement, such as a query-level SETTINGS clause after the storage definition or an SQL SECURITY clause",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "none",
+   "description": "The server applies these clauses to the CREATE itself before it builds the storage, a step this build does not model, so the schema is declined."
+  },
+  {
+   "id": "index-declared-twice",
+   "class": "create-decline",
+   "trigger": "a table that declares two indexes with one name",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "none",
+   "description": "A server refuses the duplicate before the engine's own check, and this build does not model that refusal, so the schema is declined rather than accepted."
+  },
+  {
+   "id": "index-type-not-built",
+   "class": "create-decline",
+   "trigger": "an index of a type this build does not compile in",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "none",
+   "description": "The server registers the index type, and its create-time validation is not modeled here, so the schema is declined."
+  },
+  {
+   "id": "table-setting-not-modeled",
+   "class": "create-decline",
+   "trigger": "a table SETTINGS entry the engine does not take, or a query setting that the server moves into the CREATE's own context",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "none",
+   "description": "The server's handling of the entry depends on a context this build does not model, so the schema is declined."
+  },
+  {
+   "id": "table-setting-server-storage",
+   "class": "create-decline",
+   "trigger": "a table setting that names the server's storage configuration, such as a storage policy or a disk other than the default",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "none",
+   "description": "The server's storage configuration is not visible to this build, so a setting that names it is declined."
+  },
+  {
+   "id": "plain-engine-column-ttl",
+   "class": "create-decline",
+   "trigger": "a column TTL on an engine that does not hold TTLs",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "none",
+   "description": "A server refuses the column TTL for such an engine in a way this build does not model, so the schema is declined."
+  },
+  {
+   "id": "temporary-table-memory-limit",
+   "class": "create-decline",
+   "trigger": "a TEMPORARY table with the Memory engine created under a non-zero max_temporary_table_memory_usage",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "none",
+   "description": "A server counts the temporary table's whole contents against the limit on every INSERT, which this build does not hold, so the schema is declined."
+  },
+  {
+   "id": "key-build-refused",
+   "class": "create-decline",
+   "trigger": "a sorting key the server's CREATE would refuse while building",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "none",
+   "description": "The key is built as the server builds it, and the server's refusal is reported as a decline here rather than as a rejection."
+  },
+  {
+   "id": "partition-key-declined",
+   "class": "create-decline",
+   "trigger": "a partition key whose expression this build cannot evaluate as the server does",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "none",
+   "description": "The partition key is declined for the reason its own expression carries, so a body's partitioning is not guessed."
+  },
+  {
+   "id": "ttl-kind-not-modeled",
+   "class": "create-decline",
+   "trigger": "a table TTL that is not the unconditional rows TTL: WHERE, GROUP BY, TO DISK, RECOMPRESS, or no rows TTL at all",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "none",
+   "description": "Only the unconditional rows TTL is modeled; the other kinds are declined."
+  },
+  {
+   "id": "ttl-reads-refused-default",
+   "class": "create-decline",
+   "trigger": "a column TTL that reads a column whose DEFAULT is declined",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "none",
+   "description": "The TTL's value depends on the declined DEFAULT, so it is declined with it."
+  },
+  {
+   "id": "ttl-server-zone",
+   "class": "create-decline",
+   "trigger": "a TTL on a schema whose server runs in a time zone this build cannot apply",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "none",
+   "description": "The TTL is evaluated in the server's zone, which this build cannot arm, so the TTL is declined."
+  },
+  {
+   "id": "schema-server-zone",
+   "class": "create-decline",
+   "trigger": "a schema whose server zone (the server profile's session_timezone when it sets one, else its timezone) this build cannot compile in; or, under posture load on a server zone other than the image zone, a column type that holds an AggregateFunction together with a DateTime or DateTime64 that has no zone of its own",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "none",
+   "description": "The schema is compiled in the zone the server binds its types to; when that zone cannot be armed the schema is declined. Under posture load a server builds an aggregate's state with no query context while binding a zone-less DateTime to its own zone, and this build cannot do both in one compile, so such a column type is declined rather than bound to another zone."
+  },
+  {
+   "id": "projection-with-settings",
+   "class": "create-decline",
+   "trigger": "a projection declared WITH SETTINGS",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "none",
+   "description": "The server checks these settings against its MergeTree settings and merge pools, which this build does not model, so the schema is declined."
+  },
+  {
+   "id": "projection-reads-unstored-column",
+   "class": "create-decline",
+   "trigger": "a projection that reads a column the table does not store, such as a virtual column or a subcolumn",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "none",
+   "description": "The block the server's writer hands such a projection is not modeled, so the schema is declined."
+  },
+  {
+   "id": "materialized-unfillable",
+   "class": "create-decline",
+   "trigger": "a schema whose MATERIALIZED columns cannot be filled for a step",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "none",
+   "description": "The step needs every MATERIALIZED value, and one could not be computed here, so it is declined."
+  },
+  {
+   "id": "type-family-needs-server",
+   "class": "create-decline",
+   "trigger": "a column type, or a type text, from a family that needs a live server context",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "none",
+   "description": "Such a type cannot be built without a server context, so the schema or type text is declined."
+  },
+  {
+   "id": "compile-mode-unsupported",
+   "class": "create-decline",
+   "trigger": "a compile mode other than the declared-profile mode 0",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "none",
+   "description": "This build supports one compile mode; any other value is declined."
+  },
+  {
+   "id": "buffers-empty-header",
+   "class": "call-decline",
+   "trigger": "a Buffers body whose header has no columns",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
    ],
    "paths": [
     "chs_filter_eval_body",
@@ -1184,7 +2801,771 @@
     "chs_preview_batch"
    ],
    "retirement": "none",
-   "description": "A filter is tenant-authored code; an evaluation that trips the envelope is declined for that row, never reported as an error or as false."
+   "description": "The Buffers reader needs at least one column on the wire, so the call is declined."
+  },
+  {
+   "id": "clock-skew-exceeded",
+   "class": "call-decline",
+   "trigger": "a call whose client clock is further from the batch clock than the configured skew budget",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "Substituting a clock value past the budget would store a timestamp the server would not have written, so the batch is declined."
+  },
+  {
+   "id": "column-list-unreadable",
+   "class": "call-decline",
+   "trigger": "an INSERT column list that is not a JSON array of column-name strings",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "The list cannot be read as names, so the call is declined."
+  },
+  {
+   "id": "default-unfoldable-under-settings",
+   "class": "call-decline",
+   "trigger": "a constant DEFAULT that cannot be folded under the call's settings",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "The value the server stores depends on the settings the call carries, and the DEFAULT cannot be evaluated under them, so the call is declined."
+  },
+  {
+   "id": "empty-input-block",
+   "class": "call-decline",
+   "trigger": "an INSERT whose input block has no columns",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "A server refuses the statement before it reads the body, with an empty-column-list error; this build cannot run that step, so the call is declined."
+  },
+  {
+   "id": "row-count-not-one",
+   "class": "call-decline",
+   "trigger": "a single-row call whose input holds no row or more than one",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "A single-row call is handed exactly one row; any other count is declined, and a body of rows is read by the batch call."
+  },
+  {
+   "id": "stack-exhausted-in-process",
+   "class": "call-decline",
+   "trigger": "a Values expression whose evaluation runs out of this process's stack",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "A server's answer depends on its own thread's stack, which this process cannot reproduce, so the row is declined."
+  },
+  {
+   "id": "expression-subquery",
+   "class": "call-decline",
+   "trigger": "a Values expression that contains a subquery",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "Evaluating it would run a query in the gateway process, so the row is declined."
+  },
+  {
+   "id": "values-reads-storage",
+   "class": "call-decline",
+   "trigger": "a Values expression that reads a table, a dictionary, a file or a remote host (the same list as expression-reads-storage)",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "Evaluating it would read storage, a file or the network in the gateway process, so the row is declined."
+  },
+  {
+   "id": "expression-query-parameter",
+   "class": "call-decline",
+   "trigger": "a Values expression that contains a query parameter",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "Only the server can substitute the parameter, so the row is declined."
+  },
+  {
+   "id": "values-field-unscanned",
+   "class": "call-decline",
+   "trigger": "a Values field that could not be scanned or walked for admission",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "An expression the scan never walked must not be evaluated, so the row is declined."
+  },
+  {
+   "id": "listed-ephemeral-reaches-ttl",
+   "class": "batch-precedence",
+   "trigger": "an INSERT that lists an EPHEMERAL column whose value reaches the TTL",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "The engine's insert-time merge runs before the TTL and this build cannot carry a listed EPHEMERAL value through that merge, so the batch is declined."
+  },
+  {
+   "id": "ttl-merge-throws",
+   "class": "batch-precedence",
+   "trigger": "a TTL whose application at merge throws where the server's INSERT stores the row",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "The merge, not the INSERT, meets the error, so what the part holds is declined."
+  },
+  {
+   "id": "dynamic-typed-by-earlier-rows",
+   "class": "batch-precedence",
+   "trigger": "a Dynamic or JSON value typed by the rows before it, read by a CHECK, DEFAULT or expression",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "The value's stored type depends on earlier rows, so an answer over the row alone would be a guess and is declined."
+  },
+  {
+   "id": "defaults-chunk-boundary",
+   "class": "batch-precedence",
+   "trigger": "a body whose DEFAULT expressions the server evaluates over chunks this build cannot reproduce",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "The server evaluates the DEFAULT expressions over each chunk its reader forms; the chunks could not be read here, so the batch is declined rather than answered per row."
+  },
+  {
+   "id": "default-throws-over-chunk",
+   "class": "batch-precedence",
+   "trigger": "a DEFAULT expression that throws over a chunk of the body",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "The server's chunk-wise evaluation fails where a per-row one would not, so the batch is declined."
+  },
+  {
+   "id": "chunks-unreadable-again",
+   "class": "batch-precedence",
+   "trigger": "a body whose server chunks could not be read a second time",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "The block steps re-read the chunks the server forms; when that fails the batch is declined."
+  },
+  {
+   "id": "reread-row-count-mismatch",
+   "class": "batch-precedence",
+   "trigger": "a body whose re-read yields a different number of rows than the per-row read stored",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "The stored value depends on the whole block, so a mismatch is declined rather than attributed."
+  },
+  {
+   "id": "squash-not-one-block",
+   "class": "batch-precedence",
+   "trigger": "a body whose chunks the INSERT's squashing step writes as more than one block",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "Each block is its own part and the server commits earlier parts before a later one fails, so the batch is declined."
+  },
+  {
+   "id": "squash-view-mismatch",
+   "class": "batch-precedence",
+   "trigger": "a body whose squashed block passes its steps where a row's own view refused",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "The disagreement is not explained here, so the batch is declined."
+  },
+  {
+   "id": "squash-grouping-differs",
+   "class": "batch-precedence",
+   "trigger": "a body whose block steps give different answers under the groupings the squashing step can form",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "The answer depends on a grouping this build cannot pin, so the batch is declined."
+  },
+  {
+   "id": "block-step-throws",
+   "class": "batch-precedence",
+   "trigger": "a whole-block step that throws where each row passed",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "The block throws on no single row, so the error is not attributed and the batch is declined."
+  },
+  {
+   "id": "block-step-unevaluated",
+   "class": "batch-precedence",
+   "trigger": "block steps that were not evaluated to a verdict",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "The steps could not be evaluated here, so the batch is declined."
+  },
+  {
+   "id": "writer-expressions-unbuilt",
+   "class": "batch-precedence",
+   "trigger": "a writer step whose sorting-key and skip-index expressions could not be built",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "Without them the writer step has no answer, so the batch is declined."
+  },
+  {
+   "id": "writer-step-throws",
+   "class": "batch-precedence",
+   "trigger": "writer index and projection expressions that throw over the body's block and on no stored row alone",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "The error is not attributable to a row, so the batch is declined."
+  },
+  {
+   "id": "writer-step-unevaluated",
+   "class": "batch-precedence",
+   "trigger": "writer index and projection expressions that were not evaluated to a verdict",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "The writer step could not be evaluated here, so the batch is declined."
+  },
+  {
+   "id": "partitions-segmented-body",
+   "class": "batch-precedence",
+   "trigger": "a body that spans more partitions than the limit and that the server reads in parallel-parsing segments",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "The server's segment block boundaries are not modeled, so the batch is declined rather than answered over blocks that might differ."
+  },
+  {
+   "id": "error-budget-reread",
+   "class": "batch-precedence",
+   "trigger": "a body read under an error budget that one reader counts over the whole body and parallel segments count per segment",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "The result differs between the two readings, so the batch is declined."
+  },
+  {
+   "id": "parallel-segment-cut",
+   "class": "batch-precedence",
+   "trigger": "a body one of whose parallel-parsing segments ends where the library cannot reproduce",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "The server's segmentation is decided by its settings and CPU count, so the batch is declined."
+  },
+  {
+   "id": "parallel-segments-unformed",
+   "class": "batch-precedence",
+   "trigger": "a body whose parallel-parsing segments could not be formed here",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "The server counts its error budget over those segments, so the batch is declined."
+  },
+  {
+   "id": "invariant-not-held",
+   "class": "call-decline",
+   "trigger": "an internal consistency check that does not hold: vendored code returned a result the library cannot account for",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create",
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "The library declines rather than answer from a result it cannot explain; route the input to the server."
+  },
+  {
+   "id": "setting-server-refuses",
+   "class": "create-decline",
+   "trigger": "a filter whose own settings hold a cell of the line's documented-pathological table: a setting at a value under which the server refuses every query",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_create"
+   ],
+   "retirement": "when the server stops refusing the cell (a reviewed change per cell)",
+   "description": "The server refuses every query under the cell, so a verdict under it would be unfounded; the create is declined and names the setting. The same cell at the schema or profile layer is listed at tier server-refuses instead."
+  },
+  {
+   "id": "defer-defaults-reader",
+   "class": "row-decline",
+   "trigger": "a row that leaves to the server a DEFAULT the call defers (insert_options defer_defaults server), read by a CHECK, a key, a skip index, a projection, a TTL, a MATERIALIZED or other DEFAULT expression, or an attached filter",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_preview_row",
+    "chs_preview_batch",
+    "chs_block_create",
+    "chs_filter_eval_body",
+    "chs_filter_eval_block"
+   ],
+   "retirement": "none",
+   "description": "The server computes the deferred value on its own INSERT, so whatever reads it in this row has no answer here: the row is declined, and an attached filter's verdict for it is d."
+  },
+  {
+   "id": "defer-defaults-mixed-body",
+   "class": "batch-precedence",
+   "trigger": "chs_preview_batch with an export asked for under defer_defaults server, whose exported rows do not all leave the same deferred columns to the server",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_preview_batch"
+   ],
+   "retirement": "none",
+   "description": "The export has one column list, so a body that supplies a deferred column in some rows and leaves it to the server in others is declined; a body whose rows all supply it, or all leave it, exports."
+  },
+  {
+   "id": "projection-skipped-at-load",
+   "class": "create-decline",
+   "trigger": "under posture load, a stored definition with a projection that does not build, which a server loading the table at startup skips",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "none",
+   "description": "A server that loads a stored definition at startup logs a projection it cannot build and goes on without it, so whether a given server still holds the projection depends on that server's history; the schema is declined. Under posture create the same projection is the CREATE's own refusal, with its code."
+  },
+  {
+   "id": "codec-family-not-built",
+   "class": "create-decline",
+   "trigger": "a column whose CODEC chain names a codec family that the server's build registers under a build option and this library's build does not compile in, such as SZ3",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "when the library's build compiles the family in",
+   "description": "The library's codec factory cannot build such a family, so what a server's CREATE answers for it, its own refusal or the table created under the family's setting, is not modeled here; the schema is declined, naming the column and the family, with or without a DEFAULT, under either posture and whatever the codec settings declare."
   }
  ]
 }
