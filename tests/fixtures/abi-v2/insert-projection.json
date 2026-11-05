@@ -464,7 +464,7 @@
    "batch": {
     "outcome": "rejected",
     "code": 27,
-    "err": "Cannot parse input: expected '\"' before: 'x}' (while reading the value of key pt)",
+    "err": "Cannot parse input: expected '\"' before: 'x}': (while reading the value of key pt)",
     "rows": [
      {
       "outcome": "rejected",
@@ -473,7 +473,7 @@
        "off": 0,
        "len": 14
       },
-      "err": "Cannot parse input: expected '\"' before: 'x}' (while reading the value of key pt)"
+      "err": "Cannot parse input: expected '\"' before: 'x}': (while reading the value of key pt)"
      }
     ],
     "rows_read": 1,
@@ -494,7 +494,7 @@
    "insert": {
     "outcome": "rejected",
     "code": 27,
-    "err": "Cannot parse input: expected '\"' before: 'x}' (while reading the value of key pt): (at row 1)\n",
+    "err": "Cannot parse input: expected '\"' before: 'x}': (while reading the value of key pt): (at row 1)\n",
     "rows_read": 1,
     "rows_skipped": 0,
     "unsupported_settings": [],
@@ -509,12 +509,64 @@
    "expect": "equal"
   },
   {
+   "id": "red-err-suffix-doubled-line-feed",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "rejected",
+    "code": 27,
+    "err": "Cannot parse input: expected '\"' before: 'x}': (while reading the value of key pt)",
+    "rows": [
+     {
+      "outcome": "rejected",
+      "code": 27,
+      "input_span": {
+       "off": 0,
+       "len": 14
+      },
+      "err": "Cannot parse input: expected '\"' before: 'x}': (while reading the value of key pt)"
+     }
+    ],
+    "rows_read": 1,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row",
+    "refused_row": 0,
+    "export_declined": "batch outcome is 'rejected'",
+    "export_declined_reason": "export-batch-not-accepted"
+   },
+   "batch_export_b64": null,
+   "insert": {
+    "outcome": "rejected",
+    "code": 27,
+    "err": "Cannot parse input: expected '\"' before: 'x}': (while reading the value of key pt): (at row 1)\n\n",
+    "rows_read": 1,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row"
+   },
+   "insert_rows_b64": null,
+   "expect": {
+    "violates": "err_suffix"
+   }
+  },
+  {
    "id": "equal-err-suffix-under-an-error-budget",
    "output_format": "JSONCompactEachRow",
    "batch": {
     "outcome": "rejected",
     "code": 27,
-    "err": "Cannot parse input: expected ',' before: ']' (Already have 2 errors out of 3 rows, which is 0.6666666666666666 of all rows)",
+    "err": "Cannot parse input: expected ',' before: ']': (Already have 2 errors out of 3 rows, which is 0.6666666666666666 of all rows)",
     "rows": [
      {
       "outcome": "accepted",
@@ -539,7 +591,7 @@
        "off": 20,
        "len": 6
       },
-      "err": "Cannot parse input: expected ',' before: ']' (Already have 2 errors out of 3 rows, which is 0.6666666666666666 of all rows)"
+      "err": "Cannot parse input: expected ',' before: ']': (Already have 2 errors out of 3 rows, which is 0.6666666666666666 of all rows)"
      }
     ],
     "rows_read": 3,
@@ -560,7 +612,7 @@
    "insert": {
     "outcome": "rejected",
     "code": 27,
-    "err": "Cannot parse input: expected ',' before: ']' (Already have 2 errors out of 3 rows, which is 0.6666666666666666 of all rows): (at row 3)\n",
+    "err": "Cannot parse input: expected ',' before: ']': (Already have 2 errors out of 3 rows, which is 0.6666666666666666 of all rows): (at row 3)\n",
     "rows_read": 3,
     "rows_skipped": 0,
     "unsupported_settings": [],
