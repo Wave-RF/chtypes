@@ -1437,6 +1437,304 @@
    "expect": "equal"
   },
   {
+   "id": "equal-counts-undecided-excludes-skipped-records",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 5,
+    "rows_skipped": 1,
+    "rows_passed": 2,
+    "rows_cut": 2,
+    "row_spans": [
+     {
+      "off": 0,
+      "len": 36
+     },
+     null,
+     null,
+     null,
+     {
+      "off": 36,
+      "len": 35
+     }
+    ],
+    "framing": {
+     "bom_skipped": false,
+     "container": "stream",
+     "header": null
+    },
+    "unconsumed": [
+     {
+      "off": 52,
+      "len": 16
+     }
+    ],
+    "rows": [
+     {
+      "verdict": "t",
+      "verdict_code": 0,
+      "verdict_err": "",
+      "outcome": "accepted",
+      "code": 0,
+      "err": "",
+      "cols": [],
+      "input_span": {
+       "off": 0,
+       "len": 46
+      },
+      "transformed": []
+     },
+     {
+      "verdict": "d",
+      "verdict_code": 27,
+      "verdict_err": "Cannot parse input: expected ',' before: 'oops,\"s\":\"bad\"}\\n{\"n\":-2,\"s\":\"charlie\",\"ts\":\"2026-01-01 00:00:00\"}\\n{\"n\":3,\"s\":\"delta\"}\\n{\"n\":4,\"s\":\"echo\",\"ts\":\"2026-01-01 00:00:00\"}\\n'",
+      "outcome": "skipped",
+      "code": 27,
+      "err": "Cannot parse input: expected ',' before: 'oops,\"s\":\"bad\"}\\n{\"n\":-2,\"s\":\"charlie\",\"ts\":\"2026-01-01 00:00:00\"}\\n{\"n\":3,\"s\":\"delta\"}\\n{\"n\":4,\"s\":\"echo\",\"ts\":\"2026-01-01 00:00:00\"}\\n'",
+      "cols": [],
+      "input_span": {
+       "off": 47,
+       "len": 5
+      },
+      "transformed": []
+     },
+     {
+      "verdict": "f",
+      "verdict_code": 0,
+      "verdict_err": "",
+      "outcome": "accepted",
+      "code": 0,
+      "err": "",
+      "cols": [],
+      "input_span": {
+       "off": 68,
+       "len": 49
+      },
+      "transformed": []
+     },
+     {
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_reason": "drawn-value",
+      "verdict_err": "the filter reads column ts, whose value in this row was computed by this library from a clock read or a random or ID generator, while the server computes its own; supply the value to get a verdict",
+      "outcome": "accepted",
+      "code": 0,
+      "err": "",
+      "cols": [],
+      "input_span": {
+       "off": 118,
+       "len": 19
+      },
+      "transformed": []
+     },
+     {
+      "verdict": "t",
+      "verdict_code": 0,
+      "verdict_err": "",
+      "outcome": "accepted",
+      "code": 0,
+      "err": "",
+      "cols": [],
+      "input_span": {
+       "off": 138,
+       "len": 45
+      },
+      "transformed": []
+     }
+    ],
+    "unsupported_settings": [],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     },
+     {
+      "name": "ts"
+     }
+    ],
+    "transformed": []
+   },
+   "batch_export_b64": "WzEsICJhbHBoYSIsICIyMDI2LTAxLTAxIDAwOjAwOjAwIl0KWzQsICJlY2hvIiwgIjIwMjYtMDEtMDEgMDA6MDA6MDAiXQo=",
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 5,
+    "rows_skipped": 1,
+    "rows_passed": 2,
+    "rows_cut": 2,
+    "framing": {
+     "bom_skipped": false,
+     "container": "stream",
+     "header": null
+    },
+    "unsupported_settings": [],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     },
+     {
+      "name": "ts"
+     }
+    ],
+    "rows_undecided": 1
+   },
+   "insert_rows_b64": "WzEsICJhbHBoYSIsICIyMDI2LTAxLTAxIDAwOjAwOjAwIl0KWzQsICJlY2hvIiwgIjIwMjYtMDEtMDEgMDA6MDA6MDAiXQo=",
+   "expect": "equal",
+   "provenance": {
+    "batch": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    },
+    "insert": "unrecorded"
+   }
+  },
+  {
+   "id": "equal-counts-undecided-zero-when-only-a-skipped-record-is-d",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 4,
+    "rows_skipped": 1,
+    "rows_passed": 2,
+    "rows_cut": 1,
+    "row_spans": [
+     {
+      "off": 0,
+      "len": 13
+     },
+     null,
+     null,
+     {
+      "off": 13,
+      "len": 13
+     }
+    ],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "unconsumed": [
+     {
+      "off": 13,
+      "len": 12
+     }
+    ],
+    "rows": [
+     {
+      "verdict": "t",
+      "verdict_code": 0,
+      "verdict_err": "",
+      "outcome": "accepted",
+      "code": 0,
+      "err": "",
+      "cols": [],
+      "input_span": {
+       "off": 0,
+       "len": 12
+      },
+      "transformed": []
+     },
+     {
+      "verdict": "d",
+      "verdict_code": 27,
+      "verdict_err": "Cannot parse input: expected ',' before: 'oops,\"bad\"]\\n[-2,\"charlie\"]\\n[3,\"delta\"]\\n'",
+      "outcome": "skipped",
+      "code": 27,
+      "err": "Cannot parse input: expected ',' before: 'oops,\"bad\"]\\n[-2,\"charlie\"]\\n[3,\"delta\"]\\n'",
+      "cols": [],
+      "input_span": {
+       "off": 12,
+       "len": 1
+      },
+      "transformed": []
+     },
+     {
+      "verdict": "f",
+      "verdict_code": 0,
+      "verdict_err": "",
+      "outcome": "accepted",
+      "code": 0,
+      "err": "",
+      "cols": [],
+      "input_span": {
+       "off": 25,
+       "len": 15
+      },
+      "transformed": []
+     },
+     {
+      "verdict": "t",
+      "verdict_code": 0,
+      "verdict_err": "",
+      "outcome": "accepted",
+      "code": 0,
+      "err": "",
+      "cols": [],
+      "input_span": {
+       "off": 40,
+       "len": 12
+      },
+      "transformed": []
+     }
+    ],
+    "unsupported_settings": [],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "transformed": []
+   },
+   "batch_export_b64": "WzEsICJhbHBoYSJdClszLCAiZGVsdGEiXQo=",
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 4,
+    "rows_skipped": 1,
+    "rows_passed": 2,
+    "rows_cut": 1,
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "unsupported_settings": [],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_undecided": 0
+   },
+   "insert_rows_b64": "WzEsICJhbHBoYSJdClszLCAiZGVsdGEiXQo=",
+   "expect": "equal",
+   "provenance": {
+    "batch": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    },
+    "insert": "unrecorded"
+   }
+  },
+  {
    "id": "exception-generator-draw-bytes-differ",
    "output_format": "JSONCompactEachRow",
    "batch": {
@@ -1951,6 +2249,171 @@
    "insert_rows_b64": "WzEsImFscGhhIl0KWzQsImRlbHRhIl0K",
    "expect": {
     "violates": "counts"
+   }
+  },
+  {
+   "id": "red-count-undecided-counts-a-skipped-record",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 5,
+    "rows_skipped": 1,
+    "rows_passed": 2,
+    "rows_cut": 2,
+    "row_spans": [
+     {
+      "off": 0,
+      "len": 36
+     },
+     null,
+     null,
+     null,
+     {
+      "off": 36,
+      "len": 35
+     }
+    ],
+    "framing": {
+     "bom_skipped": false,
+     "container": "stream",
+     "header": null
+    },
+    "unconsumed": [
+     {
+      "off": 52,
+      "len": 16
+     }
+    ],
+    "rows": [
+     {
+      "verdict": "t",
+      "verdict_code": 0,
+      "verdict_err": "",
+      "outcome": "accepted",
+      "code": 0,
+      "err": "",
+      "cols": [],
+      "input_span": {
+       "off": 0,
+       "len": 46
+      },
+      "transformed": []
+     },
+     {
+      "verdict": "d",
+      "verdict_code": 27,
+      "verdict_err": "Cannot parse input: expected ',' before: 'oops,\"s\":\"bad\"}\\n{\"n\":-2,\"s\":\"charlie\",\"ts\":\"2026-01-01 00:00:00\"}\\n{\"n\":3,\"s\":\"delta\"}\\n{\"n\":4,\"s\":\"echo\",\"ts\":\"2026-01-01 00:00:00\"}\\n'",
+      "outcome": "skipped",
+      "code": 27,
+      "err": "Cannot parse input: expected ',' before: 'oops,\"s\":\"bad\"}\\n{\"n\":-2,\"s\":\"charlie\",\"ts\":\"2026-01-01 00:00:00\"}\\n{\"n\":3,\"s\":\"delta\"}\\n{\"n\":4,\"s\":\"echo\",\"ts\":\"2026-01-01 00:00:00\"}\\n'",
+      "cols": [],
+      "input_span": {
+       "off": 47,
+       "len": 5
+      },
+      "transformed": []
+     },
+     {
+      "verdict": "f",
+      "verdict_code": 0,
+      "verdict_err": "",
+      "outcome": "accepted",
+      "code": 0,
+      "err": "",
+      "cols": [],
+      "input_span": {
+       "off": 68,
+       "len": 49
+      },
+      "transformed": []
+     },
+     {
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_reason": "drawn-value",
+      "verdict_err": "the filter reads column ts, whose value in this row was computed by this library from a clock read or a random or ID generator, while the server computes its own; supply the value to get a verdict",
+      "outcome": "accepted",
+      "code": 0,
+      "err": "",
+      "cols": [],
+      "input_span": {
+       "off": 118,
+       "len": 19
+      },
+      "transformed": []
+     },
+     {
+      "verdict": "t",
+      "verdict_code": 0,
+      "verdict_err": "",
+      "outcome": "accepted",
+      "code": 0,
+      "err": "",
+      "cols": [],
+      "input_span": {
+       "off": 138,
+       "len": 45
+      },
+      "transformed": []
+     }
+    ],
+    "unsupported_settings": [],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     },
+     {
+      "name": "ts"
+     }
+    ],
+    "transformed": []
+   },
+   "batch_export_b64": "WzEsICJhbHBoYSIsICIyMDI2LTAxLTAxIDAwOjAwOjAwIl0KWzQsICJlY2hvIiwgIjIwMjYtMDEtMDEgMDA6MDA6MDAiXQo=",
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 5,
+    "rows_skipped": 1,
+    "rows_passed": 2,
+    "rows_cut": 2,
+    "framing": {
+     "bom_skipped": false,
+     "container": "stream",
+     "header": null
+    },
+    "unsupported_settings": [],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     },
+     {
+      "name": "ts"
+     }
+    ],
+    "rows_undecided": 2
+   },
+   "insert_rows_b64": "WzEsICJhbHBoYSIsICIyMDI2LTAxLTAxIDAwOjAwOjAwIl0KWzQsICJlY2hvIiwgIjIwMjYtMDEtMDEgMDA6MDA6MDAiXQo=",
+   "expect": {
+    "violates": "counts"
+   },
+   "provenance": {
+    "batch": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    },
+    "insert": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    }
    }
   },
   {

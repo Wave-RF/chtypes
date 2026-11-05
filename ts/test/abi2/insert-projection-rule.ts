@@ -279,10 +279,11 @@ export function projectionVerdict(
     return violates('shared_members');
   }
 
-  // counts
-  const t = verdicts.filter((v) => v === 't').length;
-  const f = verdicts.filter((v) => v === 'f').length;
-  const d = verdicts.filter((v) => v === 'd').length;
+  // counts: over the accepted rows alone. A record skipped under the error allowance carries the verdict d too, and is counted only in rowsSkipped.
+  const kept = rows.filter((r) => r.outcome === 'accepted').map((r) => r.verdict);
+  const t = kept.filter((v) => v === 't').length;
+  const f = kept.filter((v) => v === 'f').length;
+  const d = kept.filter((v) => v === 'd').length;
   if (filtered) {
     const good = batch.outcome === 'accepted' ? batch.rowsPassed === t && batch.rowsCut === f + d : batch.rowsPassed === 0 && batch.rowsCut === 0;
     const want = ins.outcome === 'accepted' ? [t, f + d, d] : [0, 0, 0];

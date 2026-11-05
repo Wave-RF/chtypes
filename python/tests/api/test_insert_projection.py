@@ -310,9 +310,12 @@ def first_violation(
     if any(a != b for a, b in shared):
         return "violates", "shared_members"
 
-    t = verdicts.count(Verdict.TRUE)
-    f = verdicts.count(Verdict.FALSE)
-    d = verdicts.count(Verdict.DECLINE)
+    # Over the accepted rows alone: a record skipped under the error allowance carries the verdict d
+    # too, and is counted only in rows_skipped.
+    kept = [r.verdict for r in rows if r.outcome == Outcome.ACCEPTED]
+    t = kept.count(Verdict.TRUE)
+    f = kept.count(Verdict.FALSE)
+    d = kept.count(Verdict.DECLINE)
     if filtered:
         if batch.outcome == Outcome.ACCEPTED:
             good = batch.rows_passed == t and batch.rows_cut == f + d
@@ -462,12 +465,12 @@ def verdict(case: dict):
 
 @needs_fixture
 def test_the_fixture_is_the_shape_this_gate_expects() -> None:
-    assert sum(c["expect"] == "equal" for c in CASES) == 22
+    assert sum(c["expect"] == "equal" for c in CASES) == 24
     assert sum(isinstance(c["expect"], dict) and "exception" in c["expect"] for c in CASES) == 1
     for rule in RULES:
         assert any(c["expect"] == {"violates": rule} for c in CASES), rule
     assert any(c["expect"] == {"exception": "generator_draw"} for c in CASES)
-    assert sum(isinstance(c["expect"], dict) and "violates" in c["expect"] for c in CASES) == 37
+    assert sum(isinstance(c["expect"], dict) and "violates" in c["expect"] for c in CASES) == 38
 
 
 @needs_fixture
@@ -526,4 +529,4 @@ def test_the_fixture_gate_ran_cases() -> None:
                 f"CHTYPES_REQUIRE_FIXTURES=1 and the insert-projection fixture is absent: {FIXTURE}"
             )
         pytest.skip(f"insert-projection fixture absent ({FIXTURE}): not a full-repository tree")
-    assert len(CASES) == 60
+    assert len(CASES) == 63

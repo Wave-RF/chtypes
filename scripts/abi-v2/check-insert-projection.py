@@ -136,7 +136,11 @@ Rules, checked in this order (the first that fails is the answer):
   counts           rows_passed = #t, rows_cut = #f + #d, rows_undecided = #d
                    when the insert is accepted, and all three 0 on any other
                    outcome (the batch's rows_passed and rows_cut are 0 and 0 on
-                   a batch that is not accepted); all three absent with no filter
+                   a batch that is not accepted); all three absent with no filter.
+                   Each # counts the batch's accepted rows (row outcome
+                   `accepted`) alone: a record skipped under the error allowance
+                   carries the verdict `d` too, and is in none of the three, only
+                   in rows_skipped
   err_prefix       the batch's err is a prefix of the insert's
   err_suffix       the remainder is empty or exactly ClickHouse's row-reader
                    suffix, `: (at row N)` and a line feed
@@ -445,8 +449,10 @@ def evaluate(case: dict):
         if _member(batch, m) != _member(ins, m):
             return "violates", "shared_members"
 
-    # counts: #t, #f + #d and #d on an accepted call, 0 on any other outcome
-    t, f, d = verdicts.count("t"), verdicts.count("f"), verdicts.count("d")
+    # counts: #t, #f + #d and #d on an accepted call, 0 on any other outcome, over the accepted rows alone: a
+    # skipped record's verdict is `d`, and it is counted only in rows_skipped
+    kept = [v for r, v in zip(rows, verdicts) if r["outcome"] == "accepted"]
+    t, f, d = kept.count("t"), kept.count("f"), kept.count("d")
     if filtered:
         if batch["outcome"] == "accepted":
             good = batch["rows_passed"] == t and batch["rows_cut"] == f + d
