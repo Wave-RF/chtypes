@@ -269,6 +269,16 @@ design: over-protect rather than under-protect.
                           the same pull request makes — the judge that
                           excuses binding source, weakened by its own
                           defendant. Unconditional.
+  tests/fixtures/abi-v2/stub-census/**
+                          the stub census's pinned lists
+                          (scripts/abi-v1/stub_census.py): every stub-backed
+                          test a conformance run must pass, by name. A diff
+                          dropping a test and its line together would leave
+                          the census passing, the judge weakened by its own
+                          defendant. A pull request that adds or removes a
+                          stub-backed test updates the list in the same pull
+                          request, with the reason, under review.
+                          Unconditional.
   docs/divergences.json  the machine-checkable register of known divergences
                           the (non-required) `divergences` job reads — an
                           ALLOWLIST that excuses a result, the same threat
@@ -300,8 +310,9 @@ scripts/** already covers it; there is no exemption file outside that glob.
 Tests, examples, docs and CHANGELOGs are deliberately NOT protected: the
 protected gates (`checks`) judge them, and `test-counts` catches a test
 removed or turned into a skip. Fixtures that decide an outcome by themselves
-are the exception (chtypes#344): tests/fixtures/fetch-v1/** and
-tests/fixtures/api-surface/**, both unconditional, above.
+are the exception (chtypes#344): tests/fixtures/fetch-v1/**,
+tests/fixtures/api-surface/** and tests/fixtures/abi-v2/stub-census/**, all
+unconditional, above.
 
 ================================================================================
 THE PWN-REQUEST RULE — THE ONE THING THIS FILE MUST NEVER BREAK
@@ -630,6 +641,14 @@ PROTECTED_GLOBS: tuple[ProtectedGlob, ...] = (
     ProtectedGlob("tests/fixtures/api-surface/**",
                   "the api-surface job's fixture proof: the packages each pinned API tool must read as changed or "
                   "unchanged before any verdict is trusted"),
+    # The stub census's pinned lists (scripts/abi-v1/stub_census.py): which
+    # stub-backed tests each binding's conformance run must pass, by name. A
+    # pull request that dropped a test and its line together would pass its
+    # own census, so the lists are judge, reviewed like the census itself.
+    ProtectedGlob("tests/fixtures/abi-v2/stub-census/**",
+                  "the stub census's pinned lists: every stub-backed test a conformance run must pass, by name; "
+                  "a pull request that adds or removes one updates its list in the same pull request, with the "
+                  "reason"),
     # Excuses a result rather than configuring a tool — same threat model as
     # a lint exemption, protected even though its own job (divergences) is
     # non-blocking.
@@ -855,8 +874,9 @@ def is_test_or_fixture_path(path: str) -> bool:
         docs/guides/fetch-v1.md §10). The fixture-reading TEST files
         themselves already match one of the rules above; this entry is for
         the fixture DATA under tests/fixtures/ itself.
-        tests/fixtures/fetch-v1/ and tests/fixtures/api-surface/ are
-        unconditionally protected, so neither ever reaches it.
+        tests/fixtures/fetch-v1/, tests/fixtures/api-surface/ and
+        tests/fixtures/abi-v2/stub-census/ are unconditionally protected, so
+        none ever reaches it.
 """
     if path.startswith("go/") and path.endswith("_test.go"):
         return True
