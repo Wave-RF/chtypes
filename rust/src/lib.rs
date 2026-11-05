@@ -113,6 +113,15 @@ mod registry_stub_tests;
 #[cfg(test)]
 #[path = "../tests/unit/registry_flight.rs"]
 mod registry_flight_tests;
+// The insert projection gate over the shared fixture, and `Schema::insert`
+// over the stub: unit tests, because they read the crate-internal decoders and
+// the raw echo.
+#[cfg(test)]
+#[path = "../tests/unit/insert_projection.rs"]
+mod insert_projection_tests;
+#[cfg(test)]
+#[path = "../tests/unit/insert_stub.rs"]
+mod insert_stub_tests;
 mod result;
 mod schema;
 mod server;
@@ -136,11 +145,12 @@ pub use registry::{FetchOptions, Registry, RegistryOptions, cache_root, search_d
 pub use result::{
     AtMergeEntry, BatchResult, BuildInfo, Capabilities, Column, Computed, DeclinedSetting,
     DiscoveredColumn, Discovery, EngineCell, ErrorCodeEntry, ErrorCodeTable, FilterResult,
-    FilterRowError, Framing, Header, RowResult, SchemaDescription, SchemaReplicated, SchemaServer,
-    Span, Transform, Value,
+    FilterRowError, Framing, Header, InsertResult, RowResult, SchemaDescription, SchemaReplicated,
+    SchemaServer, Span, Transform, Value,
 };
 pub use schema::{
-    Block, CompileOptions, EvalOptions, Filter, FilterOptions, RowOptions, RowsOptions, Schema,
+    Block, CompileOptions, EvalOptions, Filter, FilterOptions, InsertOptions, RowOptions,
+    RowsOptions, Schema,
 };
 pub use server::{Server, ServerProfile};
 pub use setup::{SetupOptions, setup};

@@ -284,6 +284,16 @@ jobs:
           cache: false          # the module is stdlib-only: there is no go.sum to cache
       - name: build and vet, dlopen-only
         run: cd go && go build ./... && go vet ./...
+      # The standalone check below runs from a bare copy of go/, which has no
+      # tests/fixtures, so the shared-fixture tests skip there by design. They
+      # run here, in the full tree, under CHTYPES_REQUIRE_FIXTURES=1 (the
+      # workflow's env), and this step also refuses a run in which the fixture
+      # test did not pass: a -run filter that matches nothing exits 0.
+      - name: the shared fixture tests, in the full tree
+        run: |
+          (cd go && go test -count=1 -v -run '^(TestInsertProjectionFixture|TestInsertOutputAbsentUnlessAccepted)$' ./chtypes/) | tee "$RUNNER_TEMP/fixture-tests.log"
+          grep -q -- '^--- PASS: TestInsertProjectionFixture ' "$RUNNER_TEMP/fixture-tests.log" || { echo "::error::TestInsertProjectionFixture did not pass in the full tree"; exit 1; }
+          grep -q -- '^--- PASS: TestInsertOutputAbsentUnlessAccepted ' "$RUNNER_TEMP/fixture-tests.log" || { echo "::error::TestInsertOutputAbsentUnlessAccepted did not pass in the full tree"; exit 1; }
       - name: the ABI major this job tests, derived and asserted against the Go binding's compiled-in identity
         run: |
           python3 scripts/abi-v1/majors.py announce go --what "build, vet, standalone"

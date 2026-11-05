@@ -154,6 +154,49 @@ func (s *Schema) Rows(format Format, body []byte, opts ...RowsOption) (BatchResu
 	return res, err
 }
 
+// Insert models one synchronous INSERT of a whole body (chs_preview_insert) and
+// returns its insert_result: the outcome, the counts and, when outFormat is
+// not ExportNone and the outcome is Accepted, the output rows in that format.
+// With WithRowFilter the filter is the INSERT's WHERE: only the t rows are
+// output, and an e row fails the whole call (a Rejected result). A refusal or
+// decline is a result, never an error; only misuse and internal errors are.
+// Nothing of a refused body is ever output.
+func (s *Schema) Insert(format Format, body []byte, outFormat Format, opts ...InsertCallOption) (InsertResult, error) {
+	raw, rows, err := s.insertRaw(format, body, outFormat, opts...)
+	if err != nil {
+		return InsertResult{}, err
+	}
+	return decodeInsertResult(raw, rows)
+}
+
+// insertRaw makes the chs_preview_insert call and returns the insert_result
+// document and the out_rows buffer exactly as the library handed them back,
+// before the outcome decides whether the output is public.
+func (s *Schema) insertRaw(format Format, body []byte, outFormat Format, opts ...InsertCallOption) (doc, rows []byte, err error) {
+	c := insertConfig(opts)
+	settings, columns, options, err := callInputs(c)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := s.enter(); err != nil {
+		return nil, nil, err
+	}
+	defer s.g.leave()
+	var fh *abi2.Filter
+	if c.filter != nil {
+		if err := c.filter.enter(); err != nil {
+			return nil, nil, err
+		}
+		defer c.filter.g.leave()
+		fh = c.filter.h
+	}
+	docBuf, rowsBuf, cerr := s.lib.tbl.PreviewInsert(s.h, int32(format), body, settings, columns, fh, int32(outFormat), options)
+	if cerr != nil {
+		return nil, nil, callError(cerr)
+	}
+	return s.lib.tbl.Take(docBuf), s.lib.tbl.Take(rowsBuf), nil
+}
+
 // docBufs holds the document buffers of Rows between calls; one larger than
 // docBufMax is left to the collector rather than kept.
 var docBufs sync.Pool
