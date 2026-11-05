@@ -45,7 +45,7 @@ RULES = (
     "line_output",
     "native_output",
 )
-SUFFIX = re.compile(rb"^ \(at row [0-9]+\)$")
+SUFFIX = re.compile(rb": \(at row [0-9]+\)\n")
 
 
 def _b64(case: dict, key: str) -> bytes | None:
@@ -99,6 +99,8 @@ def first_violation(
         and ins.refused_at == RefusalSite.BODY_STEP
         and "export_columns" not in raw_insert
         and out is None
+        and ins.err_msg == batch.export_declined
+        and (not filtered or (ins.rows_passed, ins.rows_cut, ins.rows_undecided) == (0, 0, 0))
     ):
         return "violates", "export_decline_is_call_decline"
 
@@ -116,6 +118,7 @@ def first_violation(
         )
     )
 
+    # A declined output replaces these members with the insert's own values.
     replaced = (
         ()
         if declined
@@ -125,6 +128,8 @@ def first_violation(
             (batch.reason, ins.reason),
             (batch.refused_at, ins.refused_at),
             (batch.export_columns, ins_cols),
+            (batch.rows_passed if filtered else None, ins.rows_passed),
+            (batch.rows_cut if filtered else None, ins.rows_cut),
         )
     )
     shared = replaced + (
@@ -133,8 +138,6 @@ def first_violation(
         (batch.unsupported_settings, ins.unsupported_settings),
         (batch.framing, ins.framing),
         (batch.partition_count, ins.partition_count),
-        (batch.rows_passed if filtered else None, ins.rows_passed),
-        (batch.rows_cut if filtered else None, ins.rows_cut),
     )
     if any(a != b for a, b in shared):
         return "violates", "shared_members"
@@ -147,16 +150,19 @@ def first_violation(
             good = batch.rows_passed == t and batch.rows_cut == f + d
         else:
             good = batch.rows_passed == 0 and batch.rows_cut == 0
-        if not (good and ins.rows_undecided == d):
+        want = (t, f + d, d) if ins.outcome == Outcome.ACCEPTED else (0, 0, 0)
+        if not (good and (ins.rows_passed, ins.rows_cut, ins.rows_undecided) == want):
             return "violates", "counts"
     elif ins.rows_passed is not None or ins.rows_cut is not None or ins.rows_undecided is not None:
         return "violates", "counts"
 
-    if not ins.err_msg.startswith(batch.err_msg):
-        return "violates", "err_prefix"
-    rest = ins.err_msg[len(batch.err_msg) :]
-    if rest and not SUFFIX.match(rest):
-        return "violates", "err_suffix"
+    # A declined output's err is the decline text, checked above.
+    if not declined:
+        if not ins.err_msg.startswith(batch.err_msg):
+            return "violates", "err_prefix"
+        rest = ins.err_msg[len(batch.err_msg) :]
+        if rest and not SUFFIX.fullmatch(rest):
+            return "violates", "err_suffix"
 
     if (exp is None) != (out is None):
         return "violates", "output_presence"
@@ -200,12 +206,12 @@ def verdict(case: dict):
 
 @needs_fixture
 def test_the_fixture_is_the_shape_this_gate_expects() -> None:
-    assert sum(c["expect"] == "equal" for c in CASES) == 12
+    assert sum(c["expect"] == "equal" for c in CASES) == 17
     assert sum(isinstance(c["expect"], dict) and "exception" in c["expect"] for c in CASES) == 1
     for rule in RULES:
         assert any(c["expect"] == {"violates": rule} for c in CASES), rule
     assert any(c["expect"] == {"exception": "generator_draw"} for c in CASES)
-    assert sum(isinstance(c["expect"], dict) and "violates" in c["expect"] for c in CASES) == 24
+    assert sum(isinstance(c["expect"], dict) and "violates" in c["expect"] for c in CASES) == 25
 
 
 @needs_fixture
@@ -264,4 +270,4 @@ def test_the_fixture_gate_ran_cases() -> None:
                 f"CHTYPES_REQUIRE_FIXTURES=1 and the insert-projection fixture is absent: {FIXTURE}"
             )
         pytest.skip(f"insert-projection fixture absent ({FIXTURE}): not a full-repository tree")
-    assert len(CASES) == 37
+    assert len(CASES) == 43
