@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -253,5 +254,31 @@ func TestDecodeInsertResultEveryMember(t *testing.T) {
 	// A duplicate key is an internal error, as in every document.
 	if _, err := decodeInsertResult([]byte(`{"outcome":"accepted","outcome":"accepted"}`), nil); err == nil {
 		t.Errorf("a duplicate key decoded")
+	}
+}
+
+// An e row, one the INSERT's WHERE threw on, fails the call at refused_at
+// where: it decodes to RefusedAtWhere, a listed site, and a site nobody lists
+// yet still decodes as the vocabulary's unknown(n), kept verbatim.
+func TestDecodeInsertResultWhereSite(t *testing.T) {
+	const doc = `{"outcome":"rejected","code":72,"err":"Cannot parse number","refused_at":%q,
+	"rows_read":3,"rows_skipped":0,"rows_passed":0,"rows_cut":0,"rows_undecided":0,
+	"unsupported_settings":[],"framing":{"bom_skipped":false,"container":null,"header":null}}`
+	res, err := decodeInsertResult([]byte(fmt.Sprintf(doc, "where")), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.RefusedAt != RefusedAtWhere || !res.RefusedAt.Known() || res.RefusedAt == RefusedAtRow {
+		t.Errorf("refused_at where = %q (known %v), want RefusedAtWhere", res.RefusedAt, res.RefusedAt.Known())
+	}
+	if res.Outcome != Rejected || res.ErrCode != 72 || res.ErrMsg != "Cannot parse number" || res.Output != nil {
+		t.Errorf("a WHERE refusal = %+v", res)
+	}
+	res, err = decodeInsertResult([]byte(fmt.Sprintf(doc, "a_site_nobody_listed")), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.RefusedAt != "a_site_nobody_listed" || res.RefusedAt.Known() {
+		t.Errorf("an unlisted site = %q (known %v), want it kept as unknown(n)", res.RefusedAt, res.RefusedAt.Known())
 	}
 }

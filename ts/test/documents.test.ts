@@ -36,6 +36,7 @@ import {
   decodeDiscovery,
   decodeErrorCodes,
   decodeFilterResult,
+  decodeInsert,
   decodeLiveHandles,
   decodeRow,
   decodeSchemaDescription,
@@ -543,6 +544,31 @@ describe('spec batch 2: the refusal members (reason, refused_at, refused_row)', 
     expect(f.errors[0]?.code).toBe(-2);
     expect(f.errors[0]?.reason).toBe('drawn-value');
     expect(decodeFilterResult(enc({ outcome: 'ok', errors: [{ row: 1, code: 70 }] })).errors[0]?.reason).toBeUndefined();
+  });
+
+  it('reads an insert whose WHERE threw on a row as refused at where, and keeps a site nobody lists as its unknown(n)', () => {
+    const doc = (site: string) =>
+      enc({
+        outcome: 'rejected',
+        code: 72,
+        err: 'Cannot parse number',
+        refused_at: site,
+        rows_read: 3,
+        rows_skipped: 0,
+        rows_passed: 0,
+        rows_cut: 0,
+        rows_undecided: 0,
+        unsupported_settings: [],
+        framing: { bom_skipped: false, container: null, header: null },
+      });
+    const ins = decodeInsert(doc('where'), undefined);
+    expect(ins.refusedAt).toBe(RefusalSite.Where);
+    expect(ins.refusedAt).not.toBe(RefusalSite.Row);
+    expect(refusalSiteKnown(ins.refusedAt ?? '')).toBe(true);
+    expect([ins.outcome, ins.errCode, ins.errMsg.toString('utf8'), ins.output]).toEqual(['rejected', 72, 'Cannot parse number', undefined]);
+    const future = decodeInsert(doc('a_site_nobody_listed'), undefined);
+    expect(future.refusedAt).toBe('a_site_nobody_listed');
+    expect(refusalSiteKnown(future.refusedAt ?? '')).toBe(false);
   });
 
   it('a member of the wrong JSON type is an InternalError', () => {

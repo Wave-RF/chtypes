@@ -1555,6 +1555,32 @@ mod tests {
         );
     }
 
+    /// An `e` row, one the INSERT's WHERE threw on, fails the call at `where`:
+    /// a listed site, never `row`; a site nobody lists yet is still `Unknown`.
+    #[test]
+    fn an_insert_whose_where_threw_is_refused_at_where() {
+        let doc = |site: &str| {
+            format!(
+                r#"{{"outcome":"rejected","code":72,"err":"Cannot parse number","refused_at":"{site}",
+                "rows_read":3,"rows_skipped":0,"rows_passed":0,"rows_cut":0,"rows_undecided":0,
+                "unsupported_settings":[],"framing":{{"bom_skipped":false,"container":null,"header":null}}}}"#
+            )
+        };
+        let ins = insert_result(doc("where").as_bytes(), None).unwrap();
+        assert_eq!(ins.refused_at, Some(RefusalSite::Where));
+        assert_ne!(ins.refused_at, Some(RefusalSite::Row));
+        assert!(ins.refused_at.as_ref().is_some_and(RefusalSite::is_known));
+        assert_eq!(ins.outcome, Outcome::Rejected);
+        assert_eq!(ins.err_code, 72);
+        assert_eq!(ins.err_msg.as_bytes(), b"Cannot parse number");
+        assert_eq!(ins.output, None);
+        let future = insert_result(doc("a_site_nobody_listed").as_bytes(), None).unwrap();
+        assert_eq!(
+            future.refused_at,
+            Some(RefusalSite::Unknown("a_site_nobody_listed".into()))
+        );
+    }
+
     #[test]
     fn a_schema_description_carries_posture_support_reads_and_b64_server_settings() {
         let d = schema_description(

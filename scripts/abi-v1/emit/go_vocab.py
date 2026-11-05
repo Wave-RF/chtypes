@@ -534,14 +534,14 @@ def _posture(model) -> list[str]:
 
 
 def _refusal_site(model) -> list[str]:
-    """ABI v2: refusal_site, where a batch or filter document's refusal sits (r3: its unknown(n) too)."""
+    """ABI v2: refusal_site, where a document's refusal sits (r3: its unknown(n) too)."""
     enum = model.enums["refusal_site"]
     values = [(f"RefusedAt{_value_ident(enum.name, v.value)}", v.value) for v in enum.values]
     out = _string_type(
         "RefusalSite",
-        "RefusalSite is refusal_site: where a batch or filter document's refusal sits, the call (its settings\n"
-        "or its column list), the body outside any row (a header, the framing), one row (RefusedRow) or a\n"
-        "whole-body step. The spelling is the description's.",
+        "RefusalSite is refusal_site: where a document's refusal sits, the call (its settings or its column\n"
+        "list), the body outside any row (a header, the framing), one row (RefusedRow), a whole-body step or,\n"
+        "on an insert result only, the INSERT's WHERE, which threw on a row. The spelling is the description's.",
         values,
     )
     out += _known_method("RefusalSite", [i for i, _ in values], "site")
