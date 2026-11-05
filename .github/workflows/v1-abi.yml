@@ -455,6 +455,13 @@ jobs:
             echo "report=false" >> "$GITHUB_OUTPUT"
           fi
           exit "$rc"
+      - name: "repro: cancel tests 30x (throwaway)"
+        if: matrix.binding == 'ts' && matrix.os == 'darwin-arm64'
+        env:
+          MAJOR: ${{ steps.major.outputs.major }}
+        run: |
+          export "CHTYPES_ABI${MAJOR}_STUBS=$RUNNER_TEMP/abi-stubs/v$MAJOR"
+          cd ts && for i in $(seq 1 30); do echo "run $i/30"; pnpm exec vitest run test/abi2/cancel.test.ts || exit 1; done
       - name: upload this leg's report
         if: always() && steps.run.outputs.report == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
