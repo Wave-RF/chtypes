@@ -245,6 +245,40 @@ export interface BatchResult {
   readonly framing: Framing | undefined;
 }
 
+/**
+ * The `insert_result` document of `Schema.insert` (ABI v2): the whole body's outcome, its counts and the output's
+ * column list, and nothing per row. Every member has the meaning, and the name, of the batch member of the same name.
+ * The shared members equal `BatchResult`'s for the same inputs, under the projection rule of `chs_preview_insert`
+ * (`spec/abi-v2/docs.md`).
+ */
+export interface InsertResult {
+  readonly outcome: Outcome;
+  /** The document's `code`, as `BatchResult.errCode`. */
+  readonly errCode: number;
+  /** ClickHouse's own message, verbatim: a reader refusal's `(at row N)` is inside it. The document has no `refusedRow`. */
+  readonly errMsg: Buffer;
+  /** The catalog id of a declined insert (`errCode` is -2), from `reason`; `undefined` when the document carries none. */
+  readonly reason: string | undefined;
+  /** Where a refusal or decline sits, from `refused_at`; `undefined` for an accepted insert. */
+  readonly refusedAt: RefusalSite | undefined;
+  readonly rowsRead: number;
+  readonly rowsSkipped: number;
+  /** The `t` rows, which are the output's rows, from `rows_passed`; `undefined` when the call carried no filter (the document carries it exactly with a filter). */
+  readonly rowsPassed: number | undefined;
+  /** The rows withheld, the `f` rows and the `d` rows, from `rows_cut`; `undefined` when the call carried no filter. */
+  readonly rowsCut: number | undefined;
+  /** The `d` rows, those the library declined to evaluate the WHERE for, counted inside `rowsCut`, from `rows_undecided`; `undefined` when the call carried no filter. An `e` row is in no count: it fails the call. */
+  readonly rowsUndecided: number | undefined;
+  /** The call's own settings the library declined, from the top-level list; empty when it names none. */
+  readonly unsupportedSettings: readonly Buffer[];
+  readonly framing: Framing | undefined;
+  readonly partitionCount: number | undefined;
+  /** The output's one column list, from `export_columns`; present only when the outcome is `accepted` and an output format was asked for, `undefined` otherwise. */
+  readonly exportColumns: readonly Buffer[] | undefined;
+  /** The output rows in the requested format (possibly empty): present only when the outcome is `accepted` and an output format was asked for; `undefined` in every other case, whatever the library handed back. A declined output is the whole call's decline (`outcome` `unsupported`, `reason` the decline id, `errCode` -2, `refusedAt` `body_step`). Owned bytes. */
+  readonly output: Buffer | undefined;
+}
+
 export interface FilterRowError {
   readonly row: number;
   readonly code: number;
@@ -505,8 +539,13 @@ function engineCellOf(doc: string, v: unknown): EngineCell {
 
 /** The refusal members a row, a batch and a filter result share: `reason`, `refused_at` and `refused_row`. An unlisted site is its unknown(n): kept, never a failure (r3). */
 function refusalOf(doc: string, o: Obj): { reason: string | undefined; refusedAt: RefusalSite | undefined; refusedRow: number | undefined } {
+  return { reason: optStr(doc, o, 'reason'), refusedAt: refusedAtOf(doc, o), refusedRow: optInt(doc, o, 'refused_row') };
+}
+
+/** `refused_at`, shared by every document that carries it (an `insert_result` has no `refused_row`). */
+function refusedAtOf(doc: string, o: Obj): RefusalSite | undefined {
   const site = optStr(doc, o, 'refused_at');
-  return { reason: optStr(doc, o, 'reason'), refusedAt: site === undefined ? undefined : refusalSiteOf(site), refusedRow: optInt(doc, o, 'refused_row') };
+  return site === undefined ? undefined : refusalSiteOf(site);
 }
 
 /** One entry of `at_merge`. An unlisted reason is its unknown(n): kept, never a failure (r3). */
@@ -675,6 +714,34 @@ export function decodeBatch(bytes: Uint8Array, payload: Buffer | undefined): Bat
     unconsumed: listOf(doc, o, 'unconsumed').map((s) => spanOf(doc, 'unconsumed[]', s)),
     framing: o.framing === undefined ? undefined : framingOf(doc, o.framing),
     atMerge: listOf(doc, o, 'at_merge').map((a) => atMergeOf(doc, a)),
+  };
+}
+
+/** Decode an `insert_result` document and the output buffer, when an output was asked for. */
+export function decodeInsert(bytes: Uint8Array, output: Buffer | undefined): InsertResult {
+  const doc = 'insert_result';
+  const o = asObject(doc, '$', parseDoc(doc, bytes));
+  const exportColumnsRaw = o.export_columns;
+  const outcome = batchOutcomeOf(strOr(doc, o, 'outcome', ''));
+  // The output exists exactly when the outcome is accepted (and an output format was asked for, which is
+  // what the caller's buffer says): keyed on the outcome, not on any member of the document.
+  const accepted = outcome === 'accepted';
+  return {
+    outcome,
+    errCode: intOr(doc, o, 'code', 0),
+    errMsg: bytesOr(doc, o, 'err'),
+    reason: optStr(doc, o, 'reason'),
+    refusedAt: refusedAtOf(doc, o),
+    rowsRead: intOr(doc, o, 'rows_read', 0),
+    rowsSkipped: intOr(doc, o, 'rows_skipped', 0),
+    rowsPassed: optInt(doc, o, 'rows_passed'),
+    rowsCut: optInt(doc, o, 'rows_cut'),
+    rowsUndecided: optInt(doc, o, 'rows_undecided'),
+    unsupportedSettings: bytesListOf(doc, o, 'unsupported_settings'),
+    framing: o.framing === undefined ? undefined : framingOf(doc, o.framing),
+    partitionCount: optInt(doc, o, 'partition_count'),
+    exportColumns: exportColumnsRaw === undefined || !accepted ? undefined : bytesListOf(doc, o, 'export_columns'),
+    output: accepted ? output : undefined,
   };
 }
 

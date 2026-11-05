@@ -783,7 +783,7 @@ def _canceled_expect(where: str) -> dict:
 def _cancel_cases(model) -> list[dict]:
     """Generation 2, the cancel token (_stubshared.CANCEL), for every call
     whose options document defines `cancel` (chs_filter_eval_block takes no
-    options document, so it has none): four cases per call.
+    options document, so it has none): five cases per call.
 
       * `pre_fired`: a token fired before the call: CHS_CANCELED at entry,
         reason call-canceled, ch_code 0, every output NULL.
@@ -791,6 +791,10 @@ def _cancel_cases(model) -> list[dict]:
         blocks; a runner fires the token from another thread once the stub's
         probe reads one call in flight (a `blocked_call` step): CHS_CANCELED at
         the block check point, every output NULL.
+      * `after_last`: the same wait placed after the call's last check point
+        (the directive `!L:`): the fire arrives while the call is in flight
+        but too late to be observed, so the call answers CHS_OK with its
+        complete echo and the token reads fired afterwards.
       * `never_fired`: a token never fired: the call answers exactly its echo,
         the options argument echoed as the bytes the runner substituted; a fire
         after it returned reads 1 and changes nothing.
@@ -826,10 +830,16 @@ def _cancel_cases(model) -> list[dict]:
         canceled_call, _ = _cancel_call(model, fn, refs)
         blocked_call, _ = _cancel_call(model, fn, refs, first_bytes=rule["directive"].encode() + b"{}")
         echo_call, echo = _cancel_call(model, fn, refs)
-        echo_expect: dict = {"status": "CHS_OK"}
-        outputs = {p.name: {"fn": fn.name, "out": p.name, "args": echo} for p in _buf_out_params(fn)}
-        if outputs:
-            echo_expect["outputs"] = outputs
+        late_call, late_echo = _cancel_call(model, fn, refs, first_bytes=rule["late_directive"].encode() + b"{}")
+
+        def _echo_expect(args: list) -> dict:
+            e: dict = {"status": "CHS_OK"}
+            outs = {p.name: {"fn": fn.name, "out": p.name, "args": args} for p in _buf_out_params(fn)}
+            if outs:
+                e["outputs"] = outs
+            return e
+
+        echo_expect = _echo_expect(echo)
         out += [
             {
                 "id": f"cancel.{fn.name}.pre_fired",
@@ -854,6 +864,21 @@ def _cancel_cases(model) -> list[dict]:
                     *lets,
                     {"fired": "t", "want": 0},
                     {"blocked_call": {"call": blocked_call, "fire": "t", "expect": _canceled_expect("blocked")}},
+                    {"fired": "t", "want": 1},
+                    _live(model, **bound),
+                    *frees,
+                    _live(model),
+                ],
+            },
+            {
+                "id": f"cancel.{fn.name}.after_last",
+                "kind": "lifecycle",
+                "steps": [
+                    {"cancel": "t"},
+                    *lets,
+                    {"fired": "t", "want": 0},
+                    # Past the last check point the call blocks until the fire, then answers in full.
+                    {"blocked_call": {"call": late_call, "fire": "t", "expect": _echo_expect(late_echo)}},
                     {"fired": "t", "want": 1},
                     _live(model, **bound),
                     *frees,

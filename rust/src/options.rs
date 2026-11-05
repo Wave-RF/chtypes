@@ -1,7 +1,7 @@
 //! The options documents (`docs/reference/bindings-v1.md` §2, "The options
 //! documents"; rule r1 of `spec/abi-v2/docs.md`).
 //!
-//! Three calls take one: `insert_options` on the four calls that model an
+//! Three calls take one: `insert_options` on the five calls that model an
 //! INSERT of a body, `filter_options` on `chs_filter_create` and
 //! `schema_options` on `chs_schema_create`. Each member is its own field of
 //! the call's options struct, and the binding builds the document from the
@@ -169,6 +169,7 @@ pub(crate) struct InsertMembers<'a> {
     pub(crate) column_defaults: Option<&'a [ColumnDefault]>,
     pub(crate) verdict_basis: Option<VerdictBasis>,
     pub(crate) defer_defaults: Option<DeferDefaults>,
+    pub(crate) memory_limit_bytes: Option<u64>,
     pub(crate) extra: &'a [(String, String)],
 }
 
@@ -197,6 +198,10 @@ impl InsertMembers<'_> {
         }
         if let Some(b) = self.defer_defaults {
             d.set("defer_defaults", &b.as_str())?;
+        }
+        if let Some(n) = self.memory_limit_bytes {
+            // A decimal string, as the document spells it; the library checks it.
+            d.set("memory_limit_bytes", &n.to_string())?;
         }
         d.extras("insert options", self.extra)?;
         d.finish()
@@ -239,6 +244,7 @@ mod tests {
             column_defaults: None,
             verdict_basis: None,
             defer_defaults: None,
+            memory_limit_bytes: None,
             extra: &[],
         }
     }
@@ -272,6 +278,7 @@ mod tests {
             column_defaults: Some(&defaults),
             verdict_basis: Some(VerdictBasis::Export),
             defer_defaults: Some(DeferDefaults::Server),
+            memory_limit_bytes: Some(1048576),
             extra: &[],
         }
         .document()
@@ -282,9 +289,27 @@ mod tests {
                 r#"{"column_defaults":[{"name":"c","value":"1"},{"name_b64":"/w==","value_b64":"/g=="}],"#,
                 r#""defer_defaults":"server","#,
                 r#""insertable_columns":[{"name":"a"},{"name_b64":"AP8="}],"#,
+                r#""memory_limit_bytes":"1048576","#,
                 r#""verdict_basis":"export"}"#
             )
         );
+    }
+
+    #[test]
+    fn memory_limit_bytes_is_a_decimal_string_and_zero_is_sent() {
+        let doc = |n| {
+            text(
+                InsertMembers {
+                    memory_limit_bytes: Some(n),
+                    ..members()
+                }
+                .document()
+                .unwrap(),
+            )
+        };
+        assert_eq!(doc(7), r#"{"memory_limit_bytes":"7"}"#);
+        // Zero is a supplied value (no limit, which the library reads as such).
+        assert_eq!(doc(0), r#"{"memory_limit_bytes":"0"}"#);
     }
 
     #[test]
