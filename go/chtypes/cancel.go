@@ -52,7 +52,7 @@ type cancelArm struct {
 // armCancel prepares one call's cancellation from ctx and sets the cancel
 // member of doc. It returns nil (and touches nothing) for a context that can
 // never be canceled. A nil context is a *UsageError.
-func armCancel(tbl *abi2.Table, ctx context.Context, doc *optionDoc) (*cancelArm, error) {
+func armCancel(ctx context.Context, tbl *abi2.Table, doc *optionDoc) (*cancelArm, error) {
 	if ctx == nil {
 		return nil, usageError("the context is nil")
 	}

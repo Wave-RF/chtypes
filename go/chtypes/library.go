@@ -236,7 +236,7 @@ func (l *Library) CompileTableContext(ctx context.Context, createTable string, o
 	}
 	// The options document (posture, and any member passed through), or length
 	// 0, which the library reads as {}.
-	arm, err := armCancel(l.tbl, ctx, &c.schemaOpts)
+	arm, err := armCancel(ctx, l.tbl, &c.schemaOpts)
 	if err != nil {
 		return nil, err
 	}
