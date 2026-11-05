@@ -167,7 +167,12 @@ describe.skipIf(!stubsAvailable)('cancelable async calls over the stub library',
       const last = seen.at(-1);
       expect(last === undefined ? undefined : statusOf(last.result), name).toBe(Status.Canceled);
     }
-    expect(library.liveHandles()).toEqual(baseline);
+    // Every handle a canceled call touched is freed once its native call has returned; a free can land a tick after
+    // the drain, so wait (bounded) for the counts to come back, then name any kind that did not: a real leak fails here.
+    await waitFor(() => JSON.stringify(library.liveHandles()) === JSON.stringify(baseline));
+    const live = library.liveHandles();
+    for (const [kind, count] of Object.entries(baseline)) expect(live[kind], `live ${kind}`).toEqual(count);
+    expect(Object.keys(live).sort()).toEqual(Object.keys(baseline).sort());
     expect(probe(image).fire_after_free).toBe(0);
   });
 
