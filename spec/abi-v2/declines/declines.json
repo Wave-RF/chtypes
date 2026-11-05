@@ -91,7 +91,7 @@
   {
    "id": "option-not-implemented",
    "class": "call-decline",
-   "trigger": "an input document (insert_options, filter_options, schema_options) sets a member this build reserves to a value other than its default",
+   "trigger": "an input document (insert_options, filter_options, schema_options) sets a member this build reserves to a value other than its default; also a call this dev build does not implement (an interim v2-dev build at an SDK spec change's head)",
    "code": {
     "chs": "-2",
     "ch": []
@@ -105,6 +105,7 @@
    "paths": [
     "chs_preview_row",
     "chs_preview_batch",
+    "chs_preview_insert",
     "chs_filter_eval_body",
     "chs_block_create",
     "chs_filter_eval_block",
@@ -160,6 +161,29 @@
    ],
    "retirement": "none",
    "description": "The call stops at its next check point and answers CHS_CANCELED with every output NULL; a fire after its last check point is a no-op, and the call answers in full."
+  },
+  {
+   "id": "native-data-after-end-block",
+   "class": "call-decline",
+   "trigger": "a Native body with bytes after its end-of-stream block (a block of zero columns)",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_preview_row",
+    "chs_preview_batch",
+    "chs_block_create",
+    "chs_filter_eval_body"
+   ],
+   "retirement": "none",
+   "description": "A server's INSERT ends a Native stream at a block of zero columns and silently ignores every byte after it, rows included, so the library declines such a body rather than answer for data the server would drop; the message names the offset and length of the bytes left unread, and the batch document's unconsumed reports the same range. Send only the blocks, or end the body at the empty block."
   },
   {
    "id": "reference-type-unpaired",
@@ -344,6 +368,86 @@
    ],
    "retirement": "none",
    "description": "A server reads its own catalog, dictionaries, files or a remote host for these. The library never does in the caller's process, so the statement or filter is declined before any analysis; whether a server accepts it is its own to say."
+  },
+  {
+   "id": "server-state-function",
+   "class": "create-decline",
+   "trigger": "a CREATE TABLE (any clause) or a filter WHERE that calls a function whose analysis reads the running server's own components (its caches, process list and access control, through the server settings' live values): getServerSetting from 26.8",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create",
+    "chs_filter_create"
+   ],
+   "retirement": "when the library's context holds the server's components",
+   "description": "A server answers these from its own running components, which the library does not hold, so the statement or filter is declined before any analysis; whether a server accepts it is its own to say."
+  },
+  {
+   "id": "storage-analysis-needs-server",
+   "class": "create-decline",
+   "trigger": "a CREATE TABLE whose storage clause (the engine, a partition, sorting, primary or sampling key, the TTL, a skip index, a projection or a column TTL) the server's own analysis cannot finish without state only a running server holds (its UUID or its disks): the analysis ends in the library's own error class, never a server's verdict",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "when the library's context holds that state",
+   "description": "A function such as serverUUID, generateSnowflakeID or filesystemAvailable reads the server's own identity or disks when its storage clause is analyzed, which the library does not hold, so the schema is declined, never refused with an error a server never gives; whether a server accepts it is its own to say."
+  },
+  {
+   "id": "storage-access-not-modeled",
+   "class": "create-decline",
+   "trigger": "a CREATE TABLE whose partition, sorting, primary or sampling key, or table TTL, calls an introspection function (demangle, and the address functions where the line has them) that the access check refuses at allow_introspection_functions = 0",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "when the library's storage context holds a server global's unrestricted access",
+   "description": "A server builds those clauses under its own global context, whose access the check does not restrict, so it creates the table; the library's contexts always carry a user, so the schema is declined, never refused. Enabling allow_introspection_functions in the server profile compiles it."
+  },
+  {
+   "id": "check-built-at-insert",
+   "class": "create-decline",
+   "trigger": "a CONSTRAINT ... CHECK that the server's CREATE describes without error but whose expression does not build, such as a call with arguments the function does not take or a constant argument it refuses",
+   "code": {
+    "chs": "CHS_DECLINED",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_schema_create"
+   ],
+   "retirement": "none",
+   "description": "A server's CREATE describes a CHECK and builds it only at INSERT, so it creates the table and refuses the rows; the library does not model a table whose every INSERT fails, so the schema is declined, never refused. A CHECK the server's own description refuses is refused with its code."
   },
   {
    "id": "undeclared-gate",
@@ -1940,6 +2044,29 @@
    ],
    "retirement": "none",
    "description": "The library and the server each compute their own clock read or generated value, so a filter that reads such a column has no answer for a row that omitted it; supply the value to get a verdict."
+  },
+  {
+   "id": "expression-masked-secret",
+   "class": "row-decline",
+   "trigger": "a column DEFAULT, MATERIALIZED or ALIAS expression whose call holds the server's mask '[HIDDEN]' in every argument the server's own secret finder names secret: a definition read back from a server (SHOW CREATE, system.columns), which hides the key",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_preview_row",
+    "chs_preview_batch",
+    "chs_filter_eval_body",
+    "chs_filter_eval_block"
+   ],
+   "retirement": "none",
+   "description": "The server holding the table computes the call with its real key; the read-back text carries only the mask, so a value computed here would be wrong. The schema compiles, a row that supplies the column is answered, and a row that would evaluate the expression is declined. Compile the definition with its real key to get the server's value."
   },
   {
    "id": "float-negative-zero-sparse-default",
