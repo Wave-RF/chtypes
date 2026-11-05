@@ -559,15 +559,19 @@ extern "C" {
  *   (`chs_preview_row`, `chs_preview_batch`, `chs_preview_insert`, `chs_block_create` and
  *   `chs_filter_eval_body`), and it means the same at each: it bounds the call's own ClickHouse
  *   MemoryTracker at the query level, the tracker a server's `max_memory_usage` limits, with every
- *   thread working for the call accounted under it. When the call reaches it, the whole call
- *   declines (`reason` `call-memory-budget`, `code` `CHS_CODE_DECLINED`, `refused_at` `call`) and
- *   produces no partial output: no export or output bytes, and `export_declined` where an export or
- *   an output was asked for. It is never a rejection with ClickHouse's code 241, because the
- *   library's peak is not the server's, so a 241 would be an over-reject wherever the server stays
- *   under its limit. A profile's `max_memory_usage` stays a declined setting. Each of the five
- *   calls has a conformance case: at a forced tiny limit the call declines `call-memory-budget`
- *   with no partial output, and absent and `"0"` answer as with no limit
- *   [`insert_options.memory_limit_bytes`].
+ *   thread working for the call accounted under it. On the per-row calls (`chs_preview_row`,
+ *   `chs_preview_batch`, `chs_filter_eval_body` and `chs_block_create`) that tracked memory
+ *   includes the call's own per-row documents, so it stands far above the server's query memory for
+ *   the same body: measured at 70 to 195 MiB where the server's query peaked at 0.4 to 13.5 MiB. A
+ *   caller sizes the limit from the call, not from the server's query memory. When the call reaches
+ *   it, the whole call declines (`reason` `call-memory-budget`, `code` `CHS_CODE_DECLINED`,
+ *   `refused_at` `call`) and produces no partial output: no export or output bytes, and
+ *   `export_declined` where an export or an output was asked for. It is never a rejection with
+ *   ClickHouse's code 241, because the library's peak is not the server's, so a 241 would be an
+ *   over-reject wherever the server stays under its limit. A profile's `max_memory_usage` stays a
+ *   declined setting. Each of the five calls has a conformance case: at a forced tiny limit the
+ *   call declines `call-memory-budget` with no partial output, and absent and `"0"` answer as with
+ *   no limit [`insert_options.memory_limit_bytes`].
  * - `cancel`: the id of a cancel token (`chs_cancel_create`'s `out_id`: `c` and 16 lowercase
  *   hexadecimal digits), resolved at the call's entry. Absent is no token. Every call that takes
  *   this document honors it, and it means the same at each: a fired token makes the call return
