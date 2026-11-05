@@ -36,6 +36,10 @@ The four are **peers** under the abstract `CallError`: a decline never satisfies
 - `close()` on a `Schema`, `Filter` or `Block` is idempotent and any order is safe. `Symbol.dispose` is also defined, but **`using` is a syntax error on Node 22**, so portable code calls `close()`. An abandoned handle is freed by its finalizer.
 - Using a closed object is a `UsageError`. The per-call zone is the `session_timezone` key of `settings` and nothing more; passing both spellings is a `UsageError`.
 
+## Cancellation
+
+`schema.rowAsync`, `rowsAsync`, `insertAsync`, `parseBlockAsync`, `filter.rowsAsync` and `library.compileTableAsync` take the plain call's options plus `AsyncOptions { signal? }` and return a promise. They run on the libuv thread pool (4 threads by default), so they do not block the event loop. **TypeScript differs from the other three bindings here:** when the signal aborts, the promise rejects at once with `CallCanceledError`, even if the library has already passed its last check point, and a native result that arrives later is freed and never surfaced. Go, Python and Rust return the complete answer in that case. That is the `AbortSignal` contract, and it is safe because these calls have no server side effect. `filter.eval` over a block has no async twin, because that call is not cancelable. The shape and the rules are in [`bindings-v1.md`](bindings-v1.md#cancellation-and-the-typescript-async-calls).
+
 ## Bytes, settings and results
 
 - Every name, statement, message and rendered value is a `Buffer`, never assumed to be UTF-8. Input is `BytesIn` (`Uint8Array | string`; a string is encoded as UTF-8), and a body is a `Uint8Array` and never a string.

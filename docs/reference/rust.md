@@ -69,6 +69,10 @@ Every option struct has public fields and `Default`, and is built as `RowOptions
 
 A filter's zone is its own, fixed when it is compiled (`FilterOptions::session_timezone`); an evaluation's settings (`EvalOptions`, or a block's `RowOptions`) are the body's INSERT settings: they govern its parse and the expressions the INSERT evaluates, never the WHERE.
 
+## Cancellation
+
+Set `cancel: Some(token)` on `RowOptions`, `RowsOptions`, `EvalOptions`, `InsertOptions` or `CompileOptions`, with a `CancelToken` (`CancelToken::new()`, `Clone` shares one token); `token.cancel()` from any thread makes every call holding it return `Error::Canceled`, with no result. A call that has already passed the library's last check point returns its complete answer, `Ok`. A token is one-shot. `Filter::eval` over a block is not cancelable. The shape and the rules are in [`bindings-v1.md`](bindings-v1.md#cancellation-and-the-typescript-async-calls).
+
 ## Generated defaults
 
 A column whose DEFAULT calls a random or UUID generator the build admits reports `Value::source == source::DEFAULT_GENERATED`. It is stored only if the caller inserts the library's own output: ask `rows` for an export (`RowsOptions::export`) in the format you will insert, and insert `BatchResult::payload`. Never insert the original body.

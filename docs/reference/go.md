@@ -91,6 +91,10 @@ Environment: `CHTYPES_ARTIFACTS_URL` (the bases, comma separated), `CHTYPES_CACH
 
 Sizing a caller-side semaphore, accounting for `GOMEMLIMIT` against a `dlopen`'d artifact's own C++ heap, per-handle RSS and compile cost figures, and why `Close` does not lower RSS: [`multi-version.md`](../guides/multi-version.md#go-sizing-concurrent-handles).
 
+## Cancellation
+
+`Schema.RowContext`, `RowsContext`, `InsertContext`, `ParseBlockContext`, `(*Filter).RowsContext` and `(*Library).CompileTableContext` take a `context.Context` first and are otherwise the plain call. When the context is done before the call has passed the library's last check point, the call returns a `*CanceledError` whose `Cause` is `context.Cause(ctx)`, so `errors.Is(err, context.Canceled)` holds, and it returns no result. If the context is done after that point the call returns its complete answer: a complete answer is never turned into a cancel. `Filter.Eval` over a block has no context variant, because that call is not cancelable. The shape and the rules are in [`bindings-v1.md`](bindings-v1.md#cancellation-and-the-typescript-async-calls).
+
 ## See also
 
 - [`bindings-v1.md`](bindings-v1.md): the normative shape all four bindings implement.
