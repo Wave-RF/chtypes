@@ -76,6 +76,24 @@ exercised against real memory).
   * A NULLABLE PARENT. A handle the minted one `holds` may come from a
     nullable parameter (chs_schema_create's `server`): the new handle holds
     it only when the caller passed one.
+  * THE CANCEL TOKEN (generation 2, _stubshared.CANCEL). A real token: an
+    atomic one-shot fired flag on the common handle, an id ("c" and 16
+    lowercase hex digits) registered in a lock-guarded id -> token registry,
+    and the common refcount, which every call that resolved the id holds
+    until its last check point. `chs_cancel_free` drops the caller's
+    reference and deregisters the id; the token's memory stays, a tombstone,
+    so a fire that reaches it afterwards is counted, not undefined. Every call
+    whose options document defines `cancel` reads it after rule r1: an id
+    naming no registered token is CHS_INVALID_ARGUMENT naming it; a token
+    fired before the call is CHS_CANCELED at entry, every output NULL, with
+    reason `call-canceled`; a first bytes_in argument beginning the
+    directive `!B:` blocks (a 1 ms poll, capped at 10 s) until the token
+    fires, then CHS_CANCELED; `!L:` is the same wait placed after the last
+    check point, so the answer is the echo, never CHS_CANCELED; anything else
+    is the echo, unchanged. Two
+    counters (calls blocked in the directive, fires after free) are exported
+    as `chs_stub_inflight` / `chs_stub_fire_after_free` for stubtest.c, and
+    readable by a binding through the probe `chs_type_validate("!C:")`.
 
 THE TWELVE HAND-WRITTEN FUNCTIONS (today; `classify()` reports the exact
 split against the tree's own description). Each has return-value semantics,
@@ -89,7 +107,9 @@ buffer), `chs_error_status` (CHS_INVALID_ARGUMENT on a bad error) and
 `chs_error_ch_code` (0 on a bad error), the three owned-buffer text accessors
 (`chs_error_ch_name`/`chs_error_message`/`chs_error_column`, NULL on a bad
 error or allocation failure), and `chs_live_handles` (the real per-kind
-counters, not an echo of its own argument-less call). Every free function
+counters, not an echo of its own argument-less call). Generation 2 adds the
+cancel token's four (`chs_cancel_create`, `_fire`, `_fired`, `_free`: see THE
+CANCEL TOKEN above) and `chs_error_reason`. Every free function
 (five handles plus `chs_shutdown`) is ALSO generated, by one shared
 structural template (`_gen_free`/`is_free_like`), not hand-written, since all
 six share one shape. Everything else — about HALF of the described functions
@@ -140,6 +160,14 @@ def _omit_guard(symbol: str) -> tuple[str, str]:
     return f"#if !defined({_stubshared.omit_define(symbol)})", "#endif"
 
 
+CANCEL_HANDLE = "chs_cancel"
+
+
+def _has_cancel(model) -> bool:
+    """Generation 2 on: the description has the cancel token (_stubshared.CANCEL)."""
+    return CANCEL_HANDLE in model.handles
+
+
 def _kind_const(handle_name: str) -> str:
     """CHS_STUB_KIND_<X> for a handle type name `chs_X` (every handle name is
     the frozen `chs_` prefix plus the kind word, so stripping it once here
@@ -184,8 +212,20 @@ def _preamble(model) -> str:
     plain_structs = "\n\n".join(
         f"struct {h} {{\n    chs_handle_common common;\n}};"
         for h in handle_names
-        if h not in (BUF_HANDLE, ERROR_HANDLE)
+        if h not in (BUF_HANDLE, ERROR_HANDLE, CANCEL_HANDLE)
     )
+    # Generation 2's cancel token carries its own payload (the cancel section,
+    # _cancel_section); ABI v1 has no such handle, so none of these change it.
+    cancel = _has_cancel(model)
+    posix = (
+        "#if defined(__linux__) && !defined(_POSIX_C_SOURCE)\n"
+        "#  define _POSIX_C_SOURCE 200809L /* nanosleep, for the cancel directive's poll */\n"
+        "#endif\n"
+        if cancel
+        else ""
+    )
+    reason_fields = "    char *reason; size_t reason_len; /* the catalog id chs_error_reason answers */\n" if cancel else ""
+    reason_init = "    e->reason = NULL;\n    e->reason_len = 0;\n" if cancel else ""
     return f'''/* GENERATED BUILD-TIME FILE by scripts/abi-v1/gen.py --render stub, from spec/abi-v1/abi.json
    (CHS_ABI_FINGERPRINT {model.fingerprint}). Never committed; build-stubs.sh writes this fresh
    on every run, then compiles it into one .so per scripts/abi-v1/emit/_stubshared.py's variant
@@ -194,7 +234,7 @@ def _preamble(model) -> str:
    D3 status injection via a magic `!S:` prefix on a function's first bytes_in argument, and an
    echo of every other call's inputs into its chs_buf output, so a conformance case can assert a
    specific, adversarial-bytes-safe result without any ClickHouse behavior in this file at all. */
-#include "chtypes.h"
+{posix}#include "chtypes.h"
 
 #include <stdarg.h>
 #include <stdatomic.h>
@@ -293,7 +333,7 @@ typedef struct chs_error {{
     char *ch_name; size_t ch_name_len;
     char *message; size_t message_len;
     char *column; size_t column_len;
-}} chs_error;
+{reason_fields}}} chs_error;
 
 static chs_error *chs_stub_make_error(chs_status status, int32_t ch_code,
                                        const char *name, size_t name_len,
@@ -310,7 +350,7 @@ static chs_error *chs_stub_make_error(chs_status status, int32_t ch_code,
     e->message_len = msg_len;
     e->column = NULL;
     e->column_len = 0;
-    return e;
+{reason_init}    return e;
 }}
 
 static void chs_stub_set_err(chs_error **err, chs_error *e) {{
@@ -924,6 +964,281 @@ static int chs_stub_closed_keys(const uint8_t *p, size_t n, const char *const *a
     }
 }
 """
+
+
+def _cancel_section(model) -> str:
+    """The cancel token (_stubshared.CANCEL): the token's payload, the id
+    registry, the two stub counters and the options reader. Emitted only when
+    the description has the token (generation 2 on), so ABI v1's stub is
+    unchanged. Needs _input_document_scanner's JSON helpers, emitted before it."""
+    if not _has_cancel(model):
+        return ""
+    if not model.inputs:
+        raise ValueError("the cancel token is named in an options document, but the description has none")
+    rule = _stubshared.CANCEL
+    text = r"""
+#include <time.h> /* nanosleep, for the cancel directive's poll */
+
+/* ---------------------------------------------------------- the cancel token
+   (scripts/abi-v1/emit/_stubshared.py CANCEL). A token is the common handle
+   prefix plus a one-shot fired flag and its id. Its memory is never freed,
+   like every stub handle: a token whose caller freed it stays a TOMBSTONE, so a
+   fire that reaches it afterwards is counted (chs_stub_fire_after_free), never
+   undefined. The registry maps a live id to its token; a call resolves the id
+   at entry and holds a reference (the common refcount) until it returns. */
+
+struct chs_cancel {
+    chs_handle_common common;
+    atomic_int fired;          /* 1 once fired; one-shot, never reset */
+    atomic_int caller_freed;   /* 1 once chs_cancel_free dropped the caller's reference */
+    char id[18];               /* "c" and 16 lowercase hex digits, NUL-terminated */
+};
+
+#define CHS_STUB_CANCEL_ID_LEN 17
+
+static atomic_flag chs_stub_cancel_lock = ATOMIC_FLAG_INIT;
+static chs_cancel **chs_stub_cancel_reg = NULL;
+static size_t chs_stub_cancel_reg_len = 0, chs_stub_cancel_reg_cap = 0;
+static atomic_ullong chs_stub_cancel_serial = 0;
+static atomic_llong chs_stub_cancel_inflight_n = 0;
+static atomic_llong chs_stub_cancel_fire_after_free_n = 0;
+
+static void chs_stub_cancel_acquire(void) {
+    while (atomic_flag_test_and_set(&chs_stub_cancel_lock)) { /* spin: the critical sections are a few instructions */ }
+}
+
+static void chs_stub_cancel_release_lock(void) {
+    atomic_flag_clear(&chs_stub_cancel_lock);
+}
+
+/* Stub-only exports, outside the description: the C self-test resolves them
+   itself. A binding reads the same counters through the probe instead. */
+long long chs_stub_inflight(void) { return (long long) atomic_load(&chs_stub_cancel_inflight_n); }
+long long chs_stub_fire_after_free(void) { return (long long) atomic_load(&chs_stub_cancel_fire_after_free_n); }
+
+/* A fresh id: splitmix64's finalizer over a per-image serial, a bijection, so
+   no two tokens of one image share an id; all zeros (the cases' unknown id) is
+   skipped. */
+static void chs_stub_cancel_mint_id(char out[18]) {
+    uint64_t z;
+    do {
+        z = (uint64_t) atomic_fetch_add(&chs_stub_cancel_serial, 1) + 0x9e3779b97f4a7c15ULL;
+        z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+        z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+        z ^= z >> 31;
+    } while (z == 0);
+    snprintf(out, 18, "c%016llx", (unsigned long long) z);
+}
+
+static void chs_stub_cancel_register(chs_cancel *t) {
+    chs_stub_cancel_acquire();
+    if (chs_stub_cancel_reg_len == chs_stub_cancel_reg_cap) {
+        size_t cap = chs_stub_cancel_reg_cap ? chs_stub_cancel_reg_cap * 2 : 16;
+        chs_stub_cancel_reg = (chs_cancel **) realloc(chs_stub_cancel_reg, cap * sizeof *chs_stub_cancel_reg);
+        chs_stub_cancel_reg_cap = cap;
+    }
+    chs_stub_cancel_reg[chs_stub_cancel_reg_len++] = t;
+    chs_stub_cancel_release_lock();
+}
+
+static void chs_stub_cancel_deregister(chs_cancel *t) {
+    chs_stub_cancel_acquire();
+    for (size_t i = 0; i < chs_stub_cancel_reg_len; i++) {
+        if (chs_stub_cancel_reg[i] == t) {
+            chs_stub_cancel_reg[i] = chs_stub_cancel_reg[--chs_stub_cancel_reg_len];
+            break;
+        }
+    }
+    chs_stub_cancel_release_lock();
+}
+
+/* The registered token whose id is p[0:n), with a reference taken for the
+   calling call, or NULL. A registered token still holds its caller's
+   reference (chs_cancel_free deregisters before it releases), so the count
+   taken here never revives a released token. */
+static chs_cancel *chs_stub_cancel_resolve(const uint8_t *p, size_t n) {
+    chs_cancel *found = NULL;
+    if (n != CHS_STUB_CANCEL_ID_LEN) return NULL;
+    chs_stub_cancel_acquire();
+    for (size_t i = 0; i < chs_stub_cancel_reg_len; i++) {
+        if (memcmp(chs_stub_cancel_reg[i]->id, p, n) == 0) {
+            found = chs_stub_cancel_reg[i];
+            atomic_fetch_add(&found->common.refcount, 1);
+            break;
+        }
+    }
+    chs_stub_cancel_release_lock();
+    return found;
+}
+
+/* 1 when the top-level member `key` of the JSON object p[0:n) is a string,
+   with *v / *vn its raw bytes between the quotes (no escape decoded); 0 when
+   the document has no such member (length 0 is `{}`); -1 when it is not a
+   string. Called after rule r1's chs_stub_closed_keys accepted the document. */
+static int chs_stub_json_member_string(const uint8_t *p, size_t n, const char *key,
+                                       const uint8_t **v, size_t *vn) {
+    size_t kl = strlen(key);
+    if (n == 0) return 0;
+    size_t i = chs_stub_json_ws(p, n, 0);
+    if (i >= n || p[i] != '{') return 0;
+    i = chs_stub_json_ws(p, n, i + 1);
+    while (i < n && p[i] == '"') {
+        size_t e = chs_stub_json_string_end(p, n, i);
+        if (e == 0) return 0;
+        int match = (e - i - 2 == kl && memcmp(p + i + 1, key, kl) == 0);
+        i = chs_stub_json_ws(p, n, e);
+        if (i >= n || p[i] != ':') return 0;
+        i = chs_stub_json_ws(p, n, i + 1);
+        size_t ve = chs_stub_json_value_end(p, n, i);
+        if (ve == 0 || ve == i) return 0;
+        if (match) {
+            if (p[i] != '"') return -1;
+            *v = p + i + 1;
+            *vn = ve - i - 2;
+            return 1;
+        }
+        i = chs_stub_json_ws(p, n, ve);
+        if (i < n && p[i] == ',') { i = chs_stub_json_ws(p, n, i + 1); continue; }
+        break;
+    }
+    return 0;
+}
+
+/* The CHS_CANCELED error: ch_code 0, no name, the check point in the message,
+   and the catalog id `call-canceled` as its reason. */
+static chs_error *chs_stub_cancel_error(const char *msg) {
+    static const char reason[] = @REASON@;
+    chs_error *e = chs_stub_make_error(@STATUS@, 0, "", 0, msg, strlen(msg));
+    e->reason = (char *) malloc(sizeof(reason) - 1);
+    memcpy(e->reason, reason, sizeof(reason) - 1);
+    e->reason_len = sizeof(reason) - 1;
+    return e;
+}
+
+/* The cancel directive's poll: wait for `t` to fire, up to the cap. Returns 1
+   when it fired, 0 when the cap elapsed. Counted in chs_stub_inflight while
+   it waits. */
+static int chs_stub_cancel_block(chs_cancel *t) {
+    struct timespec ms = {0, 1000000L};
+    int fired = 0;
+    atomic_fetch_add(&chs_stub_cancel_inflight_n, 1);
+    for (long i = 0; i < @CAP_MS@L; i++) {
+        if (atomic_load(&t->fired)) { fired = 1; break; }
+        nanosleep(&ms, NULL);
+    }
+    if (!fired) fired = atomic_load(&t->fired);
+    atomic_fetch_sub(&chs_stub_cancel_inflight_n, 1);
+    return fired;
+}
+"""
+    return (
+        text.replace("@REASON@", _c_str(rule["reason"]))
+        .replace("@STATUS@", rule["status"])
+        .replace("@CAP_MS@", str(int(rule["cap_ms"])))
+    )
+
+
+def _cancel_param(model, fn):
+    """The options parameter of `fn` whose input document defines `cancel`, or None."""
+    for p in fn.params:
+        d = model.input_of(p)
+        if d is not None and "cancel" in d.schema.get("properties", {}):
+            return p
+    return None
+
+
+def _cancel(model, fn) -> list[str]:
+    """The cancel member of a call's options document (_stubshared.CANCEL):
+    resolved at entry (an unknown id is refused), a token fired before the
+    call cancels it at entry, and the directive blocks until a fire. The
+    reference is held across both check points and released before the call
+    assembles its answer, so nothing after this needs to know about it. After
+    the input checks, the status injection and rule r1."""
+    if not _has_cancel(model):
+        return []
+    p = _cancel_param(model, fn)
+    if p is None:
+        return []
+    if fn.returns.kind != "status" or rule_status_missing(fn):
+        raise ValueError(f"{fn.name}: takes a cancel member but cannot return {_stubshared.CANCEL['status']}")
+    rule = _stubshared.CANCEL
+    first_bytes = next(q for q in fn.params if q.kind == "bytes_in")
+    prefix, _, suffix = _stubshared.cancel_unknown_message(p.name, "\0").partition("\0")
+    null_outs = [f"        if ({q.name} != NULL) *{q.name} = NULL;" for q in fn.params if q.kind == "out_handle"]
+    directive = rule["directive"]
+    late = rule["late_directive"]
+    return [
+        "    {",
+        "        /* the options' cancel member: see scripts/abi-v1/emit/_stubshared.py CANCEL */",
+        "        const uint8_t *cv = NULL; size_t cvn = 0;",
+        f'        int has_cancel = chs_stub_json_member_string({p.name}, {p.name}_len, "cancel", &cv, &cvn);',
+        "        if (has_cancel < 0) {",
+        *_c_fixed_error(rule["invalid_status"], rule["not_string"].format(param=p.name), indent="            "),
+        "        }",
+        "        if (has_cancel > 0) {",
+        "            chs_cancel *tok = chs_stub_cancel_resolve(cv, cvn);",
+        "            if (tok == NULL) {",
+        "                chs_sb m; chs_sb_init(&m);",
+        f"                chs_sb_cat(&m, {_c_str(prefix)});",
+        "                chs_sb_append(&m, cv, cvn);",
+        f"                chs_sb_cat(&m, {_c_str(suffix)});",
+        f"                chs_stub_set_err(err, chs_stub_make_error({rule['invalid_status']}, 0, \"\", 0, m.buf, m.len));",
+        "                free(m.buf);",
+        f"                return {rule['invalid_status']};",
+        "            }",
+        "            const char *canceled = NULL;",
+        "            if (atomic_load(&tok->fired)) {",
+        f"                canceled = {_c_str(rule['messages']['entry'])};",
+        f"            }} else if ({first_bytes.name}_len >= {len(directive)} && memcmp({first_bytes.name}, {_c_str(directive)}, {len(directive)}) == 0) {{",
+        f"                canceled = chs_stub_cancel_block(tok) ? {_c_str(rule['messages']['blocked'])} : {_c_str(rule['messages']['cap'])};",
+        f"            }} else if ({first_bytes.name}_len >= {len(late)} && memcmp({first_bytes.name}, {_c_str(late)}, {len(late)}) == 0) {{",
+        "                (void) chs_stub_cancel_block(tok); /* past the last check point: the fire is not observed, the answer is the echo */",
+        "            }",
+        "            chs_stub_release(&tok->common); /* the call's own reference: the last check point is behind it */",
+        "            if (canceled != NULL) {",
+        *["        " + line for line in null_outs],
+        "                chs_stub_set_err(err, chs_stub_cancel_error(canceled));",
+        f"                return {rule['status']};",
+        "            }",
+        "        }",
+        "    }",
+    ]
+
+
+def rule_status_missing(fn) -> bool:
+    return _stubshared.CANCEL["status"] not in fn.may_return
+
+
+def _cancel_probe(model, fn) -> list[str]:
+    """The cancel probe (_stubshared.CANCEL's `probe`): the stub's two cancel
+    counters, as a document, instead of the echo. Only the function the probe
+    names gets it, and only when the description has the token."""
+    if not _has_cancel(model):
+        return []
+    rule = _stubshared.CANCEL
+    if fn.name != rule["probe_fn"]:
+        return []
+    p, out = rule["probe_param"], rule["probe_out"]
+    if not any(q.name == p and q.kind == "bytes_in" for q in fn.params):
+        raise ValueError(f"{fn.name}: _stubshared.CANCEL's probe names {p!r}, which is not one of its bytes_in parameters")
+    if not any(q.name == out and q.kind == "out_handle" and q.type == BUF_HANDLE and not q.nullable for q in fn.params):
+        raise ValueError(f"{fn.name}: _stubshared.CANCEL's probe names {out!r}, which is not its required chs_buf output")
+    return [
+        "    {",
+        "        /* the cancel probe: see scripts/abi-v1/emit/_stubshared.py CANCEL */",
+        f"        static const char probe[] = {_c_str(rule['probe'])};",
+        f"        if ({p}_len == sizeof(probe) - 1 && memcmp({p}, probe, sizeof(probe) - 1) == 0) {{",
+        f"            if ({out} == NULL) {{",
+        *_c_fixed_error("CHS_INVALID_ARGUMENT", f"{out}: required", indent="                "),
+        "            }",
+        "            chs_sb sb; chs_sb_init(&sb);",
+        '            chs_sb_fmt(&sb, "{\\"fire_after_free\\":%lld,\\"inflight\\":%lld}", chs_stub_fire_after_free(), chs_stub_inflight());',
+        f"            *{out} = chs_stub_finish_buf(&sb);",
+        "            chs_stub_set_err(err, NULL);",
+        "            return CHS_OK;",
+        "        }",
+        "    }",
+    ]
 
 
 def _input_documents(model, fn) -> list[str]:
@@ -1542,6 +1857,8 @@ def _gen_generic(model, fn) -> str:
     body += _input_checks(model, fn)
     body += _status_injection(fn)
     body += _input_documents(model, fn)
+    body += _cancel(model, fn)
+    body += _cancel_probe(model, fn)
     body += _one_create(fn)
     body += _image_zone(fn)
     body += _zone_probe(fn)
@@ -1611,27 +1928,73 @@ def _special(model) -> dict[str, str]:
             "}",
         ]
     )
-    # The cancel token's two calls that cannot fail: no status, no error
-    # out-parameter, so the generic validate-then-report body does not apply.
-    # NULL, a wrong-kind or a freed token is a no-op (fire) or 0 (fired), the
-    # stub's reading of "misuse is undefined, NULL does nothing".
-    names = {f.name for f in model.functions}
-    if "chs_cancel_fire" in names:
-        s["chs_cancel_fire"] = "\n".join(
+    # The cancel token (_stubshared.CANCEL; generation 2 on): create mints a
+    # token and registers its id; fire and fired cannot fail (no status, no
+    # error out-parameter), so NULL, a wrong-kind or cross-image token is a
+    # no-op (fire) or 0 (fired), and a fire that reaches a token its caller
+    # freed is counted, not applied; free drops the caller's reference and
+    # deregisters the id (a call that resolved it holds its own reference).
+    if _has_cancel(model):
+        k = _kind_const(CANCEL_HANDLE)
+        valid = f"c->image == CHS_STUB_IMAGE && c->kind == {k}"
+        s["chs_cancel_create"] = "\n".join(
             [
-                f"{sig('chs_cancel_fire')} {{",
-                f"    if (token == NULL || chs_stub_check_handle((const chs_handle_common *) token, "
-                f'{_kind_const("chs_cancel")}, "token") != NULL) return;',
+                f"{sig('chs_cancel_create')} {{",
+                "    if (out == NULL) {",
+                *_c_fixed_error("CHS_INVALID_ARGUMENT", "out: required", indent="        "),
+                "    }",
+                "    if (out_id == NULL) {",
+                *_c_fixed_error("CHS_INVALID_ARGUMENT", "out_id: required", indent="        "),
+                "    }",
+                "    chs_cancel *t = (chs_cancel *) malloc(sizeof *t);",
+                f"    chs_stub_common_init(&t->common, {k});",
+                "    atomic_init(&t->fired, 0);",
+                "    atomic_init(&t->caller_freed, 0);",
+                "    chs_stub_cancel_mint_id(t->id);",
+                "    chs_stub_cancel_register(t);",
+                "    uint8_t *copy = (uint8_t *) malloc(CHS_STUB_CANCEL_ID_LEN);",
+                "    memcpy(copy, t->id, CHS_STUB_CANCEL_ID_LEN);",
+                "    *out = t;",
+                "    *out_id = chs_stub_make_buf(copy, CHS_STUB_CANCEL_ID_LEN);",
+                "    chs_stub_set_err(err, NULL);",
+                "    return CHS_OK;",
                 "}",
             ]
         )
-    if "chs_cancel_fired" in names:
+        s["chs_cancel_fire"] = "\n".join(
+            [
+                f"{sig('chs_cancel_fire')} {{",
+                "    if (token == NULL) return;",
+                "    const chs_handle_common *c = (const chs_handle_common *) token;",
+                f"    if (!({valid})) return;",
+                "    if (atomic_load((atomic_int *) &token->caller_freed) || atomic_load((atomic_int *) &c->freed)) {",
+                "        atomic_fetch_add(&chs_stub_cancel_fire_after_free_n, 1); /* a tombstone: counted, never applied */",
+                "        return;",
+                "    }",
+                "    atomic_store((atomic_int *) &token->fired, 1);",
+                "}",
+            ]
+        )
         s["chs_cancel_fired"] = "\n".join(
             [
                 f"{sig('chs_cancel_fired')} {{",
-                f"    if (token == NULL || chs_stub_check_handle((const chs_handle_common *) token, "
-                f'{_kind_const("chs_cancel")}, "token") != NULL) return 0;',
-                "    return 0;",
+                "    if (token == NULL) return 0;",
+                "    const chs_handle_common *c = (const chs_handle_common *) token;",
+                f"    if (!({valid}) || atomic_load((atomic_int *) &token->caller_freed)) return 0;",
+                "    return atomic_load((atomic_int *) &token->fired) ? 1 : 0;",
+                "}",
+            ]
+        )
+        s["chs_cancel_free"] = "\n".join(
+            [
+                f"{sig('chs_cancel_free')} {{",
+                "    if (token == NULL) return;",
+                "    chs_handle_common *c = &token->common;",
+                f"    if (!({valid})) return;",
+                "    int expected = 0;",
+                "    if (!atomic_compare_exchange_strong(&token->caller_freed, &expected, 1)) return; /* already freed */",
+                "    chs_stub_cancel_deregister(token);",
+                "    chs_stub_release(c);",
                 "}",
             ]
         )
@@ -1677,6 +2040,17 @@ def _special(model) -> dict[str, str]:
                 f"{sig('chs_error_reason')} {{",
                 "    if (error == NULL || chs_stub_check_handle((const chs_handle_common *) error, "
                 f'{_kind_const(ERROR_HANDLE)}, "error") != NULL) return NULL;',
+                *(
+                    [
+                        "    if (error->reason_len > 0) {",
+                        "        uint8_t *copy = (uint8_t *) malloc(error->reason_len);",
+                        "        memcpy(copy, error->reason, error->reason_len);",
+                        "        return chs_stub_make_buf(copy, error->reason_len);",
+                        "    }",
+                    ]
+                    if _has_cancel(model)
+                    else []
+                ),
                 "    return chs_stub_make_buf(NULL, 0);",
                 "}",
             ]
@@ -1740,6 +2114,8 @@ def render_stub_c(model) -> str:
         _image_zone_state(),
         _input_document_scanner(model),
     ]
+    if _has_cancel(model):  # appended only when present, so ABI v1's text is unchanged
+        parts.append(_cancel_section(model))
     # chs_build_info and chs_abi_version need their own omit/override handling,
     # woven around the hand-written and special bodies below.
     specials = _special(model)

@@ -14,9 +14,7 @@
 use std::collections::BTreeMap;
 use std::ffi::{CStr, c_void};
 
-use super::decls::{
-    self, Api, ChsBlock, ChsBuf, ChsCancel, ChsError, ChsFilter, ChsSchema, ChsServer,
-};
+use super::decls::{self, Api, ChsBlock, ChsBuf, ChsError, ChsFilter, ChsSchema, ChsServer};
 
 /// One already-resolved argument `invoke` consumes positionally. Built from
 /// a case's JSON expression tree by rust/src/abi2/conformance.rs, which also
@@ -90,6 +88,7 @@ pub(crate) struct CaseError {
     pub(crate) ch_name: String,
     pub(crate) message: String,
     pub(crate) column: String,
+    pub(crate) reason: String,
 }
 
 /// What invoking one function produced, generic across every call shape
@@ -264,12 +263,15 @@ unsafe fn finish_status(
             let message = take_buf_text(api, message_buf);
             let column_buf = (api.chs_error_column)(err as *const decls::ChsError);
             let column = take_buf_text(api, column_buf);
+            let reason_buf = (api.chs_error_reason)(err as *const decls::ChsError);
+            let reason = take_buf_text(api, reason_buf);
             (api.chs_error_free)(err);
             Some(CaseError {
                 ch_code,
                 ch_name,
                 message,
                 column,
+                reason,
             })
         }
     };
@@ -760,19 +762,6 @@ pub(crate) unsafe fn invoke(
             };
             let mut outputs: BTreeMap<String, MintedHandle> = BTreeMap::new();
             outputs.insert("out".to_string(), MintedHandle::Buf(out_out));
-            // SAFETY: err is null or a chs_error* this same call just received from api above.
-            unsafe { finish_status(api, status, err, outputs) }
-        }
-        "chs_cancel_create" => {
-            let mut out_out: *mut ChsCancel = std::ptr::null_mut();
-            let mut out_out_id: *mut ChsBuf = std::ptr::null_mut();
-            let mut err: *mut ChsError = std::ptr::null_mut();
-            // SAFETY: every input is marshaled from the case's own recipe above, matching chs_cancel_create's declared shape; every output pointer is this call's own local.
-            let status =
-                unsafe { (api.chs_cancel_create)(&mut out_out, &mut out_out_id, &mut err) };
-            let mut outputs: BTreeMap<String, MintedHandle> = BTreeMap::new();
-            outputs.insert("out".to_string(), MintedHandle::Cancel(out_out));
-            outputs.insert("out_id".to_string(), MintedHandle::Buf(out_out_id));
             // SAFETY: err is null or a chs_error* this same call just received from api above.
             unsafe { finish_status(api, status, err, outputs) }
         }
