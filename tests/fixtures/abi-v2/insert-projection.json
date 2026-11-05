@@ -5499,6 +5499,534 @@
    }
   },
   {
+   "id": "equal-post-where-cut-partition-count-is-the-t-rows-on-a-partitioned-table",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "rejected",
+    "code": 469,
+    "err": "Constraint `c_keep` for table default.t is violated at row 5. Expression: ((keep = 1) OR (p < 100)). Column values: p = 200, keep = 0",
+    "rows_read": 5,
+    "rows_skipped": 0,
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "export_declined": "batch outcome is 'rejected': only a fully accepted batch exports bytes",
+    "export_declined_reason": "export-batch-not-accepted",
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "unconsumed": [],
+    "rows": [
+     {
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_err": "batch outcome is 'rejected': only a fully accepted batch has filter verdicts",
+      "outcome": "accepted",
+      "code": 0,
+      "err": "",
+      "cols": [],
+      "input_span": {
+       "off": 0,
+       "len": 8
+      },
+      "transformed": []
+     },
+     {
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_err": "batch outcome is 'rejected': only a fully accepted batch has filter verdicts",
+      "outcome": "accepted",
+      "code": 0,
+      "err": "",
+      "cols": [],
+      "input_span": {
+       "off": 8,
+       "len": 9
+      },
+      "transformed": []
+     },
+     {
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_err": "batch outcome is 'rejected': only a fully accepted batch has filter verdicts",
+      "outcome": "accepted",
+      "code": 0,
+      "err": "",
+      "cols": [],
+      "input_span": {
+       "off": 17,
+       "len": 9
+      },
+      "transformed": []
+     },
+     {
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_err": "batch outcome is 'rejected': only a fully accepted batch has filter verdicts",
+      "outcome": "accepted",
+      "code": 0,
+      "err": "",
+      "cols": [],
+      "input_span": {
+       "off": 26,
+       "len": 8
+      },
+      "transformed": []
+     },
+     {
+      "verdict": "d",
+      "verdict_code": 469,
+      "verdict_err": "Constraint `c_keep` for table default.t is violated at row 5. Expression: ((keep = 1) OR (p < 100)). Column values: p = 200, keep = 0",
+      "outcome": "rejected",
+      "code": 469,
+      "err": "Constraint `c_keep` for table default.t is violated at row 5. Expression: ((keep = 1) OR (p < 100)). Column values: p = 200, keep = 0",
+      "cols": [],
+      "input_span": {
+       "off": 34,
+       "len": 10
+      },
+      "transformed": []
+     }
+    ],
+    "unsupported_settings": [],
+    "refused_at": "row",
+    "refused_row": 4,
+    "transformed": []
+   },
+   "batch_export_b64": null,
+   "batch_of_t_rows": {
+    "rows": [
+     0,
+     3,
+     5
+    ],
+    "batch": {
+     "outcome": "accepted",
+     "code": 0,
+     "err": "",
+     "partition_count": 2,
+     "rows_read": 3,
+     "rows_skipped": 0,
+     "rows_passed": 3,
+     "rows_cut": 0,
+     "row_spans": [
+      {
+       "off": 0,
+       "len": 10
+      },
+      {
+       "off": 10,
+       "len": 10
+      },
+      {
+       "off": 20,
+       "len": 10
+      }
+     ],
+     "framing": {
+      "bom_skipped": false,
+      "container": null,
+      "header": null
+     },
+     "unconsumed": [],
+     "rows": [
+      {
+       "verdict": "t",
+       "verdict_code": 0,
+       "verdict_err": "",
+       "outcome": "accepted",
+       "code": 0,
+       "err": "",
+       "cols": [],
+       "partition_id": "1",
+       "input_span": {
+        "off": 0,
+        "len": 8
+       },
+       "transformed": []
+      },
+      {
+       "verdict": "t",
+       "verdict_code": 0,
+       "verdict_err": "",
+       "outcome": "accepted",
+       "code": 0,
+       "err": "",
+       "cols": [],
+       "partition_id": "2",
+       "input_span": {
+        "off": 8,
+        "len": 8
+       },
+       "transformed": []
+      },
+      {
+       "verdict": "t",
+       "verdict_code": 0,
+       "verdict_err": "",
+       "outcome": "accepted",
+       "code": 0,
+       "err": "",
+       "cols": [],
+       "partition_id": "2",
+       "input_span": {
+        "off": 16,
+        "len": 8
+       },
+       "transformed": []
+      }
+     ],
+     "unsupported_settings": [],
+     "export_columns": [
+      {
+       "name": "id"
+      },
+      {
+       "name": "p"
+      },
+      {
+       "name": "keep"
+      }
+     ],
+     "transformed": []
+    },
+    "export_b64": "WzEsIDEsIDFdCls0LCAyLCAxXQpbNiwgMiwgMV0K"
+   },
+   "body_records": [
+    {
+     "off": 0,
+     "len": 8
+    },
+    {
+     "off": 8,
+     "len": 9
+    },
+    {
+     "off": 17,
+     "len": 9
+    },
+    {
+     "off": 26,
+     "len": 8
+    },
+    {
+     "off": 34,
+     "len": 10
+    },
+    {
+     "off": 44,
+     "len": 8
+    }
+   ],
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "partition_count": 2,
+    "rows_read": 6,
+    "rows_skipped": 0,
+    "rows_passed": 3,
+    "rows_cut": 3,
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "unsupported_settings": [],
+    "export_columns": [
+     {
+      "name": "id"
+     },
+     {
+      "name": "p"
+     },
+     {
+      "name": "keep"
+     }
+    ],
+    "rows_undecided": 0
+   },
+   "insert_rows_b64": "WzEsIDEsIDFdCls0LCAyLCAxXQpbNiwgMiwgMV0K",
+   "expect": "equal",
+   "provenance": {
+    "batch": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    },
+    "batch_of_t_rows": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    },
+    "insert": "unrecorded"
+   }
+  },
+  {
+   "id": "red-post-where-cut-partition-count-over-every-body-row",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "rejected",
+    "code": 469,
+    "err": "Constraint `c_keep` for table default.t is violated at row 5. Expression: ((keep = 1) OR (p < 100)). Column values: p = 200, keep = 0",
+    "rows_read": 5,
+    "rows_skipped": 0,
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "export_declined": "batch outcome is 'rejected': only a fully accepted batch exports bytes",
+    "export_declined_reason": "export-batch-not-accepted",
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "unconsumed": [],
+    "rows": [
+     {
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_err": "batch outcome is 'rejected': only a fully accepted batch has filter verdicts",
+      "outcome": "accepted",
+      "code": 0,
+      "err": "",
+      "cols": [],
+      "input_span": {
+       "off": 0,
+       "len": 8
+      },
+      "transformed": []
+     },
+     {
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_err": "batch outcome is 'rejected': only a fully accepted batch has filter verdicts",
+      "outcome": "accepted",
+      "code": 0,
+      "err": "",
+      "cols": [],
+      "input_span": {
+       "off": 8,
+       "len": 9
+      },
+      "transformed": []
+     },
+     {
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_err": "batch outcome is 'rejected': only a fully accepted batch has filter verdicts",
+      "outcome": "accepted",
+      "code": 0,
+      "err": "",
+      "cols": [],
+      "input_span": {
+       "off": 17,
+       "len": 9
+      },
+      "transformed": []
+     },
+     {
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_err": "batch outcome is 'rejected': only a fully accepted batch has filter verdicts",
+      "outcome": "accepted",
+      "code": 0,
+      "err": "",
+      "cols": [],
+      "input_span": {
+       "off": 26,
+       "len": 8
+      },
+      "transformed": []
+     },
+     {
+      "verdict": "d",
+      "verdict_code": 469,
+      "verdict_err": "Constraint `c_keep` for table default.t is violated at row 5. Expression: ((keep = 1) OR (p < 100)). Column values: p = 200, keep = 0",
+      "outcome": "rejected",
+      "code": 469,
+      "err": "Constraint `c_keep` for table default.t is violated at row 5. Expression: ((keep = 1) OR (p < 100)). Column values: p = 200, keep = 0",
+      "cols": [],
+      "input_span": {
+       "off": 34,
+       "len": 10
+      },
+      "transformed": []
+     }
+    ],
+    "unsupported_settings": [],
+    "refused_at": "row",
+    "refused_row": 4,
+    "transformed": []
+   },
+   "batch_export_b64": null,
+   "batch_of_t_rows": {
+    "rows": [
+     0,
+     3,
+     5
+    ],
+    "batch": {
+     "outcome": "accepted",
+     "code": 0,
+     "err": "",
+     "partition_count": 2,
+     "rows_read": 3,
+     "rows_skipped": 0,
+     "rows_passed": 3,
+     "rows_cut": 0,
+     "row_spans": [
+      {
+       "off": 0,
+       "len": 10
+      },
+      {
+       "off": 10,
+       "len": 10
+      },
+      {
+       "off": 20,
+       "len": 10
+      }
+     ],
+     "framing": {
+      "bom_skipped": false,
+      "container": null,
+      "header": null
+     },
+     "unconsumed": [],
+     "rows": [
+      {
+       "verdict": "t",
+       "verdict_code": 0,
+       "verdict_err": "",
+       "outcome": "accepted",
+       "code": 0,
+       "err": "",
+       "cols": [],
+       "partition_id": "1",
+       "input_span": {
+        "off": 0,
+        "len": 8
+       },
+       "transformed": []
+      },
+      {
+       "verdict": "t",
+       "verdict_code": 0,
+       "verdict_err": "",
+       "outcome": "accepted",
+       "code": 0,
+       "err": "",
+       "cols": [],
+       "partition_id": "2",
+       "input_span": {
+        "off": 8,
+        "len": 8
+       },
+       "transformed": []
+      },
+      {
+       "verdict": "t",
+       "verdict_code": 0,
+       "verdict_err": "",
+       "outcome": "accepted",
+       "code": 0,
+       "err": "",
+       "cols": [],
+       "partition_id": "2",
+       "input_span": {
+        "off": 16,
+        "len": 8
+       },
+       "transformed": []
+      }
+     ],
+     "unsupported_settings": [],
+     "export_columns": [
+      {
+       "name": "id"
+      },
+      {
+       "name": "p"
+      },
+      {
+       "name": "keep"
+      }
+     ],
+     "transformed": []
+    },
+    "export_b64": "WzEsIDEsIDFdCls0LCAyLCAxXQpbNiwgMiwgMV0K"
+   },
+   "body_records": [
+    {
+     "off": 0,
+     "len": 8
+    },
+    {
+     "off": 8,
+     "len": 9
+    },
+    {
+     "off": 17,
+     "len": 9
+    },
+    {
+     "off": 26,
+     "len": 8
+    },
+    {
+     "off": 34,
+     "len": 10
+    },
+    {
+     "off": 44,
+     "len": 8
+    }
+   ],
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "partition_count": 5,
+    "rows_read": 6,
+    "rows_skipped": 0,
+    "rows_passed": 3,
+    "rows_cut": 3,
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "unsupported_settings": [],
+    "export_columns": [
+     {
+      "name": "id"
+     },
+     {
+      "name": "p"
+     },
+     {
+      "name": "keep"
+     }
+    ],
+    "rows_undecided": 0
+   },
+   "insert_rows_b64": "WzEsIDEsIDFdCls0LCAyLCAxXQpbNiwgMiwgMV0K",
+   "expect": {
+    "violates": "post_where_cut"
+   },
+   "provenance": {
+    "batch": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    },
+    "batch_of_t_rows": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    },
+    "insert": "planted"
+   }
+  },
+  {
    "id": "equal-post-where-refusal-check-on-a-cut-row-and-a-later-t-row",
    "output_format": "JSONCompactEachRow",
    "batch": {

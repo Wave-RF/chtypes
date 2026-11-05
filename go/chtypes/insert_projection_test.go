@@ -556,8 +556,8 @@ func loadProjectionFixture(t *testing.T) []projectionCase {
 
 func TestInsertProjectionFixture(t *testing.T) {
 	cases := loadProjectionFixture(t)
-	if len(cases) != 63 {
-		t.Fatalf("the fixture holds %d cases, want 63", len(cases))
+	if len(cases) != 65 {
+		t.Fatalf("the fixture holds %d cases, want 65", len(cases))
 	}
 	reds := map[string]int{}
 	var equal, exceptions int
@@ -631,13 +631,13 @@ func TestInsertProjectionFixture(t *testing.T) {
 			t.Errorf("no planted red for rule %s", r)
 		}
 	}
-	wantReds := map[string]int{"e_row_rejects": 8, "export_decline_is_call_decline": 3, "post_where_cut": 4, "post_where_refusal": 7, "shared_members": 3, "counts": 3,
+	wantReds := map[string]int{"e_row_rejects": 8, "export_decline_is_call_decline": 3, "post_where_cut": 5, "post_where_refusal": 7, "shared_members": 3, "counts": 3,
 		"line_output": 2, "non_t_row": 2, "output_presence": 2, "err_prefix": 1, "err_suffix": 2, "native_output": 1}
 	if !reflect.DeepEqual(reds, wantReds) {
 		t.Errorf("planted reds per rule = %v, want %v", reds, wantReds)
 	}
-	if exceptions != 1 || equal != 24 {
-		t.Errorf("equal=%d exceptions=%d, want 24 and 1", equal, exceptions)
+	if exceptions != 1 || equal != 25 {
+		t.Errorf("equal=%d exceptions=%d, want 25 and 1", equal, exceptions)
 	}
 }
 
