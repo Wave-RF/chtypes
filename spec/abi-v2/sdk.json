@@ -27,6 +27,7 @@
       "schema": {"go": "*SchemaError", "python": "SchemaError", "ts": "SchemaError", "rust": "Error::Schema", "new": false},
       "unsupported": {"go": "*UnsupportedError", "python": "UnsupportedError", "ts": "UnsupportedError", "rust": "Error::Unsupported", "new": false},
       "usage": {"go": "*UsageError", "python": "UsageError", "ts": "UsageError", "rust": "Error::Usage", "new": true},
+      "canceled": {"go": "*CanceledError", "python": "CallCanceledError", "ts": "CallCanceledError", "rust": "Error::Canceled", "new": true},
       "internal": {"go": "*InternalError", "python": "InternalError", "ts": "InternalError", "rust": "Error::Internal", "new": true},
       "artifact_incompatible": {"go": "*ArtifactError", "python": "ArtifactIncompatibleError", "ts": "ArtifactIncompatibleError", "rust": "Error::ArtifactIncompatible", "new": true},
       "artifact_corrupt": {"go": "*ArtifactError", "python": "ArtifactCorruptError", "ts": "ArtifactCorruptError", "rust": "Error::ArtifactCorrupt", "new": false}
@@ -36,6 +37,7 @@
       "CHS_REJECTED": "schema",
       "CHS_DECLINED": "unsupported",
       "CHS_INVALID_ARGUMENT": "usage",
+      "CHS_CANCELED": "canceled",
       "CHS_INTERNAL": "internal",
       "unknown": "internal"
     }

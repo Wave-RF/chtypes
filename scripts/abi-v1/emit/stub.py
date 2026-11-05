@@ -1611,6 +1611,30 @@ def _special(model) -> dict[str, str]:
             "}",
         ]
     )
+    # The cancel token's two calls that cannot fail: no status, no error
+    # out-parameter, so the generic validate-then-report body does not apply.
+    # NULL, a wrong-kind or a freed token is a no-op (fire) or 0 (fired), the
+    # stub's reading of "misuse is undefined, NULL does nothing".
+    names = {f.name for f in model.functions}
+    if "chs_cancel_fire" in names:
+        s["chs_cancel_fire"] = "\n".join(
+            [
+                f"{sig('chs_cancel_fire')} {{",
+                f"    if (token == NULL || chs_stub_check_handle((const chs_handle_common *) token, "
+                f'{_kind_const("chs_cancel")}, "token") != NULL) return;',
+                "}",
+            ]
+        )
+    if "chs_cancel_fired" in names:
+        s["chs_cancel_fired"] = "\n".join(
+            [
+                f"{sig('chs_cancel_fired')} {{",
+                f"    if (token == NULL || chs_stub_check_handle((const chs_handle_common *) token, "
+                f'{_kind_const("chs_cancel")}, "token") != NULL) return 0;',
+                "    return 0;",
+                "}",
+            ]
+        )
     s["chs_buf_data"] = "\n".join(
         [
             f"{sig('chs_buf_data')} {{",

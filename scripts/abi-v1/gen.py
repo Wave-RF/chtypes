@@ -1377,6 +1377,59 @@ def _selftest_v2() -> list[str]:
     return fails
 
 
+def _selftest_v2_export_members(model: abimodel.Model) -> list[str]:
+    """Generation 2's export members, judged by the description's own schemas,
+    never by a list of ours: the batch document's row map (`row_spans`,
+    `row_positions`) and `export_declined` are mutually exclusive, so every
+    pair of them is refused and each alone is accepted; and insert_options'
+    `memory_limit_bytes` takes a decimal string, absent and "0" included, and
+    refuses a sign, a leading zero, more than 18 digits and a JSON number."""
+    if "row_positions" not in model.documents["batch"].schema.get("properties", {}):
+        return []
+    fails = []
+    batch = model.documents["batch"].schema
+    base = {
+        "outcome": "accepted",
+        "code": 0,
+        "err": "",
+        "rows": [],
+        "rows_read": 0,
+        "rows_skipped": 0,
+        "unsupported_settings": [],
+        "unconsumed": [],
+        "framing": {"bom_skipped": None, "container": None, "header": None},
+    }
+    members = {
+        "row_spans": [],
+        "row_positions": [],
+        "export_declined": "x",
+        "export_declined_b64": "eA==",
+    }
+    if abimodel.validate(base, batch):
+        fails.append(f"export members: the base batch document is refused: {abimodel.validate(base, batch)}")
+        return fails
+    for name, value in members.items():
+        extra = {"export_declined_reason": "export-batch-not-accepted"} if name.startswith("export_declined") else {}
+        if abimodel.validate({**base, name: value, **extra}, batch):
+            fails.append(f"export members: a batch document with {name} alone was refused")
+    names = list(members)
+    for i, a in enumerate(names):
+        for b in names[i + 1 :]:
+            doc = {**base, a: members[a], b: members[b], "export_declined_reason": "export-batch-not-accepted"}
+            if not abimodel.validate(doc, batch):
+                fails.append(f"export members: a batch document with both {a} and {b} was accepted")
+    opts = model.inputs["insert_options"].schema
+    for good in ({}, {"memory_limit_bytes": "0"}, {"memory_limit_bytes": "1"}, {"memory_limit_bytes": "9" * 18}):
+        if abimodel.validate(good, opts):
+            fails.append(f"memory_limit_bytes: {good!r} was refused")
+    for bad in ("01", "-1", "+1", "1" * 19, "", "1.5"):
+        if not abimodel.validate({"memory_limit_bytes": bad}, opts):
+            fails.append(f"memory_limit_bytes: {bad!r} was accepted")
+    if not abimodel.validate({"memory_limit_bytes": 1}, opts):
+        fails.append("memory_limit_bytes: a JSON number was accepted")
+    return fails
+
+
 def selftest() -> int:
     fails = _selftest_jcs() + _selftest_validator()
     if not fails:
@@ -1390,6 +1443,11 @@ def selftest() -> int:
         fails += _selftest_tree()
     if not fails:
         fails += _selftest_v2()
+    if not fails:
+        try:
+            fails += _selftest_v2_export_members(abimodel.load(ROOT, 2))
+        except abimodel.ModelError as e:
+            fails += [f"the tree's ABI v2 description does not load: {p}" for p in e.problems]
     for f in fails:
         print(f"gen.py --selftest: FAIL {f}", file=sys.stderr)
     if fails:

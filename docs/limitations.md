@@ -60,6 +60,12 @@ Each of these is `unsupported` — an `UnsupportedError`, `Error::Unsupported`, 
 
   **Measured** by the artifact producer on build `20261104.061020`, all four lines on linux-amd64, against the pinned servers: a CSV, TSV and JSONEachRow body with two good rows among bad ones, under `input_format_allow_errors_num=2` and `max_insert_block_size=2`. With `max_parsing_threads` not named the library declines it (`error-budget-reread`); named `1` it is refused with 38, as the server refuses it; named `4` the two good rows are stored, as the server stores them. All 12 cells agree on each line. The server inserts ran with `async_insert=0`: at its default of 1 a server reads the body serially.
 
+- **A read-back expression with a masked secret** (`expression-masked-secret`). A definition read back from a server carries the server's masking: a secret argument appears as `'[HIDDEN]'`. Wherever such an expression would be evaluated (a row that needs the column's DEFAULT or MATERIALIZED value, or a filter that reads it), the call declines with `expression-masked-secret`, because the true argument is unknown. A row that supplies the column is answered as usual. To have such a DEFAULT computed, compile the definition with its real argument.
+
+- **A `Native` body with bytes after an empty block** (`native-data-after-end-block`). ClickHouse's Native reader ends the stream at a block of zero columns, so anything after it, whether one trailing byte or whole further blocks, is never read. A server's INSERT stores the blocks before the empty one and silently drops the rest, with no error. The library will not answer as if those bytes were not there, so both `chs_preview_batch` and `chs_preview_insert` decline the body: the outcome is `unsupported` (`CHS_DECLINED`, reason `native-data-after-end-block`), the message gives the offset and length of the bytes left unread, and there is no export or output. The batch document's `unconsumed` still reports that span. Treat the decline as no answer, never as a rejection. To get an answer, send only the bytes up to and including the empty block, or no empty block at all.
+
+  **Measured** by the artifact producer against stock servers of all four lines: a body whose bytes continue after an empty block is stored up to that block, and the rest is dropped without an error.
+
 ## Constants are not payloads
 
 Everything on the row path is **insert-side** coercion. Never reuse it to fold a `WHERE`-clause constant.
@@ -118,6 +124,10 @@ They are measured all the same, by the same differential proof, not by this repo
 In Python specifically, `UnsupportedError` is a **peer** of `SchemaError` rather than a subclass, so `except SchemaError` never catches a decline. Handle the two arms explicitly, or catch `ChtypesError` for both. The subtype was retired precisely because catching one and getting the other is a silent misclassification.
 
 The ABI header is the full contract.
+
+## A syntax error's message can quote credentials
+
+A syntax error's message (ClickHouse code 62, for example when `chs_schema_create` refuses a `CREATE` statement) quotes the statement from the error onward, exactly as the server's own message does, credentials included. Do not log refusal messages for statements that can carry credentials unredacted. Every other message masks secrets as the server does.
 
 ## An out-of-domain Enum DEFAULT is refused at compile
 
