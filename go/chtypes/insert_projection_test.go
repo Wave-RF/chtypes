@@ -25,7 +25,7 @@ import (
 var projectionRules = []string{"e_row_rejects", "export_decline_is_call_decline", "shared_members", "counts", "err_prefix", "err_suffix",
 	"output_presence", "non_t_row", "line_output", "native_output"}
 
-var projectionSuffix = regexp.MustCompile(`^ \(at row [0-9]+\)$`)
+var projectionSuffix = regexp.MustCompile(`^: \(at row [0-9]+\)\n$`)
 
 // projectionVerdict returns ("equal", ""), ("exception", name) or
 // ("violates", rule). batchExport is the batch's export bytes (nil when no
@@ -64,9 +64,8 @@ func projectionVerdict(outFormat string, batch BatchResult, batchExport []byte, 
 	// e_row_rejects
 	if batch.Outcome == Accepted && count("e") > 0 {
 		first := batch.Rows[slices.Index(verdicts, "e")]
-		zero := func(p *uint64) bool { return p != nil && *p == 0 }
 		if !(ins.Outcome == Rejected && ins.ErrCode == first.VerdictCode && ins.ErrMsg == first.VerdictErr &&
-			ins.RefusedAt == RefusedAtRow && zero(ins.RowsPassed) && zero(ins.RowsCut) && zero(ins.RowsUndecided) &&
+			ins.RefusedAt == RefusedAtRow && isZero(ins.RowsPassed) && isZero(ins.RowsCut) && isZero(ins.RowsUndecided) &&
 			ins.RowsRead == batch.RowsRead && output == nil) {
 			return "violates", "e_row_rejects"
 		}
@@ -77,7 +76,9 @@ func projectionVerdict(outFormat string, batch BatchResult, batchExport []byte, 
 	declined := batch.Outcome == Accepted && batch.ExportDeclined != ""
 	if declined {
 		if !(ins.Outcome == Unsupported && ins.Reason == batch.ExportDeclinedReason && ins.ErrCode == CodeDeclined &&
-			ins.RefusedAt == RefusedAtBodyStep && insRaw["export_columns"] == nil && output == nil) {
+			ins.RefusedAt == RefusedAtBodyStep && insRaw["export_columns"] == nil && output == nil &&
+			ins.ErrMsg == batch.ExportDeclined &&
+			(!filtered || (isZero(ins.RowsPassed) && isZero(ins.RowsCut) && isZero(ins.RowsUndecided)))) {
 			return "violates", "export_decline_is_call_decline"
 		}
 	}
@@ -96,13 +97,14 @@ func projectionVerdict(outFormat string, batch BatchResult, batchExport []byte, 
 	}
 	if batch.RowsRead != ins.RowsRead || batch.RowsSkipped != ins.RowsSkipped ||
 		!slices.Equal(batch.UnsupportedSettings, ins.UnsupportedSettings) ||
-		!reflect.DeepEqual(batch.Framing, ins.Framing) || !reflect.DeepEqual(batch.PartitionCount, ins.PartitionCount) ||
-		!eqCount(batch.RowsPassed, ins.RowsPassed) || !eqCount(batch.RowsCut, ins.RowsCut) {
+		!reflect.DeepEqual(batch.Framing, ins.Framing) || !reflect.DeepEqual(batch.PartitionCount, ins.PartitionCount) {
 		return "violates", "shared_members"
 	}
 	if !declined {
+		// A declined output replaces these with the insert's own values.
 		if batch.Outcome != ins.Outcome || batch.ErrCode != ins.ErrCode || batch.Reason != ins.Reason ||
 			batch.RefusedAt != ins.RefusedAt ||
+			!eqCount(batch.RowsPassed, ins.RowsPassed) || !eqCount(batch.RowsCut, ins.RowsCut) ||
 			(batch.ExportColumns == nil) != (insRaw["export_columns"] == nil) || !slices.Equal(batch.ExportColumns, ins.ExportColumns) {
 			return "violates", "shared_members"
 		}
@@ -117,19 +119,27 @@ func projectionVerdict(outFormat string, batch BatchResult, batchExport []byte, 
 		} else {
 			good = batch.RowsPassed == 0 && batch.RowsCut == 0
 		}
-		if !(good && ins.RowsUndecided != nil && *ins.RowsUndecided == d) {
+		// #t, #f + #d and #d on an accepted call, 0 on any other outcome.
+		wantPassed, wantCut, wantUndecided := uint64(0), uint64(0), uint64(0)
+		if ins.Outcome == Accepted {
+			wantPassed, wantCut, wantUndecided = t, f+d, d
+		}
+		if !(good && isCount(ins.RowsPassed, wantPassed) && isCount(ins.RowsCut, wantCut) && isCount(ins.RowsUndecided, wantUndecided)) {
 			return "violates", "counts"
 		}
 	} else if ins.RowsPassed != nil || ins.RowsCut != nil || ins.RowsUndecided != nil {
 		return "violates", "counts"
 	}
 
-	// err
-	if !bytes.HasPrefix([]byte(ins.ErrMsg), []byte(batch.ErrMsg)) {
-		return "violates", "err_prefix"
-	}
-	if rest := ins.ErrMsg[len(batch.ErrMsg):]; rest != "" && !projectionSuffix.MatchString(rest) {
-		return "violates", "err_suffix"
+	// err: the batch's, plus a remainder that is empty or the row-reader suffix
+	// (a declined output's err is the decline text, checked above)
+	if !declined {
+		if !bytes.HasPrefix([]byte(ins.ErrMsg), []byte(batch.ErrMsg)) {
+			return "violates", "err_prefix"
+		}
+		if rest := ins.ErrMsg[len(batch.ErrMsg):]; rest != "" && !projectionSuffix.MatchString(rest) {
+			return "violates", "err_suffix"
+		}
 	}
 
 	// output
@@ -171,6 +181,10 @@ func projectionVerdict(outFormat string, batch BatchResult, batchExport []byte, 
 	}
 	return "violates", "line_output"
 }
+
+func isCount(p *uint64, want uint64) bool { return p != nil && *p == want }
+
+func isZero(p *uint64) bool { return isCount(p, 0) }
 
 // countLines counts lines as Python's bytes.splitlines does: \n, \r and \r\n end one.
 func countLines(b []byte) int {
@@ -250,10 +264,10 @@ func loadProjectionFixture(t *testing.T) []projectionCase {
 
 func TestInsertProjectionFixture(t *testing.T) {
 	cases := loadProjectionFixture(t)
-	if len(cases) != 37 {
-		t.Fatalf("the fixture holds %d cases, want 37", len(cases))
+	if len(cases) != 43 {
+		t.Fatalf("the fixture holds %d cases, want 43", len(cases))
 	}
-	reds := map[string]bool{}
+	reds := map[string]int{}
 	var equal, exceptions int
 	for _, c := range cases {
 		t.Run(c.ID, func(t *testing.T) {
@@ -285,7 +299,7 @@ func TestInsertProjectionFixture(t *testing.T) {
 					exceptions++
 				} else {
 					wantKind, wantName = "violates", want.Violates
-					reds[wantName] = true
+					reds[wantName]++
 				}
 			} else {
 				equal++
@@ -296,12 +310,17 @@ func TestInsertProjectionFixture(t *testing.T) {
 		})
 	}
 	for _, r := range projectionRules {
-		if !reds[r] {
+		if reds[r] == 0 {
 			t.Errorf("no planted red for rule %s", r)
 		}
 	}
-	if exceptions != 1 || equal != 12 {
-		t.Errorf("equal=%d exceptions=%d, want 12 and 1", equal, exceptions)
+	wantReds := map[string]int{"e_row_rejects": 8, "export_decline_is_call_decline": 3, "shared_members": 3, "counts": 2,
+		"line_output": 2, "non_t_row": 2, "output_presence": 2, "err_prefix": 1, "err_suffix": 1, "native_output": 1}
+	if !reflect.DeepEqual(reds, wantReds) {
+		t.Errorf("planted reds per rule = %v, want %v", reds, wantReds)
+	}
+	if exceptions != 1 || equal != 17 {
+		t.Errorf("equal=%d exceptions=%d, want 17 and 1", equal, exceptions)
 	}
 }
 
