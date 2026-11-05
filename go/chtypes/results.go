@@ -226,6 +226,42 @@ type BatchResult struct {
 	Framing    *Framing
 }
 
+// InsertResult is the result of Schema.Insert (chs_preview_insert): the whole
+// body's outcome, its counts and the output's column list, and nothing per
+// row. Every member has the meaning the member of the same name has in
+// BatchResult. A refusal or decline is a result here, never an error.
+type InsertResult struct {
+	Outcome Outcome
+	// ErrCode and ErrMsg are the document's code and ClickHouse's own message,
+	// verbatim ("" when none), as BatchResult's.
+	ErrCode int32
+	ErrMsg  string
+	// Reason is the catalog id of a decline; RefusedAt says where a refusal or
+	// decline sits. Both are "" when the document carries none.
+	Reason    string
+	RefusedAt RefusalSite
+	RowsRead  uint64
+	// RowsSkipped is the rows the reader skipped.
+	RowsSkipped uint64
+	// RowsPassed (the t rows, which are the output's rows), RowsCut (the f
+	// rows and the d rows) and RowsUndecided (the d rows, counted inside
+	// RowsCut) are present exactly when a filter was attached; nil otherwise.
+	RowsPassed, RowsCut, RowsUndecided *uint64
+	UnsupportedSettings                []string
+	Framing                            *Framing
+	// PartitionCount is present on a schema with a partition key; nil otherwise.
+	PartitionCount *uint64
+	// ExportColumns is the output's positional column list: present exactly
+	// when an output was asked for and the outcome is accepted.
+	ExportColumns []string
+	// Output is the output rows in the asked format (non-nil, possibly empty).
+	// It exists exactly when Outcome is Accepted and an output format was asked
+	// for; it is nil otherwise, decided from the outcome and never from the
+	// buffer. A declined output is the whole call's decline (Outcome
+	// Unsupported, CodeDeclined, RefusedAt body_step), with no output.
+	Output []byte
+}
+
 // FilterRowError is one itemized row error of a filter evaluation.
 type FilterRowError struct {
 	Row  int
