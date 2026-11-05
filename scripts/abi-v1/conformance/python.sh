@@ -28,7 +28,9 @@
 # (scripts/abi-v1/stub_census.py, public issue #463): pytest's own junit result,
 # not its exit code, must show tests passed, no skip naming CHTYPES_ABI<N>_STUBS,
 # and no test file in which nothing passed. At ABI v2 the reader rules (r2, r3)
-# and the dev fingerprint refusal (r6) are REQUIRED to have run and passed. Every
+# and the dev fingerprint refusal (r6) are REQUIRED to have run and passed, and
+# the tests that passed must be exactly the ones
+# tests/fixtures/abi-v<N>/stub-census/python.txt pins (public issue #727). Every
 # test that needs the stubs lives under python/tests/abi<N> (measured: no other
 # python test file reads the variable).
 #
@@ -85,7 +87,7 @@ else
 fi
 echo "python.sh: stub census"
 census_rc=0
-python3 "$CENSUS" junit "$XML" "$rc" ${REQUIRE[@]+"${REQUIRE[@]}"} || census_rc=$?
+python3 "$CENSUS" junit "$XML" "$rc" --binding python ${REQUIRE[@]+"${REQUIRE[@]}"} || census_rc=$?
 if [ "$census_rc" -ne 0 ]; then
     echo "python.sh: the stub census refused this run (pytest rc=$rc)" >&2
     exit 1

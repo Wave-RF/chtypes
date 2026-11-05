@@ -1,0 +1,387 @@
+# The stub census's pinned list: every test the ts binding's ABI v2
+# conformance leg (scripts/abi-v1/conformance/ts.sh) must pass, one per line, as
+# scripts/abi-v1/stub_census.py names it (its file name, ::, its full name).
+#
+# The census refuses a run in which a test named here did not pass (a dropped
+# test: skipped, ignored, failed or gone), and a run in which a test passed that
+# no line names (an added or renamed test: the refusal prints the line to add).
+# "[linux] " or "[darwin] " before a test: required on that OS only, because it
+# runs on that OS only. Keep the lines sorted.
+cancel.test.ts :: cancelable async calls over the stub library a call queued behind a full threadpool rejects at once on abort, and the library answers it at entry
+cancel.test.ts :: cancelable async calls over the stub library a soak of racing aborts and returns: live handles back at baseline, and no fire ever reaches a freed token
+cancel.test.ts :: cancelable async calls over the stub library an abort during the call: each of the six blocks in the stub, the abort rejects it, and the library answers CHS_CANCELED
+cancel.test.ts :: cancelable async calls over the stub library an already-aborted signal rejects at once with CallCanceledError, and the library still answered CHS_CANCELED at entry with no output
+cancel.test.ts :: cancelable async calls over the stub library cancel after the last check point
+cancel.test.ts :: cancelable async calls over the stub library close() while a call is in flight: later calls are refused at once, the free waits for the call, and close does not cancel it
+cancel.test.ts :: cancelable async calls over the stub library independent signals cancel only their own call
+cancel.test.ts :: cancelable async calls over the stub library keep-alive: a queued call whose caller dropped every reference still reads its own body (and, with CHTYPES_TS_PLANTED_RED=1, the planted red: with it off, a use-after-free)
+cancel.test.ts :: cancelable async calls over the stub library never aborted: the same answer as the synchronous call, with the token id in the options document
+cancel.test.ts :: cancelable async calls over the stub library one signal across concurrent calls cancels all of them
+cancel.test.ts :: cancelable async calls over the stub library the cancel id merges with the options the call already builds, and replaces a cancel key in insertOptionsExtra
+cancel.test.ts :: cancelable async calls over the stub library with no signal: no token is made and no extra call, and the options document is the synchronous one
+conformance.test.ts :: abi v2 conformance (ts) concurrent chs_block_create.concurrent
+conformance.test.ts :: abi v2 conformance (ts) concurrent chs_filter_create.concurrent
+conformance.test.ts :: abi v2 conformance (ts) concurrent chs_filter_eval_block.concurrent
+conformance.test.ts :: abi v2 conformance (ts) concurrent chs_filter_eval_body.concurrent
+conformance.test.ts :: abi v2 conformance (ts) concurrent chs_preview_batch.concurrent
+conformance.test.ts :: abi v2 conformance (ts) concurrent chs_preview_insert.concurrent
+conformance.test.ts :: abi v2 conformance (ts) concurrent chs_preview_row.concurrent
+conformance.test.ts :: abi v2 conformance (ts) concurrent chs_schema_create.concurrent
+conformance.test.ts :: abi v2 conformance (ts) concurrent chs_schema_describe.concurrent
+conformance.test.ts :: abi v2 conformance (ts) document document.discover_columns.binary_name
+conformance.test.ts :: abi v2 conformance (ts) document document.preview_row.binary_string
+conformance.test.ts :: abi v2 conformance (ts) document document.preview_row.utf8_with_nul
+conformance.test.ts :: abi v2 conformance (ts) echo chs_back_quote.echo
+conformance.test.ts :: abi v2 conformance (ts) echo chs_back_quote_if_needed.echo
+conformance.test.ts :: abi v2 conformance (ts) echo chs_block_create.echo
+conformance.test.ts :: abi v2 conformance (ts) echo chs_discover_columns.echo
+conformance.test.ts :: abi v2 conformance (ts) echo chs_discover_query.echo
+conformance.test.ts :: abi v2 conformance (ts) echo chs_error_codes.echo
+conformance.test.ts :: abi v2 conformance (ts) echo chs_filter_create.echo
+conformance.test.ts :: abi v2 conformance (ts) echo chs_filter_eval_block.echo
+conformance.test.ts :: abi v2 conformance (ts) echo chs_filter_eval_body.echo
+conformance.test.ts :: abi v2 conformance (ts) echo chs_function_flags.echo
+conformance.test.ts :: abi v2 conformance (ts) echo chs_initialize.echo
+conformance.test.ts :: abi v2 conformance (ts) echo chs_preview_batch.echo
+conformance.test.ts :: abi v2 conformance (ts) echo chs_preview_insert.echo
+conformance.test.ts :: abi v2 conformance (ts) echo chs_preview_row.echo
+conformance.test.ts :: abi v2 conformance (ts) echo chs_quote_string.echo
+conformance.test.ts :: abi v2 conformance (ts) echo chs_reference_type.echo
+conformance.test.ts :: abi v2 conformance (ts) echo chs_registered_families.echo
+conformance.test.ts :: abi v2 conformance (ts) echo chs_schema_create.echo
+conformance.test.ts :: abi v2 conformance (ts) echo chs_schema_describe.echo
+conformance.test.ts :: abi v2 conformance (ts) echo chs_server_create.echo
+conformance.test.ts :: abi v2 conformance (ts) echo chs_set_defaults.echo
+conformance.test.ts :: abi v2 conformance (ts) echo chs_type_validate.echo
+conformance.test.ts :: abi v2 conformance (ts) echo one_create.trailing_semicolon_accepted
+conformance.test.ts :: abi v2 conformance (ts) echo server_profile.empty_accepted
+conformance.test.ts :: abi v2 conformance (ts) echo server_profile.empty_object_accepted
+conformance.test.ts :: abi v2 conformance (ts) echo server_profile.every_member_accepted
+conformance.test.ts :: abi v2 conformance (ts) echo server_profile.schema_on_server_accepted
+conformance.test.ts :: abi v2 conformance (ts) echo session_timezone.filter_eval_body
+conformance.test.ts :: abi v2 conformance (ts) echo session_timezone.preview_row
+conformance.test.ts :: abi v2 conformance (ts) handshake chs_abi_revision.tombstone
+conformance.test.ts :: abi v2 conformance (ts) handshake chs_abi_version.handshake
+conformance.test.ts :: abi v2 conformance (ts) handshake chs_build_info.handshake
+conformance.test.ts :: abi v2 conformance (ts) handshake chs_clickhouse_version.handshake
+conformance.test.ts :: abi v2 conformance (ts) lifecycle cancel.chs_block_create.after_last
+conformance.test.ts :: abi v2 conformance (ts) lifecycle cancel.chs_block_create.during
+conformance.test.ts :: abi v2 conformance (ts) lifecycle cancel.chs_block_create.never_fired
+conformance.test.ts :: abi v2 conformance (ts) lifecycle cancel.chs_block_create.pre_fired
+conformance.test.ts :: abi v2 conformance (ts) lifecycle cancel.chs_filter_eval_body.after_last
+conformance.test.ts :: abi v2 conformance (ts) lifecycle cancel.chs_filter_eval_body.during
+conformance.test.ts :: abi v2 conformance (ts) lifecycle cancel.chs_filter_eval_body.never_fired
+conformance.test.ts :: abi v2 conformance (ts) lifecycle cancel.chs_filter_eval_body.pre_fired
+conformance.test.ts :: abi v2 conformance (ts) lifecycle cancel.chs_preview_batch.after_last
+conformance.test.ts :: abi v2 conformance (ts) lifecycle cancel.chs_preview_batch.during
+conformance.test.ts :: abi v2 conformance (ts) lifecycle cancel.chs_preview_batch.never_fired
+conformance.test.ts :: abi v2 conformance (ts) lifecycle cancel.chs_preview_batch.pre_fired
+conformance.test.ts :: abi v2 conformance (ts) lifecycle cancel.chs_preview_insert.after_last
+conformance.test.ts :: abi v2 conformance (ts) lifecycle cancel.chs_preview_insert.during
+conformance.test.ts :: abi v2 conformance (ts) lifecycle cancel.chs_preview_insert.never_fired
+conformance.test.ts :: abi v2 conformance (ts) lifecycle cancel.chs_preview_insert.pre_fired
+conformance.test.ts :: abi v2 conformance (ts) lifecycle cancel.chs_preview_row.after_last
+conformance.test.ts :: abi v2 conformance (ts) lifecycle cancel.chs_preview_row.during
+conformance.test.ts :: abi v2 conformance (ts) lifecycle cancel.chs_preview_row.never_fired
+conformance.test.ts :: abi v2 conformance (ts) lifecycle cancel.chs_preview_row.pre_fired
+conformance.test.ts :: abi v2 conformance (ts) lifecycle cancel.chs_schema_create.after_last
+conformance.test.ts :: abi v2 conformance (ts) lifecycle cancel.chs_schema_create.during
+conformance.test.ts :: abi v2 conformance (ts) lifecycle cancel.chs_schema_create.never_fired
+conformance.test.ts :: abi v2 conformance (ts) lifecycle cancel.chs_schema_create.pre_fired
+conformance.test.ts :: abi v2 conformance (ts) lifecycle lifecycle.block_and_filter_hold_schema
+conformance.test.ts :: abi v2 conformance (ts) lifecycle lifecycle.filter_holds_schema
+conformance.test.ts :: abi v2 conformance (ts) lifecycle lifecycle.schema_holds_server
+conformance.test.ts :: abi v2 conformance (ts) loader loader.abi-version-1
+conformance.test.ts :: abi v2 conformance (ts) loader loader.build-info-bad-json
+conformance.test.ts :: abi v2 conformance (ts) loader loader.build-info-dup-key
+conformance.test.ts :: abi v2 conformance (ts) loader loader.build-info-non-ascii
+conformance.test.ts :: abi v2 conformance (ts) loader loader.build-info-null
+conformance.test.ts :: abi v2 conformance (ts) loader loader.ctor-marker.darwin
+conformance.test.ts :: abi v2 conformance (ts) loader loader.ctor-marker.linux
+conformance.test.ts :: abi v2 conformance (ts) loader loader.declined-settings
+conformance.test.ts :: abi v2 conformance (ts) loader loader.filter-observable
+conformance.test.ts :: abi v2 conformance (ts) loader loader.fingerprint-other
+conformance.test.ts :: abi v2 conformance (ts) loader loader.fingerprint-other-missing-symbol
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_abi_revision
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_back_quote
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_back_quote_if_needed
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_block_create
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_block_free
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_buf_data
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_buf_free
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_buf_len
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_build_info
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_cancel_create
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_cancel_fire
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_cancel_fired
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_cancel_free
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_clickhouse_version
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_discover_columns
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_discover_query
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_error_ch_code
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_error_ch_name
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_error_codes
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_error_column
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_error_free
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_error_message
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_error_reason
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_error_status
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_filter_create
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_filter_eval_block
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_filter_eval_body
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_filter_free
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_function_flags
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_initialize
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_live_handles
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_preview_batch
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_preview_insert
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_preview_row
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_quote_string
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_reference_type
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_registered_families
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_schema_create
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_schema_describe
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_schema_free
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_server_create
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_server_free
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_set_defaults
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_shutdown
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_type_validate
+conformance.test.ts :: abi v2 conformance (ts) loader loader.no-abi-version
+conformance.test.ts :: abi v2 conformance (ts) loader loader.null-input
+conformance.test.ts :: abi v2 conformance (ts) loader loader.ok
+conformance.test.ts :: abi v2 conformance (ts) loader loader.ok-b
+conformance.test.ts :: abi v2 conformance (ts) loader loader.r2-unknown-members
+conformance.test.ts :: abi v2 conformance (ts) loader loader.r3-unknown-capabilities
+conformance.test.ts :: abi v2 conformance (ts) loader loader.r3-unknown-values
+conformance.test.ts :: abi v2 conformance (ts) loader loader.unbound
+conformance.test.ts :: abi v2 conformance (ts) loader loader.value-flags
+conformance.test.ts :: abi v2 conformance (ts) loader the unbound stub (an unresolved external symbol) refuses under RTLD_NOW, on this platform
+conformance.test.ts :: abi v2 conformance (ts) status cancel.chs_block_create.unknown_id
+conformance.test.ts :: abi v2 conformance (ts) status cancel.chs_filter_eval_body.unknown_id
+conformance.test.ts :: abi v2 conformance (ts) status cancel.chs_preview_batch.unknown_id
+conformance.test.ts :: abi v2 conformance (ts) status cancel.chs_preview_insert.unknown_id
+conformance.test.ts :: abi v2 conformance (ts) status cancel.chs_preview_row.unknown_id
+conformance.test.ts :: abi v2 conformance (ts) status cancel.chs_schema_create.unknown_id
+conformance.test.ts :: abi v2 conformance (ts) status chs_back_quote.status.CHS_INTERNAL
+conformance.test.ts :: abi v2 conformance (ts) status chs_back_quote.status.CHS_INVALID_ARGUMENT
+conformance.test.ts :: abi v2 conformance (ts) status chs_back_quote_if_needed.status.CHS_INTERNAL
+conformance.test.ts :: abi v2 conformance (ts) status chs_back_quote_if_needed.status.CHS_INVALID_ARGUMENT
+conformance.test.ts :: abi v2 conformance (ts) status chs_block_create.status.CHS_CANCELED
+conformance.test.ts :: abi v2 conformance (ts) status chs_block_create.status.CHS_INTERNAL
+conformance.test.ts :: abi v2 conformance (ts) status chs_block_create.status.CHS_INVALID_ARGUMENT
+conformance.test.ts :: abi v2 conformance (ts) status chs_discover_columns.status.CHS_DECLINED
+conformance.test.ts :: abi v2 conformance (ts) status chs_discover_columns.status.CHS_INTERNAL
+conformance.test.ts :: abi v2 conformance (ts) status chs_discover_columns.status.CHS_INVALID_ARGUMENT
+conformance.test.ts :: abi v2 conformance (ts) status chs_discover_columns.status.CHS_REJECTED
+conformance.test.ts :: abi v2 conformance (ts) status chs_filter_create.status.CHS_DECLINED
+conformance.test.ts :: abi v2 conformance (ts) status chs_filter_create.status.CHS_INTERNAL
+conformance.test.ts :: abi v2 conformance (ts) status chs_filter_create.status.CHS_INVALID_ARGUMENT
+conformance.test.ts :: abi v2 conformance (ts) status chs_filter_create.status.CHS_REJECTED
+conformance.test.ts :: abi v2 conformance (ts) status chs_filter_eval_body.status.CHS_CANCELED
+conformance.test.ts :: abi v2 conformance (ts) status chs_filter_eval_body.status.CHS_INTERNAL
+conformance.test.ts :: abi v2 conformance (ts) status chs_filter_eval_body.status.CHS_INVALID_ARGUMENT
+conformance.test.ts :: abi v2 conformance (ts) status chs_initialize.status.CHS_INTERNAL
+conformance.test.ts :: abi v2 conformance (ts) status chs_initialize.status.CHS_INVALID_ARGUMENT
+conformance.test.ts :: abi v2 conformance (ts) status chs_initialize.status.CHS_REJECTED
+conformance.test.ts :: abi v2 conformance (ts) status chs_preview_batch.status.CHS_CANCELED
+conformance.test.ts :: abi v2 conformance (ts) status chs_preview_batch.status.CHS_INTERNAL
+conformance.test.ts :: abi v2 conformance (ts) status chs_preview_batch.status.CHS_INVALID_ARGUMENT
+conformance.test.ts :: abi v2 conformance (ts) status chs_preview_insert.status.CHS_CANCELED
+conformance.test.ts :: abi v2 conformance (ts) status chs_preview_insert.status.CHS_INTERNAL
+conformance.test.ts :: abi v2 conformance (ts) status chs_preview_insert.status.CHS_INVALID_ARGUMENT
+conformance.test.ts :: abi v2 conformance (ts) status chs_preview_row.status.CHS_CANCELED
+conformance.test.ts :: abi v2 conformance (ts) status chs_preview_row.status.CHS_INTERNAL
+conformance.test.ts :: abi v2 conformance (ts) status chs_preview_row.status.CHS_INVALID_ARGUMENT
+conformance.test.ts :: abi v2 conformance (ts) status chs_quote_string.status.CHS_INTERNAL
+conformance.test.ts :: abi v2 conformance (ts) status chs_quote_string.status.CHS_INVALID_ARGUMENT
+conformance.test.ts :: abi v2 conformance (ts) status chs_reference_type.status.CHS_DECLINED
+conformance.test.ts :: abi v2 conformance (ts) status chs_reference_type.status.CHS_INTERNAL
+conformance.test.ts :: abi v2 conformance (ts) status chs_reference_type.status.CHS_INVALID_ARGUMENT
+conformance.test.ts :: abi v2 conformance (ts) status chs_reference_type.status.CHS_REJECTED
+conformance.test.ts :: abi v2 conformance (ts) status chs_schema_create.status.CHS_CANCELED
+conformance.test.ts :: abi v2 conformance (ts) status chs_schema_create.status.CHS_DECLINED
+conformance.test.ts :: abi v2 conformance (ts) status chs_schema_create.status.CHS_INTERNAL
+conformance.test.ts :: abi v2 conformance (ts) status chs_schema_create.status.CHS_INVALID_ARGUMENT
+conformance.test.ts :: abi v2 conformance (ts) status chs_schema_create.status.CHS_REJECTED
+conformance.test.ts :: abi v2 conformance (ts) status chs_server_create.status.CHS_DECLINED
+conformance.test.ts :: abi v2 conformance (ts) status chs_server_create.status.CHS_INTERNAL
+conformance.test.ts :: abi v2 conformance (ts) status chs_server_create.status.CHS_INVALID_ARGUMENT
+conformance.test.ts :: abi v2 conformance (ts) status chs_server_create.status.CHS_REJECTED
+conformance.test.ts :: abi v2 conformance (ts) status chs_set_defaults.status.CHS_DECLINED
+conformance.test.ts :: abi v2 conformance (ts) status chs_set_defaults.status.CHS_INTERNAL
+conformance.test.ts :: abi v2 conformance (ts) status chs_set_defaults.status.CHS_INVALID_ARGUMENT
+conformance.test.ts :: abi v2 conformance (ts) status chs_set_defaults.status.CHS_REJECTED
+conformance.test.ts :: abi v2 conformance (ts) status chs_type_validate.status.CHS_DECLINED
+conformance.test.ts :: abi v2 conformance (ts) status chs_type_validate.status.CHS_INTERNAL
+conformance.test.ts :: abi v2 conformance (ts) status chs_type_validate.status.CHS_INVALID_ARGUMENT
+conformance.test.ts :: abi v2 conformance (ts) status chs_type_validate.status.CHS_REJECTED
+conformance.test.ts :: abi v2 conformance (ts) status image_zone.bad_zone_refused
+conformance.test.ts :: abi v2 conformance (ts) status image_zone.different_spelling_refused
+conformance.test.ts :: abi v2 conformance (ts) status input_document.chs_block_create.options.not_an_object_refused
+conformance.test.ts :: abi v2 conformance (ts) status input_document.chs_block_create.options.unknown_key_refused
+conformance.test.ts :: abi v2 conformance (ts) status input_document.chs_filter_create.options.not_an_object_refused
+conformance.test.ts :: abi v2 conformance (ts) status input_document.chs_filter_create.options.unknown_key_refused
+conformance.test.ts :: abi v2 conformance (ts) status input_document.chs_filter_eval_body.options.not_an_object_refused
+conformance.test.ts :: abi v2 conformance (ts) status input_document.chs_filter_eval_body.options.unknown_key_refused
+conformance.test.ts :: abi v2 conformance (ts) status input_document.chs_preview_batch.options.not_an_object_refused
+conformance.test.ts :: abi v2 conformance (ts) status input_document.chs_preview_batch.options.unknown_key_refused
+conformance.test.ts :: abi v2 conformance (ts) status input_document.chs_preview_insert.options.not_an_object_refused
+conformance.test.ts :: abi v2 conformance (ts) status input_document.chs_preview_insert.options.unknown_key_refused
+conformance.test.ts :: abi v2 conformance (ts) status input_document.chs_preview_row.options.not_an_object_refused
+conformance.test.ts :: abi v2 conformance (ts) status input_document.chs_preview_row.options.unknown_key_refused
+conformance.test.ts :: abi v2 conformance (ts) status input_document.chs_schema_create.options.not_an_object_refused
+conformance.test.ts :: abi v2 conformance (ts) status input_document.chs_schema_create.options.unknown_key_refused
+conformance.test.ts :: abi v2 conformance (ts) status input_document.chs_server_create.options.not_an_object_refused
+conformance.test.ts :: abi v2 conformance (ts) status input_document.chs_server_create.options.unknown_key_refused
+conformance.test.ts :: abi v2 conformance (ts) status input_document.chs_server_create.profile.not_an_object_refused
+conformance.test.ts :: abi v2 conformance (ts) status input_document.chs_server_create.profile.unknown_key_refused
+conformance.test.ts :: abi v2 conformance (ts) status one_create.second_statement_refused
+dev-fingerprint.test.ts :: rule r6: a library with another fingerprint is refused with the dev message the refusal alone, with no library: CHTYPES_ARTIFACT_INCOMPATIBLE carrying exactly the rule's message
+dev-fingerprint.test.ts :: rule r6: a library with another fingerprint is refused with the dev message through a real load of the stub that reports another fingerprint, verified and unverified
+dev-fingerprint.test.ts :: the compiled-in identity is ABI v2 and a full sha256 fingerprint, printed for the jobs that assert it
+goldens-runner-stub.test.ts :: the goldens runner against the ABI stub records a report the comparator passes, and refuses the same report with one planted wrong byte
+insert-projection.test.ts :: the insert projection gate over the shared fixture equal-csv-filter-mixed: "equal"
+insert-projection.test.ts :: the insert projection gate over the shared fixture equal-csv-no-filter-all-accepted: "equal"
+insert-projection.test.ts :: the insert projection gate over the shared fixture equal-declined-output-is-the-call-decline: "equal"
+insert-projection.test.ts :: the insert projection gate over the shared fixture equal-declined-output-under-a-filter-counts-zero: "equal"
+insert-projection.test.ts :: the insert projection gate over the shared fixture equal-declined: "equal"
+insert-projection.test.ts :: the insert projection gate over the shared fixture equal-e-row-decides-where-the-export-was-declined: "equal"
+insert-projection.test.ts :: the insert projection gate over the shared fixture equal-e-row-first-of-two-e-rows: "equal"
+insert-projection.test.ts :: the insert projection gate over the shared fixture equal-e-row-rejects-the-insert: "equal"
+insert-projection.test.ts :: the insert projection gate over the shared fixture equal-err-suffix-under-an-error-budget: "equal"
+insert-projection.test.ts :: the insert projection gate over the shared fixture equal-err-suffix-while-reading-the-value-of-key: "equal"
+insert-projection.test.ts :: the insert projection gate over the shared fixture equal-export-none-validate-only: "equal"
+insert-projection.test.ts :: the insert projection gate over the shared fixture equal-jsoncompacteachrow-filter-mixed: "equal"
+insert-projection.test.ts :: the insert projection gate over the shared fixture equal-jsoncompacteachrow-no-filter-all-accepted: "equal"
+insert-projection.test.ts :: the insert projection gate over the shared fixture equal-native-filter-mixed: "equal"
+insert-projection.test.ts :: the insert projection gate over the shared fixture equal-native-no-filter: "equal"
+insert-projection.test.ts :: the insert projection gate over the shared fixture equal-not-accepted-batch-with-d-rows-counts-zero: "equal"
+insert-projection.test.ts :: the insert projection gate over the shared fixture equal-refused-err-suffix: "equal"
+insert-projection.test.ts :: the insert projection gate over the shared fixture exception-generator-draw-bytes-differ: {"exception":"generator_draw"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture output is absent unless accepted
+insert-projection.test.ts :: the insert projection gate over the shared fixture plants a red for every rule and a case for every exception
+insert-projection.test.ts :: the insert projection gate over the shared fixture reads the fixture it was written for, and refuses a zero-run
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-count-cut-wrong-in-both: {"violates":"counts"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-count-undecided-wrong: {"violates":"counts"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-csv-output-drops-a-t-row: {"violates":"line_output"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-declined-output-counts-carried-from-the-batch: {"violates":"export_decline_is_call_decline"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-declined-output-insert-stays-accepted: {"violates":"export_decline_is_call_decline"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-declined-output-reason-differs: {"violates":"export_decline_is_call_decline"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-e-row-code-from-a-later-e-row: {"violates":"e_row_rejects"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-e-row-counts-not-zero: {"violates":"e_row_rejects"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-e-row-insert-accepted: {"violates":"e_row_rejects"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-e-row-message-altered: {"violates":"e_row_rejects"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-e-row-output-present: {"violates":"e_row_rejects"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-e-row-refused-at-not-row: {"violates":"e_row_rejects"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-e-row-rows-read-differs: {"violates":"e_row_rejects"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-e-row-undecided-not-zero: {"violates":"e_row_rejects"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-err-not-a-prefix: {"violates":"err_prefix"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-err-suffix-doubled-line-feed: {"violates":"err_suffix"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-err-suffix-not-clickhouses: {"violates":"err_suffix"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-insert-carries-export-declined: {"violates":"shared_members"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-line-output-has-a-d-row: {"violates":"non_t_row"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-line-output-has-an-f-row: {"violates":"non_t_row"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-line-output-off-by-one-byte: {"violates":"line_output"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-native-off-by-one-byte: {"violates":"native_output"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-output-given-for-validate-only: {"violates":"output_presence"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-output-missing-for-accepted: {"violates":"output_presence"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-shared-member-missing-export-columns: {"violates":"shared_members"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-shared-member-rows-read: {"violates":"shared_members"}
+insert.test.ts :: Schema.insert over the stub library a filter reaches the ABI as a handle, settings, columns and memory_limit_bytes as documents
+insert.test.ts :: Schema.insert over the stub library hands the output to the result only for an accepted call, and EXPORT_NONE validates only
+insert.test.ts :: Schema.insert over the stub library memory_limit_bytes reaches every insert-options call: row, rows, parseBlock and the filter rows
+insert.test.ts :: Schema.insert over the stub library passes the defaults to the one ABI call: the format, no settings, no columns, NULL filter, the out format, no options
+insert.test.ts :: Schema.insert over the stub library refuses a closed schema and a closed filter with a UsageError before any call, never passing NULL
+insert.test.ts :: Schema.insert over the stub library the stub saw the format, the out format, a NULL filter, and the body, in the ABI order
+loader-step7.test.ts :: loader step 7 and the re-check of an open image maps a zone the library refuses to a SchemaError, and a conflicting spelling to a UsageError naming the zone asked for
+loader-step7.test.ts :: loader step 7 and the re-check of an open image opens once the setup is acceptable, with defaults seeded after the zone
+[linux] loader-step7.test.ts :: loader step 7 and the re-check of an open image re-checks the glibc floor on an open image too
+loader-step7.test.ts :: loader step 7 and the re-check of an open image refuses a new request whose signed statement disagrees with the open image, and leaves the image open for the requests it matches
+null-input.test.ts :: null_input: a NULL literal into a non-Nullable column (stub null-input) every row and batch entry exposes nullInput, false where the member is false or absent
+null-input.test.ts :: poison and dup_dropped: an Enum8 NULL read, a canned dup_dropped entry (stub value-flags) every row and batch entry exposes both members, each false where it is false or absent
+public-api.test.ts :: the public API over the stub library asks for the export it was given, attaches the filter, and returns the export payload only when one was asked for
+public-api.test.ts :: the public API over the stub library counts zero live handles after every handle is closed
+public-api.test.ts :: the public API over the stub library decodes the stub's discovery document with a non-UTF-8 name and joined declarations
+public-api.test.ts :: the public API over the stub library decodes the stub's real document mode: a string with bytes FF 00 80 comes out as exact bytes, NUL included
+public-api.test.ts :: the public API over the stub library frees what the caller abandons: abandon handles, collect, require every count to be zero
+public-api.test.ts :: the public API over the stub library hands out one Library per image
+public-api.test.ts :: the public API over the stub library maps each call status to its class, with the six fields verbatim; the classes are peers, never subtypes
+public-api.test.ts :: the public API over the stub library passes the documented defaults to the one ABI call: no export, the lean document groups (0), no filter, no settings
+public-api.test.ts :: the public API over the stub library raises a UsageError naming the object once it is closed, before any call, for every method
+public-api.test.ts :: the public API over the stub library reads the build info the loader decoded: version and minor are read, not derived
+public-api.test.ts :: the public API over the stub library refuses an unverified open unless BOTH allow and the environment variable say so, with a UsageError
+public-api.test.ts :: the public API over the stub library refuses the zone twice, and a text body, before any call
+public-api.test.ts :: the public API over the stub library returns each byte output as a Buffer and decodes the documents without computing anything
+public-api.test.ts :: the public API over the stub library treats a document that does not decode as the library bug it is: an InternalError
+reader-rules.test.ts :: r2: unknown members are ignored at every level (stub r2-unknown-members) build_info, live_handles and error_code_table decode around their unknown members
+reader-rules.test.ts :: r2: unknown members are ignored at every level (stub r2-unknown-members) schema_description, row, batch, filter_result and discovery decode around their unknown members
+reader-rules.test.ts :: r3: an unlisted value is kept as its unknown(n), for that field alone (stub r3-unknown-values) a call status outside the closed set is unknown(n), and the call still fails as an internal error naming it
+reader-rules.test.ts :: r3: an unlisted value is kept as its unknown(n), for that field alone (stub r3-unknown-values) the batch: its outcome, a row outcome, a column source, a transform reason, a reason it does not read, an at_merge reason, and the framing container
+reader-rules.test.ts :: r3: an unlisted value is kept as its unknown(n), for that field alone (stub r3-unknown-values) the controls: the clean documents decode with every value listed
+reader-rules.test.ts :: r3: an unlisted value is kept as its unknown(n), for that field alone (stub r3-unknown-values) the filter result: its outcome and a verdict character
+reader-rules.test.ts :: r3: an unlisted value is kept as its unknown(n), for that field alone (stub r3-unknown-values) the row: outcome, a column source, a transform reason and the verdict
+reader-rules.test.ts :: r3: an unlisted value is kept as its unknown(n), for that field alone (stub r3-unknown-values) the schema description and discovery: a default kind
+reader-rules.test.ts :: r3: build_info capabilities keep values no vocabulary lists (stub r3-unknown-capabilities) keeps every unlisted value beside the listed ones
+reader-rules.test.ts :: r3: every enum the description defines has its unknown(n) member an unlisted value reads as that vocabulary's unknown(n), carrying the raw value, and every listed value is known
+reader-rules.test.ts :: r3: every enum the description defines has its unknown(n) member the exported spellings are listed values, and the facts of an unknown(n) are the fallback's, or fail closed
+reader-rules.test.ts :: r3: every enum the description defines has its unknown(n) member the generated list names exactly the enums spec/abi-v2/abi.json defines, with exactly their listed values
+registry-adapter.test.ts :: the registry over the real fetch derivation, on the stub honors no trust override on the dev channel exactly: the trustedKeys option is ignored, with its warning, and the layout is not installed (rule r6)
+registry-adapter.test.ts :: the registry over the real fetch derivation, on the stub memoizes per request for the registry life, shares one Library per image, and lists what is installed and open
+registry-adapter.test.ts :: the registry over the real fetch derivation, on the stub names the request and the platform when nothing installed answers and autofetch is off
+registry-adapter.test.ts :: the registry over the real fetch derivation, on the stub never trusts the test key by default: under the default trust list the same layout is simply not installed
+registry-adapter.test.ts :: the registry over the real fetch derivation, on the stub opens a request through resolve, the adapter and loader steps 1 to 7, and keeps the fetch record
+registry-adapter.test.ts :: the registry over the real fetch derivation, on the stub opens each preload request at construction, in order, and a preload that nothing installed answers is the ordinary missing error
+registry-adapter.test.ts :: the registry over the real fetch derivation, on the stub refuses a pinning fetch option at construction, as a UsageError, before anything is read (rule r6)
+registry-adapter.test.ts :: the registry over the real fetch derivation, on the stub refuses a version spelling the fetch layer would refuse as a UsageError, before touching the network or the cache
+registry-adapter.test.ts :: the registry over the real fetch derivation, on the stub turns a signed statement that disagrees with the library into the artifact-corrupt class: one family with the fetch layer
+registry-flight.test.ts :: registry.fetch, the fetch-only call (public issue #492) fails with the fetch layer's own codes, and refuses a spelling as for() does
+registry-flight.test.ts :: registry.fetch, the fetch-only call (public issue #492) installs the build and opens nothing: no Library, the setup untouched, and the build held by this process
+registry-flight.test.ts :: registry.fetch, the fetch-only call (public issue #492) shares one fetch with an open of the same request: the fetch has the build, and the open goes on to its load
+registry-flight.test.ts :: the registry with a fetch in flight (public issue #491), on the stub gives every open waiting on a failed fetch its error, and never remembers the failure
+registry-flight.test.ts :: the registry with a fetch in flight (public issue #491), on the stub makes one fetch for concurrent opens of one request, and every open gets its Library
+registry-flight.test.ts :: the registry with a fetch in flight (public issue #491), on the stub never makes an installed line wait for another line's fetch: with 26.3's fetch held at the gate, 26.8 opens
+server.test.ts :: the description decoder: server and replicated (no library) a server described by {}: the image zone, settings {}, macros absent (unknown)
+server.test.ts :: the description decoder: server and replicated (no library) absent: the document is the one from before servers existed
+server.test.ts :: the description decoder: server and replicated (no library) macros present but empty is the complete (empty) set, never read as absent
+server.test.ts :: the description decoder: server and replicated (no library) macros, a Replicated engine's resolved path, a _b64 name and unknown members (rule r2)
+server.test.ts :: the description decoder: server and replicated (no library) refusals are each an InternalError naming the document
+server.test.ts :: the description decoder: the top-level filter_declined_settings (no library) [] is present and empty; absent reads as empty too, never a failure
+server.test.ts :: the description decoder: the top-level filter_declined_settings (no library) a schema with no server lists its own layers; the removed server-level list is an unknown member (rule r2)
+server.test.ts :: the description decoder: the top-level filter_declined_settings (no library) entries in the document's own order, a name_b64 entry, an unlisted tier and layer (rule r3) and unknown members (rule r2)
+server.test.ts :: the description decoder: the top-level filter_declined_settings (no library) refusals are each an InternalError naming the document
+server.test.ts :: the profile document, byte for byte (no library) a value that is not a string is the language type error, not a rewritten value
+server.test.ts :: the profile document, byte for byte (no library) absent macros is not empty macros: fails if the two serialize alike
+server.test.ts :: the profile document, byte for byte (no library) absent macros omitted (unknown)
+server.test.ts :: the profile document, byte for byte (no library) absent settings omitted
+server.test.ts :: the profile document, byte for byte (no library) an empty timezone is omitted
+server.test.ts :: the profile document, byte for byte (no library) empty macros sent (the complete set is empty)
+server.test.ts :: the profile document, byte for byte (no library) empty settings sent
+server.test.ts :: the profile document, byte for byte (no library) empty: nothing described
+server.test.ts :: the profile document, byte for byte (no library) every member
+server.test.ts :: the profile document, byte for byte (no library) never validated
+server.test.ts :: the profile document, byte for byte (no library) timezone
+server.test.ts :: the server handle over the stub library Symbol.dispose closes the server
+server.test.ts :: the server handle over the stub library a closed server is a UsageError, raised before any call and before a schema exists
+server.test.ts :: the server handle over the stub library a server and its schemas close in any order
+server.test.ts :: the server handle over the stub library a server from another library is that library's own CHS_INVALID_ARGUMENT, as a UsageError
+server.test.ts :: the server handle over the stub library accepts a profile with every member (the stub checks the closed document of input:server_profile)
+server.test.ts :: the server handle over the stub library compile with a server passes a non-NULL server to chs_schema_create, asserted from what the stub received
+server.test.ts :: the server handle over the stub library frees a server the caller abandons
+server.test.ts :: the server handle over the stub library new_server, then close twice
+server.test.ts :: the server handle over the stub library sends the serialized profile and an empty options document to the one ABI call
+server.test.ts :: the server handle over the stub library the stub's description without a server decodes with server and replicated absent
+server.test.ts :: the server handle over the stub library without a server the stub receives NULL and holds nothing
+setup-cases.test.ts :: the setup cases file is not empty: a suite that ran nothing must not pass
+setup-cases.test.ts :: the shared setup cases, through the public API filter.a_closed_filter_is_never_passed_as_null
+setup-cases.test.ts :: the shared setup cases, through the public API filter.declined_when_only_the_schema_layer_declines
+setup-cases.test.ts :: the shared setup cases, through the public API schema.compile_rejects_a_deep_input_306
+setup-cases.test.ts :: the shared setup cases, through the public API schema.filter_declined_settings_empty
+setup-cases.test.ts :: the shared setup cases, through the public API schema.filter_declined_settings_in_layer_order
+setup-cases.test.ts :: the shared setup cases, through the public API schema.filter_declined_settings_name_b64
+setup-cases.test.ts :: the shared setup cases, through the public API schema.filter_declined_settings_one_entry_at_the_highest_layer
+setup-cases.test.ts :: the shared setup cases, through the public API schema.filter_declined_settings_unknown_layer
+setup-cases.test.ts :: the shared setup cases, through the public API schema.filter_declined_settings_unknown_tier
+setup-cases.test.ts :: the shared setup cases, through the public API server.a_closed_server_is_never_passed_as_null
+setup-cases.test.ts :: the shared setup cases, through the public API setup.a_retry_after_a_failed_open_keeps_the_recorded_setup
+setup-cases.test.ts :: the shared setup cases, through the public API setup.latches_only_on_success
