@@ -83,7 +83,7 @@ jobs:
       # only: running on 3.11 with no project and no dependencies proves both.
       - name: selftest — every refusal fires on planted copies of the tree, and --write is deterministic
         run: uv run --no-project --python 3.11 scripts/abi-v1/gen.py --selftest
-      - name: selftest — the stub census refuses a stub-skip with the stubs set, a missing required test, a zero-run and a skipped-whole-file
+      - name: selftest — the stub census refuses a stub-skip with the stubs set, a missing required test, a zero-run, a skipped-whole-file, an interleaved cargo target, and a dropped or added test against each binding's pinned list
         run: python3 scripts/abi-v1/stub_census.py --selftest
       # The major map (spec/binding-majors.json) and its assertion: a map
       # missing a binding is refused, and a binding whose loaded library (a
