@@ -29,9 +29,9 @@
 //! below is produced by the run, never written down by hand.
 
 use chtypes::{
-    BatchResult, CompileOptions, DocFlags, Error, EvalOptions, FilterOptions, FilterOutcome,
-    FilterResult, Format, Library, Outcome, Registry, RegistryOptions, RowOptions, RowsOptions,
-    ServerProfile, SetupOptions, Value, Verdict,
+    BatchResult, Capabilities, CompileOptions, DocFlags, Error, EvalOptions, FilterOptions,
+    FilterOutcome, FilterResult, Format, InsertOptions, InsertResult, Library, Outcome, Registry,
+    RegistryOptions, RowOptions, RowsOptions, ServerProfile, SetupOptions, Value, Verdict,
 };
 use std::sync::Arc;
 
@@ -129,6 +129,9 @@ fn main() {
     section16(&lib);
     section17(&lib);
     section18(&lib);
+    section19(&lib);
+    section20(&lib);
+    section21(&lib);
     blank();
     println!("Done. Every value above was measured by this run.");
 }
@@ -1568,6 +1571,321 @@ fn section18(lib: &Arc<Library>) {
     note("zone. The schema holds the server, so dropping either first is safe.");
 }
 
+// ---------------------------------------------------------------------------
+// SECTIONS 19-21: The INSERT call (ABI v2)
+//
+// WHAT: `schema.insert` models one whole synchronous INSERT and returns the
+// output rows in a format of your choice. Three checks, each against the
+// batch call as the reference: the insert's output is exactly the batch
+// export's passing rows (19); a Native output read back as a Native body
+// holds the same rows (20); and a tiny memory limit declines the whole call
+// with no output (21).
+// WHY: a gateway that writes to a server wants the rows it would insert, in
+// the wire format it will send, from one call; and it wants the call's limits
+// to fail closed.
+// LOOK FOR: the one-line summaries. A build that does not implement the
+// insert call (it does not advertise `preview_insert` in build_info's
+// capabilities) is SKIPPED by name, saying which capability is absent. A
+// build that advertises it must run and pass: a decline then fails the tour.
+// C API: chs_preview_insert.
+// ---------------------------------------------------------------------------
+
+const INSERT_DDL: &str = "CREATE TABLE t (k UInt32, s String) ENGINE = MergeTree ORDER BY k";
+
+/// Six rows, so `k > 2` passes four and cuts two.
+const INSERT_BODY: &[u8] = concat!(
+    r#"{"k":1,"s":"one"}"#,
+    "\n",
+    r#"{"k":2,"s":"two"}"#,
+    "\n",
+    r#"{"k":3,"s":"three"}"#,
+    "\n",
+    r#"{"k":4,"s":"four"}"#,
+    "\n",
+    r#"{"k":5,"s":"five"}"#,
+    "\n",
+    r#"{"k":6,"s":"six"}"#,
+    "\n",
+)
+.as_bytes();
+
+/// The capability names the three sections key on, in one place: a rename in
+/// `build_info` is a change to these lines and nothing else.
+const FEATURE_INSERT: &str = "preview_insert";
+const FEATURE_MEMORY_LIMIT: &str = "insert_options.memory_limit_bytes";
+const EXPORT_FORMAT_NATIVE: &str = "Native";
+
+/// What a section does next.
+#[derive(Debug, PartialEq, Eq)]
+enum Step {
+    Run,
+    Skip(String),
+    Fail(String),
+}
+
+/// The first capability this build does not advertise, by name; `None` when
+/// it advertises everything the section needs. `need_native` adds the Native
+/// export format; `need_limit` adds the memory-limit option.
+fn absent(caps: &Capabilities, need_native: bool, need_limit: bool) -> Option<String> {
+    let has_feature = |f: &str| caps.features.iter().any(|x| x == f);
+    if !has_feature(FEATURE_INSERT) {
+        return Some(format!("features lacks {FEATURE_INSERT}"));
+    }
+    if need_native
+        && !caps
+            .export_formats
+            .iter()
+            .any(|x| x == EXPORT_FORMAT_NATIVE)
+    {
+        return Some(format!("export_formats lacks {EXPORT_FORMAT_NATIVE}"));
+    }
+    if need_limit && !has_feature(FEATURE_MEMORY_LIMIT) {
+        return Some(format!("features lacks {FEATURE_MEMORY_LIMIT}"));
+    }
+    None
+}
+
+/// The gate. A capability the build does not advertise skips the section by
+/// name. One it advertises must run: if the library then declines the insert
+/// call as not implemented, that is a FAILURE, never a skip.
+fn decide(absent: Option<String>, declined: Option<String>) -> Step {
+    match (absent, declined) {
+        (Some(why), _) => Step::Skip(why),
+        (None, Some(why)) => Step::Fail(format!("advertised but declined: {why}")),
+        (None, None) => Step::Run,
+    }
+}
+
+/// Insert once. `None` means the build does not advertise what section `n`
+/// needs, and the section has printed SKIPPED with the absent capability.
+/// Every other failure, a decline of an advertised call included, stops the
+/// tour.
+fn insert_or_skip(
+    n: u32,
+    schema: &chtypes::Schema,
+    lib: &Arc<Library>,
+    out: Format,
+    options: &InsertOptions,
+) -> Option<InsertResult> {
+    let caps = &lib.build_info().capabilities;
+    let missing = absent(
+        caps,
+        out == Format::Native,
+        options.memory_limit_bytes.is_some(),
+    );
+    if let Step::Skip(why) = decide(missing.clone(), None) {
+        kv(
+            "SKIPPED",
+            &format!("section {n}: this build does not advertise the insert call"),
+        );
+        note(&truncate(&why, 66));
+        return None;
+    }
+    let result = schema.insert(Format::JsonEachRow, INSERT_BODY, Some(out), options);
+    let declined = match &result {
+        Ok(r)
+            if r.outcome == Outcome::Unsupported
+                && r.reason.as_deref() == Some("option-not-implemented") =>
+        {
+            Some(r.err_msg.to_string())
+        }
+        Err(err) if err.is_unsupported() => Some(err.to_string()),
+        _ => None,
+    };
+    if let Step::Fail(why) = decide(missing, declined) {
+        fatal(&format!("section {n}: {why}"));
+    }
+    match result {
+        Ok(r) => Some(r),
+        Err(err) => fatal(&format!("insert: {err}")),
+    }
+}
+
+fn require(ok: bool, what: &str) {
+    if !ok {
+        fatal(&format!("check failed: {what}"));
+    }
+}
+
+// SECTION 19: Insert equals batch
+fn section19(lib: &Arc<Library>) {
+    section(19, "Insert equals batch");
+    let schema = match lib.compile_table(INSERT_DDL, &CompileOptions::default()) {
+        Ok(s) => s,
+        Err(err) => fatal(&format!("compile {INSERT_DDL:?}: {err}")),
+    };
+    let filter = match schema.compile_filter("k > 2", &FilterOptions::default()) {
+        Ok(f) => f,
+        Err(err) => fatal(&format!("compile filter: {err}")),
+    };
+    let Some(ins) = insert_or_skip(
+        19,
+        &schema,
+        lib,
+        Format::JsonEachRow,
+        &InsertOptions {
+            filter: Some(filter.clone()),
+            ..InsertOptions::default()
+        },
+    ) else {
+        return;
+    };
+    let batch = match schema.rows(
+        Format::JsonEachRow,
+        INSERT_BODY,
+        &RowsOptions {
+            filter: Some(filter),
+            export: Some(Format::JsonEachRow),
+            doc_flags: Some(DocFlags::ALL),
+            ..RowsOptions::default()
+        },
+    ) {
+        Ok(b) => b,
+        Err(err) => fatal(&format!("batch: {err}")),
+    };
+    require(ins.outcome == Outcome::Accepted, "the insert is accepted");
+    require(batch.outcome == Outcome::Accepted, "the batch is accepted");
+    require(
+        ins.rows_passed == Some(batch.rows_passed) && ins.rows_cut == Some(batch.rows_cut),
+        "rows_passed and rows_cut equal the batch's",
+    );
+
+    // The batch export restricted to the rows whose verdict is `t`: those
+    // rows' spans, concatenated in body order.
+    let payload = batch.payload.clone().unwrap_or_default();
+    let spans = batch.spans.clone().unwrap_or_default();
+    require(
+        spans.len() == batch.rows.len(),
+        "one span entry per batch row",
+    );
+    let mut expected = Vec::new();
+    for (row, span) in batch.rows.iter().zip(&spans) {
+        if row.verdict != Some(Verdict::True) {
+            continue;
+        }
+        let Some(span) = span else {
+            fatal("a passing row has no export span");
+        };
+        let (off, len) = (span.off as usize, span.len as usize);
+        let Some(bytes) = payload.get(off..off + len) else {
+            fatal("a span lies outside the export payload");
+        };
+        expected.extend_from_slice(bytes);
+    }
+    let output = ins.output.clone().unwrap_or_default();
+    require(
+        output == expected,
+        "the insert's output equals the batch export's passing rows",
+    );
+    kv(
+        "insert == batch",
+        &format!(
+            "passed={} cut={} output {} bytes, identical to the passing spans",
+            batch.rows_passed,
+            batch.rows_cut,
+            output.len()
+        ),
+    );
+}
+
+// SECTION 20: A Native round trip
+fn section20(lib: &Arc<Library>) {
+    section(20, "A Native round trip");
+    let schema = match lib.compile_table(INSERT_DDL, &CompileOptions::default()) {
+        Ok(s) => s,
+        Err(err) => fatal(&format!("compile {INSERT_DDL:?}: {err}")),
+    };
+    let Some(ins) = insert_or_skip(20, &schema, lib, Format::Native, &InsertOptions::default())
+    else {
+        return;
+    };
+    require(ins.outcome == Outcome::Accepted, "the insert is accepted");
+    let native = ins.output.clone().unwrap_or_default();
+    require(!native.is_empty(), "the Native output holds bytes");
+
+    let opts = RowsOptions {
+        doc_flags: Some(DocFlags::ALL),
+        ..RowsOptions::default()
+    };
+    let original = match schema.rows(Format::JsonEachRow, INSERT_BODY, &opts) {
+        Ok(b) => b,
+        Err(err) => fatal(&format!("batch of the original body: {err}")),
+    };
+    let back = match schema.rows(Format::Native, &native, &opts) {
+        Ok(b) => b,
+        Err(err) => fatal(&format!("batch of the Native output: {err}")),
+    };
+    require(
+        back.outcome == Outcome::Accepted,
+        "the Native body is accepted",
+    );
+    require(
+        back.rows_read == original.rows_read && back.rows.len() == original.rows.len(),
+        "the same row count",
+    );
+    let cells = |b: &BatchResult| -> Vec<Vec<(String, String, bool)>> {
+        b.rows
+            .iter()
+            .map(|r| {
+                r.values
+                    .iter()
+                    .map(|v| (v.column.to_string(), v.text.to_string(), v.null))
+                    .collect()
+            })
+            .collect()
+    };
+    require(
+        cells(&back) == cells(&original),
+        "the same value for every column of every row",
+    );
+    kv(
+        "native round trip",
+        &format!(
+            "{} rows, {} bytes of Native, every column value identical",
+            back.rows_read,
+            native.len()
+        ),
+    );
+}
+
+// SECTION 21: A memory limit declines
+fn section21(lib: &Arc<Library>) {
+    section(21, "A memory limit declines");
+    let schema = match lib.compile_table(INSERT_DDL, &CompileOptions::default()) {
+        Ok(s) => s,
+        Err(err) => fatal(&format!("compile {INSERT_DDL:?}: {err}")),
+    };
+    let Some(ins) = insert_or_skip(
+        21,
+        &schema,
+        lib,
+        Format::JsonEachRow,
+        &InsertOptions {
+            memory_limit_bytes: Some(1),
+            ..InsertOptions::default()
+        },
+    ) else {
+        return;
+    };
+    require(
+        ins.outcome == Outcome::Unsupported,
+        "a 1-byte limit declines the call",
+    );
+    require(
+        ins.reason.as_deref() == Some("call-memory-budget"),
+        "the decline reason is call-memory-budget",
+    );
+    require(ins.output.is_none(), "a declined call has no output");
+    kv(
+        "memory_limit_bytes = 1",
+        &format!(
+            "{} ({}), no output",
+            ins.outcome,
+            ins.reason.as_deref().unwrap_or("?")
+        ),
+    );
+}
+
 // ------------------------------------------------------------- plumbing
 //
 // Printing helpers only: no chtypes call hides here beyond reading results.
@@ -1775,4 +2093,48 @@ fn unhex(text: &str) -> Vec<u8> {
     (0..text.len() / 2)
         .map(|i| u8::from_str_radix(&text[i * 2..i * 2 + 2], 16).unwrap_or(0))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn caps(features: &[&str], formats: &[&str]) -> Capabilities {
+        let mut c = Capabilities::default();
+        c.features = features.iter().map(|s| s.to_string()).collect();
+        c.export_formats = formats.iter().map(|s| s.to_string()).collect();
+        c
+    }
+
+    #[test]
+    fn unadvertised_skips_by_name() {
+        let c = caps(&[], &["Native"]);
+        let why = absent(&c, false, false).expect("absent");
+        assert!(why.contains(FEATURE_INSERT));
+        assert!(matches!(decide(Some(why), None), Step::Skip(_)));
+        let c = caps(&[FEATURE_INSERT], &[]);
+        assert!(absent(&c, true, false).unwrap().contains("Native"));
+        assert!(absent(&c, false, true)
+            .unwrap()
+            .contains(FEATURE_MEMORY_LIMIT));
+    }
+
+    #[test]
+    fn advertised_runs() {
+        let c = caps(&[FEATURE_INSERT, FEATURE_MEMORY_LIMIT], &["Native"]);
+        assert_eq!(absent(&c, true, true), None);
+        assert_eq!(decide(None, None), Step::Run);
+    }
+
+    /// The planted case: an advertised capability set with the section forced
+    /// to skip (the library declines the call) must be a failure.
+    #[test]
+    fn advertised_but_declined_fails() {
+        let c = caps(&[FEATURE_INSERT, FEATURE_MEMORY_LIMIT], &["Native"]);
+        let step = decide(
+            absent(&c, true, true),
+            Some("option-not-implemented".into()),
+        );
+        assert!(matches!(step, Step::Fail(_)), "{step:?}");
+    }
 }
