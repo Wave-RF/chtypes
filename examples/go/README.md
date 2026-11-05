@@ -1,12 +1,12 @@
 # examples/go: the Go tour
 
-Eighteen sections over the whole public API, matching `../python`, `../ts` and `../rust` section for section. See [`../README.md`](../README.md) for the section list. **Runs entirely offline** (no Docker, no ClickHouse server, no network) against an installed artifact.
+Twenty-one sections over the whole public API, matching `../python`, `../ts` and `../rust` section for section. See [`../README.md`](../README.md) for the section list. **Runs entirely offline** (no Docker, no ClickHouse server, no network) against an installed artifact.
 
 ## Run it
 
 ```bash
 go run ../../go/cmd/chtypes fetch 26.8   # install a library for this host, verified
-go run .                                  # 18 sections, dlopen-only: what a public clone runs
+go run .                                  # 21 sections, dlopen-only: what a public clone runs
 ../chplay.sh go                           # the same tour with prerequisite checks
 ```
 
@@ -15,7 +15,7 @@ go run .                                  # 18 sections, dlopen-only: what a pub
 ## Prerequisites
 
 - **An installed library.** The tour reads the v1 cache, `${XDG_CACHE_HOME:-~/.cache}/chtypes/v1/` (or `$CHTYPES_CACHE`). One line is enough; section 12's cross-version sweeps want several and degrade gracefully without them.
-- **cgo is optional, and not available to a public clone.** Section 14 (the linked image) needs the artifact producer's build tree on `CGO_LDFLAGS` plus the `chtypes_linked` tag. That tree is not public: adding the tag without one fails at link time, which is why it is not in the commands above. Without the tag that section says so and skips, and the other seventeen run against the registry.
+- **cgo is optional, and not available to a public clone.** Section 14 (the linked image) needs the artifact producer's build tree on `CGO_LDFLAGS` plus the `chtypes_linked` tag. That tree is not public: adding the tag without one fails at link time, which is why it is not in the commands above. Without the tag that section says so and skips, and the other twenty run against the registry.
 - Go 1.27+.
 
 ## Knobs
@@ -24,6 +24,8 @@ go run .                                  # 18 sections, dlopen-only: what a pub
 | ----------------- | ---------------------------------------------------------------------------------------- |
 | `CHTYPES_VERSION` | which line the tour uses (`26.8`, `26.8.15.10`, ...). Default: the newest line installed |
 | `CHTYPES_CACHE`   | the cache root. Default: `${XDG_CACHE_HOME:-~/.cache}/chtypes/v1`                        |
+
+Sections 19 to 21 (insert equals batch, a Native round trip, the memory limit) call `Schema.Insert`. Each runs exactly when the build advertises what it needs in `build_info` capabilities (`preview_insert`; Native in `export_formats`; `insert_options.memory_limit_bytes`), and otherwise prints `SKIPPED` naming the missing capability. A build that advertises the call and declines it fails the tour (`go test .` plants that case).
 
 ## What is Go-specific here
 
