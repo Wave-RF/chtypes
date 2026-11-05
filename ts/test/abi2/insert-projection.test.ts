@@ -60,10 +60,10 @@ describe.skipIf(!present)('the insert projection gate over the shared fixture', 
   it('reads the fixture it was written for, and refuses a zero-run', () => {
     expect(doc.schema).toBe('chtypes.abi-v2.insert-projection-fixture/1');
     const reds = doc.cases.filter((c) => typeof c.expect === 'object' && 'violates' in c.expect);
-    expect(doc.cases).toHaveLength(37);
-    expect(doc.cases.filter((c) => c.expect === 'equal')).toHaveLength(12);
+    expect(doc.cases).toHaveLength(43);
+    expect(doc.cases.filter((c) => c.expect === 'equal')).toHaveLength(17);
     expect(doc.cases.filter((c) => typeof c.expect === 'object' && 'exception' in c.expect)).toHaveLength(1);
-    expect(reds).toHaveLength(24);
+    expect(reds).toHaveLength(25);
     const byRule: Record<string, number> = {};
     for (const c of reds) byRule[(c.expect as { violates: string }).violates] = (byRule[(c.expect as { violates: string }).violates] ?? 0) + 1;
     expect(byRule).toEqual({
@@ -73,7 +73,7 @@ describe.skipIf(!present)('the insert projection gate over the shared fixture', 
       line_output: 2,
       non_t_row: 2,
       output_presence: 2,
-      export_decline_is_call_decline: 2,
+      export_decline_is_call_decline: 3,
       err_prefix: 1,
       err_suffix: 1,
       native_output: 1,
