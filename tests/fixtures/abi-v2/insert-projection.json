@@ -4002,7 +4002,7 @@
    "expect": "equal"
   },
   {
-   "id": "red-post-where-cut-refusal-from-a-passing-row",
+   "id": "red-post-where-refusal-insert-accepted-though-a-t-row-refused",
    "output_format": "JSONCompactEachRow",
    "batch": {
     "outcome": "rejected",
@@ -4151,7 +4151,7 @@
    },
    "insert_rows_b64": "WzEsImFscGhhIl0KWzIsImNoYXJsaWUiXQo=",
    "expect": {
-    "violates": "post_where_cut"
+    "violates": "post_where_refusal"
    }
   },
   {
@@ -4393,6 +4393,404 @@
    "insert_rows_b64": "WzEsImFscGhhIl0KWy0xLCJicmF2byJdClsyLCJjaGFybGllIl0K",
    "expect": {
     "violates": "post_where_cut"
+   }
+  },
+  {
+   "id": "equal-post-where-refusal-check-on-a-cut-row-and-a-later-t-row",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "rejected",
+    "code": 469,
+    "err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = -20",
+    "rows": [
+     {
+      "outcome": "rejected",
+      "code": 469,
+      "input_span": {
+       "off": 0,
+       "len": 14
+      },
+      "err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = -20",
+      "verdict": "d",
+      "verdict_code": 0,
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 14,
+       "len": 12
+      },
+      "verdict": "d",
+      "verdict_code": 0,
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 26,
+       "len": 15
+      },
+      "verdict": "d",
+      "verdict_code": 0,
+      "verdict_err": "declined"
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row",
+    "refused_row": 0,
+    "export_declined": "batch outcome is 'rejected'",
+    "export_declined_reason": "export-batch-not-accepted",
+    "rows_passed": 0,
+    "rows_cut": 0
+   },
+   "batch_export_b64": null,
+   "batch_of_t_rows": {
+    "rows": [
+     1,
+     2
+    ],
+    "batch": {
+     "outcome": "rejected",
+     "code": 469,
+     "err": "Constraint `n_abs` for table default.t is violated at row 2. Expression: (abs(n) < 10). Column values: n = 30",
+     "rows": [
+      {
+       "outcome": "accepted",
+       "code": 0,
+       "input_span": {
+        "off": 0,
+        "len": 12
+       },
+       "verdict": "d",
+       "verdict_code": 0,
+       "verdict_err": "declined"
+      },
+      {
+       "outcome": "rejected",
+       "code": 469,
+       "input_span": {
+        "off": 12,
+        "len": 15
+       },
+       "err": "Constraint `n_abs` for table default.t is violated at row 2. Expression: (abs(n) < 10). Column values: n = 30",
+       "verdict": "d",
+       "verdict_code": 0,
+       "verdict_err": "declined"
+      }
+     ],
+     "rows_read": 2,
+     "rows_skipped": 0,
+     "unsupported_settings": [],
+     "unconsumed": [],
+     "framing": {
+      "bom_skipped": false,
+      "container": null,
+      "header": null
+     },
+     "refused_at": "row",
+     "refused_row": 1,
+     "export_declined": "batch outcome is 'rejected'",
+     "export_declined_reason": "export-batch-not-accepted",
+     "rows_passed": 0,
+     "rows_cut": 0
+    },
+    "export_b64": null
+   },
+   "insert": {
+    "outcome": "rejected",
+    "code": 469,
+    "err": "Constraint `n_abs` for table default.t is violated at row 2. Expression: (abs(n) < 10). Column values: n = 30",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row",
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "rows_undecided": 0
+   },
+   "insert_rows_b64": null,
+   "expect": "equal"
+  },
+  {
+   "id": "red-post-where-refusal-err-is-the-whole-batch-s",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "rejected",
+    "code": 469,
+    "err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = -20",
+    "rows": [
+     {
+      "outcome": "rejected",
+      "code": 469,
+      "input_span": {
+       "off": 0,
+       "len": 14
+      },
+      "err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = -20",
+      "verdict": "d",
+      "verdict_code": 0,
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 14,
+       "len": 12
+      },
+      "verdict": "d",
+      "verdict_code": 0,
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 26,
+       "len": 15
+      },
+      "verdict": "d",
+      "verdict_code": 0,
+      "verdict_err": "declined"
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row",
+    "refused_row": 0,
+    "export_declined": "batch outcome is 'rejected'",
+    "export_declined_reason": "export-batch-not-accepted",
+    "rows_passed": 0,
+    "rows_cut": 0
+   },
+   "batch_export_b64": null,
+   "batch_of_t_rows": {
+    "rows": [
+     1,
+     2
+    ],
+    "batch": {
+     "outcome": "rejected",
+     "code": 469,
+     "err": "Constraint `n_abs` for table default.t is violated at row 2. Expression: (abs(n) < 10). Column values: n = 30",
+     "rows": [
+      {
+       "outcome": "accepted",
+       "code": 0,
+       "input_span": {
+        "off": 0,
+        "len": 12
+       },
+       "verdict": "d",
+       "verdict_code": 0,
+       "verdict_err": "declined"
+      },
+      {
+       "outcome": "rejected",
+       "code": 469,
+       "input_span": {
+        "off": 12,
+        "len": 15
+       },
+       "err": "Constraint `n_abs` for table default.t is violated at row 2. Expression: (abs(n) < 10). Column values: n = 30",
+       "verdict": "d",
+       "verdict_code": 0,
+       "verdict_err": "declined"
+      }
+     ],
+     "rows_read": 2,
+     "rows_skipped": 0,
+     "unsupported_settings": [],
+     "unconsumed": [],
+     "framing": {
+      "bom_skipped": false,
+      "container": null,
+      "header": null
+     },
+     "refused_at": "row",
+     "refused_row": 1,
+     "export_declined": "batch outcome is 'rejected'",
+     "export_declined_reason": "export-batch-not-accepted",
+     "rows_passed": 0,
+     "rows_cut": 0
+    },
+    "export_b64": null
+   },
+   "insert": {
+    "outcome": "rejected",
+    "code": 469,
+    "err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = -20",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row",
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "rows_undecided": 0
+   },
+   "insert_rows_b64": null,
+   "expect": {
+    "violates": "post_where_refusal"
+   }
+  },
+  {
+   "id": "red-post-where-refusal-code-differs-from-the-whole-batch-s",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "rejected",
+    "code": 469,
+    "err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = -20",
+    "rows": [
+     {
+      "outcome": "rejected",
+      "code": 469,
+      "input_span": {
+       "off": 0,
+       "len": 14
+      },
+      "err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = -20",
+      "verdict": "d",
+      "verdict_code": 0,
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 14,
+       "len": 12
+      },
+      "verdict": "d",
+      "verdict_code": 0,
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 26,
+       "len": 15
+      },
+      "verdict": "d",
+      "verdict_code": 0,
+      "verdict_err": "declined"
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row",
+    "refused_row": 0,
+    "export_declined": "batch outcome is 'rejected'",
+    "export_declined_reason": "export-batch-not-accepted",
+    "rows_passed": 0,
+    "rows_cut": 0
+   },
+   "batch_export_b64": null,
+   "batch_of_t_rows": {
+    "rows": [
+     1,
+     2
+    ],
+    "batch": {
+     "outcome": "rejected",
+     "code": 252,
+     "err": "Too many partitions for single INSERT block (more than 1). The limit is controlled by 'max_partitions_per_insert_block' setting",
+     "rows": [
+      {
+       "outcome": "accepted",
+       "code": 0,
+       "input_span": {
+        "off": 0,
+        "len": 12
+       },
+       "verdict": "d",
+       "verdict_code": 0,
+       "verdict_err": "declined"
+      },
+      {
+       "outcome": "accepted",
+       "code": 0,
+       "input_span": {
+        "off": 12,
+        "len": 15
+       },
+       "verdict": "d",
+       "verdict_code": 0,
+       "verdict_err": "declined"
+      }
+     ],
+     "rows_read": 2,
+     "rows_skipped": 0,
+     "unsupported_settings": [],
+     "unconsumed": [],
+     "framing": {
+      "bom_skipped": false,
+      "container": null,
+      "header": null
+     },
+     "refused_at": "body_step",
+     "export_declined": "batch outcome is 'rejected'",
+     "export_declined_reason": "export-batch-not-accepted",
+     "rows_passed": 0,
+     "rows_cut": 0
+    },
+    "export_b64": null
+   },
+   "insert": {
+    "outcome": "rejected",
+    "code": 252,
+    "err": "Too many partitions for single INSERT block (more than 1). The limit is controlled by 'max_partitions_per_insert_block' setting",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row",
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "rows_undecided": 0
+   },
+   "insert_rows_b64": null,
+   "expect": {
+    "violates": "post_where_refusal"
    }
   }
  ]

@@ -13,8 +13,8 @@ and mirror the rule names below.
 
 A case: id, output_format (a chs_format name, or NONE), batch, batch_export_b64
 (null when no export ran), insert, insert_rows_b64 (null when no output), expect:
-"equal", {"exception": "<name>"} or {"violates": "<rule>"}; and, for a body the
-post-WHERE steps refused, batch_of_t_rows: {rows, batch, export_b64}, where rows
+"equal", {"exception": "<name>"} or {"violates": "<rule>"}; and, for a filtered
+body the post-WHERE steps refused, batch_of_t_rows: {rows, batch, export_b64}, where rows
 are the indexes of the body's rows the insert keeps (its t rows) and batch, with
 its export, is chs_preview_batch's document for the same inputs over those
 records alone (the filter attached, as for the whole body).
@@ -31,6 +31,25 @@ same refusal and the pair fails. What this cannot see is a t row left out of
 rows: that the rows outside the list are cut is the insert's own claim, which
 only a server's INSERT ... SELECT ... WHERE over the same body can confirm.
 
+The same document decides a refusal a post-WHERE step raises on a kept row
+(insert.post_where_refusal). The batch of the t rows is then itself refused, at
+the first failing kept row, and its err is the insert's: the server numbers that
+row over the rows its WHERE keeps, as the batch of the t rows numbers it within
+the body it was given. The whole body's batch answers the same code, but its err
+and rows_read are its own (its refusal may sit on an earlier cut row), so they
+have no counterpart. The err equality is exact for a body the server reads as
+one chunk only: across chunks (max_insert_block_size, the squashing) the row the
+server names is a server fact, which only a server's INSERT over the same body
+can confirm. The insert's rows_read is where its reader stopped, which no batch
+document states; it is bounded, not compared: at least the body records up to
+and including the failing kept row (for a `body_step` refusal, the first kept
+row), at most the records the whole body's batch read.
+
+Which carve-out a case with batch_of_t_rows is held to is decided by that batch
+alone: accepted, post_where_cut; refused, post_where_refusal. Without it, a
+filtered batch that is `rejected` with an insert that is `accepted` is held to
+post_where_cut, which then fails for want of the document.
+
 Rules, checked in this order (the first that fails is the answer):
   e_row_rejects    a batch with an `e` verdict (outcome accepted): the insert is
                    rejected with the FIRST e row's code and err, refused_at row,
@@ -43,9 +62,9 @@ Rules, checked in this order (the first that fails is the answer):
                    export_columns, no output, and rows_passed, rows_cut and
                    rows_undecided 0 under a filter (those members, and err,
                    are then not compared with the batch's)
-  post_where_cut   a case with batch_of_t_rows, or a filtered batch that is
-                   `rejected` with an insert that is `accepted`: the case carries
-                   batch_of_t_rows; the batch is `rejected` at `row` or
+  post_where_cut   a case whose batch_of_t_rows is `accepted`, or one with no
+                   batch_of_t_rows whose filtered batch is `rejected` with an
+                   insert that is `accepted`: the case carries batch_of_t_rows; the batch is `rejected` at `row` or
                    `body_step`, at a refused_row outside rows, and every row in
                    rows is `accepted` in it; the t rows' batch reads exactly
                    those records (one row each, the same input_span lengths,
@@ -58,6 +77,22 @@ Rules, checked in this order (the first that fails is the answer):
                    rows_cut, err the t rows' batch's, and the output the t rows'
                    batch's export exactly (generator_draw still applies); the
                    rules below are not applied to such a case
+  post_where_refusal
+                   a case whose batch_of_t_rows is not `accepted`: the batch is
+                   `rejected` at `row` or `body_step`; the t rows' batch reads
+                   exactly those records (as above) and is `rejected` at `row`
+                   (at a refused_row inside it, so a row in rows) or at
+                   `body_step`; the insert is `rejected`, its code both the
+                   whole batch's and the t rows' batch's, its err byte-equal to
+                   the t rows' batch's (no reader suffix: a post-WHERE step is
+                   not the reader); its reason, refused_at, rows_skipped,
+                   unsupported_settings, framing and partition_count the whole
+                   batch's; rows_read from the first failing kept record's
+                   position + 1 (the first kept row's, at `body_step`) up to
+                   the whole batch's rows_read; rows_passed, rows_cut and
+                   rows_undecided 0 (an insert that is not accepted), no
+                   export_columns and no output; the rules below are not
+                   applied to such a case
   shared_members   every member both documents may carry is equal, absent where
                    absent (outcome, code, reason, refused_at, export_columns,
                    rows_passed and rows_cut are skipped under a declined output); an insert never carries
@@ -105,8 +140,8 @@ import model as abimodel  # noqa: E402
 FIXTURE = ROOT / "tests" / "fixtures" / "abi-v2" / "insert-projection.json"
 SCHEMA = "chtypes.abi-v2.insert-projection-fixture/1"
 
-RULES = ("e_row_rejects", "export_decline_is_call_decline", "post_where_cut", "shared_members", "counts", "err_prefix",
-         "err_suffix", "output_presence", "non_t_row", "line_output", "native_output")
+RULES = ("e_row_rejects", "export_decline_is_call_decline", "post_where_cut", "post_where_refusal", "shared_members",
+         "counts", "err_prefix", "err_suffix", "output_presence", "non_t_row", "line_output", "native_output")
 EXCEPTIONS = ("generator_draw",)
 
 # docs.md, chs_preview_insert, "The projection rule", first bullet.
@@ -120,6 +155,9 @@ INSERT_NEVER = ("export_declined", "export_declined_b64", "export_declined_reaso
 PWC = "batch_of_t_rows"
 PWC_FROM_T_ROWS = ("outcome", "code", "reason", "refused_at", "export_columns", "partition_count")
 PWC_FROM_BODY = ("rows_read", "rows_skipped", "unsupported_settings", "framing")
+# post_where_refusal: the members still equal to the whole batch's (err and rows_read are not).
+POST_WHERE_REFUSAL_SHARED = ("reason", "refused_at", "rows_skipped", "unsupported_settings", "framing",
+                             "partition_count")
 POST_WHERE_SITES = ("row", "body_step")
 SUFFIX = re.compile(rb"^: \(at row [0-9]+\)\n$")
 _ABSENT = object()
@@ -281,7 +319,9 @@ def evaluate(case: dict):
                 and (not filtered or all(ins.get(k) == 0 for k in COUNTS))):
             return "violates", "export_decline_is_call_decline"
 
-    # post_where_cut: a filtered batch the body steps refused, and an insert that did not refuse with it
+    # post_where_cut and post_where_refusal: split on the t rows' batch, accepted or refused
+    if PWC in case and case[PWC]["batch"]["outcome"] != "accepted":
+        return ("equal", None) if _post_where_refusal(case, out) else ("violates", "post_where_refusal")
     if PWC in case or (filtered and batch["outcome"] == "rejected" and ins["outcome"] == "accepted"):
         got = _post_where_cut(case, out)
         if got is None:
@@ -353,9 +393,7 @@ def _post_where_cut(case: dict, out):
     if any(rows[i]["outcome"] != "accepted" for i in idx):
         return None
     # the t rows' batch: those records, read alone, accepted, every one t
-    if len(sub["rows"]) != len(idx) or sub["rows_read"] != len(idx) or sub["rows_skipped"] != 0:
-        return None
-    if any(r["input_span"]["len"] != rows[i]["input_span"]["len"] for r, i in zip(sub["rows"], idx)):
+    if not _same_records(case):
         return None
     if sub["outcome"] != "accepted" or any(r.get("verdict") != "t" for r in sub["rows"]):
         return None
@@ -382,6 +420,45 @@ def _post_where_cut(case: dict, out):
         return "exception", "generator_draw"
     # every row of the t rows' batch is t, so its whole export is the t rows' output, in either format
     return ("equal", None) if out == sexp else None
+
+
+def _same_records(case: dict) -> bool:
+    """The t rows' batch reads exactly the listed records: one row each, the same input_span lengths, none skipped."""
+    rows, ev = case["batch"]["rows"], case[PWC]
+    idx, sub = ev["rows"], ev["batch"]
+    if len(sub["rows"]) != len(idx) or sub["rows_read"] != len(idx) or sub["rows_skipped"] != 0:
+        return False
+    return all(r["input_span"]["len"] == rows[i]["input_span"]["len"] for r, i in zip(sub["rows"], idx))
+
+
+def _post_where_refusal(case: dict, out) -> bool:
+    """A post-WHERE refusal on a t row: the insert is the t rows' batch's refusal, over the whole body's read."""
+    batch, ins, ev = case["batch"], case["insert"], case[PWC]
+    sub = ev["batch"]
+    if batch["outcome"] != "rejected" or batch.get("refused_at") not in POST_WHERE_SITES:
+        return False
+    if not _same_records(case):
+        return False
+    # the t rows' batch is refused at one of its own rows, or at a whole-body step
+    if sub["outcome"] != "rejected" or sub.get("refused_at") not in POST_WHERE_SITES:
+        return False
+    if not ev["rows"] or (sub["refused_at"] == "row" and not 0 <= sub.get("refused_row", -1) < len(ev["rows"])):
+        return False
+    if ins["outcome"] != "rejected" or any(k in ins for k in INSERT_NEVER):
+        return False
+    # the outcome class and code stay equal, to the whole batch and to the t rows' batch
+    if not ins["code"] == batch["code"] == sub["code"]:
+        return False
+    # err: the server's for the first failing kept row, numbered over the kept rows
+    if _bytes(ins, "err") != _bytes(sub, "err"):
+        return False
+    if any(_member(batch, m) != _member(ins, m) for m in POST_WHERE_REFUSAL_SHARED):
+        return False
+    # rows_read: where the insert's reader stopped, which no batch states; bounded only
+    first = ev["rows"][sub["refused_row"]] if sub["refused_at"] == "row" else ev["rows"][0]
+    if not first + 1 <= ins["rows_read"] <= batch["rows_read"]:
+        return False
+    return all(ins.get(k) == 0 for k in COUNTS) and "export_columns" not in ins and out is None
 
 
 def verdict_of(case: dict):

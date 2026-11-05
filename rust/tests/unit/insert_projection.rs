@@ -13,10 +13,11 @@
 //! back for a refusal, read the raw document and the raw bytes. Both documents
 //! of every case go through this crate's real decoders (`decode::batch` and
 //! `decode::insert_result`), so a case proves the decoders as well as the
-//! rule. Each case carries its expected result; the fixture's 29 planted reds
+//! rule. Each case carries its expected result; the fixture's 31 planted reds
 //! and its exception keep the gate honest: a rule that cannot fire fails here.
-//! A `post_where_cut` case's `batch_of_t_rows`, the batch over the rows the
-//! insert keeps, goes through the same `decode::batch`.
+//! A case's `batch_of_t_rows`, the batch over the rows the insert keeps, goes
+//! through the same `decode::batch`; whether it is accepted decides which of
+//! `post_where_cut` and `post_where_refusal` the case is held to.
 //!
 //! This is a unit test of the crate (src/lib.rs declares it with `#[path]`)
 //! because the decoders are crate-internal. It needs no library.
@@ -56,6 +57,82 @@ const INSERT_NEVER: [&str; 3] = [
     "export_declined_reason",
 ];
 
+fn post_where_site(site: Option<&RefusalSite>) -> bool {
+    matches!(site, Some(RefusalSite::Row | RefusalSite::BodyStep))
+}
+
+/// The t rows' batch reads exactly the listed records: one row each, the same
+/// `input_span` lengths, none skipped.
+fn same_records(batch: &BatchResult, t_rows: &BatchOfTRows) -> bool {
+    let (idx, sub) = (&t_rows.rows, &t_rows.batch);
+    sub.rows.len() == idx.len()
+        && sub.rows_read == idx.len() as u64
+        && sub.rows_skipped == 0
+        && sub.rows.iter().zip(idx).all(|(r, &i)| {
+            match (r.input_span.as_ref(), batch.rows[i].input_span.as_ref()) {
+                (Some(a), Some(b)) => a.len == b.len,
+                _ => false,
+            }
+        })
+}
+
+/// The checker's `_post_where_refusal`: the insert is `rejected` with the code
+/// of both batches and the t rows' batch's err; err and `rows_read` have no
+/// whole batch counterpart, so `rows_read` is only bounded.
+fn post_where_refusal(
+    batch: &BatchResult,
+    ins: &InsertResult,
+    raw_ins: &Json,
+    out: Option<&[u8]>,
+    t_rows: &BatchOfTRows,
+) -> bool {
+    let sub = &t_rows.batch;
+    if batch.outcome != Outcome::Rejected
+        || !post_where_site(batch.refused_at.as_ref())
+        || !same_records(batch, t_rows)
+    {
+        return false;
+    }
+    if sub.outcome != Outcome::Rejected || !post_where_site(sub.refused_at.as_ref()) {
+        return false;
+    }
+    let Some(&first_kept) = t_rows.rows.first() else {
+        return false;
+    };
+    // the failing kept row's place in the body; at a body step, the first kept row's
+    let first = if sub.refused_at == Some(RefusalSite::Row) {
+        match sub
+            .refused_row
+            .and_then(|r| t_rows.rows.get(usize::try_from(r).ok()?))
+        {
+            Some(&i) => i,
+            None => return false,
+        }
+    } else {
+        first_kept
+    };
+    if ins.outcome != Outcome::Rejected || INSERT_NEVER.iter().any(|k| raw_ins.get(k).is_some()) {
+        return false;
+    }
+    // the outcome class and code stay equal, to the whole batch and to the t
+    // rows' batch; err is the server's for the first failing kept row,
+    // numbered over the kept rows; rows_read is bounded only
+    ins.err_code == batch.err_code
+        && ins.err_code == sub.err_code
+        && ins.err_msg == sub.err_msg
+        && batch.reason == ins.reason
+        && batch.refused_at == ins.refused_at
+        && batch.partition_count == ins.partition_count
+        && ins.rows_read > first as u64
+        && ins.rows_read <= batch.rows_read
+        && batch.rows_skipped == ins.rows_skipped
+        && batch.unsupported_settings == ins.unsupported_settings
+        && batch.framing == ins.framing
+        && (ins.rows_passed, ins.rows_cut, ins.rows_undecided) == (Some(0), Some(0), Some(0))
+        && raw_ins.get("export_columns").is_none()
+        && out.is_none()
+}
+
 /// The checker's `_post_where_cut`: the verdict when the pair holds, `None`
 /// when it does not.
 fn post_where_cut(
@@ -71,11 +148,7 @@ fn post_where_cut(
         batch: sub,
     } = t_rows?;
     let rows = &batch.rows;
-    let site_ok = matches!(
-        batch.refused_at,
-        Some(RefusalSite::Row | RefusalSite::BodyStep)
-    );
-    if batch.outcome != Outcome::Rejected || !site_ok {
+    if batch.outcome != Outcome::Rejected || !post_where_site(batch.refused_at.as_ref()) {
         return None;
     }
     if batch.refused_at == Some(RefusalSite::Row)
@@ -90,16 +163,7 @@ fn post_where_cut(
     }
     // the t rows' batch: those records, read alone, accepted, every one t
     let n = idx.len() as u64;
-    if sub.rows.len() != idx.len() || sub.rows_read != n || sub.rows_skipped != 0 {
-        return None;
-    }
-    let spans_match = sub.rows.iter().zip(idx).all(|(r, &i)| {
-        match (r.input_span.as_ref(), rows[i].input_span.as_ref()) {
-            (Some(a), Some(b)) => a.len == b.len,
-            _ => false,
-        }
-    });
-    if !spans_match
+    if !same_records(batch, t_rows?)
         || sub.outcome != Outcome::Accepted
         || sub.rows.iter().any(|r| r.verdict != Some(Verdict::True))
         || !sub.export_declined.as_bytes().is_empty()
@@ -252,8 +316,15 @@ fn evaluate(
         }
     }
 
-    // post_where_cut: a filtered batch the body steps refused, and an insert
-    // that did not refuse with it
+    // post_where_cut and post_where_refusal split on the t rows' batch,
+    // accepted or refused
+    if let Some(tr) = t_rows.filter(|tr| tr.batch.outcome != Outcome::Accepted) {
+        return if post_where_refusal(batch, ins, raw_ins, out, tr) {
+            Projection::Equal
+        } else {
+            Projection::Violates("post_where_refusal")
+        };
+    }
     if t_rows.is_some()
         || (filtered && batch.outcome == Outcome::Rejected && ins.outcome == Outcome::Accepted)
     {
@@ -444,10 +515,11 @@ fn decode_t_rows(case: &Json) -> Option<BatchOfTRows> {
     Some(BatchOfTRows { rows, batch })
 }
 
-const RULES: [&str; 11] = [
+const RULES: [&str; 12] = [
     "e_row_rejects",
     "export_decline_is_call_decline",
     "post_where_cut",
+    "post_where_refusal",
     "shared_members",
     "counts",
     "err_prefix",
@@ -522,7 +594,7 @@ fn every_case_of_the_shared_fixture_gives_its_expected_projection_result() {
     );
     assert_eq!(
         (cases.len(), equal, exceptions, reds),
-        (48, 18, 1, 29),
+        (51, 19, 1, 31),
         "the fixture's census (cases, equal, exception, planted reds)"
     );
     // A rule with no planted red is a rule the gate cannot see fail.

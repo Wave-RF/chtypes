@@ -3,11 +3,12 @@
 decoders, answers as scripts/abi-v2/check-insert-projection.py answers it.
 
 `first_violation` mirrors that checker's `evaluate`, rule by rule and in order:
-e_row_rejects, export_decline_is_call_decline, post_where_cut, shared_members, counts,
-err_prefix, err_suffix, output_presence, non_t_row, line_output, native_output; and the one
-exception, generator_draw. A post_where_cut case's batch_of_t_rows, the batch over the rows
-the insert keeps, goes through the same real batch decoder. It is a test helper, not public
-API.
+e_row_rejects, export_decline_is_call_decline, post_where_cut, post_where_refusal,
+shared_members, counts, err_prefix, err_suffix, output_presence, non_t_row, line_output,
+native_output; and the one exception, generator_draw. A case's batch_of_t_rows, the batch
+over the rows the insert keeps, goes through the same real batch decoder; whether it is
+accepted decides which of the two post-WHERE rules the case is held to. It is a test
+helper, not public API.
 """
 
 from __future__ import annotations
@@ -39,6 +40,7 @@ RULES = (
     "e_row_rejects",
     "export_decline_is_call_decline",
     "post_where_cut",
+    "post_where_refusal",
     "shared_members",
     "counts",
     "err_prefix",
@@ -65,6 +67,70 @@ def _raw_cols(raw: dict) -> tuple[bytes, ...] | None:
     return tuple(base64.b64decode(c["b64"]) if "b64" in c else c["name"].encode() for c in cols)
 
 
+def same_records(batch: BatchResult, idx: list[int], sub: BatchResult) -> bool:
+    """The t rows' batch reads exactly the listed records: one row each, the same
+    input_span lengths, none skipped."""
+    if len(sub.rows) != len(idx) or sub.rows_read != len(idx) or sub.rows_skipped != 0:
+        return False
+    for r, i in zip(sub.rows, idx, strict=True):
+        whole = batch.rows[i].input_span
+        if r.input_span is None or whole is None or r.input_span.len != whole.len:
+            return False
+    return True
+
+
+def post_where_refusal(
+    batch: BatchResult,
+    ins: InsertResult,
+    raw_insert: dict,
+    out: bytes | None,
+    pwc: tuple[list[int], BatchResult],
+) -> bool:
+    """The checker's `_post_where_refusal`: the insert is `rejected` with the code
+    of both batches and the t rows' batch's err; err and rows_read have no whole
+    batch counterpart, so rows_read is only bounded."""
+    idx, sub = pwc
+    if batch.outcome != Outcome.REJECTED or batch.refused_at not in POST_WHERE_SITES:
+        return False
+    if not same_records(batch, idx, sub):
+        return False
+    if sub.outcome != Outcome.REJECTED or sub.refused_at not in POST_WHERE_SITES:
+        return False
+    if not idx or (
+        sub.refused_at == RefusalSite.ROW
+        and not (sub.refused_row is not None and 0 <= sub.refused_row < len(idx))
+    ):
+        return False
+    if ins.outcome != Outcome.REJECTED or any(k in raw_insert for k in INSERT_NEVER):
+        return False
+    # the outcome class and code stay equal, to the whole batch and to the t rows' batch
+    if not ins.err_code == batch.err_code == sub.err_code:
+        return False
+    # err: the server's for the first failing kept row, numbered over the kept rows
+    if ins.err_msg != sub.err_msg:
+        return False
+    shared = (
+        (batch.reason, ins.reason),
+        (batch.refused_at, ins.refused_at),
+        (batch.rows_skipped, ins.rows_skipped),
+        (batch.unsupported_settings, ins.unsupported_settings),
+        (batch.framing, ins.framing),
+        (batch.partition_count, ins.partition_count),
+    )
+    if any(a != b for a, b in shared):
+        return False
+    # rows_read: where the insert's reader stopped, which no batch states; bounded only
+    at_row = sub.refused_at == RefusalSite.ROW and sub.refused_row is not None
+    first = idx[sub.refused_row] if at_row else idx[0]
+    if not first + 1 <= ins.rows_read <= batch.rows_read:
+        return False
+    return (
+        (ins.rows_passed, ins.rows_cut, ins.rows_undecided) == (0, 0, 0)
+        and "export_columns" not in raw_insert
+        and out is None
+    )
+
+
 def post_where_cut(
     batch: BatchResult,
     ins: InsertResult,
@@ -83,13 +149,8 @@ def post_where_cut(
         return False
     if any(rows[i].outcome != Outcome.ACCEPTED for i in idx):
         return False
-    if len(sub.rows) != len(idx) or sub.rows_read != len(idx) or sub.rows_skipped != 0:
+    if not same_records(batch, idx, sub):
         return False
-    for r, i in zip(sub.rows, idx, strict=True):
-        if r.input_span is None or rows[i].input_span is None:
-            return False
-        if r.input_span.len != rows[i].input_span.len:
-            return False
     if sub.outcome != Outcome.ACCEPTED or any(r.verdict != Verdict.TRUE for r in sub.rows):
         return False
     if sub.export_declined != b"" or sub.export_declined_reason is not None:
@@ -185,7 +246,10 @@ def first_violation(
     ):
         return "violates", "export_decline_is_call_decline"
 
-    # A filtered batch the body steps refused, and an insert that did not refuse with it.
+    # post_where_cut and post_where_refusal split on the t rows' batch, accepted or refused.
+    if pwc is not None and pwc[1].outcome != Outcome.ACCEPTED:
+        ok = post_where_refusal(batch, ins, raw_insert, out, pwc)
+        return ("equal", None) if ok else ("violates", "post_where_refusal")
     if pwc is not None or (
         filtered and batch.outcome == Outcome.REJECTED and ins.outcome == Outcome.ACCEPTED
     ):
@@ -303,12 +367,12 @@ def verdict(case: dict):
 
 @needs_fixture
 def test_the_fixture_is_the_shape_this_gate_expects() -> None:
-    assert sum(c["expect"] == "equal" for c in CASES) == 18
+    assert sum(c["expect"] == "equal" for c in CASES) == 19
     assert sum(isinstance(c["expect"], dict) and "exception" in c["expect"] for c in CASES) == 1
     for rule in RULES:
         assert any(c["expect"] == {"violates": rule} for c in CASES), rule
     assert any(c["expect"] == {"exception": "generator_draw"} for c in CASES)
-    assert sum(isinstance(c["expect"], dict) and "violates" in c["expect"] for c in CASES) == 29
+    assert sum(isinstance(c["expect"], dict) and "violates" in c["expect"] for c in CASES) == 31
 
 
 @needs_fixture
@@ -367,4 +431,4 @@ def test_the_fixture_gate_ran_cases() -> None:
                 f"CHTYPES_REQUIRE_FIXTURES=1 and the insert-projection fixture is absent: {FIXTURE}"
             )
         pytest.skip(f"insert-projection fixture absent ({FIXTURE}): not a full-repository tree")
-    assert len(CASES) == 48
+    assert len(CASES) == 51
