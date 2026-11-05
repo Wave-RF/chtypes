@@ -89,8 +89,17 @@ export abstract class Abi2Handle {
   }
 }
 
+/**
+ * Test-only: how many handles a finalizer freed (a caller dropped them without `close()`), in total and by kind. A
+ * test that compares live counts asserts these did not move, so a free timed by a collection can never pass for a
+ * leak or hide one. Not exported from the package.
+ */
+export const finalizersForTest: { count: number; byKind: Record<string, number> } = { count: 0, byKind: {} };
+
 function makeHandleClass(kind: string): new (raw: RawApi, ptr: JsExternal) => Abi2Handle {
   const registry = new FinalizationRegistry<{ raw: RawApi; ptr: JsExternal; freeSymbol: string }>((held) => {
+    finalizersForTest.count++;
+    finalizersForTest.byKind[kind] = (finalizersForTest.byKind[kind] ?? 0) + 1;
     freeHandle(held.raw, held.freeSymbol, held.ptr);
   });
   const info = HANDLE_INFO[kind];
