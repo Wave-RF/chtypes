@@ -21,6 +21,9 @@
  * 1 — never a zero-run: main() counts both passes and failures and refuses
  * to report success on zero checks.
  */
+#if defined(__linux__) && !defined(_POSIX_C_SOURCE)
+#  define _POSIX_C_SOURCE 200809L /* nanosleep, for the cancel test's wait */
+#endif
 #include "chtypes.h"
 
 #include <dlfcn.h>
@@ -28,6 +31,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 static int g_pass = 0, g_fail = 0;
 
@@ -630,6 +634,190 @@ static void test_server_profile(lib_t *l) {
 }
 #endif
 
+#if CHS_ABI_VERSION >= 2
+/* Generation 2: the cancel token (scripts/abi-v1/emit/_stubshared.py CANCEL),
+   through the real chs_cancel_* calls and chs_preview_row's options document,
+   with the stub's two counters read through its own exports
+   (chs_stub_inflight, chs_stub_fire_after_free), so the call fired "during"
+   is sequenced on the stub's state, never on a sleep: a never-fired token
+   answers as no token, an unknown id is refused, a fire before the call
+   cancels it at entry, a fire from another thread while the call is blocked
+   in the directive cancels it there, every canceled call answers no output
+   and the reason call-canceled, a fire on a freed token is counted and not
+   applied, and every token is gone from the live count once freed. */
+typedef chs_status (*fn_cancel_create)(chs_cancel **, chs_buf **, chs_error **);
+typedef void (*fn_cancel_fire)(const chs_cancel *);
+typedef int32_t (*fn_cancel_fired)(const chs_cancel *);
+typedef void (*fn_cancel_free)(chs_cancel *);
+typedef long long (*fn_stub_counter)(void);
+
+typedef struct {
+    lib_t *l;
+    const char *options;
+    chs_schema *schema;
+    chs_status status;
+    chs_buf *out;
+    chs_error *err;
+} cancel_call_t;
+
+static void cancel_call(cancel_call_t *c, const char *body) {
+    c->out = NULL;
+    c->err = NULL;
+    c->status = c->l->preview_row(c->schema, CHS_JSON_EACH_ROW, (const uint8_t *) body, strlen(body), NULL, 0, NULL, 0,
+                                  (const uint8_t *) c->options, strlen(c->options), &c->out, &c->err);
+}
+
+static void *cancel_blocked_worker(void *p) {
+    cancel_call((cancel_call_t *) p, "!B:{}");
+    return NULL;
+}
+
+static void *cancel_late_worker(void *p) {
+    cancel_call((cancel_call_t *) p, "!L:{}");
+    return NULL;
+}
+
+static int buf_is(lib_t *l, chs_buf *b, const char *want) {
+    if (b == NULL) return 0;
+    size_t n = l->buf_len(b);
+    int same = n == strlen(want) && memcmp(l->buf_data(b), want, n) == 0;
+    l->buf_free(b);
+    return same;
+}
+
+static void test_cancel(lib_t *l) {
+    fn_cancel_create create;
+    fn_cancel_fire fire;
+    fn_cancel_fired fired;
+    fn_cancel_free cfree;
+    fn_error_text error_reason;
+    fn_stub_counter inflight, fire_after_free;
+    *(void **) &create = dlsym(l->handle, "chs_cancel_create");
+    *(void **) &fire = dlsym(l->handle, "chs_cancel_fire");
+    *(void **) &fired = dlsym(l->handle, "chs_cancel_fired");
+    *(void **) &cfree = dlsym(l->handle, "chs_cancel_free");
+    *(void **) &error_reason = dlsym(l->handle, "chs_error_reason");
+    *(void **) &inflight = dlsym(l->handle, "chs_stub_inflight");
+    *(void **) &fire_after_free = dlsym(l->handle, "chs_stub_fire_after_free");
+    CHECK(create && fire && fired && cfree && error_reason && inflight && fire_after_free,
+          "the cancel symbols and the stub's two counters resolve");
+    if (!(create && fire && fired && cfree && error_reason && inflight && fire_after_free)) return;
+
+    long cancel_before = live_count(l, "chs_cancel");
+    chs_error *err = NULL;
+    chs_schema *schema = NULL;
+    CHECK(SCHEMA_CREATE(l, (const uint8_t *) "x", 1, NULL, 0, &schema, &err) == CHS_OK, "chs_schema_create");
+
+    chs_cancel *tok[3] = {NULL, NULL, NULL};
+    char opts[3][64];
+    for (int i = 0; i < 3; i++) {
+        chs_buf *id = NULL;
+        CHECK(create(&tok[i], &id, &err) == CHS_OK && tok[i] != NULL && id != NULL, "chs_cancel_create %d", i);
+        size_t n = id ? l->buf_len(id) : 0;
+        const uint8_t *d = id ? l->buf_data(id) : NULL;
+        int shape = n == 17 && d[0] == 'c';
+        for (size_t k = 1; shape && k < n; k++) shape = (d[k] >= '0' && d[k] <= '9') || (d[k] >= 'a' && d[k] <= 'f');
+        CHECK(shape, "chs_cancel_create %d: the id is c and 16 lowercase hex digits", i);
+        snprintf(opts[i], sizeof opts[i], "{\"cancel\":\"%.*s\"}", (int) n, d ? (const char *) d : "");
+        if (id) l->buf_free(id);
+    }
+    CHECK(strcmp(opts[0], opts[1]) != 0 && strcmp(opts[1], opts[2]) != 0 && strcmp(opts[0], opts[2]) != 0,
+          "three tokens, three ids");
+    CHECK(live_count(l, "chs_cancel") == cancel_before + 3, "live chs_cancel counts the three tokens");
+
+    /* never fired: the call answers its echo */
+    cancel_call_t c = {l, opts[0], schema, 0, NULL, NULL};
+    cancel_call(&c, "{}");
+    CHECK(c.status == CHS_OK && c.out != NULL && c.err == NULL, "a never-fired token: CHS_OK with the echo");
+    if (c.out) l->buf_free(c.out);
+    CHECK(fired(tok[0]) == 0, "chs_cancel_fired before any fire");
+
+    /* an unknown id */
+    c.options = "{\"cancel\":\"c0000000000000000\"}";
+    cancel_call(&c, "{}");
+    CHECK(c.status == CHS_INVALID_ARGUMENT && c.out == NULL, "an unknown id: CHS_INVALID_ARGUMENT");
+    if (c.err) l->error_free(c.err);
+
+    /* fired before the call: canceled at entry, no output, the reason */
+    fire(tok[0]);
+    fire(tok[0]); /* idempotent */
+    CHECK(fired(tok[0]) == 1, "chs_cancel_fired after a fire");
+    c.options = opts[0];
+    cancel_call(&c, "{}");
+    CHECK(c.status == CHS_CANCELED && c.out == NULL && c.err != NULL, "pre-fired: CHS_CANCELED, no output");
+    if (c.err) {
+        CHECK(l->error_status(c.err) == CHS_CANCELED && l->error_ch_code(c.err) == 0, "pre-fired: the error");
+        CHECK(buf_is(l, error_reason(c.err), "call-canceled"), "pre-fired: reason call-canceled");
+        CHECK(buf_is(l, l->error_message(c.err), "call canceled at entry: the token was fired before the call"),
+              "pre-fired: the message names the entry check point");
+        l->error_free(c.err);
+    }
+
+    /* fired during: another thread blocks in the directive; fire once it is in */
+    long long inflight_before = inflight();
+    cancel_call_t d = {l, opts[1], schema, 0, NULL, NULL};
+    pthread_t th;
+    CHECK(pthread_create(&th, NULL, cancel_blocked_worker, &d) == 0, "pthread_create");
+    struct timespec ms = {0, 1000000L};
+    for (int i = 0; i < 5000 && inflight() <= inflight_before; i++) nanosleep(&ms, NULL);
+    CHECK(inflight() == inflight_before + 1, "the call reached the directive (chs_stub_inflight)");
+    fire(tok[1]);
+    pthread_join(th, NULL);
+    CHECK(inflight() == inflight_before, "the call left the directive");
+    CHECK(d.status == CHS_CANCELED && d.out == NULL && d.err != NULL, "during: CHS_CANCELED, no output");
+    if (d.err) {
+        CHECK(buf_is(l, error_reason(d.err), "call-canceled"), "during: reason call-canceled");
+        CHECK(buf_is(l, l->error_message(d.err), "call canceled at the stub's block check point"),
+              "during: the message names the block check point");
+        l->error_free(d.err);
+    }
+
+    /* fired after the last check point (!L:): blocks like !B:, then answers the echo */
+    {
+        chs_cancel *lt = NULL;
+        chs_buf *lid = NULL;
+        CHECK(create(&lt, &lid, &err) == CHS_OK && lt != NULL && lid != NULL, "chs_cancel_create (late)");
+        char lopts[64];
+        snprintf(lopts, sizeof lopts, "{\"cancel\":\"%.*s\"}", (int) (lid ? l->buf_len(lid) : 0),
+                 lid ? (const char *) l->buf_data(lid) : "");
+        if (lid) l->buf_free(lid);
+        long long before = inflight();
+        cancel_call_t e = {l, lopts, schema, 0, NULL, NULL};
+        pthread_t lth;
+        CHECK(pthread_create(&lth, NULL, cancel_late_worker, &e) == 0, "pthread_create (late)");
+        for (int i = 0; i < 5000 && inflight() <= before; i++) nanosleep(&ms, NULL);
+        CHECK(inflight() == before + 1, "the !L: call reached its wait (chs_stub_inflight)");
+        fire(lt);
+        pthread_join(lth, NULL);
+        CHECK(inflight() == before, "the !L: call left its wait");
+        CHECK(e.status == CHS_OK && e.out != NULL && e.err == NULL, "after the last check point: CHS_OK with the echo, not CHS_CANCELED");
+        if (e.out) l->buf_free(e.out);
+        if (e.err) l->error_free(e.err);
+        cfree(lt);
+    }
+
+    /* a fire on a freed token is counted, never applied; its id is gone */
+    long long faf_before = fire_after_free();
+    cfree(tok[2]);
+    fire(tok[2]);
+    CHECK(fire_after_free() == faf_before + 1, "a fire after free is counted (chs_stub_fire_after_free)");
+    CHECK(fired(tok[2]) == 0, "a freed token reads unfired");
+    c.options = opts[2];
+    cancel_call(&c, "{}");
+    CHECK(c.status == CHS_INVALID_ARGUMENT, "a freed token's id is unknown");
+    if (c.err) l->error_free(c.err);
+    cfree(tok[2]); /* a second free is a no-op */
+
+    cfree(tok[0]);
+    cfree(tok[1]);
+    cfree(NULL);
+    fire(NULL);
+    CHECK(fired(NULL) == 0, "chs_cancel_fired(NULL)");
+    CHECK(live_count(l, "chs_cancel") == cancel_before, "live chs_cancel returns to its baseline");
+    l->schema_free(schema);
+}
+#endif
+
 static void test_unbound_refuses_rtld_now(const char *dir) {
     char path[4096];
     snprintf(path, sizeof path, "%s/unbound.so", dir);
@@ -666,6 +854,7 @@ int main(int argc, char **argv) {
     test_cross_image(&a, &b);
 #if CHS_ABI_VERSION >= 2
     test_server_profile(&a);
+    test_cancel(&a);
 #endif
     test_unbound_refuses_rtld_now(argv[1]);
 

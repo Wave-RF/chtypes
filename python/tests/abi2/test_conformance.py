@@ -11,14 +11,17 @@ python/tests/abi2/test_loader.py's.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
+import re
 import threading
+import time
 
 import pytest
 
 from chtypes._abi2 import _decls, _loader
 
-from .conftest import build_args, cases_of_kind, strip_ids, stub_path
+from .conftest import build_arg, build_args, cases_of_kind, strip_ids, stub_path
 
 _CASES, _IDS = cases_of_kind("handshake", "echo", "status", "lifecycle", "concurrent", "document")
 
@@ -55,6 +58,10 @@ def _check_error(case: dict, result, expect_error: dict) -> None:
     assert result.error.ch_name == expect_error["ch_name"].encode(), case["id"]
     assert result.error.message == expect_error["message"].encode(), case["id"]
     assert result.error.column == expect_error["column"].encode(), case["id"]
+    if "reason" in expect_error:
+        assert result.error.reason == expect_error["reason"].encode(), (
+            f"{case['id']}: want reason {expect_error['reason']!r}, got {result.error.reason!r}"
+        )
 
 
 def _check_result(case: dict, result, expect: dict) -> None:
@@ -63,6 +70,11 @@ def _check_result(case: dict, result, expect: dict) -> None:
     )
     if "error" in expect:
         _check_error(case, result, expect["error"])
+    if expect.get("null_outputs"):
+        # invoke_by_name records only the outputs that are not NULL.
+        assert not result.outputs and not result.out_handles, (
+            f"{case['id']}: want every output NULL, got {result.outputs} {result.out_handles}"
+        )
     if "outputs" in expect:
         for name, want_echo in expect["outputs"].items():
             raw = result.outputs.get(name)
@@ -120,25 +132,135 @@ def _live(api) -> dict:
 
 
 _LIVE_FN = "chs_live_handles"
+_CANCEL_ID = re.compile(r"c[0-9a-f]{16}")
+
+
+def _cancel_options(ids: dict, name: str) -> bytes:
+    """The options document a `cancel_options` argument names."""
+    assert name in ids, f"cancel_options {name!r}: no token is bound to that name"
+    return b'{"cancel":"' + ids[name] + b'"}'
+
+
+def _resolve(api, args: list, refs: dict, ids: dict) -> list:
+    """build_args, plus the `cancel_options` argument shape."""
+    return [
+        _cancel_options(ids, a["cancel_options"])
+        if "cancel_options" in a
+        else build_arg(api, a, refs)
+        for a in args
+    ]
+
+
+def _substitute_cancel_echo(v, ids: dict):
+    """Each {"cancel_echo": name} in an expectation, replaced by the stub's echo
+    of the `cancel_options` bytes for that name (the id is minted at run time)."""
+    if isinstance(v, dict):
+        if set(v) == {"cancel_echo"}:
+            b = _cancel_options(ids, v["cancel_echo"])
+            return {
+                "head_hex": b[:16].hex(),
+                "len": len(b),
+                "sha256": hashlib.sha256(b).hexdigest(),
+            }
+        return {k: _substitute_cancel_echo(x, ids) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_substitute_cancel_echo(x, ids) for x in v]
+    return v
+
+
+def _cancel_inflight(api) -> int:
+    """The stub's cancel probe: how many calls sit blocked in its directive."""
+    result = _decls.invoke_by_name(api, "chs_type_validate", [b"!C:"])
+    assert result.status == "CHS_OK", f"cancel probe failed: {result.status}"
+    return json.loads(result.outputs["out"])["inflight"]
+
+
+def _close_all(result) -> None:
+    for h in result.out_handles.values():
+        h.close()
+
+
+def _run_blocked_call(api, case: dict, step: dict, refs: dict, ids: dict, where: str) -> None:
+    """Start the call on another thread (its first bytes_in begins the stub's
+    block directive), wait until the probe reads one more call in flight, fire
+    the token from this thread, join, and check. Sequenced on the probe; the
+    poll only bounds how long a broken stub can hang the case."""
+    spec = step["blocked_call"]
+    token = refs[spec["fire"]]
+    before = _cancel_inflight(api)
+    call = spec["call"]
+    args = _resolve(api, call["args"], refs, ids)
+    box: dict = {}
+
+    def worker() -> None:
+        try:
+            box["result"] = _decls.invoke_by_name(api, call["fn"], args)
+        except BaseException as e:  # noqa: BLE001 - reported to the main thread
+            box["error"] = e
+
+    th = threading.Thread(target=worker)
+    th.start()
+    entered = False
+    for _ in range(5000):
+        if _cancel_inflight(api) > before:
+            entered = True
+            break
+        time.sleep(0.001)
+    _decls.invoke_by_name(api, "chs_cancel_fire", [token])
+    th.join()
+    assert entered, f"{where}: the call never reached the stub's block directive"
+    assert "error" not in box, f"{where}: {box.get('error')!r}"
+    result = box["result"]
+    try:
+        _check_result(case, result, _substitute_cancel_echo(spec["expect"], ids))
+    finally:
+        _close_all(result)
 
 
 def _run_lifecycle(api, case: dict) -> None:
     base = _live(api)
     refs: dict = {}
+    ids: dict = {}
     try:
         for i, step in enumerate(case["steps"]):
             where = f"{case['id']} step {i}"
-            if "let" in step:
+            if "cancel" in step:
+                result = _decls.invoke_by_name(api, "chs_cancel_create", [])
+                assert result.status == "CHS_OK", f"{where}: chs_cancel_create gave {result.status}"
+                cid = result.outputs.get("out_id", b"")
+                refs[step["cancel"]] = result.out_handles["out"]
+                assert _CANCEL_ID.fullmatch(cid.decode("ascii", "replace")), f"{where}: id {cid!r}"
+                ids[step["cancel"]] = cid
+            elif "fire" in step:
+                _decls.invoke_by_name(api, "chs_cancel_fire", [refs[step["fire"]]])
+            elif "fired" in step:
+                got = _decls.invoke_by_name(
+                    api, "chs_cancel_fired", [refs[step["fired"]]]
+                ).int_value
+                assert got == step["want"], (
+                    f"{where}: chs_cancel_fired = {got}, want {step['want']}"
+                )
+            elif "blocked_call" in step:
+                _run_blocked_call(api, case, step, refs, ids, where)
+            elif "let" in step:
                 call = step["call"]
-                result = _decls.invoke_by_name(api, call["fn"], build_args(api, call["args"], refs))
+                result = _decls.invoke_by_name(
+                    api, call["fn"], _resolve(api, call["args"], refs, ids)
+                )
                 assert result.status == "CHS_OK", f"{where}: {call['fn']} gave {result.status}"
                 handles = list(result.out_handles.values())
                 assert len(handles) == 1, f"{where}: want one minted handle, got {handles}"
                 refs[step["let"]] = handles[0]
             elif "call" in step:
                 call = step["call"]
-                result = _decls.invoke_by_name(api, call["fn"], build_args(api, call["args"], refs))
-                _check_result(case, result, step["expect"])
+                result = _decls.invoke_by_name(
+                    api, call["fn"], _resolve(api, call["args"], refs, ids)
+                )
+                try:
+                    _check_result(case, result, _substitute_cancel_echo(step["expect"], ids))
+                finally:
+                    # A handle the call minted (no `let` binds it) is freed straight after.
+                    _close_all(result)
             elif "free" in step:
                 refs.pop(step["free"]).close()
             elif "live_delta" in step:

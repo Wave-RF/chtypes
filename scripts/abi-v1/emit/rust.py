@@ -72,6 +72,8 @@ untouched v1 path, byte for byte as before.
 
 from __future__ import annotations
 
+import re
+
 import shutil
 import subprocess
 
@@ -385,6 +387,8 @@ def _minted_variant(handle_type: str) -> str:
 
 def render_invoke(model) -> str:
     kinds = stub.classify(model)
+    # Generation 2 on: the error's catalog id (chs_error_reason), for the cases that expect one.
+    has_reason = any(fn.name == "chs_error_reason" for fn in model.functions)
     generic = [fn for fn in model.functions if kinds.get(fn.name) == "generic"]
     non_error_handles = [h for h in model.handles if h != ERROR_HANDLE]
 
@@ -408,7 +412,8 @@ def render_invoke(model) -> str:
         "use super::decls::{",
         "    self, Api,",
     ]
-    out.append("    " + ", ".join(sorted({handle_rust_name(h) for h in model.handles})) + ",")
+    import_at = len(out)
+    out.append("")  # the handle-type import, filled in below with only the names the body uses
     out += [
         "};",
         "",
@@ -474,6 +479,7 @@ def render_invoke(model) -> str:
         "    pub(crate) ch_name: String,",
         "    pub(crate) message: String,",
         "    pub(crate) column: String,",
+        *(["    pub(crate) reason: String,"] if has_reason else []),
         "}",
         "",
         "/// What invoking one function produced, generic across every call shape",
@@ -636,8 +642,16 @@ def render_invoke(model) -> str:
         "            let message = take_buf_text(api, message_buf);",
         "            let column_buf = (api.chs_error_column)(err as *const decls::ChsError);",
         "            let column = take_buf_text(api, column_buf);",
+        *(
+            [
+                "            let reason_buf = (api.chs_error_reason)(err as *const decls::ChsError);",
+                "            let reason = take_buf_text(api, reason_buf);",
+            ]
+            if has_reason
+            else []
+        ),
         "            (api.chs_error_free)(err);",
-        "            Some(CaseError { ch_code, ch_name, message, column })",
+        "            Some(CaseError { ch_code, ch_name, message, column" + (", reason" if has_reason else "") + " })",
         "        }",
         "    };",
         "    Ok(Outcome::Call { status: name, error, outputs })",
@@ -787,6 +801,13 @@ def render_invoke(model) -> str:
         "",
     ]
 
+    # Import only the handle types an arm names: a handle whose one minting
+    # call moved out of the generic dispatcher (chs_cancel_create, now
+    # hand-written in the stub) would otherwise be an unused import.
+    rest = "\n".join(out)
+    names = sorted({handle_rust_name(h) for h in model.handles})
+    used = [n for n in names if re.search(rf"(?<!::)\b{n}\b", rest)]  # a decls::-qualified use needs no import
+    out[import_at] = "    " + ", ".join(used) + ","
     return "\n".join(out)
 
 
