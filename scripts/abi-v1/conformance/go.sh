@@ -19,7 +19,10 @@
 # are set is a failure, a zero-run is a failure, and TestConformance,
 # TestGoldensV1StubSelfCheck, TestSetupCases, TestStub* and TestRegistry* must each
 # have passed, by name, in the printed census. (Public issue #463: the three named
-# runs left TestStub* and TestRegistry* running in no CI job.)
+# runs left TestStub* and TestRegistry* running in no CI job.) And the tests that
+# passed must be exactly the ones tests/fixtures/abi-v<N>/stub-census/go.txt pins,
+# by package and name: a pinned test that skipped, failed or is gone fails the
+# run, and so does a test that passed but is not pinned (public issue #727).
 #
 #     scripts/abi-v1/conformance/go.sh --selftest   prove the census on synthetic logs
 #
@@ -82,7 +85,7 @@ go test -race ./... -count=1 -json >"$LOG" 2>&1 || rc=$?
 
 echo "go.sh: stub census"
 census_rc=0
-python3 "$CENSUS" go "$LOG" "$rc" \
+python3 "$CENSUS" go "$LOG" "$rc" --binding go \
     --require 'TestConformance' \
     --require 'TestGoldensV1StubSelfCheck' \
     --require 'TestSetupCases' \
