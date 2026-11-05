@@ -565,13 +565,14 @@ extern "C" {
  *   the same body: measured at 70 to 195 MiB where the server's query peaked at 0.4 to 13.5 MiB. A
  *   caller sizes the limit from the call, not from the server's query memory. When the call reaches
  *   it, the whole call declines (`reason` `call-memory-budget`, `code` `CHS_CODE_DECLINED`,
- *   `refused_at` `call`) and produces no partial output: no export or output bytes, and
- *   `export_declined` where an export or an output was asked for. It is never a rejection with
- *   ClickHouse's code 241, because the library's peak is not the server's, so a 241 would be an
- *   over-reject wherever the server stays under its limit. A profile's `max_memory_usage` stays a
- *   declined setting. Each of the five calls has a conformance case: at a forced tiny limit the
- *   call declines `call-memory-budget` with no partial output, and absent and `"0"` answer as with
- *   no limit [`insert_options.memory_limit_bytes`].
+ *   `refused_at` `call`) and produces no partial output: no export or output bytes;
+ *   `chs_preview_batch` carries `export_declined` where an export was asked for, and
+ *   `chs_preview_insert` carries no `export_*` member. It is never a rejection with ClickHouse's
+ *   code 241, because the library's peak is not the server's, so a 241 would be an over-reject
+ *   wherever the server stays under its limit. A profile's `max_memory_usage` stays a declined
+ *   setting. Each of the five calls has a conformance case: at a forced tiny limit the call
+ *   declines `call-memory-budget` with no partial output, and absent and `"0"` answer as with no
+ *   limit [`insert_options.memory_limit_bytes`].
  * - `cancel`: the id of a cancel token (`chs_cancel_create`'s `out_id`: `c` and 16 lowercase
  *   hexadecimal digits), resolved at the call's entry. Absent is no token. Every call that takes
  *   this document honors it, and it means the same at each: a fired token makes the call return
