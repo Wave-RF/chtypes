@@ -13,7 +13,7 @@
 //! back for a refusal, read the raw document and the raw bytes. Both documents
 //! of every case go through this crate's real decoders (`decode::batch` and
 //! `decode::insert_result`), so a case proves the decoders as well as the
-//! rule. Each case carries its expected result; the fixture's 24 planted reds
+//! rule. Each case carries its expected result; the fixture's 26 planted reds
 //! and its exception keep the gate honest: a rule that cannot fire fails here.
 //!
 //! This is a unit test of the crate (src/lib.rs declares it with `#[path]`)
@@ -46,12 +46,12 @@ fn batch_filtered(batch: &BatchResult) -> bool {
     batch.rows.iter().any(|r| r.verdict.is_some()) || batch.rows_passed != 0 || batch.rows_cut != 0
 }
 
-/// ` (at row N)`: ClickHouse's own suffix, nothing else.
+/// `: (at row N)` and a line feed: ClickHouse's own suffix, nothing else.
 fn is_row_suffix(rest: &[u8]) -> bool {
-    let Some(rest) = rest.strip_prefix(b" (at row ") else {
+    let Some(rest) = rest.strip_prefix(b": (at row ") else {
         return false;
     };
-    let Some(digits) = rest.strip_suffix(b")") else {
+    let Some(digits) = rest.strip_suffix(b")\n") else {
         return false;
     };
     !digits.is_empty() && digits.iter().all(u8::is_ascii_digit)
@@ -129,14 +129,19 @@ fn evaluate(
             && ins.err_code == -2
             && ins.refused_at == Some(RefusalSite::BodyStep)
             && ins.export_columns.is_none()
-            && out.is_none();
+            && out.is_none()
+            && ins.err_msg == batch.export_declined
+            && (!filtered
+                || (ins.rows_passed == Some(0)
+                    && ins.rows_cut == Some(0)
+                    && ins.rows_undecided == Some(0)));
         if !ok {
             return Projection::Violates("export_decline_is_call_decline");
         }
     }
 
     // shared_members: an insert never carries export_declined*; under a
-    // declined output the call's own decline replaces five members.
+    // declined output the call's own decline replaces seven members.
     if [
         "export_declined",
         "export_declined_b64",
@@ -158,8 +163,8 @@ fn evaluate(
         && batch.framing == ins.framing
         && batch.partition_count == ins.partition_count
         && replaced(batch.export_columns == ins.export_columns)
-        && filtered.then_some(batch.rows_passed) == ins.rows_passed
-        && filtered.then_some(batch.rows_cut) == ins.rows_cut;
+        && replaced(filtered.then_some(batch.rows_passed) == ins.rows_passed)
+        && replaced(filtered.then_some(batch.rows_cut) == ins.rows_cut);
     if !shared {
         return Projection::Violates("shared_members");
     }
@@ -177,21 +182,28 @@ fn evaluate(
         } else {
             batch.rows_passed == 0 && batch.rows_cut == 0
         };
-        if !(good && ins.rows_undecided == Some(d)) {
+        let want = if ins.outcome == Outcome::Accepted {
+            (Some(t), Some(f + d), Some(d))
+        } else {
+            (Some(0), Some(0), Some(0))
+        };
+        if !(good && (ins.rows_passed, ins.rows_cut, ins.rows_undecided) == want) {
             return Projection::Violates("counts");
         }
     } else if ins.rows_passed.is_some() || ins.rows_cut.is_some() || ins.rows_undecided.is_some() {
         return Projection::Violates("counts");
     }
 
-    // err
-    let (be, ie) = (batch.err_msg.as_bytes(), ins.err_msg.as_bytes());
-    if !ie.starts_with(be) {
-        return Projection::Violates("err_prefix");
-    }
-    let rest = &ie[be.len()..];
-    if !rest.is_empty() && !is_row_suffix(rest) {
-        return Projection::Violates("err_suffix");
+    // err: a declined output's err is the decline text, checked above
+    if !declined {
+        let (be, ie) = (batch.err_msg.as_bytes(), ins.err_msg.as_bytes());
+        if !ie.starts_with(be) {
+            return Projection::Violates("err_prefix");
+        }
+        let rest = &ie[be.len()..];
+        if !rest.is_empty() && !is_row_suffix(rest) {
+            return Projection::Violates("err_suffix");
+        }
     }
 
     // output
@@ -393,11 +405,13 @@ fn the_line_counter_and_the_suffix_match_the_checkers_primitives() {
     assert_eq!(line_count(b"a\r\nb\r\n"), 2);
     assert_eq!(line_count(b"a\rb"), 2);
     assert_eq!(line_count(b"\n\n"), 2);
-    assert!(is_row_suffix(b" (at row 12)"));
-    assert!(!is_row_suffix(b" (at row )"));
-    assert!(!is_row_suffix(b" (at row 1x)"));
-    assert!(!is_row_suffix(b"(at row 1)"));
-    assert!(!is_row_suffix(b" (at row 1) "));
+    assert!(is_row_suffix(b": (at row 12)\n"));
+    assert!(!is_row_suffix(b": (at row 12)"));
+    assert!(!is_row_suffix(b": (at row 12)\n\n"));
+    assert!(!is_row_suffix(b" (at row 12)\n"));
+    assert!(!is_row_suffix(b": (at row )\n"));
+    assert!(!is_row_suffix(b": (at row 1x)\n"));
+    assert!(!is_row_suffix(b"(at row 1)\n"));
 }
 
 /// Where `CHTYPES_REQUIRE_FIXTURES` is "1" (the repository's main CI) an absent

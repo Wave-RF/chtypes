@@ -43,8 +43,9 @@ export type ProjectionVerdict =
 const EQUAL: ProjectionVerdict = { kind: 'equal' };
 const violates = (rule: (typeof RULES)[number]): ProjectionVerdict => ({ kind: 'violates', rule });
 
-// ClickHouse's own suffix. `\n?` mirrors Python's `$`, which also matches before a trailing newline.
-const SUFFIX = /^ \(at row [0-9]+\)\n?$/;
+// ClickHouse's own row-reader suffix: a colon, a space, `(at row N)` and a line feed. Matched on latin1
+// text with no trimming, and `$` without the m flag matches only at the very end in JavaScript.
+const SUFFIX = /^: \(at row [0-9]+\)\n$/;
 
 function buffersEqual(a: readonly Buffer[], b: readonly Buffer[]): boolean {
   return a.length === b.length && a.every((x, i) => x.equals(b[i] as Buffer));
@@ -112,7 +113,9 @@ export function projectionVerdict(
         ins.errCode === -2 &&
         ins.refusedAt === 'body_step' &&
         ins.exportColumns === undefined &&
-        out === undefined
+        out === undefined &&
+        ins.errMsg.equals(batch.exportDeclined) &&
+        (!filtered || (ins.rowsPassed === 0 && ins.rowsCut === 0 && ins.rowsUndecided === 0))
       )
     ) {
       return violates('export_decline_is_call_decline');
@@ -134,8 +137,7 @@ export function projectionVerdict(
       isDeepStrictEqual(batch.framing, ins.framing) &&
       batch.partitionCount === ins.partitionCount &&
       (declined || optBuffersEqual(batch.exportColumns, ins.exportColumns)) &&
-      batchPassed === ins.rowsPassed &&
-      batchCut === ins.rowsCut
+      (declined || (batchPassed === ins.rowsPassed && batchCut === ins.rowsCut))
     )
   ) {
     return violates('shared_members');
@@ -147,17 +149,20 @@ export function projectionVerdict(
   const d = verdicts.filter((v) => v === 'd').length;
   if (filtered) {
     const good = batch.outcome === 'accepted' ? batch.rowsPassed === t && batch.rowsCut === f + d : batch.rowsPassed === 0 && batch.rowsCut === 0;
-    if (!(good && ins.rowsUndecided === d)) return violates('counts');
+    const want = ins.outcome === 'accepted' ? [t, f + d, d] : [0, 0, 0];
+    if (!(good && ins.rowsPassed === want[0] && ins.rowsCut === want[1] && ins.rowsUndecided === want[2])) return violates('counts');
   } else if (ins.rowsPassed !== undefined || ins.rowsCut !== undefined || ins.rowsUndecided !== undefined) {
     return violates('counts');
   }
 
-  // err
-  const be = batch.errMsg;
-  const ie = ins.errMsg;
-  if (ie.length < be.length || !ie.subarray(0, be.length).equals(be)) return violates('err_prefix');
-  const rest = ie.subarray(be.length);
-  if (rest.length > 0 && !SUFFIX.test(rest.toString('latin1'))) return violates('err_suffix');
+  // err: the batch's, plus a remainder that is empty or the row-reader suffix (a declined output's err is the decline text, checked above)
+  if (!declined) {
+    const be = batch.errMsg;
+    const ie = ins.errMsg;
+    if (ie.length < be.length || !ie.subarray(0, be.length).equals(be)) return violates('err_prefix');
+    const rest = ie.subarray(be.length);
+    if (rest.length > 0 && !SUFFIX.test(rest.toString('latin1'))) return violates('err_suffix');
+  }
 
   // output
   if ((exp === undefined) !== (out === undefined)) return violates('output_presence');
