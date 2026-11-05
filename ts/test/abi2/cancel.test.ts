@@ -191,11 +191,15 @@ describe.skipIf(!stubsAvailable)('cancelable async calls over the stub library',
       const reasonValue = { why: `stop ${name}` };
       const p = call(ac.signal);
       expect(await waitFor(() => probe(image).inflight > before), `${name} reached the wait`).toBe(true);
+      const abortedAt = Date.now();
       ac.abort(reasonValue);
       await expectCanceled(p, reasonValue);
       // Rejected while the native call is still waiting inside the library.
       expect(probe(image).inflight, name).toBe(before + 1);
       expect(await waitFor(() => probe(image).inflight === before), `${name} native call returned`).toBe(true);
+      // The token fired (chs_cancel_fired would read 1): an `!L:` call returns only once its token fires, or after
+      // the stub's 10 s cap, so a return well inside the cap is the library observing the fire.
+      expect(Date.now() - abortedAt, `${name}: the token fired`).toBeLessThan(5000);
       await asyncCallsForTest.drain();
       const last = seen.at(-1);
       expect(last === undefined ? undefined : statusOf(last.result), `${name}: the library answered`).toBe(Status.Ok);
