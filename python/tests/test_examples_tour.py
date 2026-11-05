@@ -53,7 +53,7 @@ def test_an_advertised_insert_capability_never_skips() -> None:
 
     tour = _tour()
     features = {tour.INSERT_FEATURE, tour.MEMORY_FEATURE}
-    formats = {tour.NATIVE_FORMAT}
+    formats = {tour.NATIVE_FORMAT, tour.COMPACT_FORMAT}
     for n in (19, 20, 21):
         # Advertised: the section runs, and a decline anyway fails the tour.
         assert tour.capability_gate(n, features, formats) is False
@@ -61,5 +61,7 @@ def test_an_advertised_insert_capability_never_skips() -> None:
             tour.capability_gate(n, features, formats, declined=True)
         # Not advertised: a named skip, never a failure.
         assert tour.capability_gate(n, set(), set(), declined=True) is True
+    assert tour.capability_gate(19, features, {tour.NATIVE_FORMAT}) is True
     assert tour.capability_gate(20, features, set()) is True
     assert tour.capability_gate(21, {tour.INSERT_FEATURE}, formats) is True
+    assert tour.capability_gate(21, features, {tour.NATIVE_FORMAT}) is True

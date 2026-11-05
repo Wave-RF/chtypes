@@ -1333,6 +1333,7 @@ INSERT_BODY = b"".join(
 INSERT_FEATURE = "preview_insert"
 MEMORY_FEATURE = "insert_options.memory_limit_bytes"
 NATIVE_FORMAT = "Native"
+COMPACT_FORMAT = "JSONCompactEachRow"
 
 
 def missing_capabilities(
@@ -1340,6 +1341,8 @@ def missing_capabilities(
 ) -> list[str]:
     """The capabilities section n needs that the build does not advertise."""
     need = {INSERT_FEATURE: features}
+    if n in (19, 21):
+        need[COMPACT_FORMAT] = export_formats
     if n == 20:
         need[NATIVE_FORMAT] = export_formats
     if n == 21:
@@ -1407,8 +1410,14 @@ def section19(lib: chtypes.Library) -> None:
         lib.compile_table(INSERT_DDL) as schema,
         schema.compile_filter("k > 2") as filt,
     ):
-        ins = try_insert(19, schema, jer, INSERT_BODY, jer, row_filter=filt)
-        batch = schema.rows(jer, INSERT_BODY, row_filter=filt, export=jer, doc_flags=DocFlags.ALL)
+        ins = try_insert(19, schema, jer, INSERT_BODY, Format.JSON_COMPACT_EACH_ROW, row_filter=filt)
+        batch = schema.rows(
+            jer,
+            INSERT_BODY,
+            row_filter=filt,
+            export=Format.JSON_COMPACT_EACH_ROW,
+            doc_flags=DocFlags.ALL,
+        )
         kv(
             "insert",
             f"{ins.outcome.value}  passed={ins.rows_passed} cut={ins.rows_cut}",
@@ -1479,7 +1488,7 @@ def section21(lib: chtypes.Library) -> None:
             schema,
             Format.JSON_EACH_ROW,
             INSERT_BODY,
-            Format.NATIVE,
+            Format.JSON_COMPACT_EACH_ROW,
             memory_limit_bytes=1,
         )
         kv("memory_limit_bytes", "1")
