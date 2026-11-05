@@ -16,7 +16,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { decodeBatch, decodeInsert } from '../../src/documents.js';
-import { EXCEPTIONS, projectionVerdict, RULES } from './insert-projection-rule.js';
+import { type BatchOfTRows, EXCEPTIONS, projectionVerdict, RULES } from './insert-projection-rule.js';
 
 interface Case {
   readonly id: string;
@@ -25,6 +25,7 @@ interface Case {
   readonly batch_export_b64: string | null;
   readonly insert: unknown;
   readonly insert_rows_b64: string | null;
+  readonly batch_of_t_rows?: { readonly rows: readonly number[]; readonly batch: unknown; readonly export_b64: string | null };
   readonly expect: 'equal' | { readonly exception: string } | { readonly violates: string };
 }
 
@@ -37,12 +38,23 @@ const doc = (present ? JSON.parse(readFileSync(FIXTURE, 'utf8')) : { schema: '',
 
 const bytes = (b64: string | null): Buffer | undefined => (b64 === null ? undefined : Buffer.from(b64, 'base64'));
 
+/** A case's batch_of_t_rows through the real batch decoder; a malformed one is a fixture error, never a verdict. */
+function tRowsOf(c: Case): BatchOfTRows | undefined {
+  const ev = c.batch_of_t_rows;
+  if (ev === undefined) return undefined;
+  const n = (c.batch as { rows: unknown[] }).rows.length;
+  if (!ev.rows.every((i, k) => Number.isInteger(i) && i >= 0 && i < n && (k === 0 || i > (ev.rows[k - 1] as number)))) {
+    throw new Error(`${c.id}: batch_of_t_rows.rows is not increasing indexes into the batch's rows`);
+  }
+  return { rows: ev.rows, batch: decodeBatch(Buffer.from(JSON.stringify(ev.batch)), undefined), exp: bytes(ev.export_b64) };
+}
+
 function run(c: Case) {
   const batch = decodeBatch(Buffer.from(JSON.stringify(c.batch)), undefined);
   const ins = decodeInsert(Buffer.from(JSON.stringify(c.insert)), undefined);
   // The comparator is handed the RAW insert document and the raw output bytes: the public result has
   // no export_declined* member and hides an output that does not exist.
-  return projectionVerdict(ins, bytes(c.insert_rows_b64), batch, bytes(c.batch_export_b64), c.output_format, c.insert as Record<string, unknown>);
+  return projectionVerdict(ins, bytes(c.insert_rows_b64), batch, bytes(c.batch_export_b64), c.output_format, c.insert as Record<string, unknown>, tRowsOf(c));
 }
 
 function expected(c: Case) {
@@ -60,10 +72,10 @@ describe.skipIf(!present)('the insert projection gate over the shared fixture', 
   it('reads the fixture it was written for, and refuses a zero-run', () => {
     expect(doc.schema).toBe('chtypes.abi-v2.insert-projection-fixture/1');
     const reds = doc.cases.filter((c) => typeof c.expect === 'object' && 'violates' in c.expect);
-    expect(doc.cases).toHaveLength(44);
-    expect(doc.cases.filter((c) => c.expect === 'equal')).toHaveLength(17);
+    expect(doc.cases).toHaveLength(48);
+    expect(doc.cases.filter((c) => c.expect === 'equal')).toHaveLength(18);
     expect(doc.cases.filter((c) => typeof c.expect === 'object' && 'exception' in c.expect)).toHaveLength(1);
-    expect(reds).toHaveLength(26);
+    expect(reds).toHaveLength(29);
     const byRule: Record<string, number> = {};
     for (const c of reds) byRule[(c.expect as { violates: string }).violates] = (byRule[(c.expect as { violates: string }).violates] ?? 0) + 1;
     expect(byRule).toEqual({
@@ -74,6 +86,7 @@ describe.skipIf(!present)('the insert projection gate over the shared fixture', 
       non_t_row: 2,
       output_presence: 2,
       export_decline_is_call_decline: 3,
+      post_where_cut: 3,
       err_prefix: 1,
       err_suffix: 2,
       native_output: 1,

@@ -3,9 +3,11 @@
 decoders, answers as scripts/abi-v2/check-insert-projection.py answers it.
 
 `first_violation` mirrors that checker's `evaluate`, rule by rule and in order:
-e_row_rejects, export_decline_is_call_decline, shared_members, counts, err_prefix,
-err_suffix, output_presence, non_t_row, line_output, native_output; and the one exception,
-generator_draw. It is a test helper, not public API.
+e_row_rejects, export_decline_is_call_decline, post_where_cut, shared_members, counts,
+err_prefix, err_suffix, output_presence, non_t_row, line_output, native_output; and the one
+exception, generator_draw. A post_where_cut case's batch_of_t_rows, the batch over the rows
+the insert keeps, goes through the same real batch decoder. It is a test helper, not public
+API.
 """
 
 from __future__ import annotations
@@ -36,6 +38,7 @@ needs_fixture = pytest.mark.skipif(
 RULES = (
     "e_row_rejects",
     "export_decline_is_call_decline",
+    "post_where_cut",
     "shared_members",
     "counts",
     "err_prefix",
@@ -46,11 +49,87 @@ RULES = (
     "native_output",
 )
 SUFFIX = re.compile(rb": \(at row [0-9]+\)\n")
+INSERT_NEVER = ("export_declined", "export_declined_b64", "export_declined_reason")
+POST_WHERE_SITES = (RefusalSite.ROW, RefusalSite.BODY_STEP)
 
 
 def _b64(case: dict, key: str) -> bytes | None:
     value = case.get(key)
     return None if value is None else base64.b64decode(value)
+
+
+def _raw_cols(raw: dict) -> tuple[bytes, ...] | None:
+    cols = raw.get("export_columns")
+    if cols is None:
+        return None
+    return tuple(base64.b64decode(c["b64"]) if "b64" in c else c["name"].encode() for c in cols)
+
+
+def post_where_cut(
+    batch: BatchResult,
+    ins: InsertResult,
+    raw_insert: dict,
+    out: bytes | None,
+    pwc: tuple[list[int], BatchResult] | None,
+) -> bool | tuple[str, str | None]:
+    """The checker's `_post_where_cut`: the verdict when the pair holds, False when not."""
+    if pwc is None:  # an accepted insert over a refused body, with no t rows' batch
+        return False
+    idx, sub = pwc
+    rows = batch.rows
+    if batch.outcome != Outcome.REJECTED or batch.refused_at not in POST_WHERE_SITES:
+        return False
+    if batch.refused_at == RefusalSite.ROW and batch.refused_row in idx:
+        return False
+    if any(rows[i].outcome != Outcome.ACCEPTED for i in idx):
+        return False
+    if len(sub.rows) != len(idx) or sub.rows_read != len(idx) or sub.rows_skipped != 0:
+        return False
+    for r, i in zip(sub.rows, idx, strict=True):
+        if r.input_span is None or rows[i].input_span is None:
+            return False
+        if r.input_span.len != rows[i].input_span.len:
+            return False
+    if sub.outcome != Outcome.ACCEPTED or any(r.verdict != Verdict.TRUE for r in sub.rows):
+        return False
+    if sub.export_declined != b"" or sub.export_declined_reason is not None:
+        return False
+    if any(k in raw_insert for k in INSERT_NEVER):
+        return False
+    from_t_rows = (
+        (sub.outcome, ins.outcome),
+        (sub.err_code, ins.err_code),
+        (sub.reason, ins.reason),
+        (sub.refused_at, ins.refused_at),
+        (sub.export_columns, _raw_cols(raw_insert)),
+        (sub.partition_count, ins.partition_count),
+    )
+    from_body = (
+        (batch.rows_read, ins.rows_read),
+        (batch.rows_skipped, ins.rows_skipped),
+        (batch.unsupported_settings, ins.unsupported_settings),
+        (batch.framing, ins.framing),
+    )
+    if any(a != b for a, b in from_t_rows + from_body):
+        return False
+    cut = batch.rows_read - batch.rows_skipped - len(idx)
+    if not (
+        ins.rows_passed == len(idx)
+        and ins.rows_cut == cut
+        and ins.rows_undecided is not None
+        and 0 <= ins.rows_undecided <= cut
+    ):
+        return False
+    if ins.err_msg != sub.err_msg:
+        return False
+    if (sub.payload is None) != (out is None):
+        return False
+    if out is None:
+        return "equal", None
+    if any(c.source == "default_generated" for r in sub.rows for c in r.columns):
+        return "exception", "generator_draw"
+    # every row of the t rows' batch is t, so its whole export is the t rows' output
+    return ("equal", None) if out == sub.payload else False
 
 
 def first_violation(
@@ -59,13 +138,15 @@ def first_violation(
     out_format: str,
     raw_insert: dict,
     out: bytes | None,
+    pwc: tuple[list[int], BatchResult] | None = None,
 ):
     """("equal", None), ("exception", name) or ("violates", rule).
 
     `raw_insert` is the insert document as the fixture holds it and `out` the raw
     output bytes: the public `InsertResult` has no `export_declined*` member and
     keeps `output` only for an accepted call, so a red that plants either is seen
-    only through these two."""
+    only through these two. `pwc` is the case's batch_of_t_rows, decoded: the
+    kept rows' indexes and their batch."""
     rows = batch.rows
     verdicts = [r.verdict for r in rows]
     exp = batch.payload
@@ -104,19 +185,16 @@ def first_violation(
     ):
         return "violates", "export_decline_is_call_decline"
 
-    if any(
-        k in raw_insert
-        for k in ("export_declined", "export_declined_b64", "export_declined_reason")
+    # A filtered batch the body steps refused, and an insert that did not refuse with it.
+    if pwc is not None or (
+        filtered and batch.outcome == Outcome.REJECTED and ins.outcome == Outcome.ACCEPTED
     ):
+        got = post_where_cut(batch, ins, raw_insert, out, pwc)
+        return ("violates", "post_where_cut") if got is False else got
+
+    if any(k in raw_insert for k in INSERT_NEVER):
         return "violates", "shared_members"
-    raw_cols = raw_insert.get("export_columns")
-    ins_cols = (
-        None
-        if raw_cols is None
-        else tuple(
-            base64.b64decode(c["b64"]) if "b64" in c else c["name"].encode() for c in raw_cols
-        )
-    )
+    ins_cols = _raw_cols(raw_insert)
 
     # A declined output replaces these members with the insert's own values.
     replaced = (
@@ -197,21 +275,40 @@ def decode_case(case: dict):
     return batch, ins
 
 
+def decode_pwc(case: dict) -> tuple[list[int], BatchResult] | None:
+    """The case's batch_of_t_rows through the real batch decoder; a malformed one
+    is a fixture error (the checker's FixtureError), never a verdict."""
+    ev = case.get("batch_of_t_rows")
+    if ev is None:
+        return None
+    assert set(ev) == {"rows", "batch", "export_b64"}, case["id"]
+    idx = ev["rows"]
+    assert idx == sorted(set(idx)), case["id"]
+    assert all(0 <= i < len(case["batch"]["rows"]) for i in idx), case["id"]
+    sub = decode_batch(json.dumps(ev["batch"]).encode(), _b64(ev, "export_b64"))
+    return idx, sub
+
+
 def verdict(case: dict):
     batch, ins = decode_case(case)
     return first_violation(
-        batch, ins, case["output_format"], case["insert"], _b64(case, "insert_rows_b64")
+        batch,
+        ins,
+        case["output_format"],
+        case["insert"],
+        _b64(case, "insert_rows_b64"),
+        decode_pwc(case),
     )
 
 
 @needs_fixture
 def test_the_fixture_is_the_shape_this_gate_expects() -> None:
-    assert sum(c["expect"] == "equal" for c in CASES) == 17
+    assert sum(c["expect"] == "equal" for c in CASES) == 18
     assert sum(isinstance(c["expect"], dict) and "exception" in c["expect"] for c in CASES) == 1
     for rule in RULES:
         assert any(c["expect"] == {"violates": rule} for c in CASES), rule
     assert any(c["expect"] == {"exception": "generator_draw"} for c in CASES)
-    assert sum(isinstance(c["expect"], dict) and "violates" in c["expect"] for c in CASES) == 26
+    assert sum(isinstance(c["expect"], dict) and "violates" in c["expect"] for c in CASES) == 29
 
 
 @needs_fixture
@@ -270,4 +367,4 @@ def test_the_fixture_gate_ran_cases() -> None:
                 f"CHTYPES_REQUIRE_FIXTURES=1 and the insert-projection fixture is absent: {FIXTURE}"
             )
         pytest.skip(f"insert-projection fixture absent ({FIXTURE}): not a full-repository tree")
-    assert len(CASES) == 44
+    assert len(CASES) == 48

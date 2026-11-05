@@ -13,8 +13,10 @@
 //! back for a refusal, read the raw document and the raw bytes. Both documents
 //! of every case go through this crate's real decoders (`decode::batch` and
 //! `decode::insert_result`), so a case proves the decoders as well as the
-//! rule. Each case carries its expected result; the fixture's 26 planted reds
+//! rule. Each case carries its expected result; the fixture's 29 planted reds
 //! and its exception keep the gate honest: a rule that cannot fire fails here.
+//! A `post_where_cut` case's `batch_of_t_rows`, the batch over the rows the
+//! insert keeps, goes through the same `decode::batch`.
 //!
 //! This is a unit test of the crate (src/lib.rs declares it with `#[path]`)
 //! because the decoders are crate-internal. It needs no library.
@@ -39,6 +41,115 @@ enum Projection {
     Exception(&'static str),
     /// The first rule violated.
     Violates(&'static str),
+}
+
+/// A case's `batch_of_t_rows`, decoded: the indexes of the rows the insert
+/// keeps, and the batch over those records alone (its export as `payload`).
+struct BatchOfTRows {
+    rows: Vec<usize>,
+    batch: BatchResult,
+}
+
+const INSERT_NEVER: [&str; 3] = [
+    "export_declined",
+    "export_declined_b64",
+    "export_declined_reason",
+];
+
+/// The checker's `_post_where_cut`: the verdict when the pair holds, `None`
+/// when it does not.
+fn post_where_cut(
+    batch: &BatchResult,
+    ins: &InsertResult,
+    raw_ins: &Json,
+    out: Option<&[u8]>,
+    t_rows: Option<&BatchOfTRows>,
+) -> Option<Projection> {
+    // an accepted insert over a refused body, with no t rows' batch
+    let BatchOfTRows {
+        rows: idx,
+        batch: sub,
+    } = t_rows?;
+    let rows = &batch.rows;
+    let site_ok = matches!(
+        batch.refused_at,
+        Some(RefusalSite::Row | RefusalSite::BodyStep)
+    );
+    if batch.outcome != Outcome::Rejected || !site_ok {
+        return None;
+    }
+    if batch.refused_at == Some(RefusalSite::Row)
+        && batch
+            .refused_row
+            .is_some_and(|r| idx.iter().any(|&i| i as u64 == r))
+    {
+        return None;
+    }
+    if idx.iter().any(|&i| rows[i].outcome != Outcome::Accepted) {
+        return None;
+    }
+    // the t rows' batch: those records, read alone, accepted, every one t
+    let n = idx.len() as u64;
+    if sub.rows.len() != idx.len() || sub.rows_read != n || sub.rows_skipped != 0 {
+        return None;
+    }
+    let spans_match = sub.rows.iter().zip(idx).all(|(r, &i)| {
+        match (r.input_span.as_ref(), rows[i].input_span.as_ref()) {
+            (Some(a), Some(b)) => a.len == b.len,
+            _ => false,
+        }
+    });
+    if !spans_match
+        || sub.outcome != Outcome::Accepted
+        || sub.rows.iter().any(|r| r.verdict != Some(Verdict::True))
+        || !sub.export_declined.as_bytes().is_empty()
+        || sub.export_declined_reason.is_some()
+    {
+        return None;
+    }
+    // the insert: the t rows' insert, over the whole body's read
+    if INSERT_NEVER.iter().any(|k| raw_ins.get(k).is_some()) {
+        return None;
+    }
+    let members = sub.outcome == ins.outcome
+        && sub.err_code == ins.err_code
+        && sub.reason == ins.reason
+        && sub.refused_at == ins.refused_at
+        && sub.export_columns == ins.export_columns
+        && sub.partition_count == ins.partition_count
+        && batch.rows_read == ins.rows_read
+        && batch.rows_skipped == ins.rows_skipped
+        && batch.unsupported_settings == ins.unsupported_settings
+        && batch.framing == ins.framing;
+    if !members {
+        return None;
+    }
+    let cut = batch.rows_read.checked_sub(batch.rows_skipped + n)?;
+    if !(ins.rows_passed == Some(n)
+        && ins.rows_cut == Some(cut)
+        && ins.rows_undecided.is_some_and(|u| u <= cut))
+    {
+        return None;
+    }
+    if ins.err_msg != sub.err_msg {
+        return None;
+    }
+    let sub_exp = sub.payload.as_deref();
+    if sub_exp.is_none() != out.is_none() {
+        return None;
+    }
+    let (Some(out), Some(sub_exp)) = (out, sub_exp) else {
+        return Some(Projection::Equal);
+    };
+    if sub.rows.iter().any(|r| {
+        r.columns
+            .iter()
+            .any(|c| c.source == Source::DefaultGenerated)
+    }) {
+        return Some(Projection::Exception("generator_draw"));
+    }
+    // every row of the t rows' batch is t, so its whole export is the t rows' output
+    (out == sub_exp).then_some(Projection::Equal)
 }
 
 /// A batch carries a filter's counts exactly where a filter was attached.
@@ -91,6 +202,7 @@ fn evaluate(
     raw_ins: &Json,
     out: Option<&[u8]>,
     format: Option<Format>,
+    t_rows: Option<&BatchOfTRows>,
 ) -> Projection {
     let verdicts: Vec<Option<&Verdict>> = batch.rows.iter().map(|r| r.verdict.as_ref()).collect();
     let exp = batch.payload.as_deref();
@@ -140,16 +252,18 @@ fn evaluate(
         }
     }
 
+    // post_where_cut: a filtered batch the body steps refused, and an insert
+    // that did not refuse with it
+    if t_rows.is_some()
+        || (filtered && batch.outcome == Outcome::Rejected && ins.outcome == Outcome::Accepted)
+    {
+        return post_where_cut(batch, ins, raw_ins, out, t_rows)
+            .unwrap_or(Projection::Violates("post_where_cut"));
+    }
+
     // shared_members: an insert never carries export_declined*; under a
     // declined output the call's own decline replaces seven members.
-    if [
-        "export_declined",
-        "export_declined_b64",
-        "export_declined_reason",
-    ]
-    .iter()
-    .any(|k| raw_ins.get(k).is_some())
-    {
+    if INSERT_NEVER.iter().any(|k| raw_ins.get(k).is_some()) {
         return Projection::Violates("shared_members");
     }
     let replaced = |same: bool| declined || same;
@@ -306,9 +420,34 @@ fn decode_case(case: &Json) -> (BatchResult, InsertResult) {
     (batch, ins)
 }
 
-const RULES: [&str; 10] = [
+/// Decode a case's `batch_of_t_rows` with the real batch decoder; a malformed
+/// one is a fixture error, never a verdict.
+fn decode_t_rows(case: &Json) -> Option<BatchOfTRows> {
+    let ev = case.get("batch_of_t_rows")?;
+    let n = case["batch"]["rows"].as_array().expect("batch rows").len();
+    let rows: Vec<usize> = ev["rows"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{}: batch_of_t_rows.rows is not a list", case["id"]))
+        .iter()
+        .map(|i| usize::try_from(i.as_u64().expect("a row index")).expect("a row index"))
+        .collect();
+    assert!(
+        rows.windows(2).all(|w| w[0] < w[1]) && rows.iter().all(|&i| i < n),
+        "{}: batch_of_t_rows.rows is not increasing indexes into the batch's rows",
+        case["id"]
+    );
+    let batch = decode::batch(
+        &serde_json::to_vec(&ev["batch"]).unwrap(),
+        b64(ev, "export_b64"),
+    )
+    .unwrap_or_else(|e| panic!("{}: batch_of_t_rows.batch does not decode: {e}", case["id"]));
+    Some(BatchOfTRows { rows, batch })
+}
+
+const RULES: [&str; 11] = [
     "e_row_rejects",
     "export_decline_is_call_decline",
+    "post_where_cut",
     "shared_members",
     "counts",
     "err_prefix",
@@ -356,6 +495,7 @@ fn every_case_of_the_shared_fixture_gives_its_expected_projection_result() {
             &case["insert"],
             b64(case, "insert_rows_b64").as_deref(),
             format_of(case["output_format"].as_str().unwrap()),
+            decode_t_rows(case).as_ref(),
         );
         let want = expected(case);
         eprintln!("projection case {id}: {got:?} (expected {want:?})");
@@ -379,6 +519,11 @@ fn every_case_of_the_shared_fixture_gives_its_expected_projection_result() {
     eprintln!(
         "projection gate: {} cases ({equal} equal, {exceptions} exception, {reds} planted reds)",
         cases.len()
+    );
+    assert_eq!(
+        (cases.len(), equal, exceptions, reds),
+        (48, 18, 1, 29),
+        "the fixture's census (cases, equal, exception, planted reds)"
     );
     // A rule with no planted red is a rule the gate cannot see fail.
     for rule in RULES {

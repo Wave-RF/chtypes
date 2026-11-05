@@ -3,14 +3,16 @@
  * decoded results: `scripts/abi-v2/check-insert-projection.py`'s `evaluate`, rule
  * by rule and in the same order. A test helper, not public API.
  *
- * `projectionVerdict(insert, outputBytes, batch, exportBytes, outputFormat, rawInsert)`
+ * `projectionVerdict(insert, outputBytes, batch, exportBytes, outputFormat, rawInsert, tRows)`
  * returns the FIRST violated rule, or the carve-out the case is equal by, or
  * equal. The output and the export bytes are passed on their own because a
  * decoded result hides the buffer of an output that does not exist (as it
  * should), while the rule is about exactly the buffers a broken library could
  * hand out anyway. `rawInsert` is the insert document as parsed JSON: the public
  * `InsertResult` has no `export_declined*` member, and the rule must still see
- * one that a broken library wrote.
+ * one that a broken library wrote. `tRows` is a post_where_cut case's
+ * `batch_of_t_rows`, decoded: the indexes of the rows the insert keeps and the
+ * batch over those records alone, with its export.
  *
  * Whether the batch carried a filter is read off its rows: a verdict is present
  * on every row exactly when the call had a filter (`batch.verdict_iff_filter`),
@@ -24,6 +26,7 @@ import type { BatchResult, InsertResult } from '../../src/documents.js';
 export const RULES = [
   'e_row_rejects',
   'export_decline_is_call_decline',
+  'post_where_cut',
   'shared_members',
   'counts',
   'err_prefix',
@@ -39,6 +42,14 @@ export type ProjectionVerdict =
   | { readonly kind: 'equal' }
   | { readonly kind: 'exception'; readonly name: (typeof EXCEPTIONS)[number] }
   | { readonly kind: 'violates'; readonly rule: (typeof RULES)[number] };
+
+export interface BatchOfTRows {
+  readonly rows: readonly number[];
+  readonly batch: BatchResult;
+  readonly exp: Buffer | undefined;
+}
+
+const INSERT_NEVER = ['export_declined', 'export_declined_b64', 'export_declined_reason'];
 
 const EQUAL: ProjectionVerdict = { kind: 'equal' };
 const violates = (rule: (typeof RULES)[number]): ProjectionVerdict => ({ kind: 'violates', rule });
@@ -69,6 +80,61 @@ function lineCount(b: Buffer): number {
   return start < b.length ? n + 1 : n;
 }
 
+/** The checker's `_post_where_cut`: the verdict when the pair holds, `undefined` when it does not. */
+function postWhereCut(
+  ins: InsertResult,
+  out: Buffer | undefined,
+  batch: BatchResult,
+  rawInsert: Record<string, unknown>,
+  tRows: BatchOfTRows | undefined,
+): ProjectionVerdict | undefined {
+  if (tRows === undefined) return undefined; // an accepted insert over a refused body, with no t rows' batch
+  const { rows: idx, batch: sub, exp: subExp } = tRows;
+  const rows = batch.rows;
+  if (batch.outcome !== 'rejected' || (batch.refusedAt !== 'row' && batch.refusedAt !== 'body_step')) return undefined;
+  if (batch.refusedAt === 'row' && batch.refusedRow !== undefined && idx.includes(batch.refusedRow)) return undefined;
+  if (idx.some((i) => rows[i]?.outcome !== 'accepted')) return undefined;
+  // the t rows' batch: those records, read alone, accepted, every one t
+  if (sub.rows.length !== idx.length || sub.rowsRead !== idx.length || sub.rowsSkipped !== 0) return undefined;
+  const spansMatch = sub.rows.every((r, j) => {
+    const whole = rows[idx[j] as number]?.inputSpan;
+    return r.inputSpan !== undefined && whole !== undefined && r.inputSpan.len === whole.len;
+  });
+  if (!spansMatch) return undefined;
+  if (sub.outcome !== 'accepted' || sub.rows.some((r) => r.verdict !== 't')) return undefined;
+  if (sub.exportDeclined.length > 0 || sub.exportDeclinedReason !== undefined) return undefined;
+  // the insert: the t rows' insert, over the whole body's read
+  if (INSERT_NEVER.some((k) => k in rawInsert)) return undefined;
+  if (
+    !(
+      sub.outcome === ins.outcome &&
+      sub.errCode === ins.errCode &&
+      sub.reason === ins.reason &&
+      sub.refusedAt === ins.refusedAt &&
+      optBuffersEqual(sub.exportColumns, ins.exportColumns) &&
+      sub.partitionCount === ins.partitionCount &&
+      batch.rowsRead === ins.rowsRead &&
+      batch.rowsSkipped === ins.rowsSkipped &&
+      buffersEqual(batch.unsupportedSettings, ins.unsupportedSettings) &&
+      isDeepStrictEqual(batch.framing, ins.framing)
+    )
+  ) {
+    return undefined;
+  }
+  const cut = batch.rowsRead - batch.rowsSkipped - idx.length;
+  if (!(ins.rowsPassed === idx.length && ins.rowsCut === cut && ins.rowsUndecided !== undefined && ins.rowsUndecided >= 0 && ins.rowsUndecided <= cut)) {
+    return undefined;
+  }
+  if (!ins.errMsg.equals(sub.errMsg)) return undefined;
+  if ((subExp === undefined) !== (out === undefined)) return undefined;
+  if (out === undefined || subExp === undefined) return EQUAL;
+  if (sub.rows.some((r) => r.columns.some((c) => c.source === 'default_generated'))) {
+    return { kind: 'exception', name: 'generator_draw' };
+  }
+  // every row of the t rows' batch is t, so its whole export is the t rows' output
+  return out.equals(subExp) ? EQUAL : undefined;
+}
+
 export function projectionVerdict(
   ins: InsertResult,
   out: Buffer | undefined,
@@ -76,6 +142,7 @@ export function projectionVerdict(
   exp: Buffer | undefined,
   outputFormat: string,
   rawInsert: Record<string, unknown>,
+  tRows?: BatchOfTRows,
 ): ProjectionVerdict {
   const rows = batch.rows;
   const verdicts = rows.map((r) => r.verdict);
@@ -122,9 +189,14 @@ export function projectionVerdict(
     }
   }
 
+  // post_where_cut: a filtered batch the body steps refused, and an insert that did not refuse with it.
+  if (tRows !== undefined || (filtered && batch.outcome === 'rejected' && ins.outcome === 'accepted')) {
+    return postWhereCut(ins, out, batch, rawInsert, tRows) ?? violates('post_where_cut');
+  }
+
   // shared_members: every member both documents may carry, equal and absent where absent.
   // An insert document never carries export_declined*; a declined output replaces the call's decline members.
-  if (['export_declined', 'export_declined_b64', 'export_declined_reason'].some((k) => k in rawInsert)) return violates('shared_members');
+  if (INSERT_NEVER.some((k) => k in rawInsert)) return violates('shared_members');
   // The batch decoder reads an absent count as 0, so a count is absent on the batch exactly when it had no filter.
   const batchPassed = filtered ? batch.rowsPassed : undefined;
   const batchCut = filtered ? batch.rowsCut : undefined;

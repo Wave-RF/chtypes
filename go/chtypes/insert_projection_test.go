@@ -7,6 +7,8 @@ package chtypes
 // documents of a case are read by the package's real decoders, never as raw
 // JSON, so a case also proves the decoders. projectionVerdict mirrors
 // scripts/abi-v2/check-insert-projection.py rule by rule and in the same order.
+// A post_where_cut case's batch_of_t_rows, the batch over the rows the insert
+// keeps, goes through the same decoder.
 
 import (
 	"bytes"
@@ -22,8 +24,97 @@ import (
 	"testing"
 )
 
-var projectionRules = []string{"e_row_rejects", "export_decline_is_call_decline", "shared_members", "counts", "err_prefix", "err_suffix",
-	"output_presence", "non_t_row", "line_output", "native_output"}
+var projectionRules = []string{"e_row_rejects", "export_decline_is_call_decline", "post_where_cut", "shared_members", "counts",
+	"err_prefix", "err_suffix", "output_presence", "non_t_row", "line_output", "native_output"}
+
+var insertNever = []string{"export_declined", "export_declined_b64", "export_declined_reason"}
+
+// projectionPWC is a case's batch_of_t_rows, decoded: the indexes of the rows
+// the insert keeps, and the batch over those records alone with its export.
+type projectionPWC struct {
+	Rows   []int
+	Batch  BatchResult
+	Export []byte
+}
+
+// postWhereCut mirrors the checker's _post_where_cut: ok is false when the
+// pair does not hold, else (kind, name) is the verdict.
+func postWhereCut(batch BatchResult, ins InsertResult, insRaw map[string]json.RawMessage, output []byte, pwc *projectionPWC) (kind, name string, ok bool) {
+	if pwc == nil { // an accepted insert over a refused body, with no t rows' batch
+		return "", "", false
+	}
+	idx, sub := pwc.Rows, pwc.Batch
+	if batch.Outcome != Rejected || (batch.RefusedAt != RefusedAtRow && batch.RefusedAt != RefusedAtBodyStep) {
+		return "", "", false
+	}
+	if batch.RefusedAt == RefusedAtRow && batch.RefusedRow != nil && slices.Contains(idx, int(*batch.RefusedRow)) {
+		return "", "", false
+	}
+	for _, i := range idx {
+		if batch.Rows[i].Outcome != Accepted {
+			return "", "", false
+		}
+	}
+	n := uint64(len(idx))
+	if len(sub.Rows) != len(idx) || sub.RowsRead != n || sub.RowsSkipped != 0 {
+		return "", "", false
+	}
+	for j, r := range sub.Rows {
+		whole := batch.Rows[idx[j]].InputSpan
+		if r.InputSpan == nil || whole == nil || r.InputSpan.Len != whole.Len {
+			return "", "", false
+		}
+		if r.Verdict == nil || string(*r.Verdict) != "t" {
+			return "", "", false
+		}
+	}
+	if sub.Outcome != Accepted || sub.ExportDeclined != "" || sub.ExportDeclinedReason != "" {
+		return "", "", false
+	}
+	for _, k := range insertNever {
+		if _, has := insRaw[k]; has {
+			return "", "", false
+		}
+	}
+	// the t rows' insert decides these; the whole body's read decides the rest
+	if sub.Outcome != ins.Outcome || sub.ErrCode != ins.ErrCode || sub.Reason != ins.Reason || sub.RefusedAt != ins.RefusedAt ||
+		(sub.ExportColumns == nil) != (insRaw["export_columns"] == nil) || !slices.Equal(sub.ExportColumns, ins.ExportColumns) ||
+		!reflect.DeepEqual(sub.PartitionCount, ins.PartitionCount) {
+		return "", "", false
+	}
+	if batch.RowsRead != ins.RowsRead || batch.RowsSkipped != ins.RowsSkipped ||
+		!slices.Equal(batch.UnsupportedSettings, ins.UnsupportedSettings) || !reflect.DeepEqual(batch.Framing, ins.Framing) {
+		return "", "", false
+	}
+	if batch.RowsRead < batch.RowsSkipped+n {
+		return "", "", false
+	}
+	cut := batch.RowsRead - batch.RowsSkipped - n
+	if !isCount(ins.RowsPassed, n) || !isCount(ins.RowsCut, cut) || ins.RowsUndecided == nil || *ins.RowsUndecided > cut {
+		return "", "", false
+	}
+	if ins.ErrMsg != sub.ErrMsg {
+		return "", "", false
+	}
+	if (pwc.Export == nil) != (output == nil) {
+		return "", "", false
+	}
+	if output == nil {
+		return "equal", "", true
+	}
+	for _, r := range sub.Rows {
+		for _, c := range r.Columns {
+			if c.Source == "default_generated" {
+				return "exception", "generator_draw", true
+			}
+		}
+	}
+	// every row of the t rows' batch is t, so its whole export is the t rows' output
+	if bytes.Equal(output, pwc.Export) {
+		return "equal", "", true
+	}
+	return "", "", false
+}
 
 var projectionSuffix = regexp.MustCompile(`^: \(at row [0-9]+\)\n$`)
 
@@ -34,8 +125,8 @@ var projectionSuffix = regexp.MustCompile(`^: \(at row [0-9]+\)\n$`)
 // keeps an output only for an accepted call, and the rule must see what the
 // library handed back. insRaw is the insert document's raw members: the public
 // InsertResult has no export_declined member, so a document that carries one is
-// seen there.
-func projectionVerdict(outFormat string, batch BatchResult, batchExport []byte, ins InsertResult, insRaw map[string]json.RawMessage, output []byte) (string, string) {
+// seen there. pwc is the case's batch_of_t_rows, nil when it carries none.
+func projectionVerdict(outFormat string, batch BatchResult, batchExport []byte, ins InsertResult, insRaw map[string]json.RawMessage, output []byte, pwc *projectionPWC) (string, string) {
 	verdicts := make([]string, len(batch.Rows))
 	for i, r := range batch.Rows {
 		if r.Verdict != nil {
@@ -83,8 +174,16 @@ func projectionVerdict(outFormat string, batch BatchResult, batchExport []byte, 
 		}
 	}
 
+	// post_where_cut: a filtered batch the body steps refused, and an insert that did not refuse with it
+	if pwc != nil || (filtered && batch.Outcome == Rejected && ins.Outcome == Accepted) {
+		if kind, name, ok := postWhereCut(batch, ins, insRaw, output, pwc); ok {
+			return kind, name
+		}
+		return "violates", "post_where_cut"
+	}
+
 	// shared_members
-	for _, k := range []string{"export_declined", "export_declined_b64", "export_declined_reason"} {
+	for _, k := range insertNever {
 		if _, ok := insRaw[k]; ok {
 			return "violates", "shared_members"
 		}
@@ -215,6 +314,11 @@ type projectionCase struct {
 	Insert         json.RawMessage `json:"insert"`
 	InsertRowsB64  *string         `json:"insert_rows_b64"`
 	Expect         json.RawMessage `json:"expect"`
+	BatchOfTRows   *struct {
+		Rows      []int           `json:"rows"`
+		Batch     json.RawMessage `json:"batch"`
+		ExportB64 *string         `json:"export_b64"`
+	} `json:"batch_of_t_rows"`
 }
 
 func b64Or(t *testing.T, s *string) []byte {
@@ -264,8 +368,8 @@ func loadProjectionFixture(t *testing.T) []projectionCase {
 
 func TestInsertProjectionFixture(t *testing.T) {
 	cases := loadProjectionFixture(t)
-	if len(cases) != 44 {
-		t.Fatalf("the fixture holds %d cases, want 44", len(cases))
+	if len(cases) != 48 {
+		t.Fatalf("the fixture holds %d cases, want 48", len(cases))
 	}
 	reds := map[string]int{}
 	var equal, exceptions int
@@ -284,7 +388,21 @@ func TestInsertProjectionFixture(t *testing.T) {
 			if err := json.Unmarshal(c.Insert, &insRaw); err != nil {
 				t.Fatal(err)
 			}
-			kind, name := projectionVerdict(c.OutputFormat, batch, export, ins, insRaw, output)
+			var pwc *projectionPWC
+			if ev := c.BatchOfTRows; ev != nil {
+				// a malformed batch_of_t_rows is a fixture error, never a verdict
+				if !slices.IsSorted(ev.Rows) || len(slices.Compact(slices.Clone(ev.Rows))) != len(ev.Rows) ||
+					(len(ev.Rows) > 0 && (ev.Rows[0] < 0 || ev.Rows[len(ev.Rows)-1] >= len(batch.Rows))) {
+					t.Fatalf("batch_of_t_rows.rows %v is not increasing indexes into the batch's rows", ev.Rows)
+				}
+				subExport := b64Or(t, ev.ExportB64)
+				sub, err := decodeBatch(ev.Batch, subExport)
+				if err != nil {
+					t.Fatalf("decoding batch_of_t_rows.batch: %v", err)
+				}
+				pwc = &projectionPWC{Rows: ev.Rows, Batch: sub, Export: subExport}
+			}
+			kind, name := projectionVerdict(c.OutputFormat, batch, export, ins, insRaw, output, pwc)
 			var want struct {
 				Exception string `json:"exception"`
 				Violates  string `json:"violates"`
@@ -314,13 +432,13 @@ func TestInsertProjectionFixture(t *testing.T) {
 			t.Errorf("no planted red for rule %s", r)
 		}
 	}
-	wantReds := map[string]int{"e_row_rejects": 8, "export_decline_is_call_decline": 3, "shared_members": 3, "counts": 2,
+	wantReds := map[string]int{"e_row_rejects": 8, "export_decline_is_call_decline": 3, "post_where_cut": 3, "shared_members": 3, "counts": 2,
 		"line_output": 2, "non_t_row": 2, "output_presence": 2, "err_prefix": 1, "err_suffix": 2, "native_output": 1}
 	if !reflect.DeepEqual(reds, wantReds) {
 		t.Errorf("planted reds per rule = %v, want %v", reds, wantReds)
 	}
-	if exceptions != 1 || equal != 17 {
-		t.Errorf("equal=%d exceptions=%d, want 17 and 1", equal, exceptions)
+	if exceptions != 1 || equal != 18 {
+		t.Errorf("equal=%d exceptions=%d, want 18 and 1", equal, exceptions)
 	}
 }
 
