@@ -23,18 +23,21 @@ Rules, checked in this order (the first that fails is the answer):
   export_decline_is_call_decline
                    a batch that is accepted with `export_declined` R (reason id
                    I): the insert is `unsupported`, reason I, code -2, refused_at
-                   `body_step`, no export_columns, no output (those members
+                   `body_step`, err the batch's export_declined text, no
+                   export_columns, no output, and rows_passed, rows_cut and
+                   rows_undecided 0 under a filter (those members, and err,
                    are then not compared with the batch's)
   shared_members   every member both documents may carry is equal, absent where
-                   absent (outcome, code, reason, refused_at and export_columns
-                   are skipped under a declined output); an insert never carries
+                   absent (outcome, code, reason, refused_at, export_columns,
+                   rows_passed and rows_cut are skipped under a declined output); an insert never carries
                    export_declined or export_declined_reason
   counts           rows_passed = #t, rows_cut = #f + #d, rows_undecided = #d
-                   (rows_passed and rows_cut read 0 and 0 on a batch that is
-                   not accepted); all three absent with no filter
+                   when the insert is accepted, and all three 0 on any other
+                   outcome (the batch's rows_passed and rows_cut are 0 and 0 on
+                   a batch that is not accepted); all three absent with no filter
   err_prefix       the batch's err is a prefix of the insert's
-  err_suffix       the remainder is empty or ClickHouse's own suffix,
-                   ` (at row N)`
+  err_suffix       the remainder is empty or exactly ClickHouse's row-reader
+                   suffix, `: (at row N)` and a line feed
   output_presence  an output exists exactly when the batch export ran
   non_t_row        a line format's output holds more lines than there are t rows
                    (a row that is not t was output)
@@ -79,9 +82,10 @@ EXCEPTIONS = ("generator_draw",)
 SHARED = ("outcome", "code", "reason", "refused_at", "rows_read", "rows_skipped", "unsupported_settings", "framing",
           "partition_count", "export_columns", "rows_passed", "rows_cut")
 # Members a declined output replaces: the insert's own values, by export_decline_is_call_decline.
-DECLINE_REPLACES = ("outcome", "code", "reason", "refused_at", "export_columns")
+DECLINE_REPLACES = ("outcome", "code", "reason", "refused_at", "export_columns", "rows_passed", "rows_cut")
+COUNTS = ("rows_passed", "rows_cut", "rows_undecided")
 INSERT_NEVER = ("export_declined", "export_declined_b64", "export_declined_reason")
-SUFFIX = re.compile(rb"^ \(at row [0-9]+\)$")
+SUFFIX = re.compile(rb"^: \(at row [0-9]+\)\n$")
 _ABSENT = object()
 
 
@@ -212,7 +216,9 @@ def evaluate(case: dict):
     if declined:
         if not (ins["outcome"] == "unsupported" and ins.get("reason") == batch.get("export_declined_reason")
                 and ins["code"] == -2 and ins.get("refused_at") == "body_step"
-                and "export_columns" not in ins and out is None):
+                and "export_columns" not in ins and out is None
+                and _bytes(ins, "err") == _bytes(batch, "export_declined")
+                and (not filtered or all(ins.get(k) == 0 for k in COUNTS))):
             return "violates", "export_decline_is_call_decline"
 
     # shared_members
@@ -224,25 +230,28 @@ def evaluate(case: dict):
         if _member(batch, m) != _member(ins, m):
             return "violates", "shared_members"
 
-    # counts
+    # counts: #t, #f + #d and #d on an accepted call, 0 on any other outcome
     t, f, d = verdicts.count("t"), verdicts.count("f"), verdicts.count("d")
     if filtered:
         if batch["outcome"] == "accepted":
             good = batch["rows_passed"] == t and batch["rows_cut"] == f + d
         else:
             good = batch["rows_passed"] == 0 and batch["rows_cut"] == 0
-        if not (good and ins.get("rows_undecided") == d):
+        want = (t, f + d, d) if ins["outcome"] == "accepted" else (0, 0, 0)
+        if not (good and tuple(ins.get(k) for k in COUNTS) == want):
             return "violates", "counts"
-    elif any(k in ins for k in ("rows_passed", "rows_cut", "rows_undecided")):
+    elif any(k in ins for k in COUNTS):
         return "violates", "counts"
 
-    # err
-    be, ie = _bytes(batch, "err"), _bytes(ins, "err")
-    if not ie.startswith(be):
-        return "violates", "err_prefix"
-    rest = ie[len(be):]
-    if rest and not SUFFIX.match(rest):
-        return "violates", "err_suffix"
+    # err: the batch's, plus a remainder that is empty or ClickHouse's row-reader suffix
+    # (a declined output's err is the decline text, checked above)
+    if not declined:
+        be, ie = _bytes(batch, "err"), _bytes(ins, "err")
+        if not ie.startswith(be):
+            return "violates", "err_prefix"
+        rest = ie[len(be):]
+        if rest and not SUFFIX.fullmatch(rest):
+            return "violates", "err_suffix"
 
     # output
     if (exp is None) != (out is None):
