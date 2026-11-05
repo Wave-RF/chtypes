@@ -969,7 +969,12 @@ CHS_API int32_t chs_abi_version(void);
  * the document groups it honors, and `features`, an open list of build-level features, where a new
  * feature is a new value and never a new field. `default_generators` in `features` means the
  * library fills admitted generator DEFAULTs and the caller inserts the library's output
- * (`default_generated` under `value_src`).
+ * (`default_generated` under `value_src`). `preview_insert` means `chs_preview_insert` answers a
+ * body rather than declining the whole call. An `insert_options` member that a build implements is
+ * listed by its path: `insert_options.memory_limit_bytes` when the call honors a limit rather than
+ * declining one, and `insert_options.cancel` when a fired token cancels a call rather than the
+ * member being declined. A `Native` output is advertised by `export_formats` containing `Native`,
+ * never by `features`. A reader keys on these values, never on a build or version number.
  *
  * A loader parses it (ASCII only, duplicate keys refused, `schema` equal to 1, every required field
  * of its type), refuses when `abi_fingerprint` differs from its own compiled-in
