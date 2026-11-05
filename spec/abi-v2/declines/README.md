@@ -38,6 +38,6 @@ Produced by the artifact producer at its commit `4e122ef3`, generator `chtypes f
 
 The sha256 of the file, computed by `scripts/abi-v2/check-declines.py --print-table` and checked by `--check`:
 
-- `declines.json`: `8aa23eab4663894a508d5f9ef42a5b91d6c28ba4e9eb36ab9e6527db3a3d83c2`
+- `declines.json`: `b71be3c27d9a02d999714d5a6fd890de204760a4c7891cbd19f12a17c8bc99e1`
 
 The producer regenerates the catalog. A changed set of entries is a new copy here, with this hash updated in the same change.
