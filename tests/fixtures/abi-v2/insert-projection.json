@@ -4652,6 +4652,390 @@
    }
   },
   {
+   "id": "equal-post-where-cut-nested-sizes-on-a-cut-row",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "rejected",
+    "code": 190,
+    "err": "Elements 'nest.k' and 'nest.v' of Nested data structure 'nest' (Array columns) have different array sizes.",
+    "rows_read": 2,
+    "rows_skipped": 0,
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "export_declined": "batch outcome is 'rejected': only a fully accepted batch exports bytes",
+    "export_declined_reason": "export-batch-not-accepted",
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "unconsumed": [],
+    "rows": [
+     {
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_err": "batch outcome is 'rejected': only a fully accepted batch has filter verdicts",
+      "outcome": "accepted",
+      "code": 0,
+      "err": "",
+      "cols": [],
+      "input_span": {
+       "off": 0,
+       "len": 22
+      },
+      "transformed": []
+     },
+     {
+      "verdict": "d",
+      "verdict_code": 190,
+      "verdict_err": "Elements 'nest.k' and 'nest.v' of Nested data structure 'nest' (Array columns) have different array sizes.",
+      "outcome": "rejected",
+      "code": 190,
+      "err": "Elements 'nest.k' and 'nest.v' of Nested data structure 'nest' (Array columns) have different array sizes.",
+      "cols": [],
+      "input_span": {
+       "off": 22,
+       "len": 20
+      },
+      "transformed": []
+     }
+    ],
+    "unsupported_settings": [],
+    "refused_at": "row",
+    "refused_row": 1,
+    "transformed": []
+   },
+   "batch_export_b64": null,
+   "batch_of_t_rows": {
+    "rows": [
+     0,
+     2
+    ],
+    "batch": {
+     "outcome": "accepted",
+     "code": 0,
+     "err": "",
+     "rows_read": 2,
+     "rows_skipped": 0,
+     "rows_passed": 2,
+     "rows_cut": 0,
+     "row_spans": [
+      {
+       "off": 0,
+       "len": 25
+      },
+      {
+       "off": 25,
+       "len": 19
+      }
+     ],
+     "framing": {
+      "bom_skipped": false,
+      "container": null,
+      "header": null
+     },
+     "unconsumed": [],
+     "rows": [
+      {
+       "verdict": "t",
+       "verdict_code": 0,
+       "verdict_err": "",
+       "outcome": "accepted",
+       "code": 0,
+       "err": "",
+       "cols": [],
+       "input_span": {
+        "off": 0,
+        "len": 22
+       },
+       "transformed": []
+      },
+      {
+       "verdict": "t",
+       "verdict_code": 0,
+       "verdict_err": "",
+       "outcome": "accepted",
+       "code": 0,
+       "err": "",
+       "cols": [],
+       "input_span": {
+        "off": 22,
+        "len": 16
+       },
+       "transformed": []
+      }
+     ],
+     "unsupported_settings": [],
+     "export_columns": [
+      {
+       "name": "id"
+      },
+      {
+       "name": "keep"
+      },
+      {
+       "name": "nest.k"
+      },
+      {
+       "name": "nest.v"
+      }
+     ],
+     "transformed": []
+    },
+    "export_b64": "WzEsIDEsIFsxLDJdLCBbImEiLCJiIl1dClszLCAxLCBbM10sIFsiYyJdXQo="
+   },
+   "body_records": [
+    {
+     "off": 0,
+     "len": 22
+    },
+    {
+     "off": 22,
+     "len": 20
+    },
+    {
+     "off": 42,
+     "len": 16
+    }
+   ],
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "rows_passed": 2,
+    "rows_cut": 1,
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "unsupported_settings": [],
+    "export_columns": [
+     {
+      "name": "id"
+     },
+     {
+      "name": "keep"
+     },
+     {
+      "name": "nest.k"
+     },
+     {
+      "name": "nest.v"
+     }
+    ],
+    "rows_undecided": 0
+   },
+   "insert_rows_b64": "WzEsIDEsIFsxLDJdLCBbImEiLCJiIl1dClszLCAxLCBbM10sIFsiYyJdXQo=",
+   "expect": "equal",
+   "provenance": {
+    "batch": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    },
+    "batch_of_t_rows": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    },
+    "insert": "unrecorded"
+   }
+  },
+  {
+   "id": "red-post-where-cut-nested-sizes-insert-stops-early",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "rejected",
+    "code": 190,
+    "err": "Elements 'nest.k' and 'nest.v' of Nested data structure 'nest' (Array columns) have different array sizes.",
+    "rows_read": 2,
+    "rows_skipped": 0,
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "export_declined": "batch outcome is 'rejected': only a fully accepted batch exports bytes",
+    "export_declined_reason": "export-batch-not-accepted",
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "unconsumed": [],
+    "rows": [
+     {
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_err": "batch outcome is 'rejected': only a fully accepted batch has filter verdicts",
+      "outcome": "accepted",
+      "code": 0,
+      "err": "",
+      "cols": [],
+      "input_span": {
+       "off": 0,
+       "len": 22
+      },
+      "transformed": []
+     },
+     {
+      "verdict": "d",
+      "verdict_code": 190,
+      "verdict_err": "Elements 'nest.k' and 'nest.v' of Nested data structure 'nest' (Array columns) have different array sizes.",
+      "outcome": "rejected",
+      "code": 190,
+      "err": "Elements 'nest.k' and 'nest.v' of Nested data structure 'nest' (Array columns) have different array sizes.",
+      "cols": [],
+      "input_span": {
+       "off": 22,
+       "len": 20
+      },
+      "transformed": []
+     }
+    ],
+    "unsupported_settings": [],
+    "refused_at": "row",
+    "refused_row": 1,
+    "transformed": []
+   },
+   "batch_export_b64": null,
+   "batch_of_t_rows": {
+    "rows": [
+     0,
+     2
+    ],
+    "batch": {
+     "outcome": "accepted",
+     "code": 0,
+     "err": "",
+     "rows_read": 2,
+     "rows_skipped": 0,
+     "rows_passed": 2,
+     "rows_cut": 0,
+     "row_spans": [
+      {
+       "off": 0,
+       "len": 25
+      },
+      {
+       "off": 25,
+       "len": 19
+      }
+     ],
+     "framing": {
+      "bom_skipped": false,
+      "container": null,
+      "header": null
+     },
+     "unconsumed": [],
+     "rows": [
+      {
+       "verdict": "t",
+       "verdict_code": 0,
+       "verdict_err": "",
+       "outcome": "accepted",
+       "code": 0,
+       "err": "",
+       "cols": [],
+       "input_span": {
+        "off": 0,
+        "len": 22
+       },
+       "transformed": []
+      },
+      {
+       "verdict": "t",
+       "verdict_code": 0,
+       "verdict_err": "",
+       "outcome": "accepted",
+       "code": 0,
+       "err": "",
+       "cols": [],
+       "input_span": {
+        "off": 22,
+        "len": 16
+       },
+       "transformed": []
+      }
+     ],
+     "unsupported_settings": [],
+     "export_columns": [
+      {
+       "name": "id"
+      },
+      {
+       "name": "keep"
+      },
+      {
+       "name": "nest.k"
+      },
+      {
+       "name": "nest.v"
+      }
+     ],
+     "transformed": []
+    },
+    "export_b64": "WzEsIDEsIFsxLDJdLCBbImEiLCJiIl1dClszLCAxLCBbM10sIFsiYyJdXQo="
+   },
+   "body_records": [
+    {
+     "off": 0,
+     "len": 22
+    },
+    {
+     "off": 22,
+     "len": 20
+    },
+    {
+     "off": 42,
+     "len": 16
+    }
+   ],
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 2,
+    "rows_skipped": 0,
+    "rows_passed": 2,
+    "rows_cut": 1,
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "unsupported_settings": [],
+    "export_columns": [
+     {
+      "name": "id"
+     },
+     {
+      "name": "keep"
+     },
+     {
+      "name": "nest.k"
+     },
+     {
+      "name": "nest.v"
+     }
+    ],
+    "rows_undecided": 0
+   },
+   "insert_rows_b64": "WzEsIDEsIFsxLDJdLCBbImEiLCJiIl1dClszLCAxLCBbM10sIFsiYyJdXQo=",
+   "expect": {
+    "violates": "post_where_cut"
+   },
+   "provenance": {
+    "batch": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    },
+    "batch_of_t_rows": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    },
+    "insert": "planted"
+   }
+  },
+  {
    "id": "equal-post-where-refusal-check-on-a-cut-row-and-a-later-t-row",
    "output_format": "JSONCompactEachRow",
    "batch": {
@@ -5469,6 +5853,460 @@
     "code": 469,
     "err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = 30",
     "rows_read": 3,
+    "rows_skipped": 0,
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "unsupported_settings": [],
+    "refused_at": "row",
+    "rows_undecided": 0
+   },
+   "insert_rows_b64": null,
+   "expect": {
+    "violates": "post_where_refusal"
+   },
+   "provenance": {
+    "batch": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    },
+    "batch_of_t_rows": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    },
+    "insert": "planted"
+   }
+  },
+  {
+   "id": "equal-post-where-refusal-nested-sizes-on-a-t-row",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "rejected",
+    "code": 190,
+    "err": "Elements 'nest.k' and 'nest.v' of Nested data structure 'nest' (Array columns) have different array sizes.",
+    "rows_read": 1,
+    "rows_skipped": 0,
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "export_declined": "batch outcome is 'rejected': only a fully accepted batch exports bytes",
+    "export_declined_reason": "export-batch-not-accepted",
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "unconsumed": [],
+    "rows": [
+     {
+      "verdict": "d",
+      "verdict_code": 190,
+      "verdict_err": "Elements 'nest.k' and 'nest.v' of Nested data structure 'nest' (Array columns) have different array sizes.",
+      "outcome": "rejected",
+      "code": 190,
+      "err": "Elements 'nest.k' and 'nest.v' of Nested data structure 'nest' (Array columns) have different array sizes.",
+      "cols": [],
+      "input_span": {
+       "off": 0,
+       "len": 20
+      },
+      "transformed": []
+     }
+    ],
+    "unsupported_settings": [],
+    "refused_at": "row",
+    "refused_row": 0,
+    "transformed": []
+   },
+   "batch_export_b64": null,
+   "batch_of_t_rows": {
+    "rows": [
+     1,
+     2,
+     3
+    ],
+    "batch": {
+     "outcome": "rejected",
+     "code": 190,
+     "err": "Elements 'nest.k' and 'nest.v' of Nested data structure 'nest' (Array columns) have different array sizes.",
+     "rows_read": 2,
+     "rows_skipped": 0,
+     "rows_passed": 0,
+     "rows_cut": 0,
+     "export_declined": "batch outcome is 'rejected': only a fully accepted batch exports bytes",
+     "export_declined_reason": "export-batch-not-accepted",
+     "framing": {
+      "bom_skipped": false,
+      "container": null,
+      "header": null
+     },
+     "unconsumed": [],
+     "rows": [
+      {
+       "verdict": "d",
+       "verdict_code": -2,
+       "verdict_err": "batch outcome is 'rejected': only a fully accepted batch has filter verdicts",
+       "outcome": "accepted",
+       "code": 0,
+       "err": "",
+       "cols": [],
+       "input_span": {
+        "off": 0,
+        "len": 22
+       },
+       "transformed": []
+      },
+      {
+       "verdict": "d",
+       "verdict_code": 190,
+       "verdict_err": "Elements 'nest.k' and 'nest.v' of Nested data structure 'nest' (Array columns) have different array sizes.",
+       "outcome": "rejected",
+       "code": 190,
+       "err": "Elements 'nest.k' and 'nest.v' of Nested data structure 'nest' (Array columns) have different array sizes.",
+       "cols": [],
+       "input_span": {
+        "off": 22,
+        "len": 20
+       },
+       "transformed": []
+      }
+     ],
+     "unsupported_settings": [],
+     "refused_at": "row",
+     "refused_row": 1,
+     "transformed": []
+    },
+    "export_b64": null
+   },
+   "body_records": [
+    {
+     "off": 0,
+     "len": 20
+    },
+    {
+     "off": 20,
+     "len": 22
+    },
+    {
+     "off": 42,
+     "len": 20
+    },
+    {
+     "off": 62,
+     "len": 16
+    }
+   ],
+   "failing_t_record": 2,
+   "insert": {
+    "outcome": "rejected",
+    "code": 190,
+    "err": "Elements 'nest.k' and 'nest.v' of Nested data structure 'nest' (Array columns) have different array sizes.",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "unsupported_settings": [],
+    "refused_at": "row",
+    "rows_undecided": 0
+   },
+   "insert_rows_b64": null,
+   "expect": "equal",
+   "provenance": {
+    "batch": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    },
+    "batch_of_t_rows": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    },
+    "insert": "unrecorded"
+   }
+  },
+  {
+   "id": "red-post-where-refusal-nested-sizes-insert-stops-at-the-cut-row",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "rejected",
+    "code": 190,
+    "err": "Elements 'nest.k' and 'nest.v' of Nested data structure 'nest' (Array columns) have different array sizes.",
+    "rows_read": 1,
+    "rows_skipped": 0,
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "export_declined": "batch outcome is 'rejected': only a fully accepted batch exports bytes",
+    "export_declined_reason": "export-batch-not-accepted",
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "unconsumed": [],
+    "rows": [
+     {
+      "verdict": "d",
+      "verdict_code": 190,
+      "verdict_err": "Elements 'nest.k' and 'nest.v' of Nested data structure 'nest' (Array columns) have different array sizes.",
+      "outcome": "rejected",
+      "code": 190,
+      "err": "Elements 'nest.k' and 'nest.v' of Nested data structure 'nest' (Array columns) have different array sizes.",
+      "cols": [],
+      "input_span": {
+       "off": 0,
+       "len": 20
+      },
+      "transformed": []
+     }
+    ],
+    "unsupported_settings": [],
+    "refused_at": "row",
+    "refused_row": 0,
+    "transformed": []
+   },
+   "batch_export_b64": null,
+   "batch_of_t_rows": {
+    "rows": [
+     1,
+     2,
+     3
+    ],
+    "batch": {
+     "outcome": "rejected",
+     "code": 190,
+     "err": "Elements 'nest.k' and 'nest.v' of Nested data structure 'nest' (Array columns) have different array sizes.",
+     "rows_read": 2,
+     "rows_skipped": 0,
+     "rows_passed": 0,
+     "rows_cut": 0,
+     "export_declined": "batch outcome is 'rejected': only a fully accepted batch exports bytes",
+     "export_declined_reason": "export-batch-not-accepted",
+     "framing": {
+      "bom_skipped": false,
+      "container": null,
+      "header": null
+     },
+     "unconsumed": [],
+     "rows": [
+      {
+       "verdict": "d",
+       "verdict_code": -2,
+       "verdict_err": "batch outcome is 'rejected': only a fully accepted batch has filter verdicts",
+       "outcome": "accepted",
+       "code": 0,
+       "err": "",
+       "cols": [],
+       "input_span": {
+        "off": 0,
+        "len": 22
+       },
+       "transformed": []
+      },
+      {
+       "verdict": "d",
+       "verdict_code": 190,
+       "verdict_err": "Elements 'nest.k' and 'nest.v' of Nested data structure 'nest' (Array columns) have different array sizes.",
+       "outcome": "rejected",
+       "code": 190,
+       "err": "Elements 'nest.k' and 'nest.v' of Nested data structure 'nest' (Array columns) have different array sizes.",
+       "cols": [],
+       "input_span": {
+        "off": 22,
+        "len": 20
+       },
+       "transformed": []
+      }
+     ],
+     "unsupported_settings": [],
+     "refused_at": "row",
+     "refused_row": 1,
+     "transformed": []
+    },
+    "export_b64": null
+   },
+   "body_records": [
+    {
+     "off": 0,
+     "len": 20
+    },
+    {
+     "off": 20,
+     "len": 22
+    },
+    {
+     "off": 42,
+     "len": 20
+    },
+    {
+     "off": 62,
+     "len": 16
+    }
+   ],
+   "failing_t_record": 2,
+   "insert": {
+    "outcome": "rejected",
+    "code": 190,
+    "err": "Elements 'nest.k' and 'nest.v' of Nested data structure 'nest' (Array columns) have different array sizes.",
+    "rows_read": 1,
+    "rows_skipped": 0,
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "unsupported_settings": [],
+    "refused_at": "row",
+    "rows_undecided": 0
+   },
+   "insert_rows_b64": null,
+   "expect": {
+    "violates": "post_where_refusal"
+   },
+   "provenance": {
+    "batch": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    },
+    "batch_of_t_rows": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    },
+    "insert": "planted"
+   }
+  },
+  {
+   "id": "red-post-where-refusal-nested-sizes-insert-reads-one-row-too-many",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "rejected",
+    "code": 190,
+    "err": "Elements 'nest.k' and 'nest.v' of Nested data structure 'nest' (Array columns) have different array sizes.",
+    "rows_read": 1,
+    "rows_skipped": 0,
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "export_declined": "batch outcome is 'rejected': only a fully accepted batch exports bytes",
+    "export_declined_reason": "export-batch-not-accepted",
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "unconsumed": [],
+    "rows": [
+     {
+      "verdict": "d",
+      "verdict_code": 190,
+      "verdict_err": "Elements 'nest.k' and 'nest.v' of Nested data structure 'nest' (Array columns) have different array sizes.",
+      "outcome": "rejected",
+      "code": 190,
+      "err": "Elements 'nest.k' and 'nest.v' of Nested data structure 'nest' (Array columns) have different array sizes.",
+      "cols": [],
+      "input_span": {
+       "off": 0,
+       "len": 20
+      },
+      "transformed": []
+     }
+    ],
+    "unsupported_settings": [],
+    "refused_at": "row",
+    "refused_row": 0,
+    "transformed": []
+   },
+   "batch_export_b64": null,
+   "batch_of_t_rows": {
+    "rows": [
+     1,
+     2,
+     3
+    ],
+    "batch": {
+     "outcome": "rejected",
+     "code": 190,
+     "err": "Elements 'nest.k' and 'nest.v' of Nested data structure 'nest' (Array columns) have different array sizes.",
+     "rows_read": 2,
+     "rows_skipped": 0,
+     "rows_passed": 0,
+     "rows_cut": 0,
+     "export_declined": "batch outcome is 'rejected': only a fully accepted batch exports bytes",
+     "export_declined_reason": "export-batch-not-accepted",
+     "framing": {
+      "bom_skipped": false,
+      "container": null,
+      "header": null
+     },
+     "unconsumed": [],
+     "rows": [
+      {
+       "verdict": "d",
+       "verdict_code": -2,
+       "verdict_err": "batch outcome is 'rejected': only a fully accepted batch has filter verdicts",
+       "outcome": "accepted",
+       "code": 0,
+       "err": "",
+       "cols": [],
+       "input_span": {
+        "off": 0,
+        "len": 22
+       },
+       "transformed": []
+      },
+      {
+       "verdict": "d",
+       "verdict_code": 190,
+       "verdict_err": "Elements 'nest.k' and 'nest.v' of Nested data structure 'nest' (Array columns) have different array sizes.",
+       "outcome": "rejected",
+       "code": 190,
+       "err": "Elements 'nest.k' and 'nest.v' of Nested data structure 'nest' (Array columns) have different array sizes.",
+       "cols": [],
+       "input_span": {
+        "off": 22,
+        "len": 20
+       },
+       "transformed": []
+      }
+     ],
+     "unsupported_settings": [],
+     "refused_at": "row",
+     "refused_row": 1,
+     "transformed": []
+    },
+    "export_b64": null
+   },
+   "body_records": [
+    {
+     "off": 0,
+     "len": 20
+    },
+    {
+     "off": 20,
+     "len": 22
+    },
+    {
+     "off": 42,
+     "len": 20
+    },
+    {
+     "off": 62,
+     "len": 16
+    }
+   ],
+   "failing_t_record": 2,
+   "insert": {
+    "outcome": "rejected",
+    "code": 190,
+    "err": "Elements 'nest.k' and 'nest.v' of Nested data structure 'nest' (Array columns) have different array sizes.",
+    "rows_read": 4,
     "rows_skipped": 0,
     "rows_passed": 0,
     "rows_cut": 0,

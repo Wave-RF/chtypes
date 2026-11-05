@@ -13,7 +13,7 @@
 //! back for a refusal, read the raw document and the raw bytes. Both documents
 //! of every case go through this crate's real decoders (`decode::batch` and
 //! `decode::insert_result`), so a case proves the decoders as well as the
-//! rule. Each case carries its expected result; the fixture's 34 planted reds
+//! rule. Each case carries its expected result; the fixture's 37 planted reds
 //! and its exception keep the gate honest: a rule that cannot fire fails here.
 //! A case's `batch_of_t_rows`, the batch over the rows the insert keeps, goes
 //! through the same `decode::batch`; whether it is accepted decides which of
@@ -765,7 +765,7 @@ fn every_case_of_the_shared_fixture_gives_its_expected_projection_result() {
     );
     assert_eq!(
         (cases.len(), equal, exceptions, reds),
-        (55, 20, 1, 34),
+        (60, 22, 1, 37),
         "the fixture's census (cases, equal, exception, planted reds)"
     );
     // A rule with no planted red is a rule the gate cannot see fail.
