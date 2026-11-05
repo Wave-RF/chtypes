@@ -1730,9 +1730,11 @@ CHS_API chs_status chs_preview_batch(
  * - Every member `insert_result` shares with the `batch` document is equal, absent where it is
  *   absent: `outcome`, `code`, `reason`, `refused_at`, `rows_read`, `rows_skipped`,
  *   `unsupported_settings`, `framing`, `partition_count`, `export_columns`, `rows_passed` and
- *   `rows_cut`, except as the cases below say. `rows_undecided` is the number of the batch's rows
- *   whose verdict is `d` in an `accepted` batch, and 0 otherwise. `rows_passed`, `rows_cut` and
- *   `rows_undecided` are 0 whenever this call's outcome is not `accepted`.
+ *   `rows_cut`, except as the cases below say. `rows_undecided` is the number of the batch's
+ *   accepted rows (row outcome `accepted`) whose verdict is `d` in an `accepted` batch, and 0
+ *   otherwise: a record skipped under the error allowance is counted only in `rows_skipped`.
+ *   `rows_passed`, `rows_cut` and `rows_undecided` are 0 whenever this call's outcome is not
+ *   `accepted`.
  * - `err`: the batch's `err` is a prefix of this call's, and the remainder is empty or exactly the
  *   suffix ClickHouse's row reader appends to a parse error, `: (at row N)` and a line feed, so the
  *   two are equal wherever ClickHouse appends nothing.
