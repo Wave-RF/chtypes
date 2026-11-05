@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/wave-rf/chtypes/spec/abi-v2/schema/cases.schema.json",
   "title": "tests/fixtures/abi-v2/cases.json, format 1",
-  "description": "The committed, generated (scripts/abi-v1/emit/cases.py) conformance cases every enrolled binding's v1-abi-conformance leg runs against the stub libraries scripts/abi-v1/build-stubs.sh builds. See that emitter's module docstring for the seven case kinds (handshake, echo, status, loader, lifecycle, concurrent, document) and the argument-expression shapes (int, bytes_hex, handle, null_handle, ref). This schema is checked by scripts/abi-v1/parity.py before it trusts the file, using the same restricted JSON Schema subset spec/abi-v2/abi.json's own schema uses (scripts/abi-v1/model.py's validate()); it is not part of gen.py's abi.json/sdk.json pipeline.",
+  "description": "The committed, generated (scripts/abi-v1/emit/cases.py) conformance cases every enrolled binding's v1-abi-conformance leg runs against the stub libraries scripts/abi-v1/build-stubs.sh builds. See that emitter's module docstring for the seven case kinds (handshake, echo, status, loader, lifecycle, concurrent, document) and the argument-expression shapes (int, bytes_hex, handle, null_handle, ref, cancel_options). This schema is checked by scripts/abi-v1/parity.py before it trusts the file, using the same restricted JSON Schema subset spec/abi-v2/abi.json's own schema uses (scripts/abi-v1/model.py's validate()); it is not part of gen.py's abi.json/sdk.json pipeline.",
   "type": "object",
   "additionalProperties": false,
   "required": ["_generated", "schema", "cases"],
@@ -30,7 +30,7 @@
             "type": "array",
             "minItems": 1,
             "items": {"$ref": "#/$defs/step"},
-            "description": "A lifecycle case's steps, run in order with no other case in flight: `let` binds the handle a call produces to a name a later `ref` argument uses; `call` with `expect` makes a call and checks it as an echo case is checked (every chs_buf it produces freed straight after); `free` releases a bound handle through its own free function; `live_delta` reads chs_live_handles and requires each kind's count to differ from the count read when the case began by exactly the given amount. Every handle a step binds is freed by a step."
+            "description": "A lifecycle case's steps, run in order with no other case in flight: `let` binds the handle a call produces to a name a later `ref` argument uses; `call` with `expect` makes a call and checks it as an echo case is checked (every chs_buf it produces freed straight after); `free` releases a bound handle through its own free function; `live_delta` reads chs_live_handles and requires each kind's count to differ from the count read when the case began by exactly the given amount. Generation 2's cancel token (chs_cancel) adds four: `cancel` creates a token through chs_cancel_create and binds it, and its id, to a name (the id must be `c` and 16 lowercase hex digits); `fire` fires a bound token (chs_cancel_fire); `fired` with `want` requires chs_cancel_fired of a bound token to answer `want`; `blocked_call` holds a `call`, a token name `fire` and an `expect`: the runner starts the call on another thread (the call's first bytes_in begins the stub's block directive, so it waits for a fire), waits, without sleeping a fixed time, until the stub's cancel probe (a chs_type_validate call whose type is `!C:`) reads one more call in flight than before, fires the token from this thread, joins the call and checks it against `expect`. An argument `{\"cancel_options\": <name>}` is the bytes `{\"cancel\":\"<the id bound to name>\"}`; in an expected echo, an argument `{\"cancel_echo\": <name>}` is the echo of those same bytes ({head_hex, len, sha256}), which the runner computes because the id is minted at run time. Two expectation members apply to every call expectation: an `error` may carry `reason`, the error's chs_error_reason, and `null_outputs` true requires every output of the call, handle or chs_buf, to be NULL. Every handle a step binds is freed by a step."
           },
           "threads": {"type": "integer", "minimum": 1, "description": "A concurrent case: how many threads call at once."},
           "calls": {"type": "integer", "minimum": 1, "description": "A concurrent case: how many calls each thread makes."}
@@ -55,7 +55,8 @@
         {"required": ["bytes_hex"], "properties": {"bytes_hex": {"type": "string", "pattern": "^([0-9a-f]{2})*$"}}},
         {"required": ["handle"], "properties": {"handle": {"type": "object", "required": ["fn", "args"]}}},
         {"required": ["null_handle"], "properties": {"null_handle": {"const": true}}},
-        {"required": ["ref"], "properties": {"ref": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}}}
+        {"required": ["ref"], "properties": {"ref": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}}},
+        {"required": ["cancel_options"], "properties": {"cancel_options": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}}}
       ]
     },
     "call": {
@@ -72,7 +73,11 @@
         {"required": ["let", "call"], "properties": {"let": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}, "call": {"$ref": "#/$defs/call"}}},
         {"required": ["call", "expect"], "properties": {"call": {"$ref": "#/$defs/call"}, "expect": {"type": "object"}}},
         {"required": ["free"], "properties": {"free": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}}},
-        {"required": ["live_delta"], "properties": {"live_delta": {"type": "object", "additionalProperties": {"type": "integer"}}}}
+        {"required": ["live_delta"], "properties": {"live_delta": {"type": "object", "additionalProperties": {"type": "integer"}}}},
+        {"required": ["cancel"], "properties": {"cancel": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}}},
+        {"required": ["fire"], "properties": {"fire": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}}},
+        {"required": ["fired", "want"], "properties": {"fired": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}, "want": {"enum": [0, 1]}}},
+        {"required": ["blocked_call"], "properties": {"blocked_call": {"type": "object", "required": ["call", "fire", "expect"], "properties": {"call": {"$ref": "#/$defs/call"}, "fire": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}, "expect": {"type": "object"}}}}}
       ]
     }
   }

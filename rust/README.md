@@ -54,6 +54,8 @@ The row is **accepted** and `256` is silently stored as `0`. That report, `trans
 - `Error::Unsupported`: this build declines to guess, and a real server might well have accepted. **Fall back to the server**; a decline is neither an acceptance nor a rejection.
 - `Error::Usage` is misuse (a closed or refused input); `Error::Internal` is a library bug.
 
+`Error::Canceled` is a fifth, and not a verdict: the call's `CancelToken` was canceled and the call stopped with no output.
+
 ## Documentation
 
 `cargo doc --no-deps --open` is the full reference — every public item is documented (`#![deny(missing_docs)]`), including which `Error` variant each call can produce.
@@ -64,13 +66,26 @@ The row is **accepted** and `256` is silently stored as `0`. That report, `trans
 
 Where this crate and the normative spec disagree, **the spec wins**.
 
-## Three things specific to this binding
+## Four things specific to this binding
 
 **Handles are cheap to clone and free themselves.** `Schema`, `Filter` and `Block` are `Clone + Send + Sync + 'static`: a clone shares one native handle, freed when the last clone drops, and any number of threads may call one handle at once. `Library` and `Registry` are `Send + Sync`. A library is never unloaded.
 
 **Bytes out are `RawText`.** The bytes are authoritative and the UTF-8 view is fallible, so a column name or a stored value is never silently repaired.
 
 **Option structs, not builders.** Every call takes an options struct with public fields and `Default` (`RowOptions { session_timezone: Some(z), ..Default::default() }`), and settings are `Vec<(String, String)>`: values are strings, and only strings.
+
+**Cancellation is a `CancelToken` in the options, not an async API.** `row`, `rows`, `insert`, `parse_block`, `Filter::rows` and `compile_table` take `cancel: Option<CancelToken>` in their options struct. The token is `Clone + Send + Sync`; `token.cancel()` from any thread stops every call given it (or a clone of it) at the call's next check point with `Error::Canceled`, and a call made with an already-canceled token is canceled at entry, reading no byte of the body. A call that passed its last check point returns its complete answer. `Filter::eval` over a block is not cancelable. With no token nothing changes, and no extra ABI call is made.
+
+```rust,ignore
+let token = chtypes::CancelToken::new();
+let opts = chtypes::RowsOptions { cancel: Some(token.clone()), ..Default::default() };
+let worker = std::thread::spawn(move || schema.rows(chtypes::Format::JsonEachRow, &body, &opts));
+token.cancel(); // from this thread, or any other
+match worker.join().unwrap() {
+    Err(chtypes::Error::Canceled(_)) => { /* stopped, no output */ }
+    other => { /* the complete answer, or another error */ }
+}
+```
 
 ## Tests
 

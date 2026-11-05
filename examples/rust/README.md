@@ -1,6 +1,6 @@
 # examples/rust: the Rust tour
 
-Eighteen sections over the public surface of the API ([`docs/reference/bindings-v1.md`](../../docs/reference/bindings-v1.md)), matching `../go`, `../python` and `../ts` section for section. See [`../README.md`](../README.md) for the section list. A section whose v0 feature the v1 API deletes (bindings-v1.md section 7) keeps its number and says which deletion removed it.
+Twenty-one sections over the public surface of the API ([`docs/reference/bindings-v1.md`](../../docs/reference/bindings-v1.md)), matching `../go`, `../python` and `../ts` section for section. Sections 19 to 21 exercise `Schema::insert` (insert equals batch, a Native round trip, a memory limit that declines); they run when `build_info` advertises the call (`preview_insert`; Native also needs `Native` in `export_formats`, the memory limit needs `insert_options.memory_limit_bytes`) and print SKIPPED by name, naming the absent capability, when it does not. An advertised call that declines fails the tour; `cargo test` pins that gate. See [`../README.md`](../README.md) for the section list. A section whose v0 feature the v1 API deletes (bindings-v1.md section 7) keeps its number and says which deletion removed it.
 
 ## Run it
 

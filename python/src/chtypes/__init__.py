@@ -67,6 +67,7 @@ from ._abi2._vocab import (
     Status,
     Verdict,
 )
+from ._cancel import CancelToken
 from ._input import (
     BytesIn,
     ColumnDefault,
@@ -134,6 +135,7 @@ from .results import (
     FilterRowError,
     Framing,
     Header,
+    InsertResult,
     RowResult,
     SchemaDescription,
     SchemaReplicated,
@@ -175,6 +177,7 @@ __all__ = [
     "BytesIn",
     "CacheUnusableError",
     "CallCanceledError",
+    "CancelToken",
     "CallError",
     "Capabilities",
     "ChtypesError",
@@ -202,6 +205,7 @@ __all__ = [
     "Format",
     "Framing",
     "Header",
+    "InsertResult",
     "InternalError",
     "Library",
     "MergeReason",

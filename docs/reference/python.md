@@ -99,6 +99,10 @@ Exit statuses come from the `errors` table of [`spec/fetch-v1/constants.json`](.
 
 Safe across threads at every level ([§3](bindings-v1.md)). `ctypes` releases the GIL for the whole of a foreign call, so calls on compiled handles run in parallel. The package takes no lock around a call: it keeps a close guard per handle (so `close` waits for the calls already inside it) and the setup guard.
 
+## Cancellation
+
+Create a `CancelToken` and pass it as `cancel=` to `Schema.row`, `rows`, `insert`, `parse_block`, `Filter.rows` or `Library.compile_table`; `tok.cancel()` from any thread makes every call holding the token raise `CallCanceledError` (not `asyncio.CancelledError`). A call that has already passed the library's last check point returns its complete answer. A token is one-shot. Ctrl-C cannot interrupt a call on the main thread, because Python delivers the signal only when the call returns: run the call on a worker thread, or with `asyncio.to_thread`, and call `tok.cancel()` from the main thread or on `asyncio.CancelledError`. `Filter.eval` over a block is not cancelable. The shape and the rules are in [`bindings-v1.md`](bindings-v1.md#cancellation-and-the-typescript-async-calls).
+
 <a id="known-gaps-in-10"></a>
 
 ## Known gaps in 2.0

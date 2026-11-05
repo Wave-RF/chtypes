@@ -15,10 +15,20 @@ import { HANDLE_INFO } from './decls.gen.js';
 import { usageError } from './errors.js';
 import { freeHandle, type RawApi } from './raw.js';
 
-/** A live handle over one opened image. `close()` is safe to call more than once and safe to never call explicitly (the registry calls it if this object is abandoned). */
+/**
+ * A live handle over one opened image. `close()` is safe to call more than once and safe to never call explicitly (the registry calls it if this object is abandoned).
+ *
+ * The close guard. An asynchronous call (`../cancel.ts`) runs on another thread while the event loop goes on, so a
+ * `close()` can arrive while a call that was given this handle is still in the library. Such a call LEASES the handle
+ * (`lease`, then `release` once the native call has returned). `close()` marks the handle closing, which refuses every
+ * later call, synchronous or not, at once; the free itself waits until the last lease is released. `close()` never
+ * fires the cancel token of a call in flight.
+ */
 export abstract class Abi2Handle {
   #raw: RawApi;
   #ptr: JsExternal | null;
+  #inflight = 0;
+  #closing = false;
   readonly kind: string;
 
   protected constructor(raw: RawApi, ptr: JsExternal, kind: string) {
@@ -27,19 +37,50 @@ export abstract class Abi2Handle {
     this.kind = kind;
   }
 
-  /** The raw pointer, for passing to `rawCall` as a `handle` argument. A closed handle raises a `UsageError` before any C call: a closed handle is never passed to C as NULL. */
+  /** The raw pointer, for passing to `rawCall` as a `handle` argument. A closed (or closing) handle raises a `UsageError` before any C call: a closed handle is never passed to C as NULL. */
   get ptr(): JsExternal {
-    if (this.#ptr === null) {
+    if (this.#closing || this.#ptr === null) {
       throw usageError(`this ${HANDLE_INFO[this.kind]?.className ?? this.kind} was already closed`);
     }
     return this.#ptr;
   }
 
+  /** True once `close()` was called, whether or not the deferred free has happened yet. */
   get isClosed(): boolean {
+    return this.#closing || this.#ptr === null;
+  }
+
+  /** True once the library's reference was actually released. */
+  get isFreed(): boolean {
     return this.#ptr === null;
   }
 
+  /** How many asynchronous calls hold this handle now. */
+  get inflight(): number {
+    return this.#inflight;
+  }
+
+  /** Take a lease for one asynchronous call: the pointer, valid until the matching `release`. A closed or closing handle is a `UsageError`. */
+  lease(): JsExternal {
+    const p = this.ptr;
+    this.#inflight++;
+    return p;
+  }
+
+  /** Return a lease; after `close()`, the last one returned does the free. */
+  release(): void {
+    if (this.#inflight === 0) throw new Error(`chtypes abi2: internal — a ${this.kind} lease was released twice`);
+    this.#inflight--;
+    if (this.#inflight === 0 && this.#closing) this.#free();
+  }
+
   close(): void {
+    if (this.#closing || this.#ptr === null) return;
+    this.#closing = true;
+    if (this.#inflight === 0) this.#free();
+  }
+
+  #free(): void {
     if (this.#ptr === null) return;
     const freeSymbol = HANDLE_INFO[this.kind]?.free;
     if (freeSymbol === undefined) throw new Error(`chtypes abi2: ${this.kind} has no HANDLE_INFO entry`);
@@ -48,8 +89,17 @@ export abstract class Abi2Handle {
   }
 }
 
+/**
+ * Test-only: how many handles a finalizer freed (a caller dropped them without `close()`), in total and by kind. A
+ * test that compares live counts asserts these did not move, so a free timed by a collection can never pass for a
+ * leak or hide one. Not exported from the package.
+ */
+export const finalizersForTest: { count: number; byKind: Record<string, number> } = { count: 0, byKind: {} };
+
 function makeHandleClass(kind: string): new (raw: RawApi, ptr: JsExternal) => Abi2Handle {
   const registry = new FinalizationRegistry<{ raw: RawApi; ptr: JsExternal; freeSymbol: string }>((held) => {
+    finalizersForTest.count++;
+    finalizersForTest.byKind[kind] = (finalizersForTest.byKind[kind] ?? 0) + 1;
     freeHandle(held.raw, held.freeSymbol, held.ptr);
   });
   const info = HANDLE_INFO[kind];
@@ -61,6 +111,8 @@ function makeHandleClass(kind: string): new (raw: RawApi, ptr: JsExternal) => Ab
       super(raw, ptr, kind);
       registry.register(this, { raw, ptr, freeSymbol }, this);
     }
+    // Unregistering at close is safe while the free is deferred: every lease
+    // holder references this object until it releases, which does the free.
     override close(): void {
       super.close();
       registry.unregister(this);

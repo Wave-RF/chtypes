@@ -813,6 +813,68 @@ ZONE_PROBE = {
     "probe": "!Z:",
 }
 
+# Generation 2, the cancel token (`chs_cancel`), as the stub models it and as
+# the cases that probe it expect it: emit/stub.py generates the C from this
+# dict and emit/cases.py the cases, so the two can never disagree. The rules
+# the stub restates (spec/abi-v2/docs.md, `chs_cancel` and `CHS_CANCELED`):
+#
+#   * `chs_cancel_create` mints a token and an id, `c` and 16 lowercase hex
+#     digits, registered id -> token; `chs_cancel_free` drops the caller's
+#     reference and deregisters the id. The stub's ids are a bijective mix of
+#     a per-image serial, never all zeros, so `unknown_id` never names a token.
+#   * A call whose options document (`input:insert_options` or
+#     `input:schema_options`) carries `cancel` resolves the id at entry and
+#     holds a reference while it runs. An id naming no registered token is
+#     `invalid_status`, with `unknown` as its message; a `cancel` that is not a
+#     JSON string is the same status with `not_string`.
+#   * A token fired before the call: `status` at entry, every output NULL, an
+#     error with ch_code 0, reason `reason` and message `messages["entry"]`.
+#   * The stub's one check point after entry: a call whose first bytes_in
+#     argument begins `directive` blocks until its token fires (a short poll,
+#     capped at `cap_ms`), then answers `status` with `messages["blocked"]`
+#     (or `messages["cap"]` when the cap elapsed). With no token the directive
+#     is plain bytes.
+#   * `late_directive` (`!L:`) is the same wait placed AFTER the last check
+#     point: the call blocks (counted in the probe's inflight) until the token
+#     fires, capped at `cap_ms`, and then answers its normal echo, never
+#     `status`: the token is not observed again.
+#   * Otherwise the call's answer is exactly the one it gives with no token.
+#
+# The probe: a call to `probe_fn` whose `probe_param` is exactly `probe`
+# answers, in `probe_out`, `{"fire_after_free":N,"inflight":N}`: how many
+# calls sit blocked in the directive now, and how many fires reached a token
+# after its caller freed it (the stub tombstones a freed token, so such a fire
+# is counted, never undefined). A real library has no such call: it is how a
+# runner sequences on the stub's state without a sleep and without resolving a
+# symbol the description does not declare. The same two counters are also
+# exported as `chs_stub_inflight` and `chs_stub_fire_after_free`, for the C
+# self-test (scripts/abi-v1/stubtest.c), which resolves them itself.
+CANCEL = {
+    "status": "CHS_CANCELED",
+    "reason": "call-canceled",
+    "invalid_status": "CHS_INVALID_ARGUMENT",
+    "unknown": '{param}: cancel "{id}" names no live cancel token',
+    "not_string": "{param}: cancel is not a JSON string",
+    "unknown_id": "c" + "0" * 16,
+    "directive": "!B:",
+    "late_directive": "!L:",
+    "cap_ms": 10000,
+    "messages": {
+        "entry": "call canceled at entry: the token was fired before the call",
+        "blocked": "call canceled at the stub's block check point",
+        "cap": "call canceled: the stub's block cap elapsed with no fire",
+    },
+    "probe_fn": "chs_type_validate",
+    "probe_param": "type_expr",
+    "probe_out": "out",
+    "probe": "!C:",
+}
+
+
+def cancel_unknown_message(param: str, cancel_id: str) -> str:
+    """The message the stub gives for an options `cancel` naming no token."""
+    return CANCEL["unknown"].format(param=param, id=cancel_id)
+
 # The symbol a loader checks before any other (step 3): it gets its own named
 # variant ("no-abi-version", reason "not_v1") rather than folding into the
 # generic missing-<sym> sweep, because a real loader distinguishes "this is

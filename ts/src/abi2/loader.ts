@@ -47,7 +47,7 @@ import { Calls } from './calls.gen.js';
 import { ABI_FINGERPRINT, ABI_VERSION, CROSS_CHECK, DESCRIBED_SYMBOLS, SYMBOL } from './decls.gen.js';
 import { ArtifactIncompatibleError, corruptRefusal, UsageError, usageError } from './errors.js';
 import { compareDottedVersions, ffiOpen, glibcVersionString, lastDlError, rawDlopen, rawDlsym } from './libc.js';
-import { defineRawFunctions, type RawApi, rawCall } from './raw.js';
+import { defineRawFunctions, defineThreadedRawFunctions, type RawApi, rawCall } from './raw.js';
 
 /** The predicate a loaded artifact is checked against: the verified signed statement's own fields, passed through verbatim (plan §3.1 — "predicate is passed verbatim, as the seam promises"). Only the fields this loader reads are typed; a real predicate carries more, and the fetch layer's own `ArtifactPredicate` satisfies this shape as it is. */
 export interface Predicate {
@@ -85,16 +85,45 @@ export class LoadedImage {
   readonly calls: Calls;
   readonly buildInfo: BuildInfo;
 
-  constructor(path: string, raw: RawApi, buildInfo: BuildInfo) {
+  readonly #key: string;
+  #threaded: RawApi | undefined;
+
+  constructor(path: string, raw: RawApi, buildInfo: BuildInfo, key: string = path) {
     this.path = path;
     this.raw = raw;
     this.calls = new Calls(raw);
     this.buildInfo = buildInfo;
+    this.#key = key;
+    imageByCalls.set(this.calls, this);
+  }
+
+  /**
+   * The same image's call table with every entry declared `runInNewThread`
+   * (`./raw.ts`'s `defineThreadedRawFunctions`), made on first use under a
+   * second ffi-rs key for the same path (dlopen dedupes it to this image).
+   * Only the asynchronous calls (`../cancel.ts`) use it.
+   */
+  get threaded(): RawApi {
+    if (this.#threaded === undefined) {
+      const key = `${this.#key}#threaded`;
+      ffiOpen(key, this.path);
+      this.#threaded = defineThreadedRawFunctions(key);
+    }
+    return this.#threaded;
   }
 
   get version(): string {
     return this.buildInfo.clickhouseVersion;
   }
+}
+
+const imageByCalls = new WeakMap<Calls, LoadedImage>();
+
+/** The image a generated call layer belongs to (every `Calls` the public layer holds is an image's own). */
+export function imageOfCalls(calls: Calls): LoadedImage {
+  const image = imageByCalls.get(calls);
+  if (image === undefined) throw new Error('chtypes abi2: internal — this call layer belongs to no loaded image');
+  return image;
 }
 
 function refuseIncompatible(path: string, reason: string, want?: string, got?: string): never {
@@ -252,7 +281,7 @@ export function openAbi2(input: LoadInput): LoadedImage {
   const { raw, buildInfo } = openAndCheck(path, key); // steps 2-4, 6
   checkCrossFields(path, buildInfo, input.predicate); // step 5, before step 7 touches the image
 
-  const image = new LoadedImage(path, raw, buildInfo);
+  const image = new LoadedImage(path, raw, buildInfo, key);
   initializeImage(image, input); // step 7
   loadedByKey.set(key, image);
   return image;
@@ -309,7 +338,7 @@ export function openUnverified(path: string, options: { readonly allow: boolean 
   if (cached !== undefined) return cached;
 
   const { raw, buildInfo } = openAndCheck(path, key);
-  const image = new LoadedImage(path, raw, buildInfo);
+  const image = new LoadedImage(path, raw, buildInfo, key);
   initializeImage(image, options);
   loadedByKey.set(key, image);
   return image;

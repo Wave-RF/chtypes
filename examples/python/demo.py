@@ -8,14 +8,14 @@ come from ClickHouse's own C++ (vendored per release into a shared library
 behind the frozen chs_* C ABI), which is why they are exact rather than
 approximately right.
 
-This file is a tutorial you RUN. Eighteen numbered sections walk the public
+This file is a tutorial you RUN. Twenty-one numbered sections walk the public
 API of the Python SDK (docs/reference/bindings-v1.md), from setting up the
 process to teardown, each with a comment saying what it demonstrates, why an
 ingest pipeline cares, and what to look at in the output. The same sections,
 with the same numbering, schemas and rows, exist in the Go, TypeScript and Rust
 tours, so you can diff two tours and see only the language idioms differ;
-section 18, the server profile, lands in Go and Python first and in the other
-two in their own pull requests.
+sections 18 to 21 (the server profile, and the three about the insert call) land
+in Go and Python first and in the other two in their own pull requests.
 
 Nothing here needs a ClickHouse server. It needs one installed artifact: fetch
 it once with `chtypes fetch 26.8` (or `python -m chtypes fetch 26.8`), or set
@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import os
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from typing import Any, NoReturn
 
 import chtypes
@@ -120,6 +120,9 @@ def main() -> None:
     section16(lib)
     section17(lib)
     section18(lib)
+    section19(lib)
+    section20(lib)
+    section21(lib)
     blank()
     print("Done. Every value above was measured by this run.")
 
@@ -1302,6 +1305,202 @@ def section18(lib: chtypes.Library) -> None:
                 kv("  " + show(value.column), f"{text_or(value):<20} ({value.source})")
             note("tz came from the server's own timezone(): Asia/Tokyo, not the image")
             note("zone. The schema holds the server, so closing either first is safe.")
+
+
+# ---------------------------------------------------------------------------
+# SECTIONS 19-21 - The insert call
+#
+# WHAT: schema.insert streams a whole body block by block, as a server's INSERT
+# does, and returns the insert_result document plus the output rows in the
+# format you name. A WHERE filter attached to the call keeps only its `t` rows.
+# WHY: an ingest gateway that forwards what it accepted wants the bytes to send
+# on, not a verdict to re-assemble. Three claims make that safe: the call agrees
+# with the batch call, Native output reads back to the same values, and a
+# memory limit is a decline, never a partial answer.
+# LOOK FOR: a build that does not ADVERTISE the call in its build info makes each
+# section say SKIPPED by name, with the capability that is absent. A build that
+# advertises it must run and pass: a decline then fails the tour.
+# C API: chs_preview_insert (with chs_preview_batch for the comparison).
+# ---------------------------------------------------------------------------
+INSERT_DDL = "CREATE TABLE t (k UInt32, s String) ENGINE = MergeTree ORDER BY k"
+INSERT_BODY = b"".join(
+    b'{"k":%d,"s":"row %d"}\n' % (k, k) for k in (1, 2, 3, 4, 5, 6)
+)  # fmt: skip
+
+
+# The capability names the insert sections key on, in ONE place: a rename in the
+# library's build info is a one-line change here.
+INSERT_FEATURE = "preview_insert"
+MEMORY_FEATURE = "insert_options.memory_limit_bytes"
+NATIVE_FORMAT = "Native"
+COMPACT_FORMAT = "JSONCompactEachRow"
+
+
+def missing_capabilities(
+    n: int, features: Collection[str], export_formats: Collection[str]
+) -> list[str]:
+    """The capabilities section n needs that the build does not advertise."""
+    need = {INSERT_FEATURE: features}
+    if n in (19, 21):
+        need[COMPACT_FORMAT] = export_formats
+    if n == 20:
+        need[NATIVE_FORMAT] = export_formats
+    if n == 21:
+        need[MEMORY_FEATURE] = features
+    return [name for name, have in need.items() if name not in have]
+
+
+def capability_gate(
+    n: int,
+    features: Collection[str],
+    export_formats: Collection[str],
+    *,
+    declined: bool = False,
+) -> bool:
+    """True when section n must skip: a needed capability is not advertised, and
+    the SKIPPED line names which. When everything is advertised the section MUST
+    run and pass, so `declined=True` (the call declined anyway) is a failure."""
+    missing = missing_capabilities(n, features, export_formats)
+    if missing:
+        kv(
+            "SKIPPED",
+            f"section {n}: this build does not advertise {', '.join(missing)}",
+        )
+        return True
+    if declined:
+        fatal(f"FAILED section {n}: the build advertises its capabilities but declined the call")
+    return False
+
+
+def skip_unadvertised(n: int, lib: chtypes.Library) -> bool:
+    caps = lib.build_info.capabilities
+    return capability_gate(n, caps.features, caps.export_formats)
+
+
+def try_insert(n: int, schema: chtypes.Schema, *args: Any, **kwargs: Any) -> chtypes.InsertResult:
+    """schema.insert for a build that advertises the call: any decline of the whole
+    call, or an unsupported outcome with the reason option-not-implemented, is a
+    failure here, never a skip. Everything else comes back for the section to judge."""
+    try:
+        result = schema.insert(*args, **kwargs)
+    except chtypes.UnsupportedError as e:
+        note(truncate(f"{e.reason or 'no reason'}: {e}", 66))
+        fatal(f"FAILED section {n}: an advertised insert call declined")
+    if result.outcome is Outcome.UNSUPPORTED and result.reason == "option-not-implemented":
+        note(f"reason {result.reason}: {truncate(show(result.err_msg), 56)}")
+        fatal(f"FAILED section {n}: an advertised insert option is not implemented")
+    return result
+
+
+def require(ok: bool, what: str) -> None:
+    """The tour's assertion: a mismatch ends the run with a named failure."""
+    if not ok:
+        fatal(f"FAILED {what}")
+
+
+def section19(lib: chtypes.Library) -> None:
+    section(19, "Insert equals batch")
+    if skip_unadvertised(19, lib):
+        return
+    kv("schema", "k UInt32, s String   (6 rows)")
+    kv("filter", "k > 2")
+    blank()
+    jer = Format.JSON_EACH_ROW
+    with (
+        lib.compile_table(INSERT_DDL) as schema,
+        schema.compile_filter("k > 2") as filt,
+    ):
+        ins = try_insert(19, schema, jer, INSERT_BODY, Format.JSON_COMPACT_EACH_ROW, row_filter=filt)
+        batch = schema.rows(
+            jer,
+            INSERT_BODY,
+            row_filter=filt,
+            export=Format.JSON_COMPACT_EACH_ROW,
+            doc_flags=DocFlags.ALL,
+        )
+        kv(
+            "insert",
+            f"{ins.outcome.value}  passed={ins.rows_passed} cut={ins.rows_cut}",
+        )
+        kv(
+            "batch",
+            f"{batch.outcome.value}  passed={batch.rows_passed} cut={batch.rows_cut}",
+        )
+        require(ins.outcome is Outcome.ACCEPTED, f"insert outcome {ins.outcome.value}")
+        require(batch.outcome is Outcome.ACCEPTED, f"batch outcome {batch.outcome.value}")
+        require(
+            ins.rows_passed == batch.rows_passed,
+            "rows_passed differs between the calls",
+        )
+        require(ins.rows_cut == batch.rows_cut, "rows_cut differs between the calls")
+        payload = batch.payload if batch.payload is not None else b""
+        want = b"".join(
+            payload[span.off : span.off + span.len]
+            for row, span in zip(batch.rows, batch.spans or (), strict=True)
+            if row.verdict is Verdict.TRUE and span is not None
+        )
+        require(
+            ins.output == want,
+            f"insert output {ins.output!r} != batch t spans {want!r}",
+        )
+        kv("insert output", f"{len(want)} bytes == the batch export's t-row spans")
+    note("insert equals batch: same counts, same bytes; the filter cut the same rows")
+
+
+def section20(lib: chtypes.Library) -> None:
+    section(20, "A Native round trip")
+    if skip_unadvertised(20, lib):
+        return
+    jer = Format.JSON_EACH_ROW
+    with lib.compile_table(INSERT_DDL) as schema:
+        ins = try_insert(20, schema, jer, INSERT_BODY, Format.NATIVE)
+        require(ins.outcome is Outcome.ACCEPTED, f"insert outcome {ins.outcome.value}")
+        require(ins.output is not None, "an accepted Native insert gave no output")
+        native = ins.output if ins.output is not None else b""
+        kv("native output", f"{len(native)} bytes for {ins.rows_read} rows")
+        back = schema.rows(Format.NATIVE, native, doc_flags=DocFlags.ALL)
+        original = schema.rows(jer, INSERT_BODY, doc_flags=DocFlags.ALL)
+        require(
+            back.outcome is Outcome.ACCEPTED,
+            f"Native batch outcome {back.outcome.value}",
+        )
+        require(
+            len(back.rows) == len(original.rows),
+            "row count differs after the round trip",
+        )
+
+        def cells(result: chtypes.BatchResult) -> list[list[tuple[bytes, bytes]]]:
+            return [[(v.column, v.text) for v in r.values] for r in result.rows]
+
+        require(cells(back) == cells(original), "values differ after the round trip")
+        kv("read back", f"{len(back.rows)} rows, every column's value equal")
+    note("the Native bytes insert wrote read back through the batch call to the values")
+    note("the original body gave")
+
+
+def section21(lib: chtypes.Library) -> None:
+    section(21, "The memory limit declines")
+    if skip_unadvertised(21, lib):
+        return
+    with lib.compile_table(INSERT_DDL) as schema:
+        ins = try_insert(
+            21,
+            schema,
+            Format.JSON_EACH_ROW,
+            INSERT_BODY,
+            Format.JSON_COMPACT_EACH_ROW,
+            memory_limit_bytes=1,
+        )
+        kv("memory_limit_bytes", "1")
+        kv("outcome", f"{ins.outcome.value}  reason={ins.reason}")
+        require(
+            ins.outcome is Outcome.UNSUPPORTED,
+            f"outcome {ins.outcome.value}, not unsupported",
+        )
+        require(ins.reason == "call-memory-budget", f"reason {ins.reason!r}")
+        require(ins.output is None, "a declined insert gave output")
+    note("a limit the call cannot meet is a decline with that reason and NO output:")
+    note("never a partial body to forward")
 
 
 # ------------------------------------------------------------------- plumbing

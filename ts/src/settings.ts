@@ -226,7 +226,7 @@ export interface ColumnDefault {
   readonly value: BytesIn;
 }
 
-/** The `insert_options` members of the four calls that model an INSERT of a body (`row`, `rows`, `parseBlock`, and a filter's `rows`): what `encodeInsertOptions` reads from those calls' options objects. */
+/** The `insert_options` members of the calls that model an INSERT of a body (`row`, `rows`, `insert`, `parseBlock`, and a filter's `rows`): what `encodeInsertOptions` reads from those calls' options objects. */
 export interface InsertOptions {
   /** The columns an INSERT may supply (the server's column-level INSERT grant). Absent leaves the member out (every column); `[]` is sent as `[]` (no column). */
   readonly insertableColumns?: readonly BytesIn[] | undefined;
@@ -234,6 +234,13 @@ export interface InsertOptions {
   readonly columnDefaults?: readonly ColumnDefault[] | undefined;
   readonly verdictBasis?: VerdictBasis | undefined;
   readonly deferDefaults?: DeferDefaults | undefined;
+  /**
+   * `insert_options.memory_limit_bytes` (ABI v2): a per-call memory limit in bytes, honored by every call that takes
+   * the document. Absent leaves the member out; `0` is sent as `"0"` (no limit). The document carries it as a decimal
+   * string of at most 18 digits: a `bigint`, a safe non-negative integer or that string. Anything else is a `UsageError`
+   * before any call. Reaching the limit is the library's whole-call decline (`call-memory-budget`), never a rejection.
+   */
+  readonly memoryLimitBytes?: bigint | number | string | undefined;
   /** Any other member of `insert_options`: key to its value as JSON text, passed through as given (rule r1). A key also named above keeps this value. Text that is not valid JSON is a `UsageError` before any call. */
   readonly insertOptionsExtra?: Readonly<Record<string, string>> | undefined;
 }
@@ -303,8 +310,25 @@ class OptionDoc {
   }
 }
 
-/** The `insert_options` document of a call that models an INSERT. */
-export function encodeInsertOptions(o: InsertOptions): Buffer {
+/** `memory_limit_bytes` as the document spells it: a decimal string, no sign, no leading zero, at most 18 digits. */
+function memoryLimitText(v: bigint | number | string): string {
+  let text: string;
+  if (typeof v === 'bigint') text = v.toString();
+  else if (typeof v === 'number') text = Number.isSafeInteger(v) && v >= 0 ? String(v) : '';
+  else if (typeof v === 'string') text = v;
+  else throw new TypeError(`chtypes: insert options: memoryLimitBytes must be a bigint, a number or a decimal string, got ${typeof v}`);
+  if (!/^(0|[1-9][0-9]{0,17})$/.test(text)) {
+    throw usageError('insert options: memoryLimitBytes must be a non-negative integer of at most 18 decimal digits, with no leading zero');
+  }
+  return text;
+}
+
+/**
+ * The `insert_options` document of a call that models an INSERT. `cancelId` is the id of the call's own cancel token
+ * (`./cancel.ts`), set only by an asynchronous call given a signal; it is written last, so it replaces a `cancel` key
+ * in `insertOptionsExtra`.
+ */
+export function encodeInsertOptions(o: InsertOptions, cancelId?: string): Buffer {
   const doc = new OptionDoc('insert options');
   if (o.insertableColumns !== undefined) doc.set('insertable_columns', o.insertableColumns.map((n) => nameObject('insert options', n)));
   if (o.columnDefaults !== undefined) {
@@ -315,7 +339,9 @@ export function encodeInsertOptions(o: InsertOptions): Buffer {
   }
   if (o.verdictBasis !== undefined) doc.set('verdict_basis', o.verdictBasis);
   if (o.deferDefaults !== undefined) doc.set('defer_defaults', o.deferDefaults);
+  if (o.memoryLimitBytes !== undefined) doc.set('memory_limit_bytes', memoryLimitText(o.memoryLimitBytes));
   doc.setRaw(o.insertOptionsExtra);
+  if (cancelId !== undefined) doc.set('cancel', cancelId);
   return doc.encode();
 }
 
@@ -327,10 +353,11 @@ export function encodeFilterOptions(o: FilterOptionMembers): Buffer {
   return doc.encode();
 }
 
-/** The `schema_options` document of `chs_schema_create`. */
-export function encodeSchemaOptions(o: SchemaOptionMembers): Buffer {
+/** The `schema_options` document of `chs_schema_create`; `cancelId` as for `encodeInsertOptions`. */
+export function encodeSchemaOptions(o: SchemaOptionMembers, cancelId?: string): Buffer {
   const doc = new OptionDoc('schema options');
   if (o.posture !== undefined) doc.set('posture', o.posture);
   doc.setRaw(o.schemaOptionsExtra);
+  if (cancelId !== undefined) doc.set('cancel', cancelId);
   return doc.encode();
 }

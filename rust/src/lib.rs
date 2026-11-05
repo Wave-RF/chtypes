@@ -90,6 +90,7 @@
 compile_error!("chtypes loads artifacts with dlopen and supports unix targets only");
 
 mod abi2;
+mod cancel;
 mod decode;
 mod error;
 mod library;
@@ -112,6 +113,20 @@ mod registry_stub_tests;
 #[cfg(test)]
 #[path = "../tests/unit/registry_flight.rs"]
 mod registry_flight_tests;
+// The insert projection gate over the shared fixture, and `Schema::insert`
+// over the stub: unit tests, because they read the crate-internal decoders and
+// the raw echo.
+#[cfg(test)]
+#[path = "../tests/unit/insert_projection.rs"]
+mod insert_projection_tests;
+#[cfg(test)]
+#[path = "../tests/unit/insert_stub.rs"]
+mod insert_stub_tests;
+// `CancelToken` over the stub: a unit test because it reads the raw echo of
+// the options document a cancelable call sent.
+#[cfg(test)]
+#[path = "../tests/unit/cancel_stub.rs"]
+mod cancel_stub_tests;
 mod result;
 mod schema;
 mod server;
@@ -122,6 +137,7 @@ pub use abi2::vocab_gen::{
     DocFlags, FilterOutcome, Format, MergeReason, Outcome, Posture, Reason, RefusalSite, Source,
     Status, Verdict, reason, source, status,
 };
+pub use cancel::CancelToken;
 pub use error::{Advisory, CacheFault, CallError, Error, Refusal, Result, Revocation};
 pub use library::Library;
 /// The `CHTYPES_*` codes of the artifact and fetch errors, as
@@ -135,11 +151,12 @@ pub use registry::{FetchOptions, Registry, RegistryOptions, cache_root, search_d
 pub use result::{
     AtMergeEntry, BatchResult, BuildInfo, Capabilities, Column, Computed, DeclinedSetting,
     DiscoveredColumn, Discovery, EngineCell, ErrorCodeEntry, ErrorCodeTable, FilterResult,
-    FilterRowError, Framing, Header, RowResult, SchemaDescription, SchemaReplicated, SchemaServer,
-    Span, Transform, Value,
+    FilterRowError, Framing, Header, InsertResult, RowResult, SchemaDescription, SchemaReplicated,
+    SchemaServer, Span, Transform, Value,
 };
 pub use schema::{
-    Block, CompileOptions, EvalOptions, Filter, FilterOptions, RowOptions, RowsOptions, Schema,
+    Block, CompileOptions, EvalOptions, Filter, FilterOptions, InsertOptions, RowOptions,
+    RowsOptions, Schema,
 };
 pub use server::{Server, ServerProfile};
 pub use setup::{SetupOptions, setup};
@@ -243,6 +260,7 @@ mod thread_contract {
         clone_send_sync_static::<Filter>();
         clone_send_sync_static::<Block>();
         clone_send_sync_static::<Server>();
+        clone_send_sync_static::<CancelToken>();
         // Results, errors and BuildInfo are plain values.
         send_sync::<RowResult>();
         send_sync::<BatchResult>();

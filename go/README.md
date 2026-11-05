@@ -112,6 +112,25 @@ A bad **row** is a verdict, not an error: `Outcome` becomes `Rejected` with Clic
 
 Everything is safe for concurrent use and no call takes a lock. A `Server`, `Schema`, `Filter` or `Block` has a close guard: `Close` waits for the calls already inside that object, and a later call is a `*UsageError`.
 
+## Cancellation
+
+`Row`, `Rows`, `Insert`, `ParseBlock`, `Filter.Rows` and `CompileTable` each have a context variant with `ctx` first: `RowContext`, `RowsContext`, `InsertContext`, `ParseBlockContext`, `Filter.RowsContext` and `CompileTableContext`.
+
+```go
+ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+defer cancel()
+res, err := schema.RowsContext(ctx, chtypes.JSONEachRow, body)
+if errors.Is(err, context.DeadlineExceeded) {
+	// a *chtypes.CanceledError whose Cause is the context's; there is no result
+}
+```
+
+- A canceled call returns a `*CanceledError` (`CHS_CANCELED`, reason `call-canceled`) with `Cause` set to `context.Cause(ctx)`, and no output.
+- A `ctx` already done cancels the call at entry, before any byte of the body is read. A call that completed its answer before it saw the cancellation returns that answer.
+- One `ctx` may cover any number of concurrent calls.
+- With `context.Background()` a context variant is exactly the plain call: no token, no goroutine and no extra ABI call.
+- `Filter.Eval` has no context variant: evaluating a parsed block is not cancelable. One long ClickHouse action runs to its end before the cancellation is seen (`spec/abi-v2/docs.md`, `chs_cancel`).
+
 ## The linked build
 
 `-tags chtypes_linked` adds `chtypes.OpenLinked()`, which links `-lchtypes` out of the artifact producer's build tree at compile time (`CGO_LDFLAGS` says where) and answers for exactly that one artifact. It is a development and rig instrument, not a consumer path.

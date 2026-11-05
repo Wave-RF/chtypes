@@ -6,7 +6,20 @@
  * is trivially safe to call in any order.
  */
 
-import { type BuildInfo, type Calls, checkUnverifiedAllowed, type LoadedImage, openUnverified as loadUnverified } from './abi2/index.js';
+import {
+  asBuffer,
+  type BuildInfo,
+  type Calls,
+  checkUnverifiedAllowed,
+  type HandleRef,
+  type LoadedImage,
+  NULL_EXTERNAL,
+  openUnverified as loadUnverified,
+  type SchemaHandle,
+  wrapHandle,
+} from './abi2/index.js';
+import { SYMBOL } from './abi2/decls.gen.js';
+import { type AsyncOptions, callAsync } from './cancel.js';
 import {
   type Discovery,
   decodeDiscovery,
@@ -123,6 +136,26 @@ export class Library {
       this.#calls,
       this.#calls.schemaCreate(server, bytesIn(createTable), encodeSettings(options.settings, options.sessionTimezone), encodeSchemaOptions(options)),
     );
+  }
+
+  /**
+   * `compileTable`, off the event loop: the same call and the same schema, cancelable through `options.signal`
+   * (`schema_options.cancel`; a `CallCanceledError`). A schema compiled after the signal aborted is freed, never
+   * returned. The server, if any, is leased for the call: closing it meanwhile defers its free.
+   */
+  compileTableAsync(createTable: BytesIn, options: CompileOptions & AsyncOptions = {}): Promise<Schema> {
+    const server = options.server === undefined || options.server === null ? null : serverHandleOf(options.server);
+    return callAsync(this.#calls, options.signal, {
+      name: SYMBOL.SCHEMA_CREATE,
+      handles: [server],
+      args: ([srv], cancelId) => [
+        srv ?? NULL_EXTERNAL,
+        asBuffer(bytesIn(createTable)),
+        encodeSettings(options.settings, options.sessionTimezone),
+        encodeSchemaOptions(options, cancelId),
+      ],
+      decode: (outs) => new Schema(this.#calls, wrapHandle(this.#calls.raw, outs.out as HandleRef) as SchemaHandle),
+    });
   }
 }
 

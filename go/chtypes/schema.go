@@ -10,6 +10,7 @@ package chtypes
 // the library.
 
 import (
+	"context"
 	"runtime"
 	"sync"
 
@@ -94,19 +95,32 @@ func (s *Schema) Describe() (SchemaDescription, error) {
 
 // Row previews one row (chs_preview_row).
 func (s *Schema) Row(format Format, body []byte, opts ...RowOption) (RowResult, error) {
+	return s.RowContext(context.Background(), format, body, opts...)
+}
+
+// RowContext is Row, canceled by ctx: when ctx is done before the call
+// returns its answer, the call returns a *CanceledError whose Cause is
+// context.Cause(ctx), and no result. A ctx that can never be done
+// (context.Background) makes it exactly Row. See the package documentation,
+// "Cancellation".
+func (s *Schema) RowContext(ctx context.Context, format Format, body []byte, opts ...RowOption) (RowResult, error) {
 	c := rowConfig(opts)
-	settings, columns, options, err := callInputs(c)
-	if err != nil {
-		return RowResult{}, err
-	}
 	if err := s.enter(); err != nil {
 		return RowResult{}, err
 	}
 	defer s.g.leave()
+	arm, err := armCancel(ctx, s.lib.tbl, &c.insertOpts)
+	if err != nil {
+		return RowResult{}, err
+	}
+	settings, columns, options, err := callInputs(c)
+	if err != nil {
+		return RowResult{}, arm.finish(err)
+	}
 	raw, err := s.lib.document(func() (*abi2.Buf, *abi2.CallError) {
 		return s.lib.tbl.PreviewRow(s.h, int32(format), body, settings, columns, options)
 	})
-	if err != nil {
+	if err = arm.finish(err); err != nil {
 		return RowResult{}, err
 	}
 	return decodeRow(raw)
@@ -115,11 +129,12 @@ func (s *Schema) Row(format Format, body []byte, opts ...RowOption) (RowResult, 
 // Rows previews a whole body (chs_preview_batch), optionally with a filter
 // attached and an export of the accepted rows.
 func (s *Schema) Rows(format Format, body []byte, opts ...RowsOption) (BatchResult, error) {
+	return s.RowsContext(context.Background(), format, body, opts...)
+}
+
+// RowsContext is Rows, canceled by ctx, as RowContext is Row.
+func (s *Schema) RowsContext(ctx context.Context, format Format, body []byte, opts ...RowsOption) (BatchResult, error) {
 	c := rowsConfig(opts)
-	settings, columns, options, err := callInputs(c)
-	if err != nil {
-		return BatchResult{}, err
-	}
 	if err := s.enter(); err != nil {
 		return BatchResult{}, err
 	}
@@ -132,9 +147,17 @@ func (s *Schema) Rows(format Format, body []byte, opts ...RowsOption) (BatchResu
 		defer c.filter.g.leave()
 		fh = c.filter.h
 	}
+	arm, err := armCancel(ctx, s.lib.tbl, &c.insertOpts)
+	if err != nil {
+		return BatchResult{}, err
+	}
+	settings, columns, options, err := callInputs(c)
+	if err != nil {
+		return BatchResult{}, arm.finish(err)
+	}
 	docBuf, exportBuf, cerr := s.lib.tbl.PreviewBatch(s.h, int32(format), body, settings, columns, fh, int32(c.export), uint32(c.docFlags), options)
-	if cerr != nil {
-		return BatchResult{}, callError(cerr)
+	if err := arm.finish(callError(cerr)); err != nil {
+		return BatchResult{}, err
 	}
 	// The document is read once, here, and nothing the result holds points
 	// into it (decodeBatch copies every value out), so its copy lives in a
@@ -152,6 +175,59 @@ func (s *Schema) Rows(format Format, body []byte, opts ...RowsOption) (BatchResu
 	}
 	docBufs.Put(bp)
 	return res, err
+}
+
+// Insert models one synchronous INSERT of a whole body (chs_preview_insert) and
+// returns its insert_result: the outcome, the counts and, when outFormat is
+// not ExportNone and the outcome is Accepted, the output rows in that format.
+// With WithRowFilter the filter is the INSERT's WHERE: only the t rows are
+// output, and an e row fails the whole call (a Rejected result). A refusal or
+// decline is a result, never an error; only misuse and internal errors are.
+// Nothing of a refused body is ever output.
+func (s *Schema) Insert(format Format, body []byte, outFormat Format, opts ...InsertCallOption) (InsertResult, error) {
+	return s.InsertContext(context.Background(), format, body, outFormat, opts...)
+}
+
+// InsertContext is Insert, canceled by ctx, as RowContext is Row. A canceled
+// call outputs nothing.
+func (s *Schema) InsertContext(ctx context.Context, format Format, body []byte, outFormat Format, opts ...InsertCallOption) (InsertResult, error) {
+	raw, rows, err := s.insertRaw(ctx, format, body, outFormat, opts...)
+	if err != nil {
+		return InsertResult{}, err
+	}
+	return decodeInsertResult(raw, rows)
+}
+
+// insertRaw makes the chs_preview_insert call and returns the insert_result
+// document and the out_rows buffer exactly as the library handed them back,
+// before the outcome decides whether the output is public.
+func (s *Schema) insertRaw(ctx context.Context, format Format, body []byte, outFormat Format, opts ...InsertCallOption) (doc, rows []byte, err error) {
+	c := insertConfig(opts)
+	if err := s.enter(); err != nil {
+		return nil, nil, err
+	}
+	defer s.g.leave()
+	var fh *abi2.Filter
+	if c.filter != nil {
+		if err := c.filter.enter(); err != nil {
+			return nil, nil, err
+		}
+		defer c.filter.g.leave()
+		fh = c.filter.h
+	}
+	arm, err := armCancel(ctx, s.lib.tbl, &c.insertOpts)
+	if err != nil {
+		return nil, nil, err
+	}
+	settings, columns, options, err := callInputs(c)
+	if err != nil {
+		return nil, nil, arm.finish(err)
+	}
+	docBuf, rowsBuf, cerr := s.lib.tbl.PreviewInsert(s.h, int32(format), body, settings, columns, fh, int32(outFormat), options)
+	if err := arm.finish(callError(cerr)); err != nil {
+		return nil, nil, err
+	}
+	return s.lib.tbl.Take(docBuf), s.lib.tbl.Take(rowsBuf), nil
 }
 
 // docBufs holds the document buffers of Rows between calls; one larger than
@@ -193,18 +269,29 @@ func (s *Schema) CompileFilter(expr string, opts ...FilterOption) (*Filter, erro
 // ParseBlock parses a body once (chs_block_create), so many filters can be
 // evaluated over it with no re-parse.
 func (s *Schema) ParseBlock(format Format, body []byte, opts ...BlockOption) (*Block, error) {
+	return s.ParseBlockContext(context.Background(), format, body, opts...)
+}
+
+// ParseBlockContext is ParseBlock, canceled by ctx, as RowContext is Row. A
+// canceled call returns no block.
+func (s *Schema) ParseBlockContext(ctx context.Context, format Format, body []byte, opts ...BlockOption) (*Block, error) {
 	c := blockConfig(opts)
-	settings, columns, options, err := callInputs(c)
-	if err != nil {
-		return nil, err
-	}
 	if err := s.enter(); err != nil {
 		return nil, err
 	}
 	defer s.g.leave()
+	arm, err := armCancel(ctx, s.lib.tbl, &c.insertOpts)
+	if err != nil {
+		return nil, err
+	}
+	settings, columns, options, err := callInputs(c)
+	if err != nil {
+		return nil, arm.finish(err)
+	}
 	h, cerr := s.lib.tbl.BlockCreate(s.h, int32(format), body, settings, columns, options)
-	if cerr != nil {
-		return nil, callError(cerr)
+	if err := arm.finish(callError(cerr)); err != nil {
+		_ = h.Close()
+		return nil, err
 	}
 	return newBlock(s.lib, h), nil
 }
@@ -262,19 +349,30 @@ func (f *Filter) enter() error {
 // INSERT evaluates, never the WHERE, which runs in the filter's own zone.
 // WithColumns and the insert options model the same INSERT as on Schema.Rows.
 func (f *Filter) Rows(format Format, body []byte, opts ...EvalOption) (FilterResult, error) {
+	return f.RowsContext(context.Background(), format, body, opts...)
+}
+
+// RowsContext is Rows, canceled by ctx, as Schema.RowContext is Schema.Row.
+// Eval, over a parsed block, has no context variant: chs_filter_eval_block is
+// not cancelable.
+func (f *Filter) RowsContext(ctx context.Context, format Format, body []byte, opts ...EvalOption) (FilterResult, error) {
 	c := evalConfig(opts)
-	settings, columns, options, err := callInputs(c)
-	if err != nil {
-		return FilterResult{}, err
-	}
 	if err := f.enter(); err != nil {
 		return FilterResult{}, err
 	}
 	defer f.g.leave()
+	arm, err := armCancel(ctx, f.lib.tbl, &c.insertOpts)
+	if err != nil {
+		return FilterResult{}, err
+	}
+	settings, columns, options, err := callInputs(c)
+	if err != nil {
+		return FilterResult{}, arm.finish(err)
+	}
 	raw, err := f.lib.document(func() (*abi2.Buf, *abi2.CallError) {
 		return f.lib.tbl.FilterEvalBody(f.h, int32(format), body, settings, columns, options)
 	})
-	if err != nil {
+	if err = arm.finish(err); err != nil {
 		return FilterResult{}, err
 	}
 	return decodeFilterResult(raw)

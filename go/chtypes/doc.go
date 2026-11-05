@@ -71,4 +71,31 @@
 // Everything here is safe for concurrent use. No call takes a lock; a
 // Server, Schema, Filter or Block has a close guard, so Close waits for the
 // calls already inside that object, and a later call is a *UsageError.
+//
+// # Cancellation
+//
+// The calls that read a body or compile a table each have a context variant,
+// with ctx first: Schema.RowContext, Schema.RowsContext, Schema.InsertContext,
+// Schema.ParseBlockContext, Filter.RowsContext and Library.CompileTableContext.
+// When ctx is done before the call returns its answer, the call stops at its
+// next check point and returns a *CanceledError (CHS_CANCELED, reason
+// call-canceled) whose Cause is context.Cause(ctx), so
+// errors.Is(err, context.Canceled) and errors.Is(err, context.DeadlineExceeded)
+// hold; it returns no result, no block and no schema. A ctx already done
+// cancels the call at entry, before any byte of the body is read. A call that
+// finished its answer before it saw the cancellation returns that answer.
+// One ctx may cover any number of concurrent calls.
+//
+// With a ctx that can never be done (context.Background, context.TODO) a
+// context variant is exactly the plain call: no token, no goroutine and no
+// extra ABI call. Filter.Eval has no context variant: evaluating a parsed
+// block is not cancelable. How soon a cancellation is seen is the library's
+// (spec/abi-v2/docs.md, chs_cancel): one long ClickHouse action runs to its
+// end first.
+//
+//	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+//	defer cancel()
+//	res, err := schema.RowsContext(ctx, chtypes.JSONEachRow, body)
+//	var ce *chtypes.CanceledError
+//	if errors.As(err, &ce) { /* ce.Cause is context.DeadlineExceeded */ }
 package chtypes

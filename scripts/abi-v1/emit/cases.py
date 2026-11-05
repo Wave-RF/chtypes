@@ -90,6 +90,17 @@ added beyond the per-function shapes:
     makes the calls in sequence and says `sequential` in the result's
     detail. A runner runs a concurrent case with no other case in flight.
 
+Generation 2's cancel token (`_cancel_cases`, _stubshared.CANCEL) adds, for
+every call whose options document defines `cancel`, a pre-fired, a during, a
+never-fired (lifecycle) and an unknown-id (status) case. Their lifecycle steps
+are `cancel` (create a token, bind it and its id), `fire`, `fired` with `want`,
+and `blocked_call` (the call runs on another thread, blocked in the stub's
+directive, and the runner fires once the stub's probe reads it in flight); the
+argument `{"cancel_options": "t"}` is `{"cancel":"<t's id>"}`, and, in an
+expected echo, `{"cancel_echo": "t"}` is the echo of those bytes, which a runner
+computes since the id is minted at run time. An expectation may carry
+`error.reason` and `null_outputs` (every output NULL).
+
 Plus one "loader" case per `scripts/abi-v1/emit/_stubshared.py` plan()
 entry: `{"variant": "<name>", "expect": {"reason": "<reason>"}}` — except
 "ctor-marker", which is OS-CONDITIONAL and gets two cases instead of one,
@@ -439,6 +450,7 @@ def _decision_cases(model) -> list[dict]:
     cases += _document_cases(model)
     cases += _lifecycle_cases(model)
     cases += _concurrent_cases(model)
+    cases += _cancel_cases(model)
     return cases
 
 
@@ -731,6 +743,188 @@ def _server_lifecycle_cases(model) -> list[dict]:
     ]
 
 
+def _cancel_fns(model) -> list:
+    """Every function whose options document defines `cancel`, in description order."""
+    return [fn for fn in model.functions if stub._cancel_param(model, fn) is not None]
+
+
+def _cancel_call(model, fn, refs: dict[str, str], first_bytes: bytes | None = None) -> tuple[dict, list]:
+    """(the call, the expected echo args) for `fn` with its options document
+    naming the token bound as `t` (`{"cancel_options": "t"}`), every handle
+    parameter a ref to a handle a step bound (`refs`: handle type -> name), and
+    optionally `first_bytes` in its first bytes_in parameter. The options'
+    expected echo is `{"cancel_echo": "t"}`: the id is minted at run time, so
+    a runner computes that argument's echo from the bytes it substituted."""
+    args, echo = _build_args(fn, model)
+    inputs = [p for p in fn.params if not p.is_out]
+    opt = stub._cancel_param(model, fn)
+    first = next(p for p in inputs if p.kind == "bytes_in")
+    for i, p in enumerate(inputs):
+        if p.kind == "handle" and not p.nullable:
+            args[i] = {"ref": refs[p.type]}
+        elif p is opt:
+            args[i] = {"cancel_options": "t"}
+            echo[i] = {"cancel_echo": "t"}
+        elif p is first and first_bytes is not None:
+            args[i] = {"bytes_hex": first_bytes.hex()}
+            echo[i] = _stubshared.echo_bytes_field(first_bytes)
+    return {"fn": fn.name, "args": args}, echo
+
+
+def _canceled_expect(where: str) -> dict:
+    rule = _stubshared.CANCEL
+    return {
+        "status": rule["status"],
+        "error": {"ch_code": 0, "ch_name": "", "message": rule["messages"][where], "column": "", "reason": rule["reason"]},
+        "null_outputs": True,
+    }
+
+
+def _cancel_cases(model) -> list[dict]:
+    """Generation 2, the cancel token (_stubshared.CANCEL), for every call
+    whose options document defines `cancel` (chs_filter_eval_block takes no
+    options document, so it has none): five cases per call.
+
+      * `pre_fired`: a token fired before the call: CHS_CANCELED at entry,
+        reason call-canceled, ch_code 0, every output NULL.
+      * `during`: the call's first bytes_in begins the stub's directive, so it
+        blocks; a runner fires the token from another thread once the stub's
+        probe reads one call in flight (a `blocked_call` step): CHS_CANCELED at
+        the block check point, every output NULL.
+      * `after_last`: the same wait placed after the call's last check point
+        (the directive `!L:`): the fire arrives while the call is in flight
+        but too late to be observed, so the call answers CHS_OK with its
+        complete echo and the token reads fired afterwards.
+      * `never_fired`: a token never fired: the call answers exactly its echo,
+        the options argument echoed as the bytes the runner substituted; a fire
+        after it returned reads 1 and changes nothing.
+      * `unknown_id`: an id naming no token is CHS_INVALID_ARGUMENT, naming it.
+
+    Each lifecycle case binds its token and the handles the call takes, frees
+    them all, and ends with every live count back where it began, so a call
+    that resolved the id released its reference. Empty for ABI v1."""
+    if not stub._has_cancel(model):
+        return []
+    rule = _stubshared.CANCEL
+    if "chs_cancel_create" not in {f.name for f in model.functions}:
+        raise ValueError("_cancel_cases: the description has chs_cancel but no chs_cancel_create")
+    out: list[dict] = []
+    for fn in _cancel_fns(model):
+        inputs = [p for p in fn.params if not p.is_out]
+        needs = {p.type for p in inputs if p.kind == "handle" and not p.nullable}
+        lets: list[dict] = []
+        frees: list[dict] = []
+        refs: dict[str, str] = {}
+        if needs - {"chs_schema", "chs_filter"}:
+            raise ValueError(f"{fn.name}: _cancel_cases binds only a schema and a filter, it needs {sorted(needs)}")
+        if needs:
+            lets.append({"let": "s", "call": _schema_recipe(model)})
+            refs["chs_schema"] = "s"
+        if "chs_filter" in needs:
+            filt = _filter_recipe(model)
+            filt["args"][0] = {"ref": "s"}
+            lets.append({"let": "f", "call": filt})
+            refs["chs_filter"] = "f"
+        frees = [{"free": st["let"]} for st in reversed(lets)] + [{"free": "t"}]
+        bound = {"chs_cancel": 1, **{k: 1 for k in refs}}
+        canceled_call, _ = _cancel_call(model, fn, refs)
+        blocked_call, _ = _cancel_call(model, fn, refs, first_bytes=rule["directive"].encode() + b"{}")
+        echo_call, echo = _cancel_call(model, fn, refs)
+        late_call, late_echo = _cancel_call(model, fn, refs, first_bytes=rule["late_directive"].encode() + b"{}")
+
+        def _echo_expect(args: list) -> dict:
+            e: dict = {"status": "CHS_OK"}
+            outs = {p.name: {"fn": fn.name, "out": p.name, "args": args} for p in _buf_out_params(fn)}
+            if outs:
+                e["outputs"] = outs
+            return e
+
+        echo_expect = _echo_expect(echo)
+        out += [
+            {
+                "id": f"cancel.{fn.name}.pre_fired",
+                "kind": "lifecycle",
+                "steps": [
+                    {"cancel": "t"},
+                    *lets,
+                    _live(model, **bound),
+                    {"fire": "t"},
+                    {"fired": "t", "want": 1},
+                    {"call": canceled_call, "expect": _canceled_expect("entry")},
+                    _live(model, **bound),
+                    *frees,
+                    _live(model),
+                ],
+            },
+            {
+                "id": f"cancel.{fn.name}.during",
+                "kind": "lifecycle",
+                "steps": [
+                    {"cancel": "t"},
+                    *lets,
+                    {"fired": "t", "want": 0},
+                    {"blocked_call": {"call": blocked_call, "fire": "t", "expect": _canceled_expect("blocked")}},
+                    {"fired": "t", "want": 1},
+                    _live(model, **bound),
+                    *frees,
+                    _live(model),
+                ],
+            },
+            {
+                "id": f"cancel.{fn.name}.after_last",
+                "kind": "lifecycle",
+                "steps": [
+                    {"cancel": "t"},
+                    *lets,
+                    {"fired": "t", "want": 0},
+                    # Past the last check point the call blocks until the fire, then answers in full.
+                    {"blocked_call": {"call": late_call, "fire": "t", "expect": _echo_expect(late_echo)}},
+                    {"fired": "t", "want": 1},
+                    _live(model, **bound),
+                    *frees,
+                    _live(model),
+                ],
+            },
+            {
+                "id": f"cancel.{fn.name}.never_fired",
+                "kind": "lifecycle",
+                "steps": [
+                    {"cancel": "t"},
+                    *lets,
+                    {"call": echo_call, "expect": echo_expect},
+                    {"fired": "t", "want": 0},
+                    # A fire after the call returned: the answer stands, the token reads fired.
+                    {"fire": "t"},
+                    {"fired": "t", "want": 1},
+                    _live(model, **bound),
+                    *frees,
+                    _live(model),
+                ],
+            },
+        ]
+        args, _ = _build_args(fn, model)
+        opt = stub._cancel_param(model, fn)
+        args[inputs.index(opt)] = {"bytes_hex": json.dumps({"cancel": rule["unknown_id"]}, separators=(",", ":")).encode().hex()}
+        out.append(
+            {
+                "id": f"cancel.{fn.name}.unknown_id",
+                "kind": "status",
+                "fn": fn.name,
+                "args": args,
+                "expect": {
+                    "status": rule["invalid_status"],
+                    "error": {
+                        "ch_code": 0,
+                        "ch_name": "",
+                        "message": _stubshared.cancel_unknown_message(opt.name, rule["unknown_id"]),
+                        "column": "",
+                    },
+                },
+            }
+        )
+    return out
+
+
 CONCURRENT_THREADS = 8
 CONCURRENT_CALLS = 16
 
@@ -814,7 +1008,7 @@ def _loader_cases(model) -> list[dict]:
 _ARG_FOR_KIND = {
     "scalar": ("int",),
     "enum": ("int",),
-    "bytes_in": ("bytes_hex",),
+    "bytes_in": ("bytes_hex", "cancel_options"),
     "handle": ("handle", "null_handle", "ref"),
 }
 
@@ -846,6 +1040,8 @@ def _check_calls(model, cases: list[dict]) -> None:
         for s in c.get("steps", ()):
             if "call" in s:
                 _check_call(model, s["call"]["fn"], s["call"]["args"], where)
+            if "blocked_call" in s:
+                _check_call(model, s["blocked_call"]["call"]["fn"], s["blocked_call"]["call"]["args"], where)
 
 
 def build_cases(model) -> list[dict]:

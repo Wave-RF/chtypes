@@ -129,6 +129,28 @@ export function defineRawFunctions(libraryKey: string): RawApi {
   return define(table) as unknown as RawApi;
 }
 
+/**
+ * The same table as `defineRawFunctions`, every entry declared
+ * `runInNewThread`: each call runs on a thread of ffi-rs's own and returns a
+ * Promise, so the event loop stays free while the call is in flight. Only
+ * `rawCallInNewThread` invokes it. A caller that must act while a call runs
+ * (the conformance runner firing a cancel token at a call blocked in the
+ * stub) is what this is for; `libraryKey` may be a second key `ffiOpen`
+ * registered for the same path (dlopen dedupes it to the same image).
+ */
+export function defineThreadedRawFunctions(libraryKey: string): RawApi {
+  const table: Record<string, { library: string; retType: DataType; paramsType: DataType[]; runInNewThread: true }> = {};
+  for (const [name, spec] of Object.entries(FUNCTION_SPECS)) {
+    table[name] = {
+      library: libraryKey,
+      retType: retDataType(spec),
+      paramsType: spec.params.flatMap((p) => paramDataTypes(p)),
+      runInNewThread: true,
+    };
+  }
+  return define(table) as unknown as RawApi;
+}
+
 // ------------------------------------------------------------- pointer slots
 
 type Slot = JsExternal[];
@@ -246,6 +268,58 @@ function decodeError(raw: RawApi, status: number, errSlot: Slot): CallErrorField
  * described function other than `chs_buf_data` has this shape today.
  */
 export function rawCall(raw: RawApi, name: string, args: readonly unknown[]): RawCallResult {
+  const prepared = prepareCall(name, args);
+  return finishCall(raw, name, prepared, rawFn(raw, name)(prepared.paramsValue));
+}
+
+/**
+ * `rawCall`, with the native call itself made through `threaded` (a
+ * `defineThreadedRawFunctions` table for the same image) on a thread of
+ * ffi-rs's own; marshaling and decoding are `rawCall`'s, through `raw`.
+ */
+export async function rawCallInNewThread(
+  raw: RawApi,
+  threaded: RawApi,
+  name: string,
+  args: readonly unknown[],
+): Promise<RawCallResult> {
+  const prepared = prepareCall(name, args);
+  let result: unknown;
+  try {
+    const pending = rawFn(threaded, name)(prepared.paramsValue);
+    if (!threadedKeepAlive.enabled) prepared.paramsValue.length = 0;
+    result = await pending;
+  } catch (err) {
+    for (const { slot } of prepared.outSlots) dropSlot(slot);
+    throw err;
+  } finally {
+    // Keep-alive: ffi-rs hands each Buffer's bytes to the native thread
+    // without holding the Buffer, so this frame holds every argument (the
+    // bodies, the documents, the handles) until the native call has returned.
+    keepReferenced(prepared.paramsValue);
+  }
+  return finishCall(raw, name, prepared, result);
+}
+
+/**
+ * Test-only: `enabled: false` drops this frame's references to a threaded
+ * call's arguments as soon as the call is dispatched, the planted red of the
+ * keep-alive rule (`test/abi2/cancel.test.ts`). Never set outside a test.
+ */
+export const threadedKeepAlive = { enabled: true };
+
+/** A use of `v` after the await, so the frame keeps it reachable; it does nothing else. */
+function keepReferenced(v: unknown): void {
+  if (v === keepReferenced) throw new Error('unreachable');
+}
+
+interface PreparedCall {
+  readonly spec: FunctionSpec;
+  readonly paramsValue: unknown[];
+  readonly outSlots: { param: ParamSpec; slot: Slot }[];
+}
+
+function prepareCall(name: string, args: readonly unknown[]): PreparedCall {
   const spec = FUNCTION_SPECS[name];
   if (spec === undefined) throw new Error(`chtypes abi2: no such described function ${name}`);
   const inputs = inputParams(spec);
@@ -277,9 +351,11 @@ export function rawCall(raw: RawApi, name: string, args: readonly unknown[]): Ra
       paramsValue.push(v);
     }
   }
-  const call = rawFn(raw, name);
-  const result = call(paramsValue);
+  return { spec, paramsValue, outSlots };
+}
 
+function finishCall(raw: RawApi, name: string, prepared: PreparedCall, result: unknown): RawCallResult {
+  const { spec, outSlots } = prepared;
   try {
     switch (spec.returns.kind) {
       case 'void':

@@ -1,0 +1,3855 @@
+{
+ "schema": "chtypes.abi-v2.insert-projection-fixture/1",
+ "about": "Cases for the chs_preview_insert projection rule (spec/abi-v2/docs.md, chs_preview_insert). Each case holds a chs_preview_batch document with its export bytes, a chs_preview_insert document with its output bytes, and the verdict the rule gives: equal, an exception, or the named rule it violates. Read by scripts/abi-v2/check-insert-projection.py and by every binding's projection-gate unit tests.",
+ "cases": [
+  {
+   "id": "equal-jsoncompacteachrow-no-filter-all-accepted",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 15
+      }
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 15,
+       "len": 15
+      }
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 30,
+       "len": 17
+      }
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "row_spans": [
+     {
+      "off": 0,
+      "len": 12
+     },
+     {
+      "off": 12,
+      "len": 12
+     },
+     {
+      "off": 24,
+      "len": 14
+     }
+    ],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ]
+   },
+   "batch_export_b64": "WzEsImFscGhhIl0KWzIsImJyYXZvIl0KWzMsImNoYXJsaWUiXQo=",
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ]
+   },
+   "insert_rows_b64": "WzEsImFscGhhIl0KWzIsImJyYXZvIl0KWzMsImNoYXJsaWUiXQo=",
+   "expect": "equal"
+  },
+  {
+   "id": "equal-jsoncompacteachrow-filter-mixed",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 15
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 15,
+       "len": 15
+      },
+      "verdict": "f",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 30,
+       "len": 17
+      },
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_reason": "filter-clock-read",
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 47,
+       "len": 15
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     }
+    ],
+    "rows_read": 4,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "row_spans": [
+     {
+      "off": 0,
+      "len": 12
+     },
+     null,
+     null,
+     {
+      "off": 12,
+      "len": 12
+     }
+    ],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 2
+   },
+   "batch_export_b64": "WzEsImFscGhhIl0KWzQsImRlbHRhIl0K",
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 4,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 2,
+    "rows_undecided": 1
+   },
+   "insert_rows_b64": "WzEsImFscGhhIl0KWzQsImRlbHRhIl0K",
+   "expect": "equal"
+  },
+  {
+   "id": "equal-csv-filter-mixed",
+   "output_format": "CSV",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 13
+      },
+      "verdict": "f",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 13,
+       "len": 13
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 26,
+       "len": 15
+      },
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_reason": "filter-clock-read",
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 41,
+       "len": 13
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     }
+    ],
+    "rows_read": 4,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "row_spans": [
+     null,
+     {
+      "off": 0,
+      "len": 10
+     },
+     null,
+     {
+      "off": 10,
+      "len": 10
+     }
+    ],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 2
+   },
+   "batch_export_b64": "MiwiYnJhdm8iCjQsImRlbHRhIgo=",
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 4,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 2,
+    "rows_undecided": 1
+   },
+   "insert_rows_b64": "MiwiYnJhdm8iCjQsImRlbHRhIgo=",
+   "expect": "equal"
+  },
+  {
+   "id": "equal-csv-no-filter-all-accepted",
+   "output_format": "CSV",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 13
+      }
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 13,
+       "len": 13
+      }
+     }
+    ],
+    "rows_read": 2,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "row_spans": [
+     {
+      "off": 0,
+      "len": 10
+     },
+     {
+      "off": 10,
+      "len": 10
+     }
+    ],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ]
+   },
+   "batch_export_b64": "MSwiYWxwaGEiCjIsImJyYXZvIgo=",
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 2,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ]
+   },
+   "insert_rows_b64": "MSwiYWxwaGEiCjIsImJyYXZvIgo=",
+   "expect": "equal"
+  },
+  {
+   "id": "equal-refused-err-suffix",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "rejected",
+    "code": 27,
+    "err": "Cannot parse input: expected ',' before: ']'",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 10
+      }
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 10,
+       "len": 10
+      }
+     },
+     {
+      "outcome": "rejected",
+      "code": 27,
+      "input_span": {
+       "off": 20,
+       "len": 6
+      },
+      "err": "Cannot parse input: expected ',' before: ']'"
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row",
+    "refused_row": 2,
+    "export_declined": "batch outcome is 'rejected'",
+    "export_declined_reason": "export-batch-not-accepted"
+   },
+   "batch_export_b64": null,
+   "insert": {
+    "outcome": "rejected",
+    "code": 27,
+    "err": "Cannot parse input: expected ',' before: ']': (at row 3)\n",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row"
+   },
+   "insert_rows_b64": null,
+   "expect": "equal"
+  },
+  {
+   "id": "equal-err-suffix-while-reading-the-value-of-key",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "rejected",
+    "code": 27,
+    "err": "Cannot parse input: expected '\"' before: 'x}': (while reading the value of key pt)",
+    "rows": [
+     {
+      "outcome": "rejected",
+      "code": 27,
+      "input_span": {
+       "off": 0,
+       "len": 14
+      },
+      "err": "Cannot parse input: expected '\"' before: 'x}': (while reading the value of key pt)"
+     }
+    ],
+    "rows_read": 1,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row",
+    "refused_row": 0,
+    "export_declined": "batch outcome is 'rejected'",
+    "export_declined_reason": "export-batch-not-accepted"
+   },
+   "batch_export_b64": null,
+   "insert": {
+    "outcome": "rejected",
+    "code": 27,
+    "err": "Cannot parse input: expected '\"' before: 'x}': (while reading the value of key pt): (at row 1)\n",
+    "rows_read": 1,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row"
+   },
+   "insert_rows_b64": null,
+   "expect": "equal"
+  },
+  {
+   "id": "red-err-suffix-doubled-line-feed",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "rejected",
+    "code": 27,
+    "err": "Cannot parse input: expected '\"' before: 'x}': (while reading the value of key pt)",
+    "rows": [
+     {
+      "outcome": "rejected",
+      "code": 27,
+      "input_span": {
+       "off": 0,
+       "len": 14
+      },
+      "err": "Cannot parse input: expected '\"' before: 'x}': (while reading the value of key pt)"
+     }
+    ],
+    "rows_read": 1,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row",
+    "refused_row": 0,
+    "export_declined": "batch outcome is 'rejected'",
+    "export_declined_reason": "export-batch-not-accepted"
+   },
+   "batch_export_b64": null,
+   "insert": {
+    "outcome": "rejected",
+    "code": 27,
+    "err": "Cannot parse input: expected '\"' before: 'x}': (while reading the value of key pt): (at row 1)\n\n",
+    "rows_read": 1,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row"
+   },
+   "insert_rows_b64": null,
+   "expect": {
+    "violates": "err_suffix"
+   }
+  },
+  {
+   "id": "equal-err-suffix-under-an-error-budget",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "rejected",
+    "code": 27,
+    "err": "Cannot parse input: expected ',' before: ']': (Already have 2 errors out of 3 rows, which is 0.6666666666666666 of all rows)",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 10
+      }
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 10,
+       "len": 10
+      }
+     },
+     {
+      "outcome": "rejected",
+      "code": 27,
+      "input_span": {
+       "off": 20,
+       "len": 6
+      },
+      "err": "Cannot parse input: expected ',' before: ']': (Already have 2 errors out of 3 rows, which is 0.6666666666666666 of all rows)"
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row",
+    "refused_row": 2,
+    "export_declined": "batch outcome is 'rejected'",
+    "export_declined_reason": "export-batch-not-accepted"
+   },
+   "batch_export_b64": null,
+   "insert": {
+    "outcome": "rejected",
+    "code": 27,
+    "err": "Cannot parse input: expected ',' before: ']': (Already have 2 errors out of 3 rows, which is 0.6666666666666666 of all rows): (at row 3)\n",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row"
+   },
+   "insert_rows_b64": null,
+   "expect": "equal"
+  },
+  {
+   "id": "equal-declined",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "unsupported",
+    "code": -2,
+    "err": "",
+    "rows": [],
+    "rows_read": 0,
+    "rows_skipped": 0,
+    "unsupported_settings": [
+     {
+      "name": "session_timezone"
+     }
+    ],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "call",
+    "reason": "call-setting-session-timezone",
+    "export_declined": "batch outcome is 'unsupported'",
+    "export_declined_reason": "export-batch-not-accepted"
+   },
+   "batch_export_b64": null,
+   "insert": {
+    "outcome": "unsupported",
+    "code": -2,
+    "err": "",
+    "rows_read": 0,
+    "rows_skipped": 0,
+    "unsupported_settings": [
+     {
+      "name": "session_timezone"
+     }
+    ],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "call",
+    "reason": "call-setting-session-timezone"
+   },
+   "insert_rows_b64": null,
+   "expect": "equal"
+  },
+  {
+   "id": "equal-export-none-validate-only",
+   "output_format": "NONE",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 15
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 15,
+       "len": 15
+      },
+      "verdict": "f",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 30,
+       "len": 17
+      },
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_reason": "filter-clock-read",
+      "verdict_err": "declined"
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "rows_passed": 1,
+    "rows_cut": 2
+   },
+   "batch_export_b64": null,
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "rows_passed": 1,
+    "rows_cut": 2,
+    "rows_undecided": 1
+   },
+   "insert_rows_b64": null,
+   "expect": "equal"
+  },
+  {
+   "id": "equal-native-no-filter",
+   "output_format": "Native",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 4
+      }
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 4,
+       "len": 4
+      }
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 8,
+       "len": 4
+      }
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "row_positions": [
+     0,
+     1,
+     2
+    ],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ]
+   },
+   "batch_export_b64": "AgMBbgVVSW50OAECAwFzBlN0cmluZwVhbHBoYQVicmF2bwdjaGFybGll",
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ]
+   },
+   "insert_rows_b64": "AgMBbgVVSW50OAECAwFzBlN0cmluZwVhbHBoYQVicmF2bwdjaGFybGll",
+   "expect": "equal"
+  },
+  {
+   "id": "equal-native-filter-mixed",
+   "output_format": "Native",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 4
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 4,
+       "len": 4
+      },
+      "verdict": "f",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 8,
+       "len": 4
+      },
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_reason": "filter-clock-read",
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 12,
+       "len": 4
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     }
+    ],
+    "rows_read": 4,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "row_positions": [
+     0,
+     null,
+     null,
+     1
+    ],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 2
+   },
+   "batch_export_b64": "AgIBbgVVSW50OAEEAXMGU3RyaW5nBWFscGhhBWRlbHRh",
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 4,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 2,
+    "rows_undecided": 1
+   },
+   "insert_rows_b64": "AgIBbgVVSW50OAEEAXMGU3RyaW5nBWFscGhhBWRlbHRh",
+   "expect": "equal"
+  },
+  {
+   "id": "equal-e-row-rejects-the-insert",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 15
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 15,
+       "len": 15
+      },
+      "verdict": "e",
+      "verdict_code": 395,
+      "verdict_err": "Value passed to 'throwIf' function is non-zero"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 30,
+       "len": 17
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "row_spans": [
+     {
+      "off": 0,
+      "len": 12
+     },
+     null,
+     {
+      "off": 12,
+      "len": 14
+     }
+    ],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 0
+   },
+   "batch_export_b64": "WzEsImFscGhhIl0KWzMsImNoYXJsaWUiXQo=",
+   "insert": {
+    "outcome": "rejected",
+    "code": 395,
+    "err": "Value passed to 'throwIf' function is non-zero",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row",
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "rows_undecided": 0
+   },
+   "insert_rows_b64": null,
+   "expect": "equal"
+  },
+  {
+   "id": "equal-e-row-first-of-two-e-rows",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 15
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 15,
+       "len": 15
+      },
+      "verdict": "e",
+      "verdict_code": 395,
+      "verdict_err": "Value passed to 'throwIf' function is non-zero"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 30,
+       "len": 17
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 47,
+       "len": 15
+      },
+      "verdict": "e",
+      "verdict_code": 396,
+      "verdict_err": "Later e row"
+     }
+    ],
+    "rows_read": 4,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "row_spans": [
+     {
+      "off": 0,
+      "len": 12
+     },
+     null,
+     {
+      "off": 12,
+      "len": 14
+     },
+     null
+    ],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 0
+   },
+   "batch_export_b64": "WzEsImFscGhhIl0KWzMsImNoYXJsaWUiXQo=",
+   "insert": {
+    "outcome": "rejected",
+    "code": 395,
+    "err": "Value passed to 'throwIf' function is non-zero",
+    "rows_read": 4,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row",
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "rows_undecided": 0
+   },
+   "insert_rows_b64": null,
+   "expect": "equal"
+  },
+  {
+   "id": "equal-declined-output-is-the-call-decline",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 15
+      }
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 15,
+       "len": 15
+      }
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 30,
+       "len": 17
+      }
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "export_declined": "a column's value is computed and not carried",
+    "export_declined_reason": "export-computed-value-not-carried"
+   },
+   "batch_export_b64": null,
+   "insert": {
+    "outcome": "unsupported",
+    "code": -2,
+    "err": "a column's value is computed and not carried",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "body_step",
+    "reason": "export-computed-value-not-carried"
+   },
+   "insert_rows_b64": null,
+   "expect": "equal"
+  },
+  {
+   "id": "equal-declined-output-under-a-filter-counts-zero",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 13
+      },
+      "verdict": "f",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 13,
+       "len": 13
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 26,
+       "len": 15
+      },
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_reason": "filter-clock-read",
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 41,
+       "len": 13
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     }
+    ],
+    "rows_read": 4,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "rows_passed": 2,
+    "rows_cut": 2,
+    "export_declined": "a column's value is computed and not carried",
+    "export_declined_reason": "export-computed-value-not-carried"
+   },
+   "batch_export_b64": null,
+   "insert": {
+    "outcome": "unsupported",
+    "code": -2,
+    "err": "a column's value is computed and not carried",
+    "rows_read": 4,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "rows_undecided": 0,
+    "refused_at": "body_step",
+    "reason": "export-computed-value-not-carried"
+   },
+   "insert_rows_b64": null,
+   "expect": "equal"
+  },
+  {
+   "id": "equal-not-accepted-batch-with-d-rows-counts-zero",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "rejected",
+    "code": 27,
+    "err": "Cannot parse input: expected ',' before: ']'",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 10
+      },
+      "verdict": "d",
+      "verdict_code": 0,
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 10,
+       "len": 10
+      },
+      "verdict": "d",
+      "verdict_code": 0,
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "rejected",
+      "code": 27,
+      "input_span": {
+       "off": 20,
+       "len": 6
+      },
+      "err": "Cannot parse input: expected ',' before: ']'",
+      "verdict": "d",
+      "verdict_code": 0,
+      "verdict_err": "declined"
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row",
+    "refused_row": 2,
+    "export_declined": "batch outcome is 'rejected'",
+    "export_declined_reason": "export-batch-not-accepted",
+    "rows_passed": 0,
+    "rows_cut": 0
+   },
+   "batch_export_b64": null,
+   "insert": {
+    "outcome": "rejected",
+    "code": 27,
+    "err": "Cannot parse input: expected ',' before: ']': (at row 3)\n",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row",
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "rows_undecided": 0
+   },
+   "insert_rows_b64": null,
+   "expect": "equal"
+  },
+  {
+   "id": "equal-e-row-decides-where-the-export-was-declined",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 15
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 15,
+       "len": 15
+      },
+      "verdict": "e",
+      "verdict_code": 395,
+      "verdict_err": "Value passed to 'throwIf' function is non-zero"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 30,
+       "len": 17
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "rows_passed": 2,
+    "rows_cut": 0,
+    "export_declined": "a column's value is computed and not carried",
+    "export_declined_reason": "export-computed-value-not-carried"
+   },
+   "batch_export_b64": null,
+   "insert": {
+    "outcome": "rejected",
+    "code": 395,
+    "err": "Value passed to 'throwIf' function is non-zero",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row",
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "rows_undecided": 0
+   },
+   "insert_rows_b64": null,
+   "expect": "equal"
+  },
+  {
+   "id": "exception-generator-draw-bytes-differ",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 13
+      },
+      "cols": [
+       {
+        "name": "u",
+        "null": false,
+        "src": "default_generated"
+       }
+      ]
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 13,
+       "len": 13
+      },
+      "cols": [
+       {
+        "name": "u",
+        "null": false,
+        "src": "default_generated"
+       }
+      ]
+     }
+    ],
+    "rows_read": 2,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "row_spans": [
+     {
+      "off": 0,
+      "len": 10
+     },
+     {
+      "off": 10,
+      "len": 10
+     }
+    ],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ]
+   },
+   "batch_export_b64": "WzEsInUtMSJdClsyLCJ1LTIiXQo=",
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 2,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ]
+   },
+   "insert_rows_b64": "WzEsInUtOSJdClsyLCJ1LTgiXQo=",
+   "expect": {
+    "exception": "generator_draw"
+   }
+  },
+  {
+   "id": "red-shared-member-rows-read",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 15
+      }
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 15,
+       "len": 15
+      }
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 30,
+       "len": 17
+      }
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "row_spans": [
+     {
+      "off": 0,
+      "len": 12
+     },
+     {
+      "off": 12,
+      "len": 12
+     },
+     {
+      "off": 24,
+      "len": 14
+     }
+    ],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ]
+   },
+   "batch_export_b64": "WzEsImFscGhhIl0KWzIsImJyYXZvIl0KWzMsImNoYXJsaWUiXQo=",
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 4,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ]
+   },
+   "insert_rows_b64": "WzEsImFscGhhIl0KWzIsImJyYXZvIl0KWzMsImNoYXJsaWUiXQo=",
+   "expect": {
+    "violates": "shared_members"
+   }
+  },
+  {
+   "id": "red-shared-member-missing-export-columns",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 15
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 15,
+       "len": 15
+      },
+      "verdict": "f",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 30,
+       "len": 17
+      },
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_reason": "filter-clock-read",
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 47,
+       "len": 15
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     }
+    ],
+    "rows_read": 4,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "row_spans": [
+     {
+      "off": 0,
+      "len": 12
+     },
+     null,
+     null,
+     {
+      "off": 12,
+      "len": 12
+     }
+    ],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 2
+   },
+   "batch_export_b64": "WzEsImFscGhhIl0KWzQsImRlbHRhIl0K",
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 4,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "rows_passed": 2,
+    "rows_cut": 2,
+    "rows_undecided": 1
+   },
+   "insert_rows_b64": "WzEsImFscGhhIl0KWzQsImRlbHRhIl0K",
+   "expect": {
+    "violates": "shared_members"
+   }
+  },
+  {
+   "id": "red-count-undecided-wrong",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 15
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 15,
+       "len": 15
+      },
+      "verdict": "f",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 30,
+       "len": 17
+      },
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_reason": "filter-clock-read",
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 47,
+       "len": 15
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     }
+    ],
+    "rows_read": 4,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "row_spans": [
+     {
+      "off": 0,
+      "len": 12
+     },
+     null,
+     null,
+     {
+      "off": 12,
+      "len": 12
+     }
+    ],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 2
+   },
+   "batch_export_b64": "WzEsImFscGhhIl0KWzQsImRlbHRhIl0K",
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 4,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 2,
+    "rows_undecided": 2
+   },
+   "insert_rows_b64": "WzEsImFscGhhIl0KWzQsImRlbHRhIl0K",
+   "expect": {
+    "violates": "counts"
+   }
+  },
+  {
+   "id": "red-count-cut-wrong-in-both",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 15
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 15,
+       "len": 15
+      },
+      "verdict": "f",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 30,
+       "len": 17
+      },
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_reason": "filter-clock-read",
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 47,
+       "len": 15
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     }
+    ],
+    "rows_read": 4,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "row_spans": [
+     {
+      "off": 0,
+      "len": 12
+     },
+     null,
+     null,
+     {
+      "off": 12,
+      "len": 12
+     }
+    ],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 1
+   },
+   "batch_export_b64": "WzEsImFscGhhIl0KWzQsImRlbHRhIl0K",
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 4,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 1,
+    "rows_undecided": 1
+   },
+   "insert_rows_b64": "WzEsImFscGhhIl0KWzQsImRlbHRhIl0K",
+   "expect": {
+    "violates": "counts"
+   }
+  },
+  {
+   "id": "red-err-not-a-prefix",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "rejected",
+    "code": 27,
+    "err": "Cannot parse input: expected ',' before: ']'",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 10
+      }
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 10,
+       "len": 10
+      }
+     },
+     {
+      "outcome": "rejected",
+      "code": 27,
+      "input_span": {
+       "off": 20,
+       "len": 6
+      },
+      "err": "Cannot parse input: expected ',' before: ']'"
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row",
+    "refused_row": 2,
+    "export_declined": "batch outcome is 'rejected'",
+    "export_declined_reason": "export-batch-not-accepted"
+   },
+   "batch_export_b64": null,
+   "insert": {
+    "outcome": "rejected",
+    "code": 27,
+    "err": "Cannot parse input: expected ';' before: ']': (at row 3)\n",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row"
+   },
+   "insert_rows_b64": null,
+   "expect": {
+    "violates": "err_prefix"
+   }
+  },
+  {
+   "id": "red-err-suffix-not-clickhouses",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "rejected",
+    "code": 27,
+    "err": "Cannot parse input: expected ',' before: ']'",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 10
+      }
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 10,
+       "len": 10
+      }
+     },
+     {
+      "outcome": "rejected",
+      "code": 27,
+      "input_span": {
+       "off": 20,
+       "len": 6
+      },
+      "err": "Cannot parse input: expected ',' before: ']'"
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row",
+    "refused_row": 2,
+    "export_declined": "batch outcome is 'rejected'",
+    "export_declined_reason": "export-batch-not-accepted"
+   },
+   "batch_export_b64": null,
+   "insert": {
+    "outcome": "rejected",
+    "code": 27,
+    "err": "Cannot parse input: expected ',' before: ']' (library note: retry)",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row"
+   },
+   "insert_rows_b64": null,
+   "expect": {
+    "violates": "err_suffix"
+   }
+  },
+  {
+   "id": "red-line-output-off-by-one-byte",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 15
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 15,
+       "len": 15
+      },
+      "verdict": "f",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 30,
+       "len": 17
+      },
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_reason": "filter-clock-read",
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 47,
+       "len": 15
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     }
+    ],
+    "rows_read": 4,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "row_spans": [
+     {
+      "off": 0,
+      "len": 12
+     },
+     null,
+     null,
+     {
+      "off": 12,
+      "len": 12
+     }
+    ],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 2
+   },
+   "batch_export_b64": "WzEsImFscGhhIl0KWzQsImRlbHRhIl0K",
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 4,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 2,
+    "rows_undecided": 1
+   },
+   "insert_rows_b64": "WzEtImFscGhhIl0KWzQsImRlbHRhIl0K",
+   "expect": {
+    "violates": "line_output"
+   }
+  },
+  {
+   "id": "red-line-output-has-an-f-row",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 15
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 15,
+       "len": 15
+      },
+      "verdict": "f",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 30,
+       "len": 17
+      },
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_reason": "filter-clock-read",
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 47,
+       "len": 15
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     }
+    ],
+    "rows_read": 4,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "row_spans": [
+     {
+      "off": 0,
+      "len": 12
+     },
+     null,
+     null,
+     {
+      "off": 12,
+      "len": 12
+     }
+    ],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 2
+   },
+   "batch_export_b64": "WzEsImFscGhhIl0KWzQsImRlbHRhIl0K",
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 4,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 2,
+    "rows_undecided": 1
+   },
+   "insert_rows_b64": "WzEsImFscGhhIl0KWzQsImRlbHRhIl0KWzIsImJyYXZvIl0K",
+   "expect": {
+    "violates": "non_t_row"
+   }
+  },
+  {
+   "id": "red-line-output-has-a-d-row",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 15
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 15,
+       "len": 15
+      },
+      "verdict": "f",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 30,
+       "len": 17
+      },
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_reason": "filter-clock-read",
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 47,
+       "len": 15
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     }
+    ],
+    "rows_read": 4,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "row_spans": [
+     {
+      "off": 0,
+      "len": 12
+     },
+     null,
+     null,
+     {
+      "off": 12,
+      "len": 12
+     }
+    ],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 2
+   },
+   "batch_export_b64": "WzEsImFscGhhIl0KWzQsImRlbHRhIl0K",
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 4,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 2,
+    "rows_undecided": 1
+   },
+   "insert_rows_b64": "WzEsImFscGhhIl0KWzQsImRlbHRhIl0KWzMsImNoYXJsaWUiXQo=",
+   "expect": {
+    "violates": "non_t_row"
+   }
+  },
+  {
+   "id": "red-csv-output-drops-a-t-row",
+   "output_format": "CSV",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 13
+      },
+      "verdict": "f",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 13,
+       "len": 13
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 26,
+       "len": 15
+      },
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_reason": "filter-clock-read",
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 41,
+       "len": 13
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     }
+    ],
+    "rows_read": 4,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "row_spans": [
+     null,
+     {
+      "off": 0,
+      "len": 10
+     },
+     null,
+     {
+      "off": 10,
+      "len": 10
+     }
+    ],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 2
+   },
+   "batch_export_b64": "MiwiYnJhdm8iCjQsImRlbHRhIgo=",
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 4,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 2,
+    "rows_undecided": 1
+   },
+   "insert_rows_b64": "MiwiYnJhdm8iCg==",
+   "expect": {
+    "violates": "line_output"
+   }
+  },
+  {
+   "id": "red-native-off-by-one-byte",
+   "output_format": "Native",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 4
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 4,
+       "len": 4
+      },
+      "verdict": "f",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 8,
+       "len": 4
+      },
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_reason": "filter-clock-read",
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 12,
+       "len": 4
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     }
+    ],
+    "rows_read": 4,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "row_positions": [
+     0,
+     null,
+     null,
+     1
+    ],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 2
+   },
+   "batch_export_b64": "AgIBbgVVSW50OAEEAXMGU3RyaW5nBWFscGhhBWRlbHRh",
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 4,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 2,
+    "rows_undecided": 1
+   },
+   "insert_rows_b64": "AgIBbgVVSW50OAEEAXMGU3RyaW5nBWFscGhhBWRlbHRg",
+   "expect": {
+    "violates": "native_output"
+   }
+  },
+  {
+   "id": "red-output-given-for-validate-only",
+   "output_format": "NONE",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 15
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 15,
+       "len": 15
+      },
+      "verdict": "f",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 30,
+       "len": 17
+      },
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_reason": "filter-clock-read",
+      "verdict_err": "declined"
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "rows_passed": 1,
+    "rows_cut": 2
+   },
+   "batch_export_b64": null,
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "rows_passed": 1,
+    "rows_cut": 2,
+    "rows_undecided": 1
+   },
+   "insert_rows_b64": "",
+   "expect": {
+    "violates": "output_presence"
+   }
+  },
+  {
+   "id": "red-output-missing-for-accepted",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 15
+      }
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 15,
+       "len": 15
+      }
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 30,
+       "len": 17
+      }
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "row_spans": [
+     {
+      "off": 0,
+      "len": 12
+     },
+     {
+      "off": 12,
+      "len": 12
+     },
+     {
+      "off": 24,
+      "len": 14
+     }
+    ],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ]
+   },
+   "batch_export_b64": "WzEsImFscGhhIl0KWzIsImJyYXZvIl0KWzMsImNoYXJsaWUiXQo=",
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ]
+   },
+   "insert_rows_b64": null,
+   "expect": {
+    "violates": "output_presence"
+   }
+  },
+  {
+   "id": "red-e-row-insert-accepted",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 15
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 15,
+       "len": 15
+      },
+      "verdict": "e",
+      "verdict_code": 395,
+      "verdict_err": "Value passed to 'throwIf' function is non-zero"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 30,
+       "len": 17
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "row_spans": [
+     {
+      "off": 0,
+      "len": 12
+     },
+     null,
+     {
+      "off": 12,
+      "len": 14
+     }
+    ],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 0
+   },
+   "batch_export_b64": "WzEsImFscGhhIl0KWzMsImNoYXJsaWUiXQo=",
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row",
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "rows_undecided": 0
+   },
+   "insert_rows_b64": null,
+   "expect": {
+    "violates": "e_row_rejects"
+   }
+  },
+  {
+   "id": "red-e-row-message-altered",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 15
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 15,
+       "len": 15
+      },
+      "verdict": "e",
+      "verdict_code": 395,
+      "verdict_err": "Value passed to 'throwIf' function is non-zero"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 30,
+       "len": 17
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "row_spans": [
+     {
+      "off": 0,
+      "len": 12
+     },
+     null,
+     {
+      "off": 12,
+      "len": 14
+     }
+    ],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 0
+   },
+   "batch_export_b64": "WzEsImFscGhhIl0KWzMsImNoYXJsaWUiXQo=",
+   "insert": {
+    "outcome": "rejected",
+    "code": 395,
+    "err": "Value passed to 'throwIf' function is non-zero!",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row",
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "rows_undecided": 0
+   },
+   "insert_rows_b64": null,
+   "expect": {
+    "violates": "e_row_rejects"
+   }
+  },
+  {
+   "id": "red-e-row-code-from-a-later-e-row",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 15
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 15,
+       "len": 15
+      },
+      "verdict": "e",
+      "verdict_code": 395,
+      "verdict_err": "Value passed to 'throwIf' function is non-zero"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 30,
+       "len": 17
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 47,
+       "len": 15
+      },
+      "verdict": "e",
+      "verdict_code": 396,
+      "verdict_err": "Later e row"
+     }
+    ],
+    "rows_read": 4,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "row_spans": [
+     {
+      "off": 0,
+      "len": 12
+     },
+     null,
+     {
+      "off": 12,
+      "len": 14
+     },
+     null
+    ],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 0
+   },
+   "batch_export_b64": "WzEsImFscGhhIl0KWzMsImNoYXJsaWUiXQo=",
+   "insert": {
+    "outcome": "rejected",
+    "code": 396,
+    "err": "Later e row",
+    "rows_read": 4,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row",
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "rows_undecided": 0
+   },
+   "insert_rows_b64": null,
+   "expect": {
+    "violates": "e_row_rejects"
+   }
+  },
+  {
+   "id": "red-e-row-counts-not-zero",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 15
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 15,
+       "len": 15
+      },
+      "verdict": "e",
+      "verdict_code": 395,
+      "verdict_err": "Value passed to 'throwIf' function is non-zero"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 30,
+       "len": 17
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "row_spans": [
+     {
+      "off": 0,
+      "len": 12
+     },
+     null,
+     {
+      "off": 12,
+      "len": 14
+     }
+    ],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 0
+   },
+   "batch_export_b64": "WzEsImFscGhhIl0KWzMsImNoYXJsaWUiXQo=",
+   "insert": {
+    "outcome": "rejected",
+    "code": 395,
+    "err": "Value passed to 'throwIf' function is non-zero",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row",
+    "rows_passed": 2,
+    "rows_cut": 0,
+    "rows_undecided": 0
+   },
+   "insert_rows_b64": null,
+   "expect": {
+    "violates": "e_row_rejects"
+   }
+  },
+  {
+   "id": "red-e-row-undecided-not-zero",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 15
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 15,
+       "len": 15
+      },
+      "verdict": "e",
+      "verdict_code": 395,
+      "verdict_err": "Value passed to 'throwIf' function is non-zero"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 30,
+       "len": 17
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "row_spans": [
+     {
+      "off": 0,
+      "len": 12
+     },
+     null,
+     {
+      "off": 12,
+      "len": 14
+     }
+    ],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 0
+   },
+   "batch_export_b64": "WzEsImFscGhhIl0KWzMsImNoYXJsaWUiXQo=",
+   "insert": {
+    "outcome": "rejected",
+    "code": 395,
+    "err": "Value passed to 'throwIf' function is non-zero",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row",
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "rows_undecided": 1
+   },
+   "insert_rows_b64": null,
+   "expect": {
+    "violates": "e_row_rejects"
+   }
+  },
+  {
+   "id": "red-e-row-output-present",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 15
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 15,
+       "len": 15
+      },
+      "verdict": "e",
+      "verdict_code": 395,
+      "verdict_err": "Value passed to 'throwIf' function is non-zero"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 30,
+       "len": 17
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "row_spans": [
+     {
+      "off": 0,
+      "len": 12
+     },
+     null,
+     {
+      "off": 12,
+      "len": 14
+     }
+    ],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 0
+   },
+   "batch_export_b64": "WzEsImFscGhhIl0KWzMsImNoYXJsaWUiXQo=",
+   "insert": {
+    "outcome": "rejected",
+    "code": 395,
+    "err": "Value passed to 'throwIf' function is non-zero",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row",
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "rows_undecided": 0
+   },
+   "insert_rows_b64": "WzEsImFscGhhIl0KWzMsImNoYXJsaWUiXQo=",
+   "expect": {
+    "violates": "e_row_rejects"
+   }
+  },
+  {
+   "id": "red-e-row-refused-at-not-row",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 15
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 15,
+       "len": 15
+      },
+      "verdict": "e",
+      "verdict_code": 395,
+      "verdict_err": "Value passed to 'throwIf' function is non-zero"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 30,
+       "len": 17
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "row_spans": [
+     {
+      "off": 0,
+      "len": 12
+     },
+     null,
+     {
+      "off": 12,
+      "len": 14
+     }
+    ],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 0
+   },
+   "batch_export_b64": "WzEsImFscGhhIl0KWzMsImNoYXJsaWUiXQo=",
+   "insert": {
+    "outcome": "rejected",
+    "code": 395,
+    "err": "Value passed to 'throwIf' function is non-zero",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "body_step",
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "rows_undecided": 0
+   },
+   "insert_rows_b64": null,
+   "expect": {
+    "violates": "e_row_rejects"
+   }
+  },
+  {
+   "id": "red-e-row-rows-read-differs",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 15
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 15,
+       "len": 15
+      },
+      "verdict": "e",
+      "verdict_code": 395,
+      "verdict_err": "Value passed to 'throwIf' function is non-zero"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 30,
+       "len": 17
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "row_spans": [
+     {
+      "off": 0,
+      "len": 12
+     },
+     null,
+     {
+      "off": 12,
+      "len": 14
+     }
+    ],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 0
+   },
+   "batch_export_b64": "WzEsImFscGhhIl0KWzMsImNoYXJsaWUiXQo=",
+   "insert": {
+    "outcome": "rejected",
+    "code": 395,
+    "err": "Value passed to 'throwIf' function is non-zero",
+    "rows_read": 2,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row",
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "rows_undecided": 0
+   },
+   "insert_rows_b64": null,
+   "expect": {
+    "violates": "e_row_rejects"
+   }
+  },
+  {
+   "id": "red-declined-output-insert-stays-accepted",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 15
+      }
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 15,
+       "len": 15
+      }
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 30,
+       "len": 17
+      }
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "export_declined": "a column's value is computed and not carried",
+    "export_declined_reason": "export-computed-value-not-carried"
+   },
+   "batch_export_b64": null,
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    }
+   },
+   "insert_rows_b64": null,
+   "expect": {
+    "violates": "export_decline_is_call_decline"
+   }
+  },
+  {
+   "id": "red-declined-output-reason-differs",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 15
+      }
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 15,
+       "len": 15
+      }
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 30,
+       "len": 17
+      }
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "export_declined": "a column's value is computed and not carried",
+    "export_declined_reason": "export-computed-value-not-carried"
+   },
+   "batch_export_b64": null,
+   "insert": {
+    "outcome": "unsupported",
+    "code": -2,
+    "err": "",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "body_step",
+    "reason": "export-batch-not-accepted"
+   },
+   "insert_rows_b64": null,
+   "expect": {
+    "violates": "export_decline_is_call_decline"
+   }
+  },
+  {
+   "id": "red-declined-output-counts-carried-from-the-batch",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 13
+      },
+      "verdict": "f",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 13,
+       "len": 13
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 26,
+       "len": 15
+      },
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_reason": "filter-clock-read",
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 41,
+       "len": 13
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     }
+    ],
+    "rows_read": 4,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "rows_passed": 2,
+    "rows_cut": 2,
+    "export_declined": "a column's value is computed and not carried",
+    "export_declined_reason": "export-computed-value-not-carried"
+   },
+   "batch_export_b64": null,
+   "insert": {
+    "outcome": "unsupported",
+    "code": -2,
+    "err": "a column's value is computed and not carried",
+    "rows_read": 4,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "rows_passed": 2,
+    "rows_cut": 2,
+    "rows_undecided": 1,
+    "refused_at": "body_step",
+    "reason": "export-computed-value-not-carried"
+   },
+   "insert_rows_b64": null,
+   "expect": {
+    "violates": "export_decline_is_call_decline"
+   }
+  },
+  {
+   "id": "red-insert-carries-export-declined",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "unsupported",
+    "code": -2,
+    "err": "",
+    "rows": [],
+    "rows_read": 0,
+    "rows_skipped": 0,
+    "unsupported_settings": [
+     {
+      "name": "session_timezone"
+     }
+    ],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "call",
+    "reason": "call-setting-session-timezone",
+    "export_declined": "batch outcome is 'unsupported'",
+    "export_declined_reason": "export-batch-not-accepted"
+   },
+   "batch_export_b64": null,
+   "insert": {
+    "outcome": "unsupported",
+    "code": -2,
+    "err": "",
+    "rows_read": 0,
+    "rows_skipped": 0,
+    "unsupported_settings": [
+     {
+      "name": "session_timezone"
+     }
+    ],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "call",
+    "reason": "call-setting-session-timezone",
+    "export_declined": "batch outcome is 'unsupported'",
+    "export_declined_reason": "export-batch-not-accepted"
+   },
+   "insert_rows_b64": null,
+   "expect": {
+    "violates": "shared_members"
+   }
+  }
+ ]
+}

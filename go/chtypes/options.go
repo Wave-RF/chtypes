@@ -2,6 +2,7 @@ package chtypes
 
 import (
 	"encoding/base64"
+	"strconv"
 	"unicode/utf8"
 )
 
@@ -47,9 +48,14 @@ type FilterOption interface{ applyFilter(*callConfig) }
 // EvalOption configures Filter.Rows.
 type EvalOption interface{ applyEval(*callConfig) }
 
-// SettingsOption is an option that applies to all six operations: the
+// InsertCallOption configures Schema.Insert. (InsertOption, below, is the
+// separate family of insert_options members.)
+type InsertCallOption interface{ applyInsert(*callConfig) }
+
+// SettingsOption is an option that applies to all seven operations: the
 // settings and the per-call zone.
 type SettingsOption interface {
+	InsertCallOption
 	CompileOption
 	RowOption
 	RowsOption
@@ -58,9 +64,10 @@ type SettingsOption interface {
 	EvalOption
 }
 
-// ColumnsOption is an option that applies to the four calls that model an
-// INSERT of a body: Row, Rows, ParseBlock and Filter.Rows.
+// ColumnsOption is an option that applies to the calls that model an
+// INSERT of a body: Row, Rows, Insert, ParseBlock and Filter.Rows.
 type ColumnsOption interface {
+	InsertCallOption
 	RowOption
 	RowsOption
 	BlockOption
@@ -68,13 +75,21 @@ type ColumnsOption interface {
 }
 
 // InsertOption is an option of the insert_options document: it applies to
-// the four calls that model an INSERT of a body, Row, Rows, ParseBlock and
+// the calls that model an INSERT of a body, Row, Rows, Insert, ParseBlock and
 // Filter.Rows, and means the same at each.
 type InsertOption interface {
+	InsertCallOption
 	RowOption
 	RowsOption
 	BlockOption
 	EvalOption
+}
+
+// RowFilterOption is the option WithRowFilter returns: it applies to Rows and
+// to Insert, and means the same filter at each.
+type RowFilterOption interface {
+	InsertCallOption
+	RowsOption
 }
 
 // The options are small named types, one per option, rather than closures: a
@@ -89,6 +104,7 @@ func (o settingsOpt) apply(c *callConfig)        { c.settings = o }
 func (o settingsOpt) applyCompile(c *callConfig) { o.apply(c) }
 func (o settingsOpt) applyRow(c *callConfig)     { o.apply(c) }
 func (o settingsOpt) applyRows(c *callConfig)    { o.apply(c) }
+func (o settingsOpt) applyInsert(c *callConfig)  { o.apply(c) }
 func (o settingsOpt) applyBlock(c *callConfig)   { o.apply(c) }
 func (o settingsOpt) applyFilter(c *callConfig)  { o.apply(c) }
 func (o settingsOpt) applyEval(c *callConfig)    { o.apply(c) }
@@ -102,21 +118,24 @@ func (o timezoneOpt) apply(c *callConfig) {
 func (o timezoneOpt) applyCompile(c *callConfig) { o.apply(c) }
 func (o timezoneOpt) applyRow(c *callConfig)     { o.apply(c) }
 func (o timezoneOpt) applyRows(c *callConfig)    { o.apply(c) }
+func (o timezoneOpt) applyInsert(c *callConfig)  { o.apply(c) }
 func (o timezoneOpt) applyBlock(c *callConfig)   { o.apply(c) }
 func (o timezoneOpt) applyFilter(c *callConfig)  { o.apply(c) }
 func (o timezoneOpt) applyEval(c *callConfig)    { o.apply(c) }
 
 type columnsOpt []string
 
-func (o columnsOpt) apply(c *callConfig)      { c.columns, c.haveColumns = o, true }
-func (o columnsOpt) applyRow(c *callConfig)   { o.apply(c) }
-func (o columnsOpt) applyRows(c *callConfig)  { o.apply(c) }
-func (o columnsOpt) applyBlock(c *callConfig) { o.apply(c) }
-func (o columnsOpt) applyEval(c *callConfig)  { o.apply(c) }
+func (o columnsOpt) apply(c *callConfig)       { c.columns, c.haveColumns = o, true }
+func (o columnsOpt) applyRow(c *callConfig)    { o.apply(c) }
+func (o columnsOpt) applyRows(c *callConfig)   { o.apply(c) }
+func (o columnsOpt) applyInsert(c *callConfig) { o.apply(c) }
+func (o columnsOpt) applyBlock(c *callConfig)  { o.apply(c) }
+func (o columnsOpt) applyEval(c *callConfig)   { o.apply(c) }
 
 type rowFilterOpt struct{ f *Filter }
 
-func (o rowFilterOpt) applyRows(c *callConfig) { c.filter = o.f }
+func (o rowFilterOpt) applyRows(c *callConfig)   { c.filter = o.f }
+func (o rowFilterOpt) applyInsert(c *callConfig) { c.filter = o.f }
 
 type exportOpt Format
 
@@ -157,8 +176,11 @@ func WithColumns(names []string) ColumnsOption {
 	return columnsOpt(names)
 }
 
-// WithRowFilter attaches a compiled filter to a Rows call.
-func WithRowFilter(f *Filter) RowsOption {
+// WithRowFilter attaches a compiled filter to a Rows or an Insert call. On
+// Rows it adds the per-row verdict; on Insert the filter is the INSERT's WHERE
+// (only the t rows are output), and without it every accepted row is output.
+// The filter must have been compiled on the schema the call is made on.
+func WithRowFilter(f *Filter) RowFilterOption {
 	return rowFilterOpt{f}
 }
 
@@ -219,6 +241,16 @@ func rowsConfig(opts []RowsOption) *callConfig {
 	for _, o := range opts {
 		if o != nil {
 			o.applyRows(c)
+		}
+	}
+	return c
+}
+
+func insertConfig(opts []InsertCallOption) *callConfig {
+	c := newCallConfig()
+	for _, o := range opts {
+		if o != nil {
+			o.applyInsert(c)
 		}
 	}
 	return c
@@ -310,10 +342,11 @@ type insertableColumnsOpt []string
 func (o insertableColumnsOpt) apply(c *callConfig) {
 	c.insertOpts.set("insertable_columns", nameObjects(o))
 }
-func (o insertableColumnsOpt) applyRow(c *callConfig)   { o.apply(c) }
-func (o insertableColumnsOpt) applyRows(c *callConfig)  { o.apply(c) }
-func (o insertableColumnsOpt) applyBlock(c *callConfig) { o.apply(c) }
-func (o insertableColumnsOpt) applyEval(c *callConfig)  { o.apply(c) }
+func (o insertableColumnsOpt) applyRow(c *callConfig)    { o.apply(c) }
+func (o insertableColumnsOpt) applyRows(c *callConfig)   { o.apply(c) }
+func (o insertableColumnsOpt) applyInsert(c *callConfig) { o.apply(c) }
+func (o insertableColumnsOpt) applyBlock(c *callConfig)  { o.apply(c) }
+func (o insertableColumnsOpt) applyEval(c *callConfig)   { o.apply(c) }
 
 type columnDefaultsOpt []ColumnDefault
 
@@ -330,10 +363,11 @@ func (o columnDefaultsOpt) apply(c *callConfig) {
 	}
 	c.insertOpts.set("column_defaults", list)
 }
-func (o columnDefaultsOpt) applyRow(c *callConfig)   { o.apply(c) }
-func (o columnDefaultsOpt) applyRows(c *callConfig)  { o.apply(c) }
-func (o columnDefaultsOpt) applyBlock(c *callConfig) { o.apply(c) }
-func (o columnDefaultsOpt) applyEval(c *callConfig)  { o.apply(c) }
+func (o columnDefaultsOpt) applyRow(c *callConfig)    { o.apply(c) }
+func (o columnDefaultsOpt) applyRows(c *callConfig)   { o.apply(c) }
+func (o columnDefaultsOpt) applyInsert(c *callConfig) { o.apply(c) }
+func (o columnDefaultsOpt) applyBlock(c *callConfig)  { o.apply(c) }
+func (o columnDefaultsOpt) applyEval(c *callConfig)   { o.apply(c) }
 
 // insertMember is any other member of insert_options: a key and its value.
 type insertMember struct {
@@ -346,10 +380,11 @@ func (o insertMember) apply(c *callConfig) {
 		c.insertOpts.set(o.key, o.v)
 	}
 }
-func (o insertMember) applyRow(c *callConfig)   { o.apply(c) }
-func (o insertMember) applyRows(c *callConfig)  { o.apply(c) }
-func (o insertMember) applyBlock(c *callConfig) { o.apply(c) }
-func (o insertMember) applyEval(c *callConfig)  { o.apply(c) }
+func (o insertMember) applyRow(c *callConfig)    { o.apply(c) }
+func (o insertMember) applyRows(c *callConfig)   { o.apply(c) }
+func (o insertMember) applyInsert(c *callConfig) { o.apply(c) }
+func (o insertMember) applyBlock(c *callConfig)  { o.apply(c) }
+func (o insertMember) applyEval(c *callConfig)   { o.apply(c) }
 
 type filterMember struct {
 	key string
@@ -393,6 +428,14 @@ func WithVerdictBasis(b VerdictBasis) InsertOption {
 // WithDeferDefaults sets insert_options' defer_defaults.
 func WithDeferDefaults(d DeferDefaults) InsertOption {
 	return insertMember{"defer_defaults", string(d)}
+}
+
+// WithMemoryLimit sets insert_options' memory_limit_bytes: a bound on the
+// call's own memory tracker. Reaching it declines the whole call
+// (call-memory-budget) with no partial output. 0 is no limit. The value is
+// sent as a decimal string; one above 18 digits is the library's refusal.
+func WithMemoryLimit(bytes uint64) InsertOption {
+	return insertMember{"memory_limit_bytes", strconv.FormatUint(bytes, 10)}
 }
 
 // WithInsertOption sets a member of insert_options this binding has no name

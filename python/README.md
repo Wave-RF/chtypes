@@ -75,6 +75,17 @@ A bad **row** is a verdict, not an exception: `outcome` becomes `Outcome.REJECTE
 
 **The INSERT column list is a keyword-only `columns`** on `schema.row`, `schema.rows`, `schema.parse_block` and `filter.rows`: `schema.row(Format.JSON_EACH_ROW, body, columns=["id", "e"])`. `None` or an empty sequence is the no-list shape; a list makes the data supply exactly those columns, with a listed `EPHEMERAL` value read and in scope for the DEFAULTs that reference it but never stored.
 
+**Cancellation is a `CancelToken` (ABI v2).** `schema.row`, `schema.rows`, `schema.insert`, `schema.parse_block`, `filter.rows` and `library.compile_table` take a keyword-only `cancel=`; `tok.cancel()`, from any thread and any number of times, makes every call holding the token raise `CallCanceledError` and answer nothing. `filter.eval` over a parsed block is not cancelable. Ctrl-C cannot interrupt a call on the main thread (Python delivers the signal only when the call returns), so run a call you may want to stop on a worker thread, or under `asyncio.to_thread`, and call `tok.cancel()` when its task is canceled:
+
+```python
+tok = chtypes.CancelToken()
+try:
+    batch = await asyncio.to_thread(schema.rows, Format.CSV, body, cancel=tok)
+except asyncio.CancelledError:
+    tok.cancel()
+    raise
+```
+
 **Known gaps** are listed, with workarounds, in [`docs/limitations.md`](https://github.com/wave-rf/chtypes/blob/main/docs/limitations.md#known-gaps-in-10).
 
 ## Tests

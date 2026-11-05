@@ -90,6 +90,7 @@ export {
   type FilterRowError,
   type Framing,
   type Header,
+  type InsertResult,
   type RowResult,
   type SchemaDescription,
   type SchemaReplicated,
@@ -137,10 +138,12 @@ export {
   type EvalOptions,
   Filter,
   type FilterOptions,
+  type InsertCallOptions,
   type RowOptions,
   type RowsOptions,
   Schema,
 } from './schema.js';
+export type { AsyncOptions } from './cancel.js';
 export { Server } from './server.js';
 export { DeferDefaults, ParamEncoding, VerdictBasis } from './settings.js';
 export type { BytesIn, ColumnDefault, ServerProfile, SettingValue, Settings } from './settings.js';

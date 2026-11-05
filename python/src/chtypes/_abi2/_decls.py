@@ -1089,6 +1089,14 @@ class Api:
             _read_buf(self, out_id.value),
         )
 
+    def cancel_fire(self, token: CancelHandle | None) -> None:
+        """The generated call wrapper for chs_cancel_fire (thread class shared)."""
+        self._raw["chs_cancel_fire"](None if token is None else token.value)
+
+    def cancel_fired(self, token: CancelHandle | None) -> int:
+        """The generated call wrapper for chs_cancel_fired (thread class shared)."""
+        return int(self._raw["chs_cancel_fired"](None if token is None else token.value))
+
 
 _API_KEY = object()
 
