@@ -1614,6 +1614,7 @@ const INSERT_BODY: &[u8] = concat!(
 const FEATURE_INSERT: &str = "preview_insert";
 const FEATURE_MEMORY_LIMIT: &str = "insert_options.memory_limit_bytes";
 const EXPORT_FORMAT_NATIVE: &str = "Native";
+const EXPORT_FORMAT_COMPACT: &str = "JSONCompactEachRow";
 
 /// What a section does next.
 #[derive(Debug, PartialEq, Eq)]
@@ -1624,20 +1625,18 @@ enum Step {
 }
 
 /// The first capability this build does not advertise, by name; `None` when
-/// it advertises everything the section needs. `need_native` adds the Native
-/// export format; `need_limit` adds the memory-limit option.
-fn absent(caps: &Capabilities, need_native: bool, need_limit: bool) -> Option<String> {
+/// it advertises everything the section needs. `export` names the export
+/// format the call asks for, which must be in `export_formats`; `need_limit`
+/// adds the memory-limit option.
+fn absent(caps: &Capabilities, export: Option<&str>, need_limit: bool) -> Option<String> {
     let has_feature = |f: &str| caps.features.iter().any(|x| x == f);
     if !has_feature(FEATURE_INSERT) {
         return Some(format!("features lacks {FEATURE_INSERT}"));
     }
-    if need_native
-        && !caps
-            .export_formats
-            .iter()
-            .any(|x| x == EXPORT_FORMAT_NATIVE)
-    {
-        return Some(format!("export_formats lacks {EXPORT_FORMAT_NATIVE}"));
+    if let Some(name) = export {
+        if !caps.export_formats.iter().any(|x| x == name) {
+            return Some(format!("export_formats lacks {name}"));
+        }
     }
     if need_limit && !has_feature(FEATURE_MEMORY_LIMIT) {
         return Some(format!("features lacks {FEATURE_MEMORY_LIMIT}"));
@@ -1668,11 +1667,12 @@ fn insert_or_skip(
     options: &InsertOptions,
 ) -> Option<InsertResult> {
     let caps = &lib.build_info().capabilities;
-    let missing = absent(
-        caps,
-        out == Format::Native,
-        options.memory_limit_bytes.is_some(),
-    );
+    let export = match out {
+        Format::Native => Some(EXPORT_FORMAT_NATIVE),
+        Format::JsonCompactEachRow => Some(EXPORT_FORMAT_COMPACT),
+        _ => None,
+    };
+    let missing = absent(caps, export, options.memory_limit_bytes.is_some());
     if let Step::Skip(why) = decide(missing.clone(), None) {
         kv(
             "SKIPPED",
@@ -1722,7 +1722,7 @@ fn section19(lib: &Arc<Library>) {
         19,
         &schema,
         lib,
-        Format::JsonEachRow,
+        Format::JsonCompactEachRow,
         &InsertOptions {
             filter: Some(filter.clone()),
             ..InsertOptions::default()
@@ -1735,7 +1735,7 @@ fn section19(lib: &Arc<Library>) {
         INSERT_BODY,
         &RowsOptions {
             filter: Some(filter),
-            export: Some(Format::JsonEachRow),
+            export: Some(Format::JsonCompactEachRow),
             doc_flags: Some(DocFlags::ALL),
             ..RowsOptions::default()
         },
@@ -1859,7 +1859,7 @@ fn section21(lib: &Arc<Library>) {
         21,
         &schema,
         lib,
-        Format::JsonEachRow,
+        Format::JsonCompactEachRow,
         &InsertOptions {
             memory_limit_bytes: Some(1),
             ..InsertOptions::default()
@@ -2109,20 +2109,30 @@ mod tests {
     #[test]
     fn unadvertised_skips_by_name() {
         let c = caps(&[], &["Native"]);
-        let why = absent(&c, false, false).expect("absent");
+        let why = absent(&c, None, false).expect("absent");
         assert!(why.contains(FEATURE_INSERT));
         assert!(matches!(decide(Some(why), None), Step::Skip(_)));
         let c = caps(&[FEATURE_INSERT], &[]);
-        assert!(absent(&c, true, false).unwrap().contains("Native"));
-        assert!(absent(&c, false, true)
+        assert!(absent(&c, Some(EXPORT_FORMAT_NATIVE), false)
+            .unwrap()
+            .contains("Native"));
+        assert!(absent(&c, None, true)
             .unwrap()
             .contains(FEATURE_MEMORY_LIMIT));
     }
 
     #[test]
     fn advertised_runs() {
-        let c = caps(&[FEATURE_INSERT, FEATURE_MEMORY_LIMIT], &["Native"]);
-        assert_eq!(absent(&c, true, true), None);
+        let c = caps(
+            &[FEATURE_INSERT, FEATURE_MEMORY_LIMIT],
+            &["Native", EXPORT_FORMAT_COMPACT],
+        );
+        assert_eq!(absent(&c, Some(EXPORT_FORMAT_NATIVE), true), None);
+        assert_eq!(absent(&c, Some(EXPORT_FORMAT_COMPACT), true), None);
+        let n = caps(&[FEATURE_INSERT], &["Native"]);
+        assert!(absent(&n, Some(EXPORT_FORMAT_COMPACT), false)
+            .unwrap()
+            .contains(EXPORT_FORMAT_COMPACT));
         assert_eq!(decide(None, None), Step::Run);
     }
 
@@ -2130,9 +2140,12 @@ mod tests {
     /// to skip (the library declines the call) must be a failure.
     #[test]
     fn advertised_but_declined_fails() {
-        let c = caps(&[FEATURE_INSERT, FEATURE_MEMORY_LIMIT], &["Native"]);
+        let c = caps(
+            &[FEATURE_INSERT, FEATURE_MEMORY_LIMIT],
+            &["Native", EXPORT_FORMAT_COMPACT],
+        );
         let step = decide(
-            absent(&c, true, true),
+            absent(&c, Some(EXPORT_FORMAT_COMPACT), true),
             Some("option-not-implemented".into()),
         );
         assert!(matches!(step, Step::Fail(_)), "{step:?}");
