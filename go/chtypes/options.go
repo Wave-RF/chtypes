@@ -85,6 +85,13 @@ type InsertOption interface {
 	EvalOption
 }
 
+// RowFilterOption is the option WithRowFilter returns: it applies to Rows and
+// to Insert, and means the same filter at each.
+type RowFilterOption interface {
+	InsertCallOption
+	RowsOption
+}
+
 // The options are small named types, one per option, rather than closures: a
 // closure is a heap allocation each time an option is built, and a map, a
 // pointer or a small integer converts to an interface without one. Each type
@@ -169,15 +176,11 @@ func WithColumns(names []string) ColumnsOption {
 	return columnsOpt(names)
 }
 
-// WithRowFilter attaches a compiled filter to a Rows call.
-func WithRowFilter(f *Filter) RowsOption {
-	return rowFilterOpt{f}
-}
-
-// WithInsertFilter attaches a compiled filter to an Insert call: the INSERT's
-// WHERE. Without it every accepted row is output. The filter must have been
-// compiled on the schema the call is made on.
-func WithInsertFilter(f *Filter) InsertCallOption {
+// WithRowFilter attaches a compiled filter to a Rows or an Insert call. On
+// Rows it adds the per-row verdict; on Insert the filter is the INSERT's WHERE
+// (only the t rows are output), and without it every accepted row is output.
+// The filter must have been compiled on the schema the call is made on.
+func WithRowFilter(f *Filter) RowFilterOption {
 	return rowFilterOpt{f}
 }
 
