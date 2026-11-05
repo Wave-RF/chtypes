@@ -3850,6 +3850,550 @@
    "expect": {
     "violates": "shared_members"
    }
+  },
+  {
+   "id": "equal-post-where-cut-check-violated-only-on-a-cut-row",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "rejected",
+    "code": 469,
+    "err": "Constraint `n_nonneg` for table default.t is violated at row 2. Expression: (n >= 0). Column values: n = -1",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 12
+      },
+      "verdict": "d",
+      "verdict_code": 0,
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "rejected",
+      "code": 469,
+      "input_span": {
+       "off": 12,
+       "len": 13
+      },
+      "err": "Constraint `n_nonneg` for table default.t is violated at row 2. Expression: (n >= 0). Column values: n = -1",
+      "verdict": "d",
+      "verdict_code": 0,
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 25,
+       "len": 14
+      },
+      "verdict": "d",
+      "verdict_code": 0,
+      "verdict_err": "declined"
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row",
+    "refused_row": 1,
+    "export_declined": "batch outcome is 'rejected'",
+    "export_declined_reason": "export-batch-not-accepted",
+    "rows_passed": 0,
+    "rows_cut": 0
+   },
+   "batch_export_b64": null,
+   "batch_of_t_rows": {
+    "rows": [
+     0,
+     2
+    ],
+    "batch": {
+     "outcome": "accepted",
+     "code": 0,
+     "err": "",
+     "rows": [
+      {
+       "outcome": "accepted",
+       "code": 0,
+       "input_span": {
+        "off": 0,
+        "len": 12
+       },
+       "verdict": "t",
+       "verdict_code": 0
+      },
+      {
+       "outcome": "accepted",
+       "code": 0,
+       "input_span": {
+        "off": 12,
+        "len": 14
+       },
+       "verdict": "t",
+       "verdict_code": 0
+      }
+     ],
+     "rows_read": 2,
+     "rows_skipped": 0,
+     "unsupported_settings": [],
+     "unconsumed": [],
+     "framing": {
+      "bom_skipped": false,
+      "container": null,
+      "header": null
+     },
+     "row_spans": [
+      {
+       "off": 0,
+       "len": 12
+      },
+      {
+       "off": 12,
+       "len": 14
+      }
+     ],
+     "export_columns": [
+      {
+       "name": "n"
+      },
+      {
+       "name": "s"
+      }
+     ],
+     "rows_passed": 2,
+     "rows_cut": 0
+    },
+    "export_b64": "WzEsImFscGhhIl0KWzIsImNoYXJsaWUiXQo="
+   },
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 1,
+    "rows_undecided": 0
+   },
+   "insert_rows_b64": "WzEsImFscGhhIl0KWzIsImNoYXJsaWUiXQo=",
+   "expect": "equal"
+  },
+  {
+   "id": "red-post-where-cut-refusal-from-a-passing-row",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "rejected",
+    "code": 469,
+    "err": "Constraint `n_nonneg` for table default.t is violated at row 2. Expression: (n >= 0). Column values: n = -1",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 12
+      },
+      "verdict": "d",
+      "verdict_code": 0,
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "rejected",
+      "code": 469,
+      "input_span": {
+       "off": 12,
+       "len": 13
+      },
+      "err": "Constraint `n_nonneg` for table default.t is violated at row 2. Expression: (n >= 0). Column values: n = -1",
+      "verdict": "d",
+      "verdict_code": 0,
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 25,
+       "len": 14
+      },
+      "verdict": "d",
+      "verdict_code": 0,
+      "verdict_err": "declined"
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row",
+    "refused_row": 1,
+    "export_declined": "batch outcome is 'rejected'",
+    "export_declined_reason": "export-batch-not-accepted",
+    "rows_passed": 0,
+    "rows_cut": 0
+   },
+   "batch_export_b64": null,
+   "batch_of_t_rows": {
+    "rows": [
+     0,
+     1,
+     2
+    ],
+    "batch": {
+     "outcome": "rejected",
+     "code": 469,
+     "err": "Constraint `n_nonneg` for table default.t is violated at row 2. Expression: (n >= 0). Column values: n = -1",
+     "rows": [
+      {
+       "outcome": "accepted",
+       "code": 0,
+       "input_span": {
+        "off": 0,
+        "len": 12
+       },
+       "verdict": "d",
+       "verdict_code": 0,
+       "verdict_err": "declined"
+      },
+      {
+       "outcome": "rejected",
+       "code": 469,
+       "input_span": {
+        "off": 12,
+        "len": 13
+       },
+       "err": "Constraint `n_nonneg` for table default.t is violated at row 2. Expression: (n >= 0). Column values: n = -1",
+       "verdict": "d",
+       "verdict_code": 0,
+       "verdict_err": "declined"
+      },
+      {
+       "outcome": "accepted",
+       "code": 0,
+       "input_span": {
+        "off": 25,
+        "len": 14
+       },
+       "verdict": "d",
+       "verdict_code": 0,
+       "verdict_err": "declined"
+      }
+     ],
+     "rows_read": 3,
+     "rows_skipped": 0,
+     "unsupported_settings": [],
+     "unconsumed": [],
+     "framing": {
+      "bom_skipped": false,
+      "container": null,
+      "header": null
+     },
+     "refused_at": "row",
+     "refused_row": 1,
+     "export_declined": "batch outcome is 'rejected'",
+     "export_declined_reason": "export-batch-not-accepted",
+     "rows_passed": 0,
+     "rows_cut": 0
+    },
+    "export_b64": null
+   },
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 1,
+    "rows_undecided": 0
+   },
+   "insert_rows_b64": "WzEsImFscGhhIl0KWzIsImNoYXJsaWUiXQo=",
+   "expect": {
+    "violates": "post_where_cut"
+   }
+  },
+  {
+   "id": "red-post-where-cut-without-the-t-rows-batch",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "rejected",
+    "code": 469,
+    "err": "Constraint `n_nonneg` for table default.t is violated at row 2. Expression: (n >= 0). Column values: n = -1",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 12
+      },
+      "verdict": "d",
+      "verdict_code": 0,
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "rejected",
+      "code": 469,
+      "input_span": {
+       "off": 12,
+       "len": 13
+      },
+      "err": "Constraint `n_nonneg` for table default.t is violated at row 2. Expression: (n >= 0). Column values: n = -1",
+      "verdict": "d",
+      "verdict_code": 0,
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 25,
+       "len": 14
+      },
+      "verdict": "d",
+      "verdict_code": 0,
+      "verdict_err": "declined"
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row",
+    "refused_row": 1,
+    "export_declined": "batch outcome is 'rejected'",
+    "export_declined_reason": "export-batch-not-accepted",
+    "rows_passed": 0,
+    "rows_cut": 0
+   },
+   "batch_export_b64": null,
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 1,
+    "rows_undecided": 0
+   },
+   "insert_rows_b64": "WzEsImFscGhhIl0KWzIsImNoYXJsaWUiXQo=",
+   "expect": {
+    "violates": "post_where_cut"
+   }
+  },
+  {
+   "id": "red-post-where-cut-output-carries-the-cut-row",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "rejected",
+    "code": 469,
+    "err": "Constraint `n_nonneg` for table default.t is violated at row 2. Expression: (n >= 0). Column values: n = -1",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 12
+      },
+      "verdict": "d",
+      "verdict_code": 0,
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "rejected",
+      "code": 469,
+      "input_span": {
+       "off": 12,
+       "len": 13
+      },
+      "err": "Constraint `n_nonneg` for table default.t is violated at row 2. Expression: (n >= 0). Column values: n = -1",
+      "verdict": "d",
+      "verdict_code": 0,
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 25,
+       "len": 14
+      },
+      "verdict": "d",
+      "verdict_code": 0,
+      "verdict_err": "declined"
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row",
+    "refused_row": 1,
+    "export_declined": "batch outcome is 'rejected'",
+    "export_declined_reason": "export-batch-not-accepted",
+    "rows_passed": 0,
+    "rows_cut": 0
+   },
+   "batch_export_b64": null,
+   "batch_of_t_rows": {
+    "rows": [
+     0,
+     2
+    ],
+    "batch": {
+     "outcome": "accepted",
+     "code": 0,
+     "err": "",
+     "rows": [
+      {
+       "outcome": "accepted",
+       "code": 0,
+       "input_span": {
+        "off": 0,
+        "len": 12
+       },
+       "verdict": "t",
+       "verdict_code": 0
+      },
+      {
+       "outcome": "accepted",
+       "code": 0,
+       "input_span": {
+        "off": 12,
+        "len": 14
+       },
+       "verdict": "t",
+       "verdict_code": 0
+      }
+     ],
+     "rows_read": 2,
+     "rows_skipped": 0,
+     "unsupported_settings": [],
+     "unconsumed": [],
+     "framing": {
+      "bom_skipped": false,
+      "container": null,
+      "header": null
+     },
+     "row_spans": [
+      {
+       "off": 0,
+       "len": 12
+      },
+      {
+       "off": 12,
+       "len": 14
+      }
+     ],
+     "export_columns": [
+      {
+       "name": "n"
+      },
+      {
+       "name": "s"
+      }
+     ],
+     "rows_passed": 2,
+     "rows_cut": 0
+    },
+    "export_b64": "WzEsImFscGhhIl0KWzIsImNoYXJsaWUiXQo="
+   },
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 1,
+    "rows_undecided": 0
+   },
+   "insert_rows_b64": "WzEsImFscGhhIl0KWy0xLCJicmF2byJdClsyLCJjaGFybGllIl0K",
+   "expect": {
+    "violates": "post_where_cut"
+   }
   }
  ]
 }
