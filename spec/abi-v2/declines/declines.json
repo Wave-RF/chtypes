@@ -163,6 +163,29 @@
    "description": "The call stops at its next check point and answers CHS_CANCELED with every output NULL; a fire after its last check point is a no-op, and the call answers in full."
   },
   {
+   "id": "native-data-after-end-block",
+   "class": "call-decline",
+   "trigger": "a Native body with bytes after its end-of-stream block (a block of zero columns)",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_preview_row",
+    "chs_preview_batch",
+    "chs_block_create",
+    "chs_filter_eval_body"
+   ],
+   "retirement": "none",
+   "description": "A server's INSERT ends a Native stream at a block of zero columns and silently ignores every byte after it, rows included, so the library declines such a body rather than answer for data the server would drop; the message names the offset and length of the bytes left unread, and the batch document's unconsumed reports the same range. Send only the blocks, or end the body at the empty block."
+  },
+  {
    "id": "reference-type-unpaired",
    "class": "create-decline",
    "trigger": "chs_reference_type with a type this build pairs no widened reference type with",
