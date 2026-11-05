@@ -1558,6 +1558,7 @@ const (
 	featPreviewInsert = "preview_insert"
 	featMemoryLimit   = "insert_options.memory_limit_bytes"
 	exportNative      = "Native"
+	exportCompact     = "JSONCompactEachRow"
 )
 
 // missingCaps names what the build does not advertise, out of the features and
@@ -1647,14 +1648,14 @@ func section19(lib *chtypes.Library) {
 	must(err)
 	defer f.Close()
 
-	ins, ok := insertCall(lib, 19, []string{featPreviewInsert}, nil, func() (chtypes.InsertResult, error) {
-		return s.Insert(chtypes.JSONEachRow, insertBody, chtypes.JSONEachRow, chtypes.WithInsertFilter(f))
+	ins, ok := insertCall(lib, 19, []string{featPreviewInsert}, []string{exportCompact}, func() (chtypes.InsertResult, error) {
+		return s.Insert(chtypes.JSONEachRow, insertBody, chtypes.JSONCompactEachRow, chtypes.WithInsertFilter(f))
 	})
 	if !ok {
 		return
 	}
 	bat, err := s.Rows(chtypes.JSONEachRow, insertBody, chtypes.WithRowFilter(f),
-		chtypes.WithExport(chtypes.JSONEachRow), chtypes.WithDocFlags(chtypes.DocAll))
+		chtypes.WithExport(chtypes.JSONCompactEachRow), chtypes.WithDocFlags(chtypes.DocAll))
 	must(err)
 
 	if ins.Outcome != chtypes.Accepted || bat.Outcome != chtypes.Accepted {
@@ -1739,8 +1740,8 @@ func section21(lib *chtypes.Library) {
 	must(err)
 	defer s.Close()
 
-	res, ok := insertCall(lib, 21, []string{featPreviewInsert, featMemoryLimit}, nil, func() (chtypes.InsertResult, error) {
-		return s.Insert(chtypes.JSONEachRow, insertBody, chtypes.JSONEachRow, chtypes.WithMemoryLimit(1))
+	res, ok := insertCall(lib, 21, []string{featPreviewInsert, featMemoryLimit}, []string{exportCompact}, func() (chtypes.InsertResult, error) {
+		return s.Insert(chtypes.JSONEachRow, insertBody, chtypes.JSONCompactEachRow, chtypes.WithMemoryLimit(1))
 	})
 	if !ok {
 		return
