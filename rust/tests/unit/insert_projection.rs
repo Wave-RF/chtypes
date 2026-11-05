@@ -13,7 +13,7 @@
 //! back for a refusal, read the raw document and the raw bytes. Both documents
 //! of every case go through this crate's real decoders (`decode::batch` and
 //! `decode::insert_result`), so a case proves the decoders as well as the
-//! rule. Each case carries its expected result; the fixture's 33 planted reds
+//! rule. Each case carries its expected result; the fixture's 34 planted reds
 //! and its exception keep the gate honest: a rule that cannot fire fails here.
 //! A case's `batch_of_t_rows`, the batch over the rows the insert keeps, goes
 //! through the same `decode::batch`; whether it is accepted decides which of
@@ -52,6 +52,9 @@ struct BatchOfTRows {
     /// The case's `body_records`, each `(off, len)`: one per body record, in
     /// body order; `rows` index these.
     records: Vec<(u64, u64)>,
+    /// The case's `failing_t_record`: the first failing kept record's body
+    /// index; `None` where the t rows' batch is accepted, which has none.
+    failing: Option<usize>,
 }
 
 const INSERT_NEVER: [&str; 3] = [
@@ -64,12 +67,20 @@ fn post_where_site(site: Option<&RefusalSite>) -> bool {
     matches!(site, Some(RefusalSite::Row | RefusalSite::BodyStep))
 }
 
-/// The t rows' batch reads exactly the listed records: one row each, the same
-/// `input_span` lengths, none skipped.
+/// The t rows' batch reads exactly the listed records, in order: one row each,
+/// the same `input_span` lengths, none skipped. A batch refused at a row stops
+/// reading there, so then its rows end at the refused row.
 fn same_records(t_rows: &BatchOfTRows) -> bool {
     let (idx, sub) = (&t_rows.rows, &t_rows.batch);
-    sub.rows.len() == idx.len()
-        && sub.rows_read == idx.len() as u64
+    let stop = match sub.refused_row {
+        Some(r) if sub.outcome == Outcome::Rejected && sub.refused_at == Some(RefusalSite::Row) => {
+            usize::try_from(r).ok().filter(|&r| r < idx.len())
+        }
+        _ => None,
+    };
+    let n = stop.map_or(idx.len(), |r| r + 1);
+    sub.rows.len() == n
+        && sub.rows_read == n as u64
         && sub.rows_skipped == 0
         && sub.rows.iter().zip(idx).all(|(r, &i)| {
             r.input_span
@@ -79,8 +90,8 @@ fn same_records(t_rows: &BatchOfTRows) -> bool {
 }
 
 /// The checker's `_post_where_refusal`: the insert is `rejected` with the code
-/// of both batches and the t rows' batch's err; err and `rows_read` have no
-/// whole batch counterpart, so `rows_read` is only bounded.
+/// of both batches and the t rows' batch's err, and its `rows_read` is exactly
+/// the failing kept record's body index + 1.
 fn post_where_refusal(
     batch: &BatchResult,
     ins: &InsertResult,
@@ -98,37 +109,35 @@ fn post_where_refusal(
     if sub.outcome != Outcome::Rejected || !post_where_site(sub.refused_at.as_ref()) {
         return false;
     }
-    let Some(&first_kept) = t_rows.rows.first() else {
+    if t_rows.rows.is_empty() {
         return false;
-    };
-    // the failing kept row's place in the body; at a body step, the first kept row's
-    let first = if sub.refused_at == Some(RefusalSite::Row) {
-        match sub
+    }
+    // a refusal at a row is at one of the kept rows
+    if sub.refused_at == Some(RefusalSite::Row)
+        && sub
             .refused_row
             .and_then(|r| t_rows.rows.get(usize::try_from(r).ok()?))
-        {
-            Some(&i) => i,
-            None => return false,
-        }
-    } else {
-        first_kept
-    };
+            .is_none()
+    {
+        return false;
+    }
     if ins.outcome != Outcome::Rejected || INSERT_NEVER.iter().any(|k| raw_ins.get(k).is_some()) {
         return false;
     }
     // the outcome class and code stay equal, to the whole batch and to the t
     // rows' batch; err is the server's for the first failing kept row,
-    // numbered over the kept rows; rows_read is bounded only, from the failing
-    // kept record (the first kept record at a body step) to the body's record
-    // count
+    // numbered over the kept rows; rows_read is exact: a refused insert, like
+    // the batch, stops at its refusing record, so it has read through the
+    // first failing kept record, whose body index the case carries
     ins.err_code == batch.err_code
         && ins.err_code == sub.err_code
         && ins.err_msg == sub.err_msg
         && batch.reason == ins.reason
         && batch.refused_at == ins.refused_at
         && batch.partition_count == ins.partition_count
-        && ins.rows_read > first as u64
-        && ins.rows_read <= t_rows.records.len() as u64
+        && t_rows
+            .failing
+            .is_some_and(|f| ins.rows_read == f as u64 + 1)
         && batch.rows_skipped == ins.rows_skipped
         && batch.unsupported_settings == ins.unsupported_settings
         && batch.framing == ins.framing
@@ -151,6 +160,7 @@ fn post_where_cut(
         rows: idx,
         batch: sub,
         records,
+        ..
     } = t_rows?;
     let rows = &batch.rows;
     if batch.outcome != Outcome::Rejected || !post_where_site(batch.refused_at.as_ref()) {
@@ -179,6 +189,11 @@ fn post_where_cut(
         || !sub.export_declined.as_bytes().is_empty()
         || sub.export_declined_reason.is_some()
     {
+        return None;
+    }
+    // the t rows' batch's rows_passed is the number of t rows, which the
+    // insert's equals
+    if sub.rows_passed != n {
         return None;
     }
     // the insert: the t rows' insert, over the whole body's read
@@ -510,7 +525,10 @@ fn decode_case(case: &Json) -> (BatchResult, InsertResult) {
 fn decode_t_rows(case: &Json, whole: &BatchResult) -> Option<BatchOfTRows> {
     check_provenance(case);
     let records = case.get("body_records").map(|_| body_records(case, whole));
-    let ev = case.get("batch_of_t_rows")?;
+    let Some(ev) = case.get("batch_of_t_rows") else {
+        failing_t_record(case, None);
+        return None;
+    };
     let records =
         records.unwrap_or_else(|| panic!("{}: batch_of_t_rows without body_records", case["id"]));
     let rows: Vec<usize> = ev["rows"]
@@ -529,11 +547,55 @@ fn decode_t_rows(case: &Json, whole: &BatchResult) -> Option<BatchOfTRows> {
         b64(ev, "export_b64"),
     )
     .unwrap_or_else(|e| panic!("{}: batch_of_t_rows.batch does not decode: {e}", case["id"]));
-    Some(BatchOfTRows {
+    let mut t_rows = BatchOfTRows {
         rows,
         batch,
         records,
-    })
+        failing: None,
+    };
+    t_rows.failing = failing_t_record(case, Some(&t_rows));
+    Some(t_rows)
+}
+
+/// A case's `failing_t_record`: required where the t rows' batch is refused
+/// (the `post_where_refusal` rule handles the case), absent otherwise; an
+/// integer, not a boolean, that is one of the t rows and, where that batch is
+/// refused at one of its rows, the body record that row is. A violation is a
+/// fixture error.
+fn failing_t_record(case: &Json, t_rows: Option<&BatchOfTRows>) -> Option<usize> {
+    let id = &case["id"];
+    let refused = t_rows.filter(|t| t.batch.outcome != Outcome::Accepted);
+    let Some(raw) = case.get("failing_t_record") else {
+        assert!(
+            refused.is_none(),
+            "{id}: batch_of_t_rows is refused and the case carries no failing_t_record"
+        );
+        return None;
+    };
+    let Some(t_rows) = refused else {
+        panic!("{id}: failing_t_record where post_where_refusal does not apply");
+    };
+    let n = raw
+        .as_u64()
+        .and_then(|n| usize::try_from(n).ok())
+        .unwrap_or_else(|| panic!("{id}: failing_t_record is not an integer"));
+    assert!(
+        t_rows.rows.contains(&n),
+        "{id}: failing_t_record {n} is not one of batch_of_t_rows.rows"
+    );
+    let sub = &t_rows.batch;
+    if sub.refused_at == Some(RefusalSite::Row) {
+        if let Some(&at) = sub
+            .refused_row
+            .and_then(|r| t_rows.rows.get(usize::try_from(r).ok()?))
+        {
+            assert_eq!(
+                at, n,
+                "{id}: failing_t_record {n} is not the record the t rows' batch refused at"
+            );
+        }
+    }
+    Some(n)
 }
 
 /// A case's `body_records`: each exactly `{off, len}`, integers, in body
@@ -703,7 +765,7 @@ fn every_case_of_the_shared_fixture_gives_its_expected_projection_result() {
     );
     assert_eq!(
         (cases.len(), equal, exceptions, reds),
-        (53, 19, 1, 33),
+        (55, 20, 1, 34),
         "the fixture's census (cases, equal, exception, planted reds)"
     );
     // A rule with no planted red is a rule the gate cannot see fail.

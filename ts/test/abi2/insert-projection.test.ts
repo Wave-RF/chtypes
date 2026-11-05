@@ -27,6 +27,7 @@ interface Case {
   readonly insert_rows_b64: string | null;
   readonly batch_of_t_rows?: { readonly rows: readonly number[]; readonly batch: unknown; readonly export_b64: string | null };
   readonly body_records?: readonly unknown[];
+  readonly failing_t_record?: unknown;
   readonly provenance?: Record<string, unknown>;
   readonly expect: 'equal' | { readonly exception: string } | { readonly violates: string };
 }
@@ -80,18 +81,45 @@ function bodyRecordsOf(c: Case, batch: BatchResult): BodyRecord[] {
   return recs;
 }
 
+/**
+ * failing_t_record: required where the t rows' batch is refused (the post_where_refusal rule handles the case), absent otherwise; an
+ * integer (a boolean is not one) that is one of the t rows and, where that batch is refused at one of its rows, the body record that
+ * row is. A violation is a fixture error.
+ */
+function failingOf(c: Case, tRows: BatchOfTRows | undefined): number | undefined {
+  const refused = tRows !== undefined && tRows.batch.outcome !== 'accepted';
+  const n = c.failing_t_record;
+  if (n === undefined) {
+    if (refused) throw new Error(`${c.id}: batch_of_t_rows is refused and the case carries no failing_t_record`);
+    return undefined;
+  }
+  if (!refused || tRows === undefined) throw new Error(`${c.id}: failing_t_record where post_where_refusal does not apply`);
+  if (typeof n !== 'number' || !Number.isInteger(n)) throw new Error(`${c.id}: failing_t_record is not an integer`);
+  if (!tRows.rows.includes(n)) throw new Error(`${c.id}: failing_t_record ${n} is not one of batch_of_t_rows.rows`);
+  const sub = tRows.batch;
+  if (sub.refusedAt === 'row' && sub.refusedRow !== undefined && sub.refusedRow >= 0 && sub.refusedRow < tRows.rows.length && tRows.rows[sub.refusedRow] !== n) {
+    throw new Error(`${c.id}: failing_t_record ${n} is not the record the t rows' batch refused at`);
+  }
+  return n;
+}
+
 /** A case's batch_of_t_rows through the real batch decoder; a malformed one is a fixture error, never a verdict. */
 function tRowsOf(c: Case, batch: BatchResult): BatchOfTRows | undefined {
   checkProvenance(c);
   const records = c.body_records === undefined ? undefined : bodyRecordsOf(c, batch);
   const ev = c.batch_of_t_rows;
-  if (ev === undefined) return undefined;
+  if (ev === undefined) {
+    failingOf(c, undefined);
+    return undefined;
+  }
   if (records === undefined) throw new Error(`${c.id}: batch_of_t_rows without body_records`);
   const n = records.length;
   if (!ev.rows.every((i, k) => Number.isInteger(i) && i >= 0 && i < n && (k === 0 || i > (ev.rows[k - 1] as number)))) {
     throw new Error(`${c.id}: batch_of_t_rows.rows is not increasing indexes into body_records`);
   }
-  return { rows: ev.rows, batch: decodeBatch(Buffer.from(JSON.stringify(ev.batch)), undefined), exp: bytes(ev.export_b64), records };
+  const tRows: BatchOfTRows = { rows: ev.rows, batch: decodeBatch(Buffer.from(JSON.stringify(ev.batch)), undefined), exp: bytes(ev.export_b64), records };
+  const failing = failingOf(c, tRows);
+  return failing === undefined ? tRows : { ...tRows, failing };
 }
 
 function run(c: Case) {
@@ -117,10 +145,10 @@ describe.skipIf(!present)('the insert projection gate over the shared fixture', 
   it('reads the fixture it was written for, and refuses a zero-run', () => {
     expect(doc.schema).toBe('chtypes.abi-v2.insert-projection-fixture/1');
     const reds = doc.cases.filter((c) => typeof c.expect === 'object' && 'violates' in c.expect);
-    expect(doc.cases).toHaveLength(53);
-    expect(doc.cases.filter((c) => c.expect === 'equal')).toHaveLength(19);
+    expect(doc.cases).toHaveLength(55);
+    expect(doc.cases.filter((c) => c.expect === 'equal')).toHaveLength(20);
     expect(doc.cases.filter((c) => typeof c.expect === 'object' && 'exception' in c.expect)).toHaveLength(1);
-    expect(reds).toHaveLength(33);
+    expect(reds).toHaveLength(34);
     const byRule: Record<string, number> = {};
     for (const c of reds) byRule[(c.expect as { violates: string }).violates] = (byRule[(c.expect as { violates: string }).violates] ?? 0) + 1;
     expect(byRule).toEqual({
@@ -132,7 +160,7 @@ describe.skipIf(!present)('the insert projection gate over the shared fixture', 
       output_presence: 2,
       export_decline_is_call_decline: 3,
       post_where_cut: 3,
-      post_where_refusal: 4,
+      post_where_refusal: 5,
       err_prefix: 1,
       err_suffix: 2,
       native_output: 1,

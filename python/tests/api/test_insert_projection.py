@@ -59,12 +59,15 @@ PROVENANCE_MARKS = ("unrecorded", "planted")
 
 class TRows(NamedTuple):
     """A case's batch_of_t_rows, decoded: `rows` index the body's records,
-    `batch` is the batch over those records alone, and `records` is the case's
-    body_records, each (off, len)."""
+    `batch` is the batch over those records alone, `records` is the case's
+    body_records, each (off, len), and `failing` is the case's failing_t_record,
+    the first failing kept record's body index (None where the t rows' batch is
+    accepted, which has none)."""
 
     rows: list[int]
     batch: BatchResult
     records: list[tuple[int, int]]
+    failing: int | None = None
 
 
 def _b64(case: dict, key: str) -> bytes | None:
@@ -80,12 +83,21 @@ def _raw_cols(raw: dict) -> tuple[bytes, ...] | None:
 
 
 def same_records(pwc: TRows) -> bool:
-    """The t rows' batch reads exactly the listed records: one row each, each
-    input_span as long as its body record, none skipped."""
+    """The t rows' batch reads exactly the listed records, in order: one row each,
+    each input_span as long as its body record, none skipped. A batch refused at a
+    row stops reading there, so then its rows end at the refused row."""
     idx, sub = pwc.rows, pwc.batch
-    if len(sub.rows) != len(idx) or sub.rows_read != len(idx) or sub.rows_skipped != 0:
+    n = len(idx)
+    if (
+        sub.outcome == Outcome.REJECTED
+        and sub.refused_at == RefusalSite.ROW
+        and sub.refused_row is not None
+        and 0 <= sub.refused_row < n
+    ):
+        n = sub.refused_row + 1
+    if len(sub.rows) != n or sub.rows_read != n or sub.rows_skipped != 0:
         return False
-    for r, i in zip(sub.rows, idx, strict=True):
+    for r, i in zip(sub.rows, idx[:n], strict=True):
         if r.input_span is None or r.input_span.len != pwc.records[i][1]:
             return False
     return True
@@ -99,8 +111,8 @@ def post_where_refusal(
     pwc: TRows,
 ) -> bool:
     """The checker's `_post_where_refusal`: the insert is `rejected` with the code
-    of both batches and the t rows' batch's err; err and rows_read have no whole
-    batch counterpart, so rows_read is only bounded."""
+    of both batches and the t rows' batch's err, and its rows_read is exactly the
+    failing kept record's body index + 1."""
     idx, sub = pwc.rows, pwc.batch
     if batch.outcome != Outcome.REJECTED or batch.refused_at not in POST_WHERE_SITES:
         return False
@@ -131,11 +143,9 @@ def post_where_refusal(
     )
     if any(a != b for a, b in shared):
         return False
-    # rows_read: where the insert's reader stopped, which no batch states; bounded only, from
-    # the failing kept record (the first kept record at a body step) to the body's record count
-    at_row = sub.refused_at == RefusalSite.ROW and sub.refused_row is not None
-    first = idx[sub.refused_row] if at_row else idx[0]
-    if not first + 1 <= ins.rows_read <= len(pwc.records):
+    # rows_read: exact. A refused insert, like the batch, stops at its refusing record, so
+    # it has read through the first failing kept record, whose body index the case carries
+    if pwc.failing is None or ins.rows_read != pwc.failing + 1:
         return False
     return (
         (ins.rows_passed, ins.rows_cut, ins.rows_undecided) == (0, 0, 0)
@@ -191,7 +201,7 @@ def post_where_cut(
         return False
     cut = ins.rows_read - ins.rows_skipped - len(idx)
     if not (
-        ins.rows_passed == len(idx)
+        sub.rows_passed == len(idx) == ins.rows_passed
         and ins.rows_cut == cut
         and ins.rows_undecided is not None
         and 0 <= ins.rows_undecided <= cut
@@ -392,6 +402,33 @@ def decode_body_records(case: dict, batch: BatchResult) -> list[tuple[int, int]]
     return records
 
 
+def check_failing(case: dict, pwc: TRows | None) -> int | None:
+    """failing_t_record: required where the t rows' batch is refused (the
+    post_where_refusal rule handles the case), absent otherwise; an integer, not a
+    boolean, that is one of the t rows and, where that batch is refused at one of
+    its rows, the body record that row is. A violation is a fixture error."""
+    cid = case["id"]
+    refused = pwc is not None and pwc.batch.outcome != Outcome.ACCEPTED
+    if "failing_t_record" not in case:
+        assert not refused, (
+            f"{cid}: batch_of_t_rows is refused and the case carries no failing_t_record"
+        )
+        return None
+    assert pwc is not None and refused, (
+        f"{cid}: failing_t_record where post_where_refusal does not apply"
+    )
+    n = case["failing_t_record"]
+    assert type(n) is int, f"{cid}: failing_t_record is not an integer"
+    assert n in pwc.rows, f"{cid}: failing_t_record {n} is not one of batch_of_t_rows.rows"
+    sub = pwc.batch
+    if sub.refused_at == RefusalSite.ROW and sub.refused_row is not None:
+        if 0 <= sub.refused_row < len(pwc.rows):
+            assert pwc.rows[sub.refused_row] == n, (
+                f"{cid}: failing_t_record {n} is not the record the t rows' batch refused at"
+            )
+    return n
+
+
 def decode_pwc(case: dict, batch: BatchResult) -> TRows | None:
     """The case's batch_of_t_rows through the real batch decoder; a malformed one
     is a fixture error (the checker's FixtureError), never a verdict."""
@@ -399,6 +436,7 @@ def decode_pwc(case: dict, batch: BatchResult) -> TRows | None:
     records = decode_body_records(case, batch) if "body_records" in case else None
     ev = case.get("batch_of_t_rows")
     if ev is None:
+        check_failing(case, None)
         return None
     assert records is not None, f"{case['id']}: batch_of_t_rows without body_records"
     assert set(ev) == {"rows", "batch", "export_b64"}, case["id"]
@@ -406,7 +444,8 @@ def decode_pwc(case: dict, batch: BatchResult) -> TRows | None:
     assert idx == sorted(set(idx)), case["id"]
     assert all(0 <= i < len(records) for i in idx), case["id"]
     sub = decode_batch(json.dumps(ev["batch"]).encode(), _b64(ev, "export_b64"))
-    return TRows(idx, sub, records)
+    pwc = TRows(idx, sub, records)
+    return pwc._replace(failing=check_failing(case, pwc))
 
 
 def verdict(case: dict):
@@ -423,12 +462,12 @@ def verdict(case: dict):
 
 @needs_fixture
 def test_the_fixture_is_the_shape_this_gate_expects() -> None:
-    assert sum(c["expect"] == "equal" for c in CASES) == 19
+    assert sum(c["expect"] == "equal" for c in CASES) == 20
     assert sum(isinstance(c["expect"], dict) and "exception" in c["expect"] for c in CASES) == 1
     for rule in RULES:
         assert any(c["expect"] == {"violates": rule} for c in CASES), rule
     assert any(c["expect"] == {"exception": "generator_draw"} for c in CASES)
-    assert sum(isinstance(c["expect"], dict) and "violates" in c["expect"] for c in CASES) == 33
+    assert sum(isinstance(c["expect"], dict) and "violates" in c["expect"] for c in CASES) == 34
 
 
 @needs_fixture
@@ -487,4 +526,4 @@ def test_the_fixture_gate_ran_cases() -> None:
                 f"CHTYPES_REQUIRE_FIXTURES=1 and the insert-projection fixture is absent: {FIXTURE}"
             )
         pytest.skip(f"insert-projection fixture absent ({FIXTURE}): not a full-repository tree")
-    assert len(CASES) == 53
+    assert len(CASES) == 55

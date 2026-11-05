@@ -4143,6 +4143,7 @@
      "len": 15
     }
    ],
+   "failing_t_record": 2,
    "insert": {
     "outcome": "accepted",
     "code": 0,
@@ -4763,11 +4764,143 @@
      "len": 15
     }
    ],
+   "failing_t_record": 2,
    "insert": {
     "outcome": "rejected",
     "code": 469,
     "err": "Constraint `n_abs` for table default.t is violated at row 2. Expression: (abs(n) < 10). Column values: n = 30",
     "rows_read": 3,
+    "rows_skipped": 0,
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "unsupported_settings": [],
+    "refused_at": "row",
+    "rows_undecided": 0
+   },
+   "insert_rows_b64": null,
+   "expect": "equal",
+   "provenance": {
+    "batch": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    },
+    "batch_of_t_rows": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    },
+    "insert": "unrecorded"
+   }
+  },
+  {
+   "id": "equal-post-where-refusal-failing-t-row-before-the-end",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "rejected",
+    "code": 469,
+    "err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = -20",
+    "rows_read": 1,
+    "rows_skipped": 0,
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "export_declined": "batch outcome is 'rejected': only a fully accepted batch exports bytes",
+    "export_declined_reason": "export-batch-not-accepted",
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "unconsumed": [],
+    "rows": [
+     {
+      "verdict": "d",
+      "verdict_code": 469,
+      "verdict_err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = -20",
+      "outcome": "rejected",
+      "code": 469,
+      "err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = -20",
+      "cols": [],
+      "input_span": {
+       "off": 0,
+       "len": 14
+      },
+      "transformed": []
+     }
+    ],
+    "unsupported_settings": [],
+    "refused_at": "row",
+    "refused_row": 0,
+    "transformed": []
+   },
+   "batch_export_b64": null,
+   "batch_of_t_rows": {
+    "rows": [
+     1,
+     2
+    ],
+    "batch": {
+     "outcome": "rejected",
+     "code": 469,
+     "err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = 30",
+     "rows_read": 1,
+     "rows_skipped": 0,
+     "rows_passed": 0,
+     "rows_cut": 0,
+     "export_declined": "batch outcome is 'rejected': only a fully accepted batch exports bytes",
+     "export_declined_reason": "export-batch-not-accepted",
+     "framing": {
+      "bom_skipped": false,
+      "container": null,
+      "header": null
+     },
+     "unconsumed": [],
+     "rows": [
+      {
+       "verdict": "d",
+       "verdict_code": 469,
+       "verdict_err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = 30",
+       "outcome": "rejected",
+       "code": 469,
+       "err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = 30",
+       "cols": [],
+       "input_span": {
+        "off": 0,
+        "len": 13
+       },
+       "transformed": []
+      }
+     ],
+     "unsupported_settings": [],
+     "refused_at": "row",
+     "refused_row": 0,
+     "transformed": []
+    },
+    "export_b64": null
+   },
+   "body_records": [
+    {
+     "off": 0,
+     "len": 14
+    },
+    {
+     "off": 14,
+     "len": 13
+    },
+    {
+     "off": 27,
+     "len": 14
+    }
+   ],
+   "failing_t_record": 1,
+   "insert": {
+    "outcome": "rejected",
+    "code": 469,
+    "err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = 30",
+    "rows_read": 2,
     "rows_skipped": 0,
     "rows_passed": 0,
     "rows_cut": 0,
@@ -4907,6 +5040,7 @@
      "len": 15
     }
    ],
+   "failing_t_record": 2,
    "insert": {
     "outcome": "rejected",
     "code": 469,
@@ -5052,6 +5186,7 @@
      "len": 15
     }
    ],
+   "failing_t_record": 2,
    "insert": {
     "outcome": "rejected",
     "code": 252,
@@ -5195,11 +5330,145 @@
      "len": 15
     }
    ],
+   "failing_t_record": 2,
    "insert": {
     "outcome": "rejected",
     "code": 469,
     "err": "Constraint `n_abs` for table default.t is violated at row 2. Expression: (abs(n) < 10). Column values: n = 30",
     "rows_read": 1,
+    "rows_skipped": 0,
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "unsupported_settings": [],
+    "refused_at": "row",
+    "rows_undecided": 0
+   },
+   "insert_rows_b64": null,
+   "expect": {
+    "violates": "post_where_refusal"
+   },
+   "provenance": {
+    "batch": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    },
+    "batch_of_t_rows": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    },
+    "insert": "planted"
+   }
+  },
+  {
+   "id": "red-post-where-refusal-insert-reads-the-whole-body",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "rejected",
+    "code": 469,
+    "err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = -20",
+    "rows_read": 1,
+    "rows_skipped": 0,
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "export_declined": "batch outcome is 'rejected': only a fully accepted batch exports bytes",
+    "export_declined_reason": "export-batch-not-accepted",
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "unconsumed": [],
+    "rows": [
+     {
+      "verdict": "d",
+      "verdict_code": 469,
+      "verdict_err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = -20",
+      "outcome": "rejected",
+      "code": 469,
+      "err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = -20",
+      "cols": [],
+      "input_span": {
+       "off": 0,
+       "len": 14
+      },
+      "transformed": []
+     }
+    ],
+    "unsupported_settings": [],
+    "refused_at": "row",
+    "refused_row": 0,
+    "transformed": []
+   },
+   "batch_export_b64": null,
+   "batch_of_t_rows": {
+    "rows": [
+     1,
+     2
+    ],
+    "batch": {
+     "outcome": "rejected",
+     "code": 469,
+     "err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = 30",
+     "rows_read": 1,
+     "rows_skipped": 0,
+     "rows_passed": 0,
+     "rows_cut": 0,
+     "export_declined": "batch outcome is 'rejected': only a fully accepted batch exports bytes",
+     "export_declined_reason": "export-batch-not-accepted",
+     "framing": {
+      "bom_skipped": false,
+      "container": null,
+      "header": null
+     },
+     "unconsumed": [],
+     "rows": [
+      {
+       "verdict": "d",
+       "verdict_code": 469,
+       "verdict_err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = 30",
+       "outcome": "rejected",
+       "code": 469,
+       "err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = 30",
+       "cols": [],
+       "input_span": {
+        "off": 0,
+        "len": 13
+       },
+       "transformed": []
+      }
+     ],
+     "unsupported_settings": [],
+     "refused_at": "row",
+     "refused_row": 0,
+     "transformed": []
+    },
+    "export_b64": null
+   },
+   "body_records": [
+    {
+     "off": 0,
+     "len": 14
+    },
+    {
+     "off": 14,
+     "len": 13
+    },
+    {
+     "off": 27,
+     "len": 14
+    }
+   ],
+   "failing_t_record": 1,
+   "insert": {
+    "outcome": "rejected",
+    "code": 469,
+    "err": "Constraint `n_abs` for table default.t is violated at row 1. Expression: (abs(n) < 10). Column values: n = 30",
+    "rows_read": 3,
     "rows_skipped": 0,
     "rows_passed": 0,
     "rows_cut": 0,

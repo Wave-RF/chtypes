@@ -12,9 +12,9 @@
  * `InsertResult` has no `export_declined*` member, and the rule must still see
  * one that a broken library wrote. `tRows` is a case's `batch_of_t_rows`,
  * decoded: the indexes of the body records the insert keeps, the batch over
- * those records alone, with its export, and the case's `body_records`; whether
- * that batch is accepted decides which of `post_where_cut` and
- * `post_where_refusal` the case is held to.
+ * those records alone, with its export, the case's `body_records` and its
+ * `failing_t_record`; whether that batch is accepted decides which of
+ * `post_where_cut` and `post_where_refusal` the case is held to.
  *
  * Whether the batch carried a filter is read off its rows: a verdict is present
  * on every row exactly when the call had a filter (`batch.verdict_iff_filter`),
@@ -57,6 +57,8 @@ export interface BatchOfTRows {
   readonly exp: Buffer | undefined;
   /** The case's body_records: one span per body record, in body order; `rows` index these. */
   readonly records: readonly BodyRecord[];
+  /** The case's failing_t_record: the first failing kept record's body index; undefined where the t rows' batch is accepted. */
+  readonly failing?: number;
 }
 
 const INSERT_NEVER = ['export_declined', 'export_declined_b64', 'export_declined_reason'];
@@ -92,16 +94,21 @@ function lineCount(b: Buffer): number {
 
 const postWhereSite = (s: string | undefined): boolean => s === 'row' || s === 'body_step';
 
-/** The t rows' batch reads exactly the listed records: one row each, each input_span as long as its body record, none skipped. */
+/**
+ * The t rows' batch reads exactly the listed records, in order: one row each, each input_span as long as its body record, none
+ * skipped. A batch refused at a row stops reading there, so then its rows end at the refused row.
+ */
 function sameRecords(tRows: BatchOfTRows): boolean {
   const { rows: idx, batch: sub, records } = tRows;
-  if (sub.rows.length !== idx.length || sub.rowsRead !== idx.length || sub.rowsSkipped !== 0) return false;
+  const stop = sub.outcome === 'rejected' && sub.refusedAt === 'row' && sub.refusedRow !== undefined && sub.refusedRow >= 0 && sub.refusedRow < idx.length;
+  const n = stop ? (sub.refusedRow as number) + 1 : idx.length;
+  if (sub.rows.length !== n || sub.rowsRead !== n || sub.rowsSkipped !== 0) return false;
   return sub.rows.every((r, j) => r.inputSpan !== undefined && r.inputSpan.len === records[idx[j] as number]?.len);
 }
 
 /**
- * The checker's `_post_where_refusal`: the insert is `rejected` with the code of both batches and the t rows' batch's err;
- * err and rows_read have no whole batch counterpart, so rows_read is only bounded.
+ * The checker's `_post_where_refusal`: the insert is `rejected` with the code of both batches and the t rows' batch's err, and
+ * its rows_read is exactly the failing kept record's body index + 1.
  */
 function postWhereRefusal(ins: InsertResult, out: Buffer | undefined, batch: BatchResult, rawInsert: Record<string, unknown>, tRows: BatchOfTRows): boolean {
   const sub = tRows.batch;
@@ -111,9 +118,9 @@ function postWhereRefusal(ins: InsertResult, out: Buffer | undefined, batch: Bat
   if (idx.length === 0) return false;
   if (sub.refusedAt === 'row' && !(sub.refusedRow !== undefined && sub.refusedRow >= 0 && sub.refusedRow < idx.length)) return false;
   if (ins.outcome !== 'rejected' || INSERT_NEVER.some((k) => k in rawInsert)) return false;
-  // rows_read: where the insert's reader stopped, which no batch states; bounded only, from the failing kept record
-  // (the first kept record at a body step) to the body's record count
-  const first = (sub.refusedAt === 'row' && sub.refusedRow !== undefined ? idx[sub.refusedRow] : idx[0]) as number;
+  // rows_read: exact. A refused insert, like the batch, stops at its refusing record, so it has read through the first
+  // failing kept record, whose body index the case carries
+  if (tRows.failing === undefined) return false;
   return (
     // the outcome class and code stay equal, to the whole batch and to the t rows' batch
     ins.errCode === batch.errCode &&
@@ -123,8 +130,7 @@ function postWhereRefusal(ins: InsertResult, out: Buffer | undefined, batch: Bat
     batch.reason === ins.reason &&
     batch.refusedAt === ins.refusedAt &&
     batch.partitionCount === ins.partitionCount &&
-    ins.rowsRead >= first + 1 &&
-    ins.rowsRead <= tRows.records.length &&
+    ins.rowsRead === tRows.failing + 1 &&
     batch.rowsSkipped === ins.rowsSkipped &&
     buffersEqual(batch.unsupportedSettings, ins.unsupportedSettings) &&
     isDeepStrictEqual(batch.framing, ins.framing) &&
@@ -154,6 +160,8 @@ function postWhereCut(
   // the t rows' batch: those records, read alone, accepted, every one t
   if (!sameRecords(tRows)) return undefined;
   if (sub.outcome !== 'accepted' || sub.rows.some((r) => r.verdict !== 't')) return undefined;
+  // the t rows' batch's rows_passed is the number of t rows, which the insert's equals
+  if (sub.rowsPassed !== idx.length) return undefined;
   if (sub.exportDeclined.length > 0 || sub.exportDeclinedReason !== undefined) return undefined;
   // the insert: the t rows' insert, over the whole body's read
   if (INSERT_NEVER.some((k) => k in rawInsert)) return undefined;

@@ -23,7 +23,17 @@ records alone (the filter attached, as for the whole body). A case that carries
 batch_of_t_rows also carries body_records, [{off, len}, ...], one entry per
 record of the body in body order (its byte span in the body), and rows index
 those records, not the whole batch's rows: a batch refused at a row stops
-reading there, so its rows end at the refused row while the body goes on.
+reading there, so its rows end at the refused row while the body goes on. The
+t rows' batch is read the same way: refused at one of its rows, it stops there,
+so its rows end at that row and the kept records after it are unread.
+
+failing_t_record, an integer, is required on a case whose batch_of_t_rows is
+refused (the post_where_refusal rule handles it) and is a fixture error on any
+other. It is the first failing kept record's 0-based index in the body, so it is
+one of rows. Where the t rows' batch is refused at a row it is rows[refused_row],
+the kept record that row is, and a case whose documents disagree with it is a
+fixture error; where it is refused at body_step, which names no row, it is still
+one of rows (the kept record the insert's reader stopped at).
 
 provenance, on any case and required with batch_of_t_rows, says where each of
 the case's documents came from: {"batch": P, "insert": P} plus
@@ -56,13 +66,12 @@ and rows_read are its own (its refusal may sit on an earlier cut row), so they
 have no counterpart. The err equality is exact for a body the server reads as
 one chunk only: across chunks (max_insert_block_size, the squashing) the row the
 server names is a server fact, which only a server's INSERT over the same body
-can confirm. The insert's rows_read is where its reader stopped, which no batch
-document states; it is bounded, not compared: at least the failing kept
-record's body index + 1 (for a `body_step` refusal, which names no row, the
-first kept record's), at most the body's record count. A refused INSERT stops at
-its refusing row, so the lead may tighten this to exact (the failing kept row's
-body index + 1, carried by the case and checked against a recorded insert) once
-a no-filter recording confirms the insert stops at the refused row.
+can confirm.
+
+The insert's rows_read is exact. A refused insert, like the batch, stops at its
+refusing record, so its rows_read is the first failing kept record's body index
++ 1, which the case carries as failing_t_record. The whole body's batch states
+no such number, because its own refusal may sit on an earlier, cut row.
 
 An accepted insert (post_where_cut) read the whole body, so its rows_read is
 exactly the body's record count and its rows_cut the rows read, less those
@@ -94,28 +103,29 @@ Rules, checked in this order (the first that fails is the answer):
                    batch read is `accepted` in it; the t rows' batch reads
                    exactly those records (one row each, input_span lengths
                    those of body_records, none skipped), is `accepted`, every
-                   verdict `t`; the insert's outcome, code, reason, refused_at,
+                   verdict `t`, with rows_passed the number of t rows; the
+                   insert's outcome, code, reason, refused_at,
                    export_columns and partition_count are the t rows' batch's,
                    its rows_skipped, unsupported_settings and framing the whole
                    batch's, rows_read exactly the body's record count,
-                   rows_passed the number of t rows, rows_cut rows_read less
-                   rows_skipped and rows_passed, rows_undecided at most
-                   rows_cut, err the t rows' batch's, and the output the t rows'
-                   batch's export exactly (generator_draw still applies); the
+                   rows_passed the t rows' batch's (the number of t rows),
+                   rows_cut rows_read less rows_skipped and rows_passed,
+                   rows_undecided at most rows_cut, err the t rows' batch's,
+                   and the output the t rows' batch's export exactly, byte for
+                   byte, in either format (generator_draw alone exempts it); the
                    rules below are not applied to such a case
   post_where_refusal
                    a case whose batch_of_t_rows is not `accepted`: the batch is
                    `rejected` at `row` or `body_step`; the t rows' batch reads
-                   exactly those records (as above) and is `rejected` at `row`
-                   (at a refused_row inside it, so a row in rows) or at
-                   `body_step`; the insert is `rejected`, its code both the
-                   whole batch's and the t rows' batch's, its err byte-equal to
-                   the t rows' batch's (no reader suffix: a post-WHERE step is
-                   not the reader); its reason, refused_at, rows_skipped,
-                   unsupported_settings, framing and partition_count the whole
-                   batch's; rows_read from the failing kept record's body
-                   index + 1 (the first kept record's, at `body_step`) up to
-                   the body's record count; rows_passed, rows_cut and
+                   those records (as above, but stopping at its refused row)
+                   and is `rejected` at `row` (at a refused_row inside it, so
+                   a row in rows) or at `body_step`; the insert is `rejected`,
+                   its code both the whole batch's and the t rows' batch's, its
+                   err byte-equal to the t rows' batch's (no reader suffix: a
+                   post-WHERE step is not the reader); its reason, refused_at,
+                   rows_skipped, unsupported_settings, framing and
+                   partition_count the whole batch's; rows_read exactly
+                   failing_t_record + 1; rows_passed, rows_cut and
                    rows_undecided 0 (an insert that is not accepted), no
                    export_columns and no output; the rules below are not
                    applied to such a case
@@ -184,9 +194,10 @@ PWC = "batch_of_t_rows"
 PWC_FROM_T_ROWS = ("outcome", "code", "reason", "refused_at", "export_columns", "partition_count")
 PWC_FROM_BODY = ("rows_skipped", "unsupported_settings", "framing")
 BODY = "body_records"
+FAILING = "failing_t_record"
 PROVENANCE = "provenance"
 PROVENANCE_MARKS = ("unrecorded", "planted")
-# post_where_refusal: the members still equal to the whole batch's (err and rows_read are not).
+# post_where_refusal: the members still equal to the whole batch's (err is the t rows' batch's, rows_read is exact).
 POST_WHERE_REFUSAL_SHARED = ("reason", "refused_at", "rows_skipped", "unsupported_settings", "framing",
                              "partition_count")
 POST_WHERE_SITES = ("row", "body_step")
@@ -251,6 +262,7 @@ def shape(case: dict, batch_schema, insert_schema) -> None:
         _provenance_shape(case, bad)
     if PWC in case:
         _pwc_shape(case, batch_schema, bad)
+    _failing_shape(case, bad)
     if case["output_format"] == "NONE" and (ran or "export_columns" in case["insert"]):
         bad("NONE: an export member is present")
     e = case["expect"]
@@ -316,6 +328,27 @@ def _pwc_shape(case: dict, batch_schema, bad) -> None:
         bad(f"{PWC}.batch carries no filter")
     _batch_shape(ev["batch"], None if ev["export_b64"] is None else base64.b64decode(ev["export_b64"]),
                  batch_schema, bad, f"{PWC}.batch")
+
+
+def _failing_shape(case: dict, bad) -> None:
+    """failing_t_record: required where the t rows' batch is refused (post_where_refusal), absent otherwise; an
+    integer (not a boolean) that is one of the t rows, and, where that batch is refused at one of its rows, the
+    body record that row is."""
+    refused = PWC in case and case[PWC]["batch"]["outcome"] != "accepted"
+    if FAILING not in case:
+        if refused:
+            bad(f"{PWC} is refused and the case carries no {FAILING}")
+        return
+    if not refused:
+        bad(f"{FAILING} on a case whose {PWC} is absent or accepted, which post_where_refusal does not handle")
+    n, idx, sub = case[FAILING], case[PWC]["rows"], case[PWC]["batch"]
+    if not _is_int(n):
+        bad(f"{FAILING} is not an integer")
+    if n not in idx:
+        bad(f"{FAILING} {n} is not one of {PWC}.rows")
+    r = sub.get("refused_row")
+    if sub.get("refused_at") == "row" and _is_int(r) and 0 <= r < len(idx) and idx[r] != n:
+        bad(f"{FAILING} {n} is not {PWC}.rows[{r}], the record the t rows' batch refused at")
 
 
 def _batch_shape(batch: dict, exp, batch_schema, bad, what: str) -> bool:
@@ -487,7 +520,7 @@ def _post_where_cut(case: dict, out):
     if ins["rows_read"] != nbody:
         return None
     cut = ins["rows_read"] - ins["rows_skipped"] - len(idx)
-    if not (ins.get("rows_passed") == len(idx) and ins.get("rows_cut") == cut
+    if not (sub.get("rows_passed") == len(idx) == ins.get("rows_passed") and ins.get("rows_cut") == cut
             and isinstance(ins.get("rows_undecided"), int) and 0 <= ins["rows_undecided"] <= cut):
         return None
     if _bytes(ins, "err") != _bytes(sub, "err"):
@@ -503,17 +536,22 @@ def _post_where_cut(case: dict, out):
 
 
 def _same_records(case: dict) -> bool:
-    """The t rows' batch reads exactly the listed records: one row each, each input_span as long as its body
-    record, none skipped."""
+    """The t rows' batch reads exactly the listed records, in order: one row each, each input_span as long as its
+    body record, none skipped. A batch refused at a row stops reading there, so then its rows end at the refused
+    row and the kept records after it are unread."""
     recs, ev = case[BODY], case[PWC]
     idx, sub = ev["rows"], ev["batch"]
-    if len(sub["rows"]) != len(idx) or sub["rows_read"] != len(idx) or sub["rows_skipped"] != 0:
+    n, at = len(idx), sub.get("refused_row")
+    if sub["outcome"] == "rejected" and sub.get("refused_at") == "row" and _is_int(at) and 0 <= at < n:
+        n = at + 1
+    if len(sub["rows"]) != n or sub["rows_read"] != n or sub["rows_skipped"] != 0:
         return False
     return all(r["input_span"]["len"] == recs[i]["len"] for r, i in zip(sub["rows"], idx))
 
 
 def _post_where_refusal(case: dict, out) -> bool:
-    """A post-WHERE refusal on a t row: the insert is the t rows' batch's refusal, over the whole body's read."""
+    """A post-WHERE refusal on a t row: the insert is the t rows' batch's refusal, read up to the failing kept
+    record (failing_t_record) and no further."""
     batch, ins, ev = case["batch"], case["insert"], case[PWC]
     sub = ev["batch"]
     if batch["outcome"] != "rejected" or batch.get("refused_at") not in POST_WHERE_SITES:
@@ -535,10 +573,9 @@ def _post_where_refusal(case: dict, out) -> bool:
         return False
     if any(_member(batch, m) != _member(ins, m) for m in POST_WHERE_REFUSAL_SHARED):
         return False
-    # rows_read: where the insert's reader stopped, which no batch states; bounded only, from the failing kept
-    # record (the first kept record at a body step, which names no row) to the body's record count
-    first = ev["rows"][sub["refused_row"]] if sub["refused_at"] == "row" else ev["rows"][0]
-    if not first + 1 <= ins["rows_read"] <= len(case[BODY]):
+    # rows_read: exact. A refused insert, like the batch, stops at its refusing record, so it has read through the
+    # first failing kept record, whose body index the case carries
+    if ins["rows_read"] != case[FAILING] + 1:
         return False
     return all(ins.get(k) == 0 for k in COUNTS) and "export_columns" not in ins and out is None
 
@@ -618,6 +655,15 @@ def selftest() -> int:
     if pwc is None:
         fails.append(f"no equal case with {PWC}")
         pwc = base
+    # a post_where_refusal case whose failing kept record is not the body's last, and whose t rows' batch stops at
+    # its own first row: one value of failing_t_record is 1, which True also equals
+    pwr_id = "equal-post-where-refusal-failing-t-row-before-the-end"
+    pwr = next((c for c in cases if c["id"] == pwr_id), None)
+    if pwr is None:
+        fails.append(f"no case {pwr_id}")
+        pwr = pwc
+    elif pwr.get(FAILING) != 1 or pwr[PWC]["batch"].get("refused_row") != 0:
+        fails.append(f"{pwr_id} is not the case the {FAILING} plants are built on")
     for what, start, mutate in (
         ("an invalid batch document", base, lambda c: c["batch"].pop("rows")),
         ("an invalid insert document", base, lambda c: c["insert"].update(rows_read=-1)),
@@ -641,6 +687,16 @@ def selftest() -> int:
         (f"{PROVENANCE} with an unknown mark", pwc, lambda c: c[PROVENANCE].update(insert="guessed")),
         (f"{PROVENANCE} without the t rows' batch", pwc, lambda c: c[PROVENANCE].pop(PWC)),
         (f"{PROVENANCE} with a build but no line", pwc, lambda c: c[PROVENANCE].update(batch={"build": "x"})),
+        (f"{FAILING} missing where the t rows' batch is refused", pwr, lambda c: c.pop(FAILING, None)),
+        (f"{FAILING} where the t rows' batch is accepted", pwc, lambda c: c.update({FAILING: c[PWC]["rows"][0]})),
+        (f"{FAILING} where there is no {PWC}", base, lambda c: c.update({FAILING: 0})),
+        (f"{FAILING} not one of the t rows", pwr, lambda c: c.update({FAILING: len(c[BODY])})),
+        (f"{FAILING} a cut record, not a t row", pwr, lambda c: c.update({FAILING: 0})),
+        (f"{FAILING} disagreeing with the t rows' batch's refused_row", pwr,
+         lambda c: c.update({FAILING: c[PWC]["rows"][1]})),
+        (f"{FAILING} a boolean", pwr, lambda c: c.update({FAILING: True})),
+        (f"{FAILING} a string", pwr, lambda c: c.update({FAILING: "1"})),
+        (f"{FAILING} a float", pwr, lambda c: c.update({FAILING: 1.5})),
     ):
         c = copy.deepcopy(start)
         mutate(c)
