@@ -7,6 +7,14 @@
  * many fires reached a freed token), never on a sleep; the 1 ms wait between
  * probe reads only bounds how long a broken stub can hang a case. Without
  * `$CHTYPES_ABI2_STUBS` every case SKIPS LOUDLY by name.
+ *
+ * The stub's live counts are per image, and every case here opens the same
+ * image, so a handle one case dropped without `close()` would be freed by its
+ * finalizer whenever a collection happened to run, inside some later case's
+ * baseline-to-check window. So every case closes what it made, and each one
+ * starts and ends with a forced collection and asserts that no finalizer ran:
+ * a leak fails the case that made it, by kind, and no live count can drift
+ * with the collector's timing.
  */
 
 import { createHash } from 'node:crypto';
@@ -15,14 +23,31 @@ import path from 'node:path';
 import { setFlagsFromString } from 'node:v8';
 import { runInNewContext } from 'node:vm';
 import { isNullPointer } from 'ffi-rs';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SYMBOL } from '../../src/abi2/decls.gen.js';
+import { finalizersForTest } from '../../src/abi2/handles.js';
 import { CallCanceledError, EXPORT_NONE, Format, type RawCallResult, rawCall, Status, UsageError } from '../../src/abi2/index.js';
 import { type LoadedImage, openAbi2, type Predicate } from '../../src/abi2/loader.js';
 import { rawCallInNewThread, threadedKeepAlive } from '../../src/abi2/raw.js';
 import { asyncCallsForTest } from '../../src/cancel.js';
 import { type Library, libraryOf } from '../../src/library.js';
-import type { Schema } from '../../src/schema.js';
+import type { Filter, Schema } from '../../src/schema.js';
+
+setFlagsFromString('--expose-gc');
+const gc = runInNewContext('gc') as () => void;
+
+/** Collect, then let every finalizer callback the collection queued run. */
+async function collect(): Promise<void> {
+  for (let i = 0; i < 3; i++) {
+    gc();
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
+/** The finalizer callbacks so far, by kind. */
+function finalized(): Record<string, number> {
+  return { ...finalizersForTest.byKind };
+}
 
 const STUBS_DIR = process.env.CHTYPES_ABI2_STUBS;
 const stubsAvailable = typeof STUBS_DIR === 'string' && STUBS_DIR.length > 0;
@@ -102,8 +127,11 @@ async function expectCanceled(p: Promise<unknown>, reason: unknown): Promise<Cal
 }
 
 /** The six cancelable calls, each given a signal and a body (or statement) whose first byte argument is `first`. */
-function cancelables(library: Library, schema: Schema): Record<string, (first: Buffer, signal: AbortSignal) => Promise<unknown>> {
-  const filter = schema.compileFilter('x > 0');
+function cancelables(
+  library: Library,
+  schema: Schema,
+  filter: Filter,
+): Record<string, (first: Buffer, signal: AbortSignal) => Promise<unknown>> {
   return {
     row: (b, signal) => schema.rowAsync(Format.JSONEachRow, b, { signal }),
     rows: (b, signal) => schema.rowsAsync(Format.JSONEachRow, b, { signal }),
@@ -115,17 +143,27 @@ function cancelables(library: Library, schema: Schema): Record<string, (first: B
 }
 
 describe.skipIf(!stubsAvailable)('cancelable async calls over the stub library', () => {
+  let finalizedAtStart: Record<string, number> = {};
+  beforeEach(async () => {
+    await collect();
+    finalizedAtStart = finalized();
+  });
   afterEach(async () => {
     await asyncCallsForTest.drain();
     asyncCallsForTest.onReturn = undefined;
     threadedKeepAlive.enabled = true;
+    // Every handle the case made was closed: a collection now finalizes none of them.
+    await collect();
+    expect(finalized(), 'finalizer callbacks, by kind, during this case').toEqual(finalizedAtStart);
   });
 
   it('an already-aborted signal rejects at once with CallCanceledError, and the library still answered CHS_CANCELED at entry with no output', async () => {
     const { image, library } = openStub();
     const schema = library.compileTable(CREATE);
-    const calls = cancelables(library, schema);
+    const filter = schema.compileFilter('x > 0');
+    const calls = cancelables(library, schema, filter);
     const baseline = library.liveHandles();
+    const finalizedBefore = finalized();
     const seen = recordReturns();
     for (const [name, call] of Object.entries(calls)) {
       const ac = new AbortController();
@@ -145,16 +183,21 @@ describe.skipIf(!stubsAvailable)('cancelable async calls over the stub library',
         expect(Buffer.isBuffer(out) ? out.length === 0 : isNullPointer(out.ptr), `${s.name} ${k} is NULL`).toBe(true);
       }
     }
+    expect(finalized(), 'finalizer callbacks').toEqual(finalizedBefore);
     expect(library.liveHandles()).toEqual(baseline);
     expect(probe(image).fire_after_free).toBe(0);
+    filter.close();
+    schema.close();
   });
 
   it('an abort during the call: each of the six blocks in the stub, the abort rejects it, and the library answers CHS_CANCELED', async () => {
     const { image, library } = openStub();
     const schema = library.compileTable(CREATE);
+    const filter = schema.compileFilter('x > 0');
     const seen = recordReturns();
-    const calls = cancelables(library, schema);
+    const calls = cancelables(library, schema, filter);
     const baseline = library.liveHandles();
+    const finalizedBefore = finalized();
     for (const [name, call] of Object.entries(calls)) {
       const before = probe(image).inflight;
       const ac = new AbortController();
@@ -167,13 +210,15 @@ describe.skipIf(!stubsAvailable)('cancelable async calls over the stub library',
       const last = seen.at(-1);
       expect(last === undefined ? undefined : statusOf(last.result), name).toBe(Status.Canceled);
     }
-    // Every handle a canceled call touched is freed once its native call has returned; a free can land a tick after
-    // the drain, so wait (bounded) for the counts to come back, then name any kind that did not: a real leak fails here.
-    await waitFor(() => JSON.stringify(library.liveHandles()) === JSON.stringify(baseline));
+    // Every handle a canceled call minted was freed before its native promise settled, so the last drain() is the
+    // whole wait: each kind is back at its baseline now, and no finalizer freed anything meanwhile.
     const live = library.liveHandles();
+    expect(finalized(), 'finalizer callbacks').toEqual(finalizedBefore);
     for (const [kind, count] of Object.entries(baseline)) expect(live[kind], `live ${kind}`).toEqual(count);
     expect(Object.keys(live).sort()).toEqual(Object.keys(baseline).sort());
     expect(probe(image).fire_after_free).toBe(0);
+    filter.close();
+    schema.close();
   });
 
   it('cancel after the last check point', async () => {
@@ -197,10 +242,13 @@ describe.skipIf(!stubsAvailable)('cancelable async calls over the stub library',
       const p = call(ac.signal);
       expect(await waitFor(() => probe(image).inflight > before), `${name} reached the wait`).toBe(true);
       const abortedAt = Date.now();
+      const returnsBefore = seen.length;
       ac.abort(reasonValue);
       await expectCanceled(p, reasonValue);
-      // Rejected while the native call is still waiting inside the library.
-      expect(probe(image).inflight, name).toBe(before + 1);
+      // Rejected before the native call returned: the rejection is settled inside abort() and observed in microtasks,
+      // while the native return arrives as a later task. (The stub's own count is no witness here: the fired token
+      // releases the call within its 1 ms poll, which can beat this read.)
+      expect(seen.length, `${name}: rejected before the native return`).toBe(returnsBefore);
       expect(await waitFor(() => probe(image).inflight === before), `${name} native call returned`).toBe(true);
       // The token fired (chs_cancel_fired would read 1): an `!L:` call returns only once its token fires, or after
       // the stub's 10 s cap, so a return well inside the cap is the library observing the fire.
@@ -211,6 +259,7 @@ describe.skipIf(!stubsAvailable)('cancelable async calls over the stub library',
       expect(library.liveHandles(), `${name}: the late result was freed`).toEqual(baseline);
     }
     expect(probe(image).fire_after_free).toBe(0);
+    schema.close();
   });
 
   it('never aborted: the same answer as the synchronous call, with the token id in the options document', async () => {
@@ -229,9 +278,11 @@ describe.skipIf(!stubsAvailable)('cancelable async calls over the stub library',
     );
     expect(await filter.rowsAsync(Format.JSONEachRow, BODY, { signal })).toEqual(filter.rows(Format.JSONEachRow, BODY));
     const block = await schema.parseBlockAsync(Format.JSONEachRow, BODY, { signal });
-    expect(filter.eval(block)).toEqual(filter.eval(schema.parseBlock(Format.JSONEachRow, BODY)));
+    const syncBlock = schema.parseBlock(Format.JSONEachRow, BODY);
+    expect(filter.eval(block)).toEqual(filter.eval(syncBlock));
     const compiled = await library.compileTableAsync(CREATE, { signal });
     expect(compiled.describe()).toEqual(schema.describe());
+    for (const h of [block, syncBlock, compiled, filter, schema]) h.close();
     // Each call's options document (its last argument) is exactly {"cancel": <a fresh id>}, merged with the others.
     for (const s of seen) {
       const doc = JSON.parse((s.args.at(-1) as Buffer).toString('utf8')) as { cancel: string };
@@ -254,6 +305,7 @@ describe.skipIf(!stubsAvailable)('cancelable async calls over the stub library',
     expect(doc.memory_limit_bytes).toBe('7');
     expect(doc.cancel).toMatch(CANCEL_ID);
     expect(doc.cancel).not.toBe('c0000000000000000');
+    schema.close();
   });
 
   it('with no signal: no token is made and no extra call, and the options document is the synchronous one', async () => {
@@ -265,6 +317,7 @@ describe.skipIf(!stubsAvailable)('cancelable async calls over the stub library',
     expect(spy).not.toHaveBeenCalled();
     expect(optionsDoc(seen[0]).length).toBe(0);
     spy.mockRestore();
+    schema.close();
   });
 
   it('one signal across concurrent calls cancels all of them', async () => {
@@ -285,6 +338,7 @@ describe.skipIf(!stubsAvailable)('cancelable async calls over the stub library',
     await asyncCallsForTest.drain();
     expect(seen.map((s) => statusOf(s.result))).toEqual([Status.Canceled, Status.Canceled, Status.Canceled]);
     expect(library.liveHandles()).toEqual(baseline);
+    schema.close();
   });
 
   it('independent signals cancel only their own call', async () => {
@@ -306,6 +360,7 @@ describe.skipIf(!stubsAvailable)('cancelable async calls over the stub library',
     expect(bSettled).toBe(false);
     b.abort('b');
     await expectCanceled(pb, 'b');
+    schema.close();
   });
 
   it('close() while a call is in flight: later calls are refused at once, the free waits for the call, and close does not cancel it', async () => {
@@ -350,6 +405,7 @@ describe.skipIf(!stubsAvailable)('cancelable async calls over the stub library',
     expect(probe(image).inflight).toBe(before + pool);
     ac.abort('blockers');
     for (const p of blockers) await expectCanceled(p, 'blockers');
+    schema.close();
   });
 
   it('a soak of racing aborts and returns: live handles back at baseline, and no fire ever reaches a freed token', async () => {
@@ -386,6 +442,8 @@ describe.skipIf(!stubsAvailable)('cancelable async calls over the stub library',
     await asyncCallsForTest.drain();
     expect(library.liveHandles()).toEqual(baseline);
     expect(probe(image).fire_after_free).toBe(fafBefore);
+    filter.close();
+    schema.close();
   });
 
   it('keep-alive: a queued call whose caller dropped every reference still reads its own body (and, with CHTYPES_TS_PLANTED_RED=1, the planted red: with it off, a use-after-free)', async () => {
@@ -397,8 +455,6 @@ describe.skipIf(!stubsAvailable)('cancelable async calls over the stub library',
     // off (the test-only switch `threadedKeepAlive`) the body is collected
     // while the call waits, and the stub hashes freed memory. That half reads
     // freed memory, so it runs only on request (CHTYPES_TS_PLANTED_RED=1).
-    setFlagsFromString('--expose-gc');
-    const gc = runInNewContext('gc') as () => void;
     const { image, library } = openStub();
     const schema = library.compileTable(CREATE);
     const pool = Number(process.env.UV_THREADPOOL_SIZE ?? 4);
@@ -448,5 +504,6 @@ describe.skipIf(!stubsAvailable)('cancelable async calls over the stub library',
       console.warn(`planted red: body collected while queued; the stub read ${red.intact ? 'stale but unchanged' : 'reused'} memory`);
     }
     handle.close();
+    schema.close();
   });
 });
