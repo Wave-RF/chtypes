@@ -1688,9 +1688,10 @@ CHS_API chs_status chs_preview_batch(
  * so the call fails with that error, verbatim. With no filter (NULL) every accepted row is output.
  * A body the call cannot stream is answered through the per-row path; there, a refusal a post-WHERE
  * step raises on no `t` row is declined (`post-where-fallback`) rather than given, and a refusal on
- * a `t` row stands. The counts are present whenever a filter is attached, so a caller whose rule is
- * all-or-nothing refuses on `rows_cut` greater than 0 itself. `filter` must have been compiled on
- * `schema`: a filter from another schema handle is `CHS_INVALID_ARGUMENT`.
+ * a `t` row stands where the per-row path gives the server's text exactly, and is otherwise
+ * declined the same way. The counts are present whenever a filter is attached, so a caller whose
+ * rule is all-or-nothing refuses on `rows_cut` greater than 0 itself. `filter` must have been
+ * compiled on `schema`: a filter from another schema handle is `CHS_INVALID_ARGUMENT`.
  *
  * Refusals are ClickHouse's own. A reader refusal and a whole-body refusal carry ClickHouse's code,
  * and its message verbatim in `err`, exactly as the server's error carries it, `(at row N)`
