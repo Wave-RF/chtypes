@@ -142,6 +142,7 @@ export {
   type RowsOptions,
   Schema,
 } from './schema.js';
+export type { AsyncOptions } from './cancel.js';
 export { Server } from './server.js';
 export { DeferDefaults, ParamEncoding, VerdictBasis } from './settings.js';
 export type { BytesIn, ColumnDefault, ServerProfile, SettingValue, Settings } from './settings.js';
