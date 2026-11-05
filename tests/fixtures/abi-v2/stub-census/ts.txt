@@ -241,6 +241,8 @@ dev-fingerprint.test.ts :: rule r6: a library with another fingerprint is refuse
 dev-fingerprint.test.ts :: rule r6: a library with another fingerprint is refused with the dev message through a real load of the stub that reports another fingerprint, verified and unverified
 dev-fingerprint.test.ts :: the compiled-in identity is ABI v2 and a full sha256 fingerprint, printed for the jobs that assert it
 goldens-runner-stub.test.ts :: the goldens runner against the ABI stub records a report the comparator passes, and refuses the same report with one planted wrong byte
+insert-projection.test.ts :: the insert projection gate over the shared fixture equal-counts-undecided-excludes-skipped-records: "equal"
+insert-projection.test.ts :: the insert projection gate over the shared fixture equal-counts-undecided-zero-when-only-a-skipped-record-is-d: "equal"
 insert-projection.test.ts :: the insert projection gate over the shared fixture equal-csv-filter-mixed: "equal"
 insert-projection.test.ts :: the insert projection gate over the shared fixture equal-csv-no-filter-all-accepted: "equal"
 insert-projection.test.ts :: the insert projection gate over the shared fixture equal-declined-output-is-the-call-decline: "equal"
@@ -257,12 +259,19 @@ insert-projection.test.ts :: the insert projection gate over the shared fixture 
 insert-projection.test.ts :: the insert projection gate over the shared fixture equal-native-filter-mixed: "equal"
 insert-projection.test.ts :: the insert projection gate over the shared fixture equal-native-no-filter: "equal"
 insert-projection.test.ts :: the insert projection gate over the shared fixture equal-not-accepted-batch-with-d-rows-counts-zero: "equal"
+insert-projection.test.ts :: the insert projection gate over the shared fixture equal-post-where-cut-check-violated-only-on-a-cut-row: "equal"
+insert-projection.test.ts :: the insert projection gate over the shared fixture equal-post-where-cut-nested-sizes-on-a-cut-row: "equal"
+insert-projection.test.ts :: the insert projection gate over the shared fixture equal-post-where-cut-partition-count-is-the-t-rows-on-a-partitioned-table: "equal"
+insert-projection.test.ts :: the insert projection gate over the shared fixture equal-post-where-refusal-check-on-a-cut-row-and-a-later-t-row: "equal"
+insert-projection.test.ts :: the insert projection gate over the shared fixture equal-post-where-refusal-failing-t-row-before-the-end: "equal"
+insert-projection.test.ts :: the insert projection gate over the shared fixture equal-post-where-refusal-nested-sizes-on-a-t-row: "equal"
 insert-projection.test.ts :: the insert projection gate over the shared fixture equal-refused-err-suffix: "equal"
 insert-projection.test.ts :: the insert projection gate over the shared fixture exception-generator-draw-bytes-differ: {"exception":"generator_draw"}
 insert-projection.test.ts :: the insert projection gate over the shared fixture output is absent unless accepted
 insert-projection.test.ts :: the insert projection gate over the shared fixture plants a red for every rule and a case for every exception
 insert-projection.test.ts :: the insert projection gate over the shared fixture reads the fixture it was written for, and refuses a zero-run
 insert-projection.test.ts :: the insert projection gate over the shared fixture red-count-cut-wrong-in-both: {"violates":"counts"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-count-undecided-counts-a-skipped-record: {"violates":"counts"}
 insert-projection.test.ts :: the insert projection gate over the shared fixture red-count-undecided-wrong: {"violates":"counts"}
 insert-projection.test.ts :: the insert projection gate over the shared fixture red-csv-output-drops-a-t-row: {"violates":"line_output"}
 insert-projection.test.ts :: the insert projection gate over the shared fixture red-declined-output-counts-carried-from-the-batch: {"violates":"export_decline_is_call_decline"}
@@ -286,6 +295,18 @@ insert-projection.test.ts :: the insert projection gate over the shared fixture 
 insert-projection.test.ts :: the insert projection gate over the shared fixture red-native-off-by-one-byte: {"violates":"native_output"}
 insert-projection.test.ts :: the insert projection gate over the shared fixture red-output-given-for-validate-only: {"violates":"output_presence"}
 insert-projection.test.ts :: the insert projection gate over the shared fixture red-output-missing-for-accepted: {"violates":"output_presence"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-post-where-cut-insert-stops-early: {"violates":"post_where_cut"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-post-where-cut-nested-sizes-insert-stops-early: {"violates":"post_where_cut"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-post-where-cut-output-carries-the-cut-row: {"violates":"post_where_cut"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-post-where-cut-partition-count-over-every-body-row: {"violates":"post_where_cut"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-post-where-cut-without-the-t-rows-batch: {"violates":"post_where_cut"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-post-where-refusal-code-differs-from-the-whole-batch-s: {"violates":"post_where_refusal"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-post-where-refusal-err-is-the-whole-batch-s: {"violates":"post_where_refusal"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-post-where-refusal-insert-accepted-though-a-t-row-refused: {"violates":"post_where_refusal"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-post-where-refusal-insert-reads-the-whole-body: {"violates":"post_where_refusal"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-post-where-refusal-insert-stops-early: {"violates":"post_where_refusal"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-post-where-refusal-nested-sizes-insert-reads-one-row-too-many: {"violates":"post_where_refusal"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-post-where-refusal-nested-sizes-insert-stops-at-the-cut-row: {"violates":"post_where_refusal"}
 insert-projection.test.ts :: the insert projection gate over the shared fixture red-shared-member-missing-export-columns: {"violates":"shared_members"}
 insert-projection.test.ts :: the insert projection gate over the shared fixture red-shared-member-rows-read: {"violates":"shared_members"}
 insert.test.ts :: Schema.insert over the stub library a filter reaches the ABI as a handle, settings, columns and memory_limit_bytes as documents
