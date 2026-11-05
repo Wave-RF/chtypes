@@ -1750,8 +1750,8 @@ CHS_API chs_status chs_preview_batch(
  *   `framing` and `partition_count` are the batch's [`insert.export_decline_is_call_decline`].
  *   Under any other batch outcome the batch's `export_declined` has no counterpart here: this call
  *   carries no `export_*` member.
- * - Three cases have no counterpart. A body with an `e` row, which the batch answers `accepted`
- *   with that row's `verdict_code` and `verdict_err`, is `rejected` here [`insert.e_row_rejects`]:
+ * - Four cases have no counterpart. A body with an `e` row, which the batch answers `accepted` with
+ *   that row's `verdict_code` and `verdict_err`, is `rejected` here [`insert.e_row_rejects`]:
  *   `code` and `err` are those of the first `e` row in body order (equal to the batch's
  *   `verdict_code` and `verdict_err` for that row, and to the server's own error exactly),
  *   `refused_at` is `row`, `rows_passed`, `rows_cut` and `rows_undecided` are 0, `rows_read` is the
@@ -1759,8 +1759,12 @@ CHS_API chs_status chs_preview_batch(
  *   declined. A body-step refusal raised only by rows the filter cuts is answered here as the
  *   insert of the passing rows [`insert.post_where_cut`]: the outcome, the counts and the output
  *   are those of the `t` rows' insert, while the batch, which models the whole body, still refuses.
- *   A value a generator DEFAULT draws is drawn per call, so two calls can draw differently; every
- *   other member is the same.
+ *   With a filter, a refusal a post-WHERE step raises on a `t` row is the server's
+ *   [`insert.post_where_refusal`]: `code` and `err` are those of the first failing `t` row,
+ *   numbered over the filtered rows, and `rows_read` is the reader's, while the batch's refusal of
+ *   the whole body, which may sit on an earlier cut row, has no counterpart here. A value a
+ *   generator DEFAULT draws is drawn per call, so two calls can draw differently; every other
+ *   member is the same.
  *
  * An output row whose verdict is not `t` is an over-accept, a security-severity defect, as a `t`
  * where the server would not return the row is.
