@@ -237,8 +237,9 @@ conformance.test.ts :: abi v2 conformance (ts) status input_document.chs_server_
 conformance.test.ts :: abi v2 conformance (ts) status input_document.chs_server_create.profile.not_an_object_refused
 conformance.test.ts :: abi v2 conformance (ts) status input_document.chs_server_create.profile.unknown_key_refused
 conformance.test.ts :: abi v2 conformance (ts) status one_create.second_statement_refused
-dev-fingerprint.test.ts :: rule r6: a library with another fingerprint is refused with the dev message the refusal alone, with no library: CHTYPES_ARTIFACT_INCOMPATIBLE carrying exactly the rule's message
-dev-fingerprint.test.ts :: rule r6: a library with another fingerprint is refused with the dev message through a real load of the stub that reports another fingerprint, verified and unverified
+dev-fingerprint.test.ts :: rule r6: a library with another fingerprint is refused each side selected explicitly: rule r6's exact message while unstable, the loader's own once locked
+dev-fingerprint.test.ts :: rule r6: a library with another fingerprint is refused this SDK as built is locked: the refusal alone is CHTYPES_ARTIFACT_INCOMPATIBLE with the loader's own message
+dev-fingerprint.test.ts :: rule r6: a library with another fingerprint is refused through a real load of the stub that reports another fingerprint, verified and unverified
 dev-fingerprint.test.ts :: the compiled-in identity is ABI v2 and a full sha256 fingerprint, printed for the jobs that assert it
 goldens-runner-stub.test.ts :: the goldens runner against the ABI stub records a report the comparator passes, and refuses the same report with one planted wrong byte
 insert-projection.test.ts :: the insert projection gate over the shared fixture equal-csv-filter-mixed: "equal"

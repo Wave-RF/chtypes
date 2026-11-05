@@ -61,7 +61,7 @@ github.com/wave-rf/chtypes/go/v2/chtypes TestDecodeSchemaDescriptionAndDiscovery
 github.com/wave-rf/chtypes/go/v2/chtypes TestDecodeSchemaDescriptionBatch2
 github.com/wave-rf/chtypes/go/v2/chtypes TestDecodeSchemaDescriptionFilterDeclinedSettings
 github.com/wave-rf/chtypes/go/v2/chtypes TestDecodeSchemaDescriptionServer
-github.com/wave-rf/chtypes/go/v2/chtypes TestDevFingerprintMessageIsRuleR6Exactly
+github.com/wave-rf/chtypes/go/v2/chtypes TestDevFingerprintRefusalAfterTheLock
 github.com/wave-rf/chtypes/go/v2/chtypes TestDevFingerprintRefusalThroughALoad
 github.com/wave-rf/chtypes/go/v2/chtypes TestEverySharedCodeHasASentinel
 github.com/wave-rf/chtypes/go/v2/chtypes TestFilterAndSchemaOptionsDocuments
@@ -210,7 +210,7 @@ github.com/wave-rf/chtypes/go/v2/cmd/chtypes TestHelpIsStdoutAnywhere
 github.com/wave-rf/chtypes/go/v2/cmd/chtypes TestListOfflineIsInstalledOnly
 github.com/wave-rf/chtypes/go/v2/cmd/chtypes TestOfflineMissIsArtifactMissing
 github.com/wave-rf/chtypes/go/v2/cmd/chtypes TestPruneAgainstTheFixtureTree
-github.com/wave-rf/chtypes/go/v2/cmd/chtypes TestRealBinarySpeaksTheDevChannel
+github.com/wave-rf/chtypes/go/v2/cmd/chtypes TestRealBinarySpeaksTheProductionChannel
 github.com/wave-rf/chtypes/go/v2/cmd/chtypes TestResolveAgainstTheFixtureTree
 github.com/wave-rf/chtypes/go/v2/cmd/chtypes TestResolveUsageErrorsExitTwo
 github.com/wave-rf/chtypes/go/v2/cmd/chtypes TestRevokedBuildExitsEleven
@@ -440,6 +440,7 @@ github.com/wave-rf/chtypes/go/v2/internal/abi2 TestConformance/server_profile.ev
 github.com/wave-rf/chtypes/go/v2/internal/abi2 TestConformance/server_profile.schema_on_server_accepted
 github.com/wave-rf/chtypes/go/v2/internal/abi2 TestConformance/session_timezone.filter_eval_body
 github.com/wave-rf/chtypes/go/v2/internal/abi2 TestConformance/session_timezone.preview_row
+github.com/wave-rf/chtypes/go/v2/internal/abi2 TestDevFingerprintMessageAtEachStability
 github.com/wave-rf/chtypes/go/v2/internal/ocifetch TestAFailedWriteIsCacheUnusable
 github.com/wave-rf/chtypes/go/v2/internal/ocifetch TestAStrictSystemDirFaultIsAnError
 github.com/wave-rf/chtypes/go/v2/internal/ocifetch TestAddIndexEntryMerges
@@ -518,7 +519,7 @@ github.com/wave-rf/chtypes/go/v2/internal/ocifetch TestPreseededHitStillVerifies
 github.com/wave-rf/chtypes/go/v2/internal/ocifetch TestProdV2ChannelCacheRoots
 github.com/wave-rf/chtypes/go/v2/internal/ocifetch TestProdV2ChannelHonorsOverridesAndPins
 github.com/wave-rf/chtypes/go/v2/internal/ocifetch TestProdV2ChannelValues
-github.com/wave-rf/chtypes/go/v2/internal/ocifetch TestProdV2IsNotTheDefault
+github.com/wave-rf/chtypes/go/v2/internal/ocifetch TestProdV2IsTheDefault
 github.com/wave-rf/chtypes/go/v2/internal/ocifetch TestPruneKeepsWhatAnotherProcessHolds
 github.com/wave-rf/chtypes/go/v2/internal/ocifetch TestReadLockRefusesSchema1And2
 github.com/wave-rf/chtypes/go/v2/internal/ocifetch TestReadLockRefusesWrongABI

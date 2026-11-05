@@ -193,7 +193,9 @@ tests.abi2.test_conformance::test_case[session_timezone.filter_eval_body]
 tests.abi2.test_conformance::test_case[session_timezone.preview_row]
 tests.abi2.test_dev_fingerprint::test_dev_fingerprint_beats_a_missing_symbol
 tests.abi2.test_dev_fingerprint::test_dev_fingerprint_message_is_rule_r6_exactly
+tests.abi2.test_dev_fingerprint::test_dev_fingerprint_refusal_after_the_lock
 tests.abi2.test_dev_fingerprint::test_dev_fingerprint_refusal_through_a_load
+tests.abi2.test_dev_fingerprint::test_dev_fingerprint_refusal_through_a_load_on_the_dev_side
 tests.abi2.test_goldens_runner_stub::test_the_runner_over_the_stub_passes_the_comparator_and_a_planted_byte_fails
 tests.abi2.test_loader::test_api_two_phase_construction_is_private
 tests.abi2.test_loader::test_case[loader.abi-version-1]
