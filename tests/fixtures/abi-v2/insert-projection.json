@@ -398,7 +398,7 @@
    "batch": {
     "outcome": "rejected",
     "code": 27,
-    "err": "Code: 27. DB::Exception: Cannot parse input: expected ',' before: ']'",
+    "err": "Cannot parse input: expected ',' before: ']'",
     "rows": [
      {
       "outcome": "accepted",
@@ -423,7 +423,7 @@
        "off": 20,
        "len": 6
       },
-      "err": "Code: 27. DB::Exception: Cannot parse input: expected ',' before: ']'"
+      "err": "Cannot parse input: expected ',' before: ']'"
      }
     ],
     "rows_read": 3,
@@ -444,7 +444,123 @@
    "insert": {
     "outcome": "rejected",
     "code": 27,
-    "err": "Code: 27. DB::Exception: Cannot parse input: expected ',' before: ']' (at row 3)",
+    "err": "Cannot parse input: expected ',' before: ']': (at row 3)\n",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row"
+   },
+   "insert_rows_b64": null,
+   "expect": "equal"
+  },
+  {
+   "id": "equal-err-suffix-while-reading-the-value-of-key",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "rejected",
+    "code": 27,
+    "err": "Cannot parse input: expected '\"' before: 'x}' (while reading the value of key pt)",
+    "rows": [
+     {
+      "outcome": "rejected",
+      "code": 27,
+      "input_span": {
+       "off": 0,
+       "len": 14
+      },
+      "err": "Cannot parse input: expected '\"' before: 'x}' (while reading the value of key pt)"
+     }
+    ],
+    "rows_read": 1,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row",
+    "refused_row": 0,
+    "export_declined": "batch outcome is 'rejected'",
+    "export_declined_reason": "export-batch-not-accepted"
+   },
+   "batch_export_b64": null,
+   "insert": {
+    "outcome": "rejected",
+    "code": 27,
+    "err": "Cannot parse input: expected '\"' before: 'x}' (while reading the value of key pt): (at row 1)\n",
+    "rows_read": 1,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row"
+   },
+   "insert_rows_b64": null,
+   "expect": "equal"
+  },
+  {
+   "id": "equal-err-suffix-under-an-error-budget",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "rejected",
+    "code": 27,
+    "err": "Cannot parse input: expected ',' before: ']' (Already have 2 errors out of 3 rows, which is 0.6666666666666666 of all rows)",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 10
+      }
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 10,
+       "len": 10
+      }
+     },
+     {
+      "outcome": "rejected",
+      "code": 27,
+      "input_span": {
+       "off": 20,
+       "len": 6
+      },
+      "err": "Cannot parse input: expected ',' before: ']' (Already have 2 errors out of 3 rows, which is 0.6666666666666666 of all rows)"
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row",
+    "refused_row": 2,
+    "export_declined": "batch outcome is 'rejected'",
+    "export_declined_reason": "export-batch-not-accepted"
+   },
+   "batch_export_b64": null,
+   "insert": {
+    "outcome": "rejected",
+    "code": 27,
+    "err": "Cannot parse input: expected ',' before: ']' (Already have 2 errors out of 3 rows, which is 0.6666666666666666 of all rows): (at row 3)\n",
     "rows_read": 3,
     "rows_skipped": 0,
     "unsupported_settings": [],
@@ -793,7 +909,7 @@
       },
       "verdict": "e",
       "verdict_code": 395,
-      "verdict_err": "Code: 395. DB::Exception: Value passed to 'throwIf' function is non-zero"
+      "verdict_err": "Value passed to 'throwIf' function is non-zero"
      },
      {
       "outcome": "accepted",
@@ -841,7 +957,7 @@
    "insert": {
     "outcome": "rejected",
     "code": 395,
-    "err": "Code: 395. DB::Exception: Value passed to 'throwIf' function is non-zero",
+    "err": "Value passed to 'throwIf' function is non-zero",
     "rows_read": 3,
     "rows_skipped": 0,
     "unsupported_settings": [],
@@ -885,7 +1001,7 @@
       },
       "verdict": "e",
       "verdict_code": 395,
-      "verdict_err": "Code: 395. DB::Exception: Value passed to 'throwIf' function is non-zero"
+      "verdict_err": "Value passed to 'throwIf' function is non-zero"
      },
      {
       "outcome": "accepted",
@@ -906,7 +1022,7 @@
       },
       "verdict": "e",
       "verdict_code": 396,
-      "verdict_err": "Code: 396. DB::Exception: Later e row"
+      "verdict_err": "Later e row"
      }
     ],
     "rows_read": 4,
@@ -945,7 +1061,7 @@
    "insert": {
     "outcome": "rejected",
     "code": 395,
-    "err": "Code: 395. DB::Exception: Value passed to 'throwIf' function is non-zero",
+    "err": "Value passed to 'throwIf' function is non-zero",
     "rows_read": 4,
     "rows_skipped": 0,
     "unsupported_settings": [],
@@ -1011,7 +1127,7 @@
    "insert": {
     "outcome": "unsupported",
     "code": -2,
-    "err": "",
+    "err": "a column's value is computed and not carried",
     "rows_read": 3,
     "rows_skipped": 0,
     "unsupported_settings": [],
@@ -1022,6 +1138,248 @@
     },
     "refused_at": "body_step",
     "reason": "export-computed-value-not-carried"
+   },
+   "insert_rows_b64": null,
+   "expect": "equal"
+  },
+  {
+   "id": "equal-declined-output-under-a-filter-counts-zero",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 13
+      },
+      "verdict": "f",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 13,
+       "len": 13
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 26,
+       "len": 15
+      },
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_reason": "filter-clock-read",
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 41,
+       "len": 13
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     }
+    ],
+    "rows_read": 4,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "rows_passed": 2,
+    "rows_cut": 2,
+    "export_declined": "a column's value is computed and not carried",
+    "export_declined_reason": "export-computed-value-not-carried"
+   },
+   "batch_export_b64": null,
+   "insert": {
+    "outcome": "unsupported",
+    "code": -2,
+    "err": "a column's value is computed and not carried",
+    "rows_read": 4,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "rows_undecided": 0,
+    "refused_at": "body_step",
+    "reason": "export-computed-value-not-carried"
+   },
+   "insert_rows_b64": null,
+   "expect": "equal"
+  },
+  {
+   "id": "equal-not-accepted-batch-with-d-rows-counts-zero",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "rejected",
+    "code": 27,
+    "err": "Cannot parse input: expected ',' before: ']'",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 10
+      },
+      "verdict": "d",
+      "verdict_code": 0,
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 10,
+       "len": 10
+      },
+      "verdict": "d",
+      "verdict_code": 0,
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "rejected",
+      "code": 27,
+      "input_span": {
+       "off": 20,
+       "len": 6
+      },
+      "err": "Cannot parse input: expected ',' before: ']'",
+      "verdict": "d",
+      "verdict_code": 0,
+      "verdict_err": "declined"
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row",
+    "refused_row": 2,
+    "export_declined": "batch outcome is 'rejected'",
+    "export_declined_reason": "export-batch-not-accepted",
+    "rows_passed": 0,
+    "rows_cut": 0
+   },
+   "batch_export_b64": null,
+   "insert": {
+    "outcome": "rejected",
+    "code": 27,
+    "err": "Cannot parse input: expected ',' before: ']': (at row 3)\n",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row",
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "rows_undecided": 0
+   },
+   "insert_rows_b64": null,
+   "expect": "equal"
+  },
+  {
+   "id": "equal-e-row-decides-where-the-export-was-declined",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 15
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 15,
+       "len": 15
+      },
+      "verdict": "e",
+      "verdict_code": 395,
+      "verdict_err": "Value passed to 'throwIf' function is non-zero"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 30,
+       "len": 17
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "rows_passed": 2,
+    "rows_cut": 0,
+    "export_declined": "a column's value is computed and not carried",
+    "export_declined_reason": "export-computed-value-not-carried"
+   },
+   "batch_export_b64": null,
+   "insert": {
+    "outcome": "rejected",
+    "code": 395,
+    "err": "Value passed to 'throwIf' function is non-zero",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row",
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "rows_undecided": 0
    },
    "insert_rows_b64": null,
    "expect": "equal"
@@ -1549,7 +1907,7 @@
    "batch": {
     "outcome": "rejected",
     "code": 27,
-    "err": "Code: 27. DB::Exception: Cannot parse input: expected ',' before: ']'",
+    "err": "Cannot parse input: expected ',' before: ']'",
     "rows": [
      {
       "outcome": "accepted",
@@ -1574,7 +1932,7 @@
        "off": 20,
        "len": 6
       },
-      "err": "Code: 27. DB::Exception: Cannot parse input: expected ',' before: ']'"
+      "err": "Cannot parse input: expected ',' before: ']'"
      }
     ],
     "rows_read": 3,
@@ -1595,7 +1953,7 @@
    "insert": {
     "outcome": "rejected",
     "code": 27,
-    "err": "Code: 27. DB::Exception: Cannot parse input: expected ';' before: ']' (at row 3)",
+    "err": "Cannot parse input: expected ';' before: ']': (at row 3)\n",
     "rows_read": 3,
     "rows_skipped": 0,
     "unsupported_settings": [],
@@ -1617,7 +1975,7 @@
    "batch": {
     "outcome": "rejected",
     "code": 27,
-    "err": "Code: 27. DB::Exception: Cannot parse input: expected ',' before: ']'",
+    "err": "Cannot parse input: expected ',' before: ']'",
     "rows": [
      {
       "outcome": "accepted",
@@ -1642,7 +2000,7 @@
        "off": 20,
        "len": 6
       },
-      "err": "Code: 27. DB::Exception: Cannot parse input: expected ',' before: ']'"
+      "err": "Cannot parse input: expected ',' before: ']'"
      }
     ],
     "rows_read": 3,
@@ -1663,7 +2021,7 @@
    "insert": {
     "outcome": "rejected",
     "code": 27,
-    "err": "Code: 27. DB::Exception: Cannot parse input: expected ',' before: ']' (library note: retry)",
+    "err": "Cannot parse input: expected ',' before: ']' (library note: retry)",
     "rows_read": 3,
     "rows_skipped": 0,
     "unsupported_settings": [],
@@ -2432,7 +2790,7 @@
       },
       "verdict": "e",
       "verdict_code": 395,
-      "verdict_err": "Code: 395. DB::Exception: Value passed to 'throwIf' function is non-zero"
+      "verdict_err": "Value passed to 'throwIf' function is non-zero"
      },
      {
       "outcome": "accepted",
@@ -2526,7 +2884,7 @@
       },
       "verdict": "e",
       "verdict_code": 395,
-      "verdict_err": "Code: 395. DB::Exception: Value passed to 'throwIf' function is non-zero"
+      "verdict_err": "Value passed to 'throwIf' function is non-zero"
      },
      {
       "outcome": "accepted",
@@ -2574,7 +2932,7 @@
    "insert": {
     "outcome": "rejected",
     "code": 395,
-    "err": "Code: 395. DB::Exception: Value passed to 'throwIf' function is non-zero!",
+    "err": "Value passed to 'throwIf' function is non-zero!",
     "rows_read": 3,
     "rows_skipped": 0,
     "unsupported_settings": [],
@@ -2620,7 +2978,7 @@
       },
       "verdict": "e",
       "verdict_code": 395,
-      "verdict_err": "Code: 395. DB::Exception: Value passed to 'throwIf' function is non-zero"
+      "verdict_err": "Value passed to 'throwIf' function is non-zero"
      },
      {
       "outcome": "accepted",
@@ -2641,7 +2999,7 @@
       },
       "verdict": "e",
       "verdict_code": 396,
-      "verdict_err": "Code: 396. DB::Exception: Later e row"
+      "verdict_err": "Later e row"
      }
     ],
     "rows_read": 4,
@@ -2680,7 +3038,7 @@
    "insert": {
     "outcome": "rejected",
     "code": 396,
-    "err": "Code: 396. DB::Exception: Later e row",
+    "err": "Later e row",
     "rows_read": 4,
     "rows_skipped": 0,
     "unsupported_settings": [],
@@ -2726,7 +3084,7 @@
       },
       "verdict": "e",
       "verdict_code": 395,
-      "verdict_err": "Code: 395. DB::Exception: Value passed to 'throwIf' function is non-zero"
+      "verdict_err": "Value passed to 'throwIf' function is non-zero"
      },
      {
       "outcome": "accepted",
@@ -2774,7 +3132,7 @@
    "insert": {
     "outcome": "rejected",
     "code": 395,
-    "err": "Code: 395. DB::Exception: Value passed to 'throwIf' function is non-zero",
+    "err": "Value passed to 'throwIf' function is non-zero",
     "rows_read": 3,
     "rows_skipped": 0,
     "unsupported_settings": [],
@@ -2820,7 +3178,7 @@
       },
       "verdict": "e",
       "verdict_code": 395,
-      "verdict_err": "Code: 395. DB::Exception: Value passed to 'throwIf' function is non-zero"
+      "verdict_err": "Value passed to 'throwIf' function is non-zero"
      },
      {
       "outcome": "accepted",
@@ -2868,7 +3226,7 @@
    "insert": {
     "outcome": "rejected",
     "code": 395,
-    "err": "Code: 395. DB::Exception: Value passed to 'throwIf' function is non-zero",
+    "err": "Value passed to 'throwIf' function is non-zero",
     "rows_read": 3,
     "rows_skipped": 0,
     "unsupported_settings": [],
@@ -2914,7 +3272,7 @@
       },
       "verdict": "e",
       "verdict_code": 395,
-      "verdict_err": "Code: 395. DB::Exception: Value passed to 'throwIf' function is non-zero"
+      "verdict_err": "Value passed to 'throwIf' function is non-zero"
      },
      {
       "outcome": "accepted",
@@ -2962,7 +3320,7 @@
    "insert": {
     "outcome": "rejected",
     "code": 395,
-    "err": "Code: 395. DB::Exception: Value passed to 'throwIf' function is non-zero",
+    "err": "Value passed to 'throwIf' function is non-zero",
     "rows_read": 3,
     "rows_skipped": 0,
     "unsupported_settings": [],
@@ -3008,7 +3366,7 @@
       },
       "verdict": "e",
       "verdict_code": 395,
-      "verdict_err": "Code: 395. DB::Exception: Value passed to 'throwIf' function is non-zero"
+      "verdict_err": "Value passed to 'throwIf' function is non-zero"
      },
      {
       "outcome": "accepted",
@@ -3056,7 +3414,7 @@
    "insert": {
     "outcome": "rejected",
     "code": 395,
-    "err": "Code: 395. DB::Exception: Value passed to 'throwIf' function is non-zero",
+    "err": "Value passed to 'throwIf' function is non-zero",
     "rows_read": 3,
     "rows_skipped": 0,
     "unsupported_settings": [],
@@ -3102,7 +3460,7 @@
       },
       "verdict": "e",
       "verdict_code": 395,
-      "verdict_err": "Code: 395. DB::Exception: Value passed to 'throwIf' function is non-zero"
+      "verdict_err": "Value passed to 'throwIf' function is non-zero"
      },
      {
       "outcome": "accepted",
@@ -3150,7 +3508,7 @@
    "insert": {
     "outcome": "rejected",
     "code": 395,
-    "err": "Code: 395. DB::Exception: Value passed to 'throwIf' function is non-zero",
+    "err": "Value passed to 'throwIf' function is non-zero",
     "rows_read": 2,
     "rows_skipped": 0,
     "unsupported_settings": [],
@@ -3293,6 +3651,95 @@
     },
     "refused_at": "body_step",
     "reason": "export-batch-not-accepted"
+   },
+   "insert_rows_b64": null,
+   "expect": {
+    "violates": "export_decline_is_call_decline"
+   }
+  },
+  {
+   "id": "red-declined-output-counts-carried-from-the-batch",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 13
+      },
+      "verdict": "f",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 13,
+       "len": 13
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 26,
+       "len": 15
+      },
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_reason": "filter-clock-read",
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 41,
+       "len": 13
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     }
+    ],
+    "rows_read": 4,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "rows_passed": 2,
+    "rows_cut": 2,
+    "export_declined": "a column's value is computed and not carried",
+    "export_declined_reason": "export-computed-value-not-carried"
+   },
+   "batch_export_b64": null,
+   "insert": {
+    "outcome": "unsupported",
+    "code": -2,
+    "err": "a column's value is computed and not carried",
+    "rows_read": 4,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "rows_passed": 2,
+    "rows_cut": 2,
+    "rows_undecided": 1,
+    "refused_at": "body_step",
+    "reason": "export-computed-value-not-carried"
    },
    "insert_rows_b64": null,
    "expect": {
