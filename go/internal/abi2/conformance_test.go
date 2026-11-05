@@ -339,6 +339,17 @@ func matchResult(expect map[string]interface{}, res *InvokeResult) []string {
 		problems = append(problems, fmt.Sprintf("unexpected error: %v", res.Error))
 	}
 
+	// null_outputs: every output of the call, handle or chs_buf, is NULL
+	// (finishResult and invoke record only the chs_buf outputs that are not).
+	if want, _ := c.Expect["null_outputs"].(bool); want {
+		if len(res.Outputs) != 0 {
+			problems = append(problems, fmt.Sprintf("null_outputs: the call produced %d chs_buf output(s)", len(res.Outputs)))
+		}
+		if !isNilHandle(res.Handle) {
+			problems = append(problems, "null_outputs: the call produced a handle")
+		}
+	}
+
 	if rawOutputs, ok := c.Expect["outputs"]; ok {
 		wantOutputs, ok := rawOutputs.(map[string]interface{})
 		if !ok {
@@ -405,6 +416,9 @@ func matchCallError(want map[string]interface{}, got *CallError) []string {
 	}
 	if wantCol, ok := want["column"].(string); ok && got.Column != wantCol {
 		problems = append(problems, fmt.Sprintf("column = %q, want %q", got.Column, wantCol))
+	}
+	if wantReason, ok := want["reason"].(string); ok && got.Reason != wantReason {
+		problems = append(problems, fmt.Sprintf("reason = %q, want %q", got.Reason, wantReason))
 	}
 	return problems
 }
