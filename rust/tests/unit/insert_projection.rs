@@ -13,7 +13,7 @@
 //! back for a refusal, read the raw document and the raw bytes. Both documents
 //! of every case go through this crate's real decoders (`decode::batch` and
 //! `decode::insert_result`), so a case proves the decoders as well as the
-//! rule. Each case carries its expected result; the fixture's 25 planted reds
+//! rule. Each case carries its expected result; the fixture's 26 planted reds
 //! and its exception keep the gate honest: a rule that cannot fire fails here.
 //!
 //! This is a unit test of the crate (src/lib.rs declares it with `#[path]`)
