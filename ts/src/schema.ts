@@ -23,9 +23,11 @@ import {
   type BatchResult,
   decodeBatch,
   decodeFilterResult,
+  decodeInsert,
   decodeRow,
   decodeSchemaDescription,
   type FilterResult,
+  type InsertResult,
   type RowResult,
   type SchemaDescription,
 } from './documents.js';
@@ -81,6 +83,8 @@ export interface RowOptions {
   readonly verdictBasis?: VerdictBasis | undefined;
   /** `insert_options.defer_defaults`. */
   readonly deferDefaults?: DeferDefaults | undefined;
+  /** `insert_options.memory_limit_bytes` (ABI v2): a per-call memory limit in bytes; `0` is no limit. Reaching it is the library's whole-call decline (`call-memory-budget`), with no partial output. */
+  readonly memoryLimitBytes?: bigint | number | string | undefined;
   /** Any other member of `insert_options`: key to its value as JSON text, passed through as given (rule r1; a key also named above keeps this value). Text that is not valid JSON is a `UsageError` before any call. */
   readonly insertOptionsExtra?: Readonly<Record<string, string>> | undefined;
 }
@@ -93,6 +97,12 @@ export interface RowsOptions extends RowOptions {
   readonly exportFormat?: Format | undefined;
   /** The document groups to carry; absent means 0, the lean result; pass `DocFlags.All` for every group. */
   readonly docFlags?: number | undefined;
+}
+
+/** Options of `Schema.insert`: the INSERT's settings, column list and `insert_options` members, and the WHERE it carries. */
+export interface InsertCallOptions extends RowOptions {
+  /** A compiled filter that is the INSERT's WHERE (`INSERT INTO t SELECT * FROM input(...) WHERE <filter>`): only the `t` rows are output. Absent (NULL to the library) outputs every accepted row. A closed filter is a `UsageError`, never a NULL. */
+  readonly rowFilter?: Filter | undefined;
 }
 
 /** Options of `Schema.compileFilter`. */
@@ -126,6 +136,8 @@ export interface EvalOptions {
   readonly verdictBasis?: VerdictBasis | undefined;
   /** `insert_options.defer_defaults`. */
   readonly deferDefaults?: DeferDefaults | undefined;
+  /** `insert_options.memory_limit_bytes` (ABI v2): a per-call memory limit in bytes; `0` is no limit. Reaching it is the library's whole-call decline (`call-memory-budget`), with no partial output. */
+  readonly memoryLimitBytes?: bigint | number | string | undefined;
   /** Any other member of `insert_options`: key to its value as JSON text, passed through as given (rule r1; a key also named above keeps this value). Text that is not valid JSON is a `UsageError` before any call. */
   readonly insertOptionsExtra?: Readonly<Record<string, string>> | undefined;
 }
@@ -246,6 +258,28 @@ export class Schema {
       encodeInsertOptions(options),
     );
     return decodeBatch(out.out, exporting ? out.outExport : undefined);
+  }
+
+  /**
+   * One synchronous INSERT of a whole body (`chs_preview_insert`), streamed block by block as a server streams it:
+   * the outcome, the counts and the output rows in `outFormat`, with no per-row documents. A refusal or a decline
+   * is the result, never an error; only misuse and internal errors raise. `outFormat` is `EXPORT_NONE` (validate
+   * only: `output` is `undefined`) or a `Format` the build can write. The output exists only if the whole call
+   * succeeded; an `e` verdict from the filter fails the call. Synchronous: there is no async variant and no cancellation.
+   */
+  insert(format: Format, body: Uint8Array, outFormat: Format | typeof EXPORT_NONE, options: InsertCallOptions = {}): InsertResult {
+    const filter = options.rowFilter === undefined ? null : (filterHandles.get(options.rowFilter) as FilterHandle);
+    const out = this.#calls.previewInsert(
+      this.#h,
+      format,
+      bodyIn(body),
+      encodeSettings(options.settings, options.sessionTimezone),
+      encodeColumns(options.columns),
+      filter,
+      outFormat as number,
+      encodeInsertOptions(options),
+    );
+    return decodeInsert(out.out, outFormat === EXPORT_NONE ? undefined : out.outRows);
   }
 
   /** Compile a filter. Its zone is fixed here. */

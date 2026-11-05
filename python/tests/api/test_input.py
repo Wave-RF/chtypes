@@ -157,6 +157,18 @@ def test_insert_options_are_the_members_set_and_nothing_else() -> None:
     }
 
 
+def test_memory_limit_bytes_is_a_decimal_string_and_never_validated() -> None:
+    assert insert_options_json(memory_limit_bytes=1048576) == b'{"memory_limit_bytes":"1048576"}'
+    assert insert_options_json(memory_limit_bytes=0) == b'{"memory_limit_bytes":"0"}'
+    # a str is written as given: the library judges it (rule r1)
+    assert insert_options_json(memory_limit_bytes="007") == b'{"memory_limit_bytes":"007"}'
+    assert insert_options_json(memory_limit_bytes=None) is None
+    with pytest.raises(TypeError):
+        insert_options_json(memory_limit_bytes=True)
+    with pytest.raises(TypeError):
+        insert_options_json(memory_limit_bytes=1.5)  # type: ignore[arg-type]
+
+
 def test_an_absent_list_is_left_out_and_a_present_empty_one_is_sent() -> None:
     assert json.loads(insert_options_json(insertable_columns=[]) or b"") == {
         "insertable_columns": []
