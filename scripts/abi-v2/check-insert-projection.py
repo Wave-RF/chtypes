@@ -250,7 +250,7 @@ def evaluate(case: dict):
         if not ie.startswith(be):
             return "violates", "err_prefix"
         rest = ie[len(be):]
-        if rest and not SUFFIX.match(rest):
+        if rest and not SUFFIX.fullmatch(rest):
             return "violates", "err_suffix"
 
     # output
