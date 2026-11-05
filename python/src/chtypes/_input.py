@@ -267,12 +267,16 @@ def _column_default_objects(defaults: Sequence[ColumnDefault]) -> list[dict[str,
 
 
 def _options_json(
-    what: str, members: dict[str, object], extra: Mapping[str, str] | None
+    what: str,
+    members: dict[str, object],
+    extra: Mapping[str, str] | None,
+    cancel: str | None = None,
 ) -> bytes | None:
     """The document from the members set (value already JSON-encodable) and the
     extra members (JSON text, spliced verbatim). A key set twice keeps the last
-    value, and an extra member is set after the named ones. Nothing set is None
-    (length 0, which the library reads as `{}`)."""
+    value, and an extra member is set after the named ones. `cancel`, the id of
+    the call's own token, is set last, so an extra `cancel` never replaces it.
+    Nothing set is None (length 0, which the library reads as `{}`)."""
     parts: dict[str, str] = {key: json.dumps(value) for key, value in members.items()}
     if extra is not None:
         if not isinstance(extra, Mapping):
@@ -289,6 +293,8 @@ def _options_json(
                     f"{what} options: the value for key {json.dumps(key)} is not valid JSON"
                 ) from None
             parts[key] = text
+    if cancel is not None:
+        parts["cancel"] = json.dumps(cancel)
     if not parts:
         return None
     body = ",".join(f"{json.dumps(key)}:{text}" for key, text in parts.items())
@@ -306,10 +312,12 @@ def insert_options_json(
     defer_defaults: DeferDefaults | str | None = None,
     memory_limit_bytes: int | str | None = None,
     insert_options_extra: Mapping[str, str] | None = None,
+    cancel: str | None = None,
 ) -> bytes | None:
     """`insert_options`, from the members set. None leaves a member out; an empty
     list is sent as `[]`. `memory_limit_bytes` is a decimal string on the wire; an
-    `int` is written as its decimal digits, a `str` verbatim, neither validated."""
+    `int` is written as its decimal digits, a `str` verbatim, neither validated.
+    `cancel` is the id of the call's own cancel token, set by the binding."""
     members: dict[str, object] = {}
     if insertable_columns is not None:
         if isinstance(insertable_columns, str | bytes):
@@ -323,7 +331,7 @@ def insert_options_json(
         members["defer_defaults"] = _enum_text(defer_defaults, "defer_defaults")
     if memory_limit_bytes is not None:
         members["memory_limit_bytes"] = _decimal_text(memory_limit_bytes, "memory_limit_bytes")
-    return _options_json("insert", members, insert_options_extra)
+    return _options_json("insert", members, insert_options_extra, cancel)
 
 
 def filter_options_json(
@@ -342,12 +350,13 @@ def schema_options_json(
     *,
     posture: Posture | str | None = None,
     schema_options_extra: Mapping[str, str] | None = None,
+    cancel: str | None = None,
 ) -> bytes | None:
-    """`schema_options`, from the members set."""
+    """`schema_options`, from the members set; `cancel` as for `insert_options_json`."""
     members: dict[str, object] = {}
     if posture is not None:
         members["posture"] = _enum_text(posture, "posture")
-    return _options_json("schema", members, schema_options_extra)
+    return _options_json("schema", members, schema_options_extra, cancel)
 
 
 @dataclass(frozen=True, slots=True)

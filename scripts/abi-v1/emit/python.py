@@ -283,6 +283,32 @@ def _wrapper_name(fn: Function) -> str:
     return fn.name[len("chs_") :]
 
 
+def _is_handle_operation(model: Model, fn: Function) -> bool:
+    """A non-status function whose one parameter is a handle that is not a
+    `chs_buf` or `chs_error` (the read-out's own plumbing), and which is not
+    that handle's free: the cancel token's fire and fired (ABI v2). The public
+    layer calls these, so they get a typed wrapper too."""
+    if fn.returns.kind not in ("void", "scalar") or len(fn.params) != 1:
+        return False
+    (p,) = fn.params
+    if p.kind != "handle" or p.type in ("chs_buf", "chs_error"):
+        return False
+    return model.handles[p.type].free != fn.name
+
+
+def _handle_operation_wrapper(model: Model, fn: Function) -> str:
+    (p,) = fn.params
+    ret = "None" if fn.returns.kind == "void" else "int"
+    arg = f"None if {p.name} is None else {p.name}.value" if p.nullable else f"{p.name}.value"
+    call = f'self._raw["{fn.name}"]({arg})'
+    lines = [
+        f"    def {_wrapper_name(fn)}(self, {p.name}: {_param_annotation(model, p)}) -> {ret}:",
+        f'        """The generated call wrapper for {fn.name} (thread class {fn.thread})."""',
+        f"        {call}" if ret == "None" else f"        return int({call})",
+    ]
+    return "\n".join(lines)
+
+
 def _typed_wrappers(model: Model) -> str:
     """One method on `Api` per described status-returning function: bytes in,
     bytes or a handle out, a raised error on a non-OK status (copy-then-free of
@@ -292,6 +318,9 @@ def _typed_wrappers(model: Model) -> str:
     the read-out's own plumbing."""
     out: list[str] = []
     for fn in model.functions:
+        if _is_handle_operation(model, fn):
+            out.append(_handle_operation_wrapper(model, fn))
+            continue
         if fn.returns.kind != "status":
             continue
         ins = [p for p in fn.params if not p.is_out]
