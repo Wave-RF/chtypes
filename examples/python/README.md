@@ -1,6 +1,6 @@
 # examples/python — the Python tour
 
-Eighteen sections over the whole public surface, matching `../go`, `../ts` and `../rust` section for section. See [`../README.md`](../README.md) for the section list. **Runs entirely offline** once an artifact is installed: no Docker, no ClickHouse server, no network.
+Twenty-one sections over the whole public surface, matching `../go`, `../ts` and `../rust` section for section. See [`../README.md`](../README.md) for the section list. **Runs entirely offline** once an artifact is installed: no Docker, no ClickHouse server, no network.
 
 ## Run it
 

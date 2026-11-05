@@ -44,6 +44,7 @@ __all__ = [
     "FilterRowError",
     "Framing",
     "Header",
+    "InsertResult",
     "RowResult",
     "SchemaDescription",
     "SchemaReplicated",
@@ -268,6 +269,44 @@ class BatchResult:
     framing: Framing | None
     unsupported_settings: tuple[bytes, ...] = ()
     at_merge: tuple[AtMergeEntry, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class InsertResult:
+    """The `insert_result` document of `Schema.insert` and the output rows.
+
+    Every member has the meaning of the `BatchResult` member of the same name (the
+    projection rule, spec/abi-v2/docs.md `chs_preview_insert`). A refusal or a
+    decline is this result, never an exception. `output` is the output rows in the
+    output format: None when no output was asked for, and None whenever the outcome
+    is not accepted. A declined output is the whole call's decline (`outcome`
+    `unsupported`, `reason` the decline id, `err_code` -2, `refused_at` `body_step`);
+    an empty `bytes` is an accepted output of no rows.
+
+    `rows_passed`, `rows_cut` and `rows_undecided` are present with a filter
+    attached and None without one: `rows_passed` the `t` rows (the output's rows),
+    `rows_cut` the `f` and `d` rows, and `rows_undecided` the `d` rows (counted
+    inside `rows_cut`). An `e` row fails the call: it is in no count, and the
+    outcome is `rejected` with that row's code and message. There is no per-row
+    document and no `refused_row`: a reader refusal's row is inside `err_msg`.
+    `export_columns` is the output's one column list (None unless the call is
+    accepted and an output was asked for)."""
+
+    outcome: Outcome
+    err_code: int
+    err_msg: bytes
+    reason: str | None
+    refused_at: RefusalSite | None
+    rows_read: int
+    rows_skipped: int
+    rows_passed: int | None
+    rows_cut: int | None
+    rows_undecided: int | None
+    partition_count: int | None
+    unsupported_settings: tuple[bytes, ...]
+    framing: Framing | None
+    export_columns: tuple[bytes, ...] | None
+    output: bytes | None
 
 
 @dataclass(frozen=True, slots=True)

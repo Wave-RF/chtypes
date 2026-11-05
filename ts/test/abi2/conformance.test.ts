@@ -18,12 +18,22 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import type { JsExternal } from 'ffi-rs';
+import { isNullPointer, type JsExternal } from 'ffi-rs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { HANDLE_INFO, SYMBOL } from '../../src/abi2/decls.gen.js';
 import { ArtifactCorruptError, ArtifactIncompatibleError } from '../../src/abi2/errors.js';
+import { ffiOpen } from '../../src/abi2/libc.js';
 import { LoadedImage, type LoadInput, openAbi2, type Predicate } from '../../src/abi2/loader.js';
-import { freeHandle, type HandleRef, NULL_EXTERNAL, type RawApi, type RawCallResult, rawCall } from '../../src/abi2/raw.js';
+import {
+  defineThreadedRawFunctions,
+  freeHandle,
+  type HandleRef,
+  NULL_EXTERNAL,
+  type RawApi,
+  type RawCallResult,
+  rawCall,
+  rawCallInNewThread,
+} from '../../src/abi2/raw.js';
 
 const STUBS_DIR = process.env.CHTYPES_ABI2_STUBS;
 const REPORT_PATH = process.env.CHTYPES_ABI2_REPORT;
@@ -39,14 +49,25 @@ type ArgExpr =
   | { readonly bytes_hex: string }
   | { readonly handle: { readonly fn: string; readonly args: readonly ArgExpr[] } }
   | { readonly null_handle: true }
-  | { readonly ref: string };
+  | { readonly ref: string }
+  | { readonly cancel_options: string };
+
+interface CallEntry {
+  readonly fn: string;
+  readonly args: readonly ArgExpr[];
+}
 
 interface StepEntry {
   readonly let?: string;
-  readonly call?: { readonly fn: string; readonly args: readonly ArgExpr[] };
+  readonly call?: CallEntry;
   readonly expect?: any;
   readonly free?: string;
   readonly live_delta?: Readonly<Record<string, number>>;
+  readonly cancel?: string;
+  readonly fire?: string;
+  readonly fired?: string;
+  readonly want?: number;
+  readonly blocked_call?: { readonly call: CallEntry; readonly fire: string; readonly expect: any };
 }
 
 interface CaseEntry {
@@ -122,10 +143,49 @@ function currentOs(): 'linux' | 'darwin' {
 interface ArgContext {
   readonly refs: Map<string, HandleRef>;
   readonly minted: HandleRef[];
+  /** The id of each cancel token a `cancel` step bound, by the same name. */
+  readonly ids: Map<string, Buffer>;
 }
 
 function newContext(): ArgContext {
-  return { refs: new Map(), minted: [] };
+  return { refs: new Map(), minted: [], ids: new Map() };
+}
+
+/** The options document a `cancel_options` argument names: `{"cancel":"<id>"}`. */
+function cancelOptions(ctx: ArgContext, name: string): Buffer {
+  const id = ctx.ids.get(name);
+  if (id === undefined) throw new Error(`conformance: cancel_options ${name}: no token is bound to that name`);
+  return Buffer.concat([Buffer.from('{"cancel":"'), id, Buffer.from('"}')]);
+}
+
+/** Each `{"cancel_echo": name}` in an expectation, replaced by the stub's echo of the `cancel_options` bytes for that name (the id is minted at run time). */
+function substituteCancelEcho(v: unknown, ctx: ArgContext): unknown {
+  if (Array.isArray(v)) return v.map((x) => substituteCancelEcho(x, ctx));
+  if (v !== null && typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    const keys = Object.keys(o);
+    if (keys.length === 1 && typeof o.cancel_echo === 'string') {
+      const b = cancelOptions(ctx, o.cancel_echo);
+      return { head_hex: b.subarray(0, 16).toString('hex'), len: b.length, sha256: createHash('sha256').update(b).digest('hex') };
+    }
+    return Object.fromEntries(keys.map((k) => [k, substituteCancelEcho(o[k], ctx)]));
+  }
+  return v;
+}
+
+/** The stub's cancel probe: how many calls sit blocked in its directive now. */
+function cancelInflight(raw: RawApi): number {
+  const call = rawCall(raw, SYMBOL.TYPE_VALIDATE, [Buffer.from('!C:')]);
+  if (call.outcome !== 'status' || call.statusName !== 'CHS_OK') throw new Error('conformance: the cancel probe did not answer CHS_OK');
+  const out = call.outs.out;
+  if (!Buffer.isBuffer(out)) throw new Error('conformance: the cancel probe produced no document');
+  return (JSON.parse(out.toString('utf8')) as { inflight: number }).inflight;
+}
+
+/** Free every handle (not chs_buf) a status call produced. */
+function freeHandleOuts(raw: RawApi, call: RawCallResult): void {
+  if (call.outcome !== 'status') return;
+  for (const out of Object.values(call.outs)) if (!Buffer.isBuffer(out)) freeRef(raw, out);
 }
 
 /** The first handle a successful status call produced. */
@@ -142,6 +202,7 @@ function resolveArg(raw: RawApi, expr: ArgExpr, ctx: ArgContext): unknown {
   if ('int' in expr) return expr.int;
   if ('bytes_hex' in expr) return Buffer.from(expr.bytes_hex, 'hex');
   if ('null_handle' in expr) return NULL_EXTERNAL;
+  if ('cancel_options' in expr) return cancelOptions(ctx, expr.cancel_options);
   if ('ref' in expr) {
     const bound = ctx.refs.get(expr.ref);
     if (bound === undefined) throw new Error(`conformance: ref ${expr.ref} is not bound`);
@@ -174,6 +235,26 @@ function checkEchoExpect(call: RawCallResult, expectation: any): void {
   expect(call.outcome).toBe('status');
   if (call.outcome !== 'status') return;
   expect(call.statusName).toBe(expectation.status);
+  const expectedError = expectation.error as
+    | { ch_code: number; ch_name: string; message: string; column: string; reason?: string }
+    | undefined;
+  if (expectedError !== undefined) {
+    expect(call.error).not.toBeNull();
+    if (call.error === null) return;
+    expect(call.error.chCode).toBe(expectedError.ch_code);
+    expect(call.error.chName).toBe(expectedError.ch_name);
+    expect(call.error.messageBytes.toString('utf8')).toBe(expectedError.message);
+    expect(call.error.column.toString('utf8')).toBe(expectedError.column);
+    if (expectedError.reason !== undefined) expect(call.error.reason).toBe(expectedError.reason);
+  }
+  if (expectation.null_outputs === true) {
+    // rawCall reads a NULL chs_buf as an empty Buffer (no echo the stub writes is empty) and
+    // keeps a NULL handle's pointer: every output must be one of the two.
+    for (const [name, out] of Object.entries(call.outs)) {
+      const isNull = Buffer.isBuffer(out) ? out.length === 0 : isNullPointer(out.ptr);
+      expect(isNull, `output ${name} is NULL`).toBe(true);
+    }
+  }
   const expectedOutputs = expectation.outputs as Record<string, { fn: string; out: string; args: unknown[] }> | undefined;
   if (expectedOutputs === undefined) return;
   for (const [name, expected] of Object.entries(expectedOutputs)) {
@@ -233,9 +314,52 @@ function record(id: string, run: () => string | undefined): void {
   }
 }
 
+async function recordAsync(id: string, run: () => Promise<string | undefined>): Promise<void> {
+  try {
+    const detail = await run();
+    results.push(typeof detail === 'string' ? { id, pass: true, detail } : { id, pass: true });
+  } catch (err) {
+    results.push({ id, pass: false, detail: err instanceof Error ? err.message : String(err) });
+    throw err;
+  }
+}
+
 describe.skipIf(!stubsAvailable)('abi v2 conformance (ts)', () => {
   let okRaw: RawApi;
+  let okThreaded: RawApi;
   let okPredicate: Predicate;
+
+  /**
+   * A `blocked_call` step: the call runs on a thread of ffi-rs's own
+   * (`rawCallInNewThread`; its first bytes_in begins the stub's block
+   * directive, so it waits), this thread waits until the stub's cancel probe
+   * reads one more call in flight than before, fires the token, then awaits
+   * the call and checks it. Sequenced on the probe: the 1 ms wait between
+   * reads only bounds how long a broken stub can hang the case.
+   */
+  async function runBlockedCall(spec: NonNullable<StepEntry['blocked_call']>, ctx: ArgContext): Promise<void> {
+    const token = ctx.refs.get(spec.fire);
+    if (token === undefined) throw new Error(`conformance: blocked_call fires unbound ${spec.fire}`);
+    const before = cancelInflight(okRaw);
+    const args = spec.call.args.map((a) => resolveArg(okRaw, a, ctx));
+    const pending = rawCallInNewThread(okRaw, okThreaded, spec.call.fn, args);
+    let entered = false;
+    for (let i = 0; i < 5000 && !entered; i++) {
+      if (cancelInflight(okRaw) > before) {
+        entered = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    rawCall(okRaw, SYMBOL.CANCEL_FIRE, [token.ptr]);
+    const call = await pending;
+    try {
+      expect(entered, 'the call reached the stub\'s block directive').toBe(true);
+      checkEchoExpect(call, substituteCancelEcho(spec.expect, ctx));
+    } finally {
+      freeHandleOuts(okRaw, call);
+    }
+  }
 
   beforeAll(() => {
     const doc = stubsDoc as StubsDoc;
@@ -245,6 +369,10 @@ describe.skipIf(!stubsAvailable)('abi v2 conformance (ts)', () => {
     const okPath = path.join(STUBS_DIR as string, 'ok.so');
     const input: LoadInput = { libraryPath: okPath, predicate: okPredicate, platform: platformOf(okPredicate) };
     okRaw = openAbi2(input).raw;
+    // A second ffi-rs key for the same path (dlopen dedupes it to the same
+    // image), whose table makes each call on a thread of its own.
+    ffiOpen('conformance-threaded', okPath);
+    okThreaded = defineThreadedRawFunctions('conformance-threaded');
   });
 
   afterAll(() => {
@@ -333,18 +461,39 @@ describe.skipIf(!stubsAvailable)('abi v2 conformance (ts)', () => {
         expect(call.error.chName).toBe(expectedError.ch_name);
         expect(call.error.messageBytes.toString('utf8')).toBe(expectedError.message);
         expect(call.error.column.toString('utf8')).toBe(expectedError.column);
+        if ('reason' in expectedError) expect(call.error.reason).toBe((expectedError as { reason: string }).reason);
       });
     });
   });
 
   describe('lifecycle', () => {
-    it.each(casesOfKind('lifecycle'))('$id', (c: CaseEntry) => {
-      record(c.id, () => {
+    it.each(casesOfKind('lifecycle'))('$id', async (c: CaseEntry) => {
+      await recordAsync(c.id, async () => {
         const baseline = liveHandles(okRaw);
         const ctx = newContext();
         try {
           for (const step of c.steps ?? []) {
-            if (step.free !== undefined) {
+            if (step.cancel !== undefined) {
+              const call = rawCall(okRaw, SYMBOL.CANCEL_CREATE, []);
+              if (call.outcome !== 'status' || call.statusName !== 'CHS_OK') throw new Error('conformance: chs_cancel_create failed');
+              const token = call.outs.out;
+              const id = call.outs.out_id;
+              if (token === undefined || Buffer.isBuffer(token) || !Buffer.isBuffer(id)) throw new Error('conformance: chs_cancel_create gave no token or id');
+              ctx.refs.set(step.cancel, token);
+              expect(/^c[0-9a-f]{16}$/.test(id.toString('latin1')), `the id ${id.toString('latin1')}`).toBe(true);
+              ctx.ids.set(step.cancel, id);
+            } else if (step.fire !== undefined) {
+              const h = ctx.refs.get(step.fire);
+              if (h === undefined) throw new Error(`conformance: fire of unbound ${step.fire}`);
+              rawCall(okRaw, SYMBOL.CANCEL_FIRE, [h.ptr]);
+            } else if (step.fired !== undefined) {
+              const h = ctx.refs.get(step.fired);
+              if (h === undefined) throw new Error(`conformance: fired of unbound ${step.fired}`);
+              const call = rawCall(okRaw, SYMBOL.CANCEL_FIRED, [h.ptr]);
+              expect(call.outcome === 'value' ? call.value : undefined, 'chs_cancel_fired').toBe(step.want);
+            } else if (step.blocked_call !== undefined) {
+              await runBlockedCall(step.blocked_call, ctx);
+            } else if (step.free !== undefined) {
               const h = ctx.refs.get(step.free);
               if (h === undefined) throw new Error(`conformance: free of unbound ${step.free}`);
               freeRef(okRaw, h);
@@ -360,7 +509,12 @@ describe.skipIf(!stubsAvailable)('abi v2 conformance (ts)', () => {
               if (step.let !== undefined) {
                 ctx.refs.set(step.let, firstHandleOut(step.call.fn, call));
               } else {
-                checkEchoExpect(call, step.expect);
+                try {
+                  checkEchoExpect(call, substituteCancelEcho(step.expect, ctx));
+                } finally {
+                  // A handle the call minted (no `let` binds it) is freed straight after.
+                  freeHandleOuts(okRaw, call);
+                }
               }
             } else {
               throw new Error(`conformance: ${c.id}: unrecognized step shape`);
@@ -370,8 +524,12 @@ describe.skipIf(!stubsAvailable)('abi v2 conformance (ts)', () => {
           // A failing case must not leak handles into the next one.
           for (const h of ctx.refs.values()) freeRef(okRaw, h);
         }
+        return undefined;
       });
-    });
+      // A blocked_call waits at most 5 s for the call to reach the stub's directive, and a
+      // stub that never wakes it would hold the call for its 10 s cap: past vitest's default
+      // 5 s timeout, which would drop the case from the report instead of failing it there.
+    }, 30_000);
   });
 
   describe('concurrent', () => {
