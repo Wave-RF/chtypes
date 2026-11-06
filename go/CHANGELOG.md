@@ -109,6 +109,10 @@ The four bindings in this repository are released together and give one answer, 
 - A 2.0.0-dev SDK whose fingerprint no published build carries yet now fails closed with a precise message (#578). When every base answers its own alias 404 and the tag names a build signed for another fingerprint, `fetch` is `CHTYPES_ARTIFACT_UNPUBLISHED` (exit status 4): `no published build for this SDK's fingerprint <own fp>; newest published on this channel is <fp> (build <id>)`. It used to install that build, or report it already installed, and the lookup at open then answered `CHTYPES_ARTIFACT_MISSING` with advice to run `fetch`: a loop with no pointer to the cause. Nothing is downloaded or installed and the cache is unchanged. An alias that answers, a tag at the SDK's own fingerprint and the v1 contract are unchanged. All four bindings run the same fetch conformance cases, `fp-ahead-*`, and the rule is `docs/guides/fetch-v1.md` section 3.
 - Opening a line no longer waits for another line's fetch: the registry never holds its lock across network I/O, and concurrent opens of one request share one fetch (#491). `ForContext` returns `ctx.Err()` when its context is done before the open has an answer; the fetch goes on for any other open of the same request, and is canceled once no open waits on it.
 
+### Security
+
+- `github.com/klauspost/compress` is bumped from v1.20.1 to v1.20.3, past GO-2026-6865 (a panic on two-block frames), which govulncheck reports as reachable through the decoder's pooled buffers. The binding's own code is unchanged.
+
 ## [1.1.0] — 2026-10-06
 
 ### Added

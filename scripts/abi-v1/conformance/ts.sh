@@ -30,7 +30,10 @@
 # (scripts/abi-v1/stub_census.py, public issue #463): vitest's own JSON result,
 # not its exit code, must show tests passed, and no test file in which nothing
 # passed (every file under ts/test/abi<N> gates on the stubs; measured: no other
-# ts test file reads the variable).
+# ts test file reads the variable). The tests that passed must be exactly the
+# ones tests/fixtures/abi-v<N>/stub-census/ts.txt pins, by file and full name
+# (public issue #727); ts/vitest.config.ts keeps each case id whole in its
+# test's name, so no two conformance cases share one.
 #
 #     scripts/abi-v1/conformance/ts.sh --selftest   prove the census on synthetic results
 set -euo pipefail
@@ -79,7 +82,7 @@ rc=0
 pnpm exec vitest run "$TESTS" --reporter=verbose --reporter=json --outputFile.json="$JSON" || rc=$?
 echo "ts.sh: stub census"
 census_rc=0
-python3 "$CENSUS" vitest "$JSON" "$rc" || census_rc=$?
+python3 "$CENSUS" vitest "$JSON" "$rc" --binding ts || census_rc=$?
 if [ "$census_rc" -ne 0 ]; then
     echo "ts.sh: the stub census refused this run (vitest rc=$rc)" >&2
     exit 1
