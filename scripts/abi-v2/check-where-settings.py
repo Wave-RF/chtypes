@@ -24,9 +24,10 @@ rows. It is copied byte for byte too, and checked by the rules marked (tsv).
 
 Rules (each has a planted case in --selftest, which asserts the rule's name and
 a non-zero exit status):
-  lines       lines.json missing, not JSON, with another schema, or with a
-              `lines` member that is empty, not a list, not `major.minor`
-              spellings, repeated, or not in numeric order
+  lines       lines.json missing, not JSON, with another schema, with a member
+              other than schema, source and lines, or with a `lines` member that
+              is empty, not a list, not `major.minor` spellings, repeated, or not
+              in numeric order
   source      lines.json's `source` is neither the fixture marker (the path of
               the dry-run fixture, before the channel's first publication) nor a
               publication tag `YYYYMMDDTHHMMSSZ` that is a real UTC time; or it
@@ -36,11 +37,15 @@ a non-zero exit status):
   lines-file  a line lines.json names that has no list
   json        a list or the union that is not a JSON object, repeats a member
               anywhere (Python's json keeps the last one silently), or holds
-              NaN, an infinity or a number too large for a double
+              NaN, an infinity or a number too large for a double (an integer
+              past a double's range included, and one past Python's own digit
+              limit)
   settings    a list or the union whose `settings` is empty, is not a list, or
               holds something other than an object with a name
   stray       any other file here: a list of a line lines.json does not name
-              fails, it is not ignored
+              fails, it is not ignored. The only files passed over are the
+              names IGNORED gives, each with its reason (a local .DS_Store); the
+              selftest holds each to .gitignore, so a stale entry fails
   schema      a schema id other than the two the files use
   sorted      names not sorted, or a duplicate name
   tier        a tier outside the six
@@ -56,7 +61,7 @@ a non-zero exit status):
               derived because the lines disagree on a name's tier or kind
   private     a string that points into the private half: a private CI
               path, the private repository's name, a private notes path or
-              "#<digit>" (JSON strings and the README)
+              "#<digit>" (JSON strings, lines.json's included, and the README)
   table       the README's sha256 list disagrees with the files: a file with
               no row, a row with another hash, two rows for one file, or a row
               for a file that is not here
@@ -103,6 +108,8 @@ DIR = ROOT / "spec" / "abi-v2" / "where-settings"
 LINES_FILE = "lines.json"
 LINES_SCHEMA = "chtypes.where-settings-lines/1"
 LINE_SPELLING = re.compile(r"[0-9]+\.[0-9]+")
+# The only members lines.json has; regen-where-settings.py writes exactly these.
+LINES_MEMBERS = ("schema", "source", "lines")
 # lines.json's `source`, a closed form: this marker until the channel's first
 # publication, then the tag of the publication `lines` was taken from.
 FIXTURE_SOURCE = "tests/fixtures/support-v2/channel-statement.json"
@@ -122,6 +129,11 @@ TIER_KIND = {
 }
 # Built from parts so this file does not itself spell a private name (lint-public).
 PRIVATE = re.compile("|".join(["ci" + "/steps", "chtypes" + "-core", "notes" + "/", "#[0-9]"]))
+# Files in the directory that are not data, and why. The selftest holds each entry to
+# .gitignore: an entry whose reason has gone stale fails there.
+IGNORED = {
+    ".DS_Store": "macOS Finder metadata; listed in .gitignore, so never committed",
+}
 ROW = re.compile(r"^- `([^`]+\.(?:json|tsv))`: `([0-9a-f]{64})`$")
 TSV = "documented-pathological.tsv"
 TSV_HEADER = ("setting", "value", "line", "layer", "server", "rule", "ruling")
@@ -131,7 +143,8 @@ SERVER = re.compile(r"^e:[0-9]+$")
 
 def strict_json(data: bytes):
     """JSON as these files must be: json.loads silently keeps the last of a repeated
-    member and reads NaN, Infinity and 1e400 as numbers. Each raises ValueError."""
+    member and reads NaN, Infinity, 1e400 and an integer past a double's range as
+    numbers. Each raises ValueError."""
 
     def pairs(items: list) -> dict:
         out: dict = {}
@@ -147,10 +160,22 @@ def strict_json(data: bytes):
     def number(text: str) -> float:
         value = float(text)
         if not math.isfinite(value):
-            raise ValueError(f"the number {text} does not fit a double")
+            raise ValueError("a number does not fit a double")
         return value
 
-    return json.loads(data, object_pairs_hook=pairs, parse_constant=constant, parse_float=number)
+    def integer(text: str) -> int:
+        # int() itself refuses more digits than Python's limit (ValueError); one
+        # that fits Python and not a double is refused here.
+        value = int(text)
+        try:
+            float(value)
+        except OverflowError:
+            raise ValueError("an integer does not fit a double") from None
+        return value
+
+    return json.loads(
+        data, object_pairs_hook=pairs, parse_constant=constant, parse_float=number, parse_int=integer
+    )
 
 
 def source_problem(source: object) -> str:
@@ -210,6 +235,9 @@ def lines_of(raw: dict[str, bytes]) -> tuple[list[str], list[str]]:
     out: list[str] = []
     if doc.get("schema") != LINES_SCHEMA:
         out.append(f"{LINES_FILE}: schema {doc.get('schema')!r}, want {LINES_SCHEMA!r} (lines)")
+    extra = sorted(set(doc) - set(LINES_MEMBERS))
+    if extra:
+        out.append(f"{LINES_FILE}: members other than {', '.join(LINES_MEMBERS)}: {extra} (lines)")
     problem = source_problem(doc.get("source"))
     if problem:
         out.append(f"{LINES_FILE}: {problem} (source)")
@@ -286,6 +314,13 @@ def derive_union(per_line: list[dict]) -> bytes:
 def check(raw: dict[str, bytes], readme: str) -> list[str]:
     """raw maps each file name to its bytes; returns the problems found."""
     lines, out = lines_of(raw)
+    if LINES_FILE in raw:
+        try:
+            for t in strings(strict_json(raw[LINES_FILE])):
+                if PRIVATE.search(t):
+                    out.append(f"{LINES_FILE}: string {t!r} points into the private half (private)")
+        except ValueError:
+            pass  # lines_of said so
     files = [f"{n}.json" for n in lines] + [UNION]
     data_files = data_names(raw, lines)
     for n in sorted(raw):
@@ -454,12 +489,13 @@ def union_problems(docs: dict, lines: list[str], union_bytes: bytes) -> list[str
 
 def load(directory: Path) -> tuple[dict[str, bytes], str]:
     """Every file of the directory but the README, whatever its name: reading only
-    the names lines.json gives would make a stray list invisible. A dot file
-    (a local .DS_Store) is not data. A subdirectory reads as an empty file, so it
-    is stray too."""
+    the names lines.json gives would make a stray list invisible. The only files
+    passed over are the ones IGNORED names, each with its reason; any other dot
+    file is stray like any other. A subdirectory reads as an empty file, so it is
+    stray too."""
     raw = {}
     for p in sorted(directory.iterdir()):
-        if p.name != "README.md" and not p.name.startswith("."):
+        if p.name != "README.md" and p.name not in IGNORED:
             raw[p.name] = p.read_bytes() if p.is_file() else b""
     rd = directory / "README.md"
     return raw, rd.read_text(encoding="utf-8") if rd.exists() else ""
@@ -489,6 +525,11 @@ def selftest() -> int:
 
     def dump(d) -> bytes:
         return (json.dumps(d, indent=1) + "\n").encode()
+
+    def re_rowed(rd: str, data: bytes) -> str:
+        """The README with lines.json's row recomputed for `data`."""
+        return re.sub(r"(?m)^- `" + re.escape(LINES_FILE) + r"`: `[0-9a-f]{64}`$",
+                      f"- `{LINES_FILE}`: `{hashlib.sha256(data).hexdigest()}`", rd)
 
     def judged(name: str, r: dict[str, bytes], rd: str, rule: str):
         """A planted case counts only if the rule fired AND the status is non-zero."""
@@ -604,10 +645,24 @@ def selftest() -> int:
         ("a tag with a trailing newline", "20261106T120000Z\n"),
     ):
         lines_variant(f"source {name}", dump({**doc, "source": source}), "source")
-    lines_variant("the fixture marker with a line dropped", dump({**doc, "lines": lines[1:]}), "source")
+    # Each plant above and below sets its own `source`, so none depends on which of
+    # its two forms the committed lines.json is in.
+    lines_variant("the fixture marker with a line dropped", dump({**doc, "source": FIXTURE_SOURCE, "lines": lines[1:]}), "source")
     # The control: a tag is as good as the marker, and the rule is not always firing.
     if [p for p in lines_of({LINES_FILE: dump(tag_doc)})[1] if "(source)" in p]:
         fails.append("positive control: a publication tag as the source does not pass (source)")
+    # The tree is clean in BOTH states of lines.json, whichever it is committed in.
+    for state, source in (("a publication tag", "20261106T120000Z"), ("the fixture marker", FIXTURE_SOURCE)):
+        if source == FIXTURE_SOURCE and lines != fixture_supported():
+            continue  # the marker's lines are the fixture's, and these are not
+        got = check({**raw, LINES_FILE: dump({**doc, "source": source})}, re_rowed(readme, dump({**doc, "source": source})))
+        if got:
+            fails.append(f"positive control: the tree with source {state} is not clean: {got[:3]}")
+    # lines.json has three members; another one, and a private string in it, are refused.
+    lines_variant("lines.json another member", dump({**doc, "note": "x"}))
+    lines_variant("lines.json a private string in another member", dump({**doc, "note": "see notes" + "/plan.md"}), "private")
+    lines_variant("lines.json an integer too large for a double", dump(doc).replace(b"{", b'{"big": 1' + b"0" * 400 + b",", 1))
+    lines_variant("lines.json an integer of 5001 digits", dump(doc).replace(b"{", b'{"big": 1' + b"0" * 5000 + b",", 1))
 
     # The same rules through load(), on a real directory: a rule load() cannot
     # feed is dead however well check() passes above.
@@ -635,6 +690,25 @@ def selftest() -> int:
         on_disk("a list with no line", lambda d: (d / "25.1.json").write_bytes(raw[other_file]), "stray")
         on_disk("a stray file of another kind", lambda d: (d / "extra.txt").write_bytes(b"x\n"), "stray")
         on_disk("a stray directory", lambda d: (d / "extra").mkdir(), "stray")
+        on_disk("a dot file IGNORED does not name", lambda d: (d / ".26.7.json").write_bytes(b"{}\n"), "stray")
+        on_disk("a dot file that only starts like an ignored one", lambda d: (d / ".DS_Store2").write_bytes(b"x\n"), "stray")
+        # Each named entry is passed over, has a reason, and is still in .gitignore:
+        # an entry whose reason has gone stale fails here.
+        gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines() if (ROOT / ".gitignore").exists() else None
+        for ignored, why in IGNORED.items():
+            planted += 1
+            d = Path(tmp) / f"ignored-{planted}"
+            d.mkdir()
+            for n, b in raw.items():
+                (d / n).write_bytes(b)
+            (d / "README.md").write_text(readme)
+            (d / ignored).write_bytes(b"x\n")
+            if verdict(*load(d))[0] != 0:
+                fails.append(f"IGNORED {ignored!r}: a copy holding it is not clean")
+            if not ignored.startswith(".") or not why.strip():
+                fails.append(f"IGNORED {ignored!r}: not a dot file, or no reason")
+            if gitignore is not None and ignored not in gitignore:
+                fails.append(f"IGNORED {ignored!r}: no longer in .gitignore, so its reason is stale")
         on_disk("lines.json empty on disk", lambda d: (d / LINES_FILE).write_bytes(dump({**doc, "lines": []})), "lines")
         on_disk("lines.json deleted on disk", lambda d: (d / LINES_FILE).unlink(), "lines")
         on_disk("the union deleted on disk", lambda d: (d / UNION).unlink(), "union")
@@ -657,6 +731,8 @@ def selftest() -> int:
         planted_bytes("a repeated member in the union", raw[UNION].replace(b'"settings":', b'"settings": [],\n "settings":', 1), "json", UNION)
         planted_bytes("NaN in a list", raw[line_file].replace(b'{', b'{"nan": NaN,', 1), "json")
         planted_bytes("a number too large for a double", raw[line_file].replace(b'{', b'{"big": 1e400,', 1), "json")
+        planted_bytes("an integer too large for a double", raw[line_file].replace(b'{', b'{"big": 1' + b"0" * 400 + b",", 1), "json")
+        planted_bytes("an integer of 5001 digits", raw[line_file].replace(b'{', b'{"big": 1' + b"0" * 5000 + b",", 1), "json")
         planted_bytes("a list that is an array", b"[]\n", "json")
         planted_bytes("a list that is not JSON", b"nope\n", "json")
 
@@ -795,7 +871,9 @@ def cli_selftest(raw: dict[str, bytes], readme: str, fails: list[str]) -> int:
 
         wrong = tree("source")
         path = wrong / DIR.relative_to(ROOT) / LINES_FILE
-        path.write_bytes(path.read_bytes().replace(FIXTURE_SOURCE.encode(), b"reworded"))
+        # It names its own source: replacing the marker in the file would change
+        # nothing once lines.json names a publication.
+        path.write_bytes((json.dumps({**json.loads(raw[LINES_FILE]), "source": "reworded"}, indent=1) + "\n").encode())
         if path.read_bytes() == raw[LINES_FILE]:
             fails.append("command line --check: the source plant changed nothing")
         cli("--check with a source outside the closed form", wrong, ["--check"], 1, "(source)")
