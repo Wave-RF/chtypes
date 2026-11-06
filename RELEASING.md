@@ -100,6 +100,14 @@ The Go twin reads the version list rather than the version, so a dry run never a
 
 **The lock.** When #511's conditions hold, nothing in these workflows changes: a `2.N.N` tag already selects the stable mode below, and the maintainer's repository variable is what lets it publish. SDK `2.0.0` then ships from production, signed with the release key.
 
+The pull request that locks goes in this order, and its red checks before step 1 are expected, because they ask for what only step 1 publishes:
+
+1. The production channel's first publication, its libraries and its channel document, signed with the release key by the maintainer.
+2. On that pull request's branch, `lines.json` names the publication (the steps under "After the first publication" below), and its live `gen.py --check` re-runs and passes.
+3. It merges on the maintainer's word.
+
+Before step 1 its live `gen.py --check` exits 4, because the channel's listing names no line. `gen.py --write` and `--check-page` read no registry, so neither waits for step 1.
+
 ## Stable releases (2.N.N)
 
 The stable mode releases SDK `2.0.0` and every later `2.N.N` (public issue #597). It is ready before the lock, so the maintainer's approval can publish in minutes, and until he sets one repository variable it can only dry-run.
@@ -165,10 +173,10 @@ Commit `lines.json` and the README's changed row, not `document.json`. The last 
 ```sh
 uv run scripts/support-v2/gen.py --print-document > document.json
 python3 scripts/abi-v2/regen-where-settings.py --lines-document document.json --lines-source <tag> --from <dir>
-uv run scripts/support-v2/gen.py --write
+uv run scripts/support-v2/gen.py --check
 ```
 
-`regen-where-settings.py` copies each list byte for byte, deletes a list `lines.json` does not name, drops the TSV rows on such a line, derives `union.json` and rewrites the README's sha256 list; it never takes a list by hand, and it judges the whole tree before it writes a byte. The exit statuses of `gen.py` are in its header: 0 is fine (or NOT JUDGED, named), 1 is a committed file that differs, 3 is a line that failed (named on stderr: read them before committing), 4 is a channel whose lines could not be read, and 5 is a channel document that was refused. No older document is ever read in place of a refused one.
+`regen-where-settings.py` copies each list byte for byte, deletes a list `lines.json` does not name, drops the TSV rows on such a line, derives `union.json` and rewrites the README's sha256 list; it never takes a list by hand, and it judges the whole tree before it writes a byte. The exit statuses of `gen.py` are in its header: 0 is fine (or NOT JUDGED, named), 1 is a committed file that differs, 3 is a line that failed (named on stderr: read them before committing), 4 is a channel whose lines could not be read or that lists none, and 5 is a channel document that was refused. No older document is ever read in place of a refused one.
 
 **What these checks don't cover.** They guard a descriptive page and a generated list, and these limits are accepted on that basis. If the page or `lines.json` ever feeds a binding or an enforcement step, a real evaluator of the workflow's steps comes first.
 

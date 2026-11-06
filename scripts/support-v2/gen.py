@@ -6,8 +6,8 @@
 r"""gen.py: generate docs/support-v2.md, and judge the channel's published lines
 against its signed per-line document (public issue #438).
 
-    uv run scripts/support-v2/gen.py                  print the page to stdout
-    uv run scripts/support-v2/gen.py --write          write docs/support-v2.md
+    uv run scripts/support-v2/gen.py                  print the page to stdout, with no registry read
+    uv run scripts/support-v2/gen.py --write          write docs/support-v2.md, with no registry read
     uv run scripts/support-v2/gen.py --check-page     the committed page must agree, with no registry read
     uv run scripts/support-v2/gen.py --check          the committed page and lines.json must agree with the channel
     uv run scripts/support-v2/gen.py --print-document print the verified channel document to stdout
@@ -123,7 +123,10 @@ supported lines; while none exists, with the dry-run fixture's, whatever else
 lines.json says. --check-page needs no registry: the page, lines.json's source, and
 in the fixture state its lines. .github/workflows/ci.yml runs --check-page on every
 pull request; a publish cannot redden an unrelated one, because --check runs only
-on one that touches these paths.
+on one that touches these paths. --write and no mode need no registry either: the page
+depends on nothing a registry says, so a channel with no publication, which is
+production before its first, gives the same bytes. Only --check and --print-document
+read the channel.
 
 KNOWN LIMITS. A registry that silently caps a listing under the page asked for, with
 no `Link` and short of a full page, hides the newest tag from rule 1, and nothing
@@ -140,15 +143,16 @@ does not evaluate the workflow, and `.github/**` being a protected path is what
 guards the steps.
 
 EXIT STATUSES
-    0  the page is current or written: every line fine, or NOT JUDGED (named)
+    0  the page was written or printed, which reads no registry; or it is current:
+       every line fine, or NOT JUDGED (named)
     1  --check or --check-page: the committed page or lines.json differs (named)
     2  usage error, or --print-document with nothing published
-    3  the page was produced, but a line failed by the table above (named);
-       --check does not compare, and fails
-    4  nothing was written: the channel's tag listing was unreadable, named no line,
-       or no platform of any line verified
-    5  nothing was written: the channel document was refused, rules 1 to 6 or the
-       latch (named)
+    3  --check or --print-document: a line failed by the table above (named); --check
+       does not compare, and fails
+    4  --check or --print-document, nothing judged: the channel's tag listing was
+       unreadable, named no line, or no platform of any line verified
+    5  --check or --print-document, nothing judged: the channel document was refused,
+       rules 1 to 6 or the latch (named)
    70  a crash in this script, which is never a verdict
 """
 
@@ -239,8 +243,8 @@ VERDICTS = {
     EXIT_DIFF: "a committed file differs",
     EXIT_USAGE: "nothing to print",
     EXIT_PARTIAL: "a line failed",
-    EXIT_NOTHING: "nothing written, the channel's lines were not readable",
-    EXIT_CHANNEL: "nothing written, the channel document was refused",
+    EXIT_NOTHING: "nothing judged, the channel's lines were not readable",
+    EXIT_CHANNEL: "nothing judged, the channel document was refused",
     EXIT_CRASH: "crashed, this is not a verdict",
 }
 
@@ -1070,10 +1074,10 @@ def generate(options: Options, ctx: Context, say, source: LinesSource) -> Outcom
         say(f"support-v2: channel statement {document.tag} verified")
     data = collect(options, ctx)
     if data.fatal:
-        say(f"support-v2: nothing written: {data.fatal}")
+        say(f"support-v2: nothing judged: {data.fatal}")
         return Outcome(EXIT_NOTHING, document=document)
     if data.verified_rows == 0:
-        say("support-v2: nothing written: no platform of any line verified")
+        say("support-v2: nothing judged: no platform of any line verified")
         return Outcome(EXIT_NOTHING, document=document)
     return Outcome(judge(data, document, say), render(ctx), document)
 
@@ -1160,6 +1164,7 @@ def _lines_problem(lines_json: Path, document: ChannelDocument) -> str:
 
 
 def _finish(mode: str, out: Path, lines_json: Path, outcome: Outcome, say) -> int:
+    """Act on a judgment: `mode` is "document" or "check"."""
     status, page, document = outcome.status, outcome.page, outcome.document
     if status in (EXIT_NOTHING, EXIT_CHANNEL):
         return status
@@ -1171,29 +1176,35 @@ def _finish(mode: str, out: Path, lines_json: Path, outcome: Outcome, say) -> in
         sys.stdout.write(json.dumps(document.predicate, indent=1) + "\n")
         sys.stdout.flush()
         return status
-    if mode == "check":
-        if status != EXIT_OK:
-            say("support-v2: not comparing: a line failed")
-            return status
-        differs = False
-        problem = _page_problem(out, page)
-        if problem:
-            say(f"support-v2: {problem}")
-            differs = True
-        if document is not None:
-            problem = _lines_problem(lines_json, document)
-        else:
-            problem = _fixture_problem(lines_json)
-        if problem:
-            say(f"support-v2: {problem}")
-            differs = True
-        return EXIT_DIFF if differs else EXIT_OK
-    if mode == "write":
-        out.write_bytes(page.encode("utf-8"))
+    if status != EXIT_OK:
+        say("support-v2: not comparing: a line failed")
+        return status
+    differs = False
+    problem = _page_problem(out, page)
+    if problem:
+        say(f"support-v2: {problem}")
+        differs = True
+    if document is not None:
+        problem = _lines_problem(lines_json, document)
     else:
+        problem = _fixture_problem(lines_json)
+    if problem:
+        say(f"support-v2: {problem}")
+        differs = True
+    return EXIT_DIFF if differs else EXIT_OK
+
+
+def produce_page(out: Path | None, say, selection: str = "") -> int:
+    """--write (a path) and no mode (None): the page from this tree. Neither reads a
+    registry, so nothing a channel says can stop them or change a byte."""
+    page = render(channel_context())
+    if out is None:
         sys.stdout.write(page)
         sys.stdout.flush()
-    return status
+    else:
+        out.write_bytes(page.encode("utf-8"))
+    say(verdict_line(EXIT_OK, True, selection, "ok, the page from this tree, no registry read"))
+    return EXIT_OK
 
 
 def check_page(out: Path, lines_json: Path, say, selection: str = "") -> int:
@@ -2398,9 +2409,9 @@ def _selftest() -> int:
             and r.rc == EXIT_CHANNEL
             and f"refused [{rule}]:" in r.said
             and r.said.count("channel statement refused [") == 1
-            and "verdict: nothing written, the channel document was refused (exit 5)" in r.said
+            and "verdict: nothing judged, the channel document was refused (exit 5)" in r.said
             and r.page == "",
-            f"{name}: exit 5 with [{rule}], nothing written"
+            f"{name}: exit 5 with [{rule}], nothing judged"
             + ("" if f"refused [{rule}]:" in r.said else f" (said: {r.said[:200]})"),
         )
 
@@ -2544,7 +2555,7 @@ def _selftest() -> int:
     check(r.status == EXIT_OK and "linux-amd64: omitted" not in r.said,
           "the control: allow_unsigned=True admits it, so the rows bite")  # fmt: skip
     r = results["allbad"]
-    check(r.status == EXIT_NOTHING and r.page == "", "every statement bad: nothing written (4)")
+    check(r.status == EXIT_NOTHING and r.page == "", "every statement bad: nothing judged (4)")
     check("no platform of any line verified" in r.said, "every statement bad: named")
     for name in ("planted-rendered", "planted-hidden"):
         r = results[name]
@@ -2620,9 +2631,9 @@ def _selftest() -> int:
         ("lines-listing-integer-5001-digits", "listing-shape"),
     ):
         r = results[name]
-        check(r.status == EXIT_NOTHING and f"nothing written: [{rule}]" in r.said, f"{name}: nothing written (4), [{rule}]")
+        check(r.status == EXIT_NOTHING and f"nothing judged: [{rule}]" in r.said, f"{name}: nothing judged (4), [{rule}]")
 
-    # The file-level contract: --check, --write and --print-document on each outcome.
+    # The file-level contract: --check and --print-document on each outcome.
     good = results["published"]
     published = Outcome(EXIT_OK, good.page, good.document)
     unpublished = Outcome(EXIT_OK, good.page, None)
@@ -2707,14 +2718,7 @@ def _selftest() -> int:
           "--check: a failed line fails (3), not compared")  # fmt: skip
     check(concluded("check", out_page, agreed, Outcome(EXIT_NOTHING))[0] == EXIT_NOTHING, "--check: nothing readable fails (4)")
     check(concluded("check", out_page, agreed, Outcome(EXIT_CHANNEL))[0] == EXIT_CHANNEL, "--check: a refused document fails (5)")
-    written = tmp / "written.md"
-    check(concluded("write", written, agreed, Outcome(EXIT_CHANNEL))[0] == EXIT_CHANNEL and not written.exists(),
-          "--write: a refused document writes nothing (5)")  # fmt: skip
-    check(concluded("write", written, agreed, Outcome(EXIT_NOTHING))[0] == EXIT_NOTHING and not written.exists(),
-          "--write: nothing readable writes nothing (4)")  # fmt: skip
-    check(concluded("write", written, agreed, published)[0] == EXIT_OK and written.read_text(encoding="utf-8") == page,
-          "--write: writes the page (0)")  # fmt: skip
-    check(concluded("document", written, agreed, unpublished)[0] == EXIT_USAGE,
+    check(concluded("document", tmp / "no-page.md", agreed, unpublished)[0] == EXIT_USAGE,
           "--print-document with nothing published: nothing to print (2)")  # fmt: skip
 
     # If the fetch layer stops going through the opener this script watches, the `Link`
@@ -2804,10 +2808,10 @@ def _cli_selftest(check, tmp: Path, port: int, lines_doc, supported, fixture, pa
     env_base = {k: v for k, v in os.environ.items() if k != "GITHUB_ACTIONS" and not k.startswith("CHTYPES_")}
     runs = 0
 
-    def setup(case: str, keys_hex: str = pub, crash: bool = False) -> str:
+    def setup(case: str, keys_hex: str = pub, crash: bool = False, base: str = "") -> str:
         return json.dumps(
             {
-                "base": f"http://127.0.0.1:{port}/s-{case}/chtypes/v1",
+                "base": base or f"http://127.0.0.1:{port}/s-{case}/chtypes/v1",
                 "keys": [{"keyid": keyid if keys_hex == pub else hashlib.sha256(bytes.fromhex(keys_hex)).hexdigest()[:16], "ed25519_hex": keys_hex}],
                 "crash": crash,
                 "src": str(ROOT / "python" / "src"),
@@ -2822,6 +2826,7 @@ def _cli_selftest(check, tmp: Path, port: int, lines_doc, supported, fixture, pa
         case: str = "",
         keys_hex: str = pub,
         crash: bool = False,
+        base: str = "",
         said: tuple[str, ...] = (),
         unsaid: tuple[str, ...] = (),
         env: dict[str, str] | None = None,
@@ -2834,7 +2839,7 @@ def _cli_selftest(check, tmp: Path, port: int, lines_doc, supported, fixture, pa
         nonlocal runs
         runs += 1
         command = (
-            [sys.executable, "-c", CLI_DRIVER, script, setup(case, keys_hex, crash), *args]
+            [sys.executable, "-c", CLI_DRIVER, script, setup(case, keys_hex, crash, base), *args]
             if case
             else [sys.executable, script, *args]
         )
@@ -2864,10 +2869,22 @@ def _cli_selftest(check, tmp: Path, port: int, lines_doc, supported, fixture, pa
     dropped_reworded = write("dropped-reworded.json", lines_doc("a note", supported[:-1]))
     no_form = write("no-form.json", lines_doc("a note", supported))
 
-    def page_of(case: str) -> str:
+    def page_of(case: str, base: str = "") -> str:
         """The page the child's channel generates, a file it must agree with, and stale."""
-        channel = replace(_channel.FETCH_V1_CHANNEL, name="selftest", bases=(f"http://127.0.0.1:{port}/s-{case}/chtypes/v1",))
+        channel = replace(_channel.FETCH_V1_CHANNEL, name="selftest", bases=(base or f"http://127.0.0.1:{port}/s-{case}/chtypes/v1",))
         return render(channel_context(channel))
+
+    def from_this_tree(what: str, case: str, *, base: str = "", crash: bool = False) -> None:
+        """--write and no mode: the page and status 0 from a channel in this state. The
+        offline check takes what they gave, under the same channel."""
+        text = page_of(case, base)
+        words = ("no registry read",)
+        written = tmp / f"from-this-tree-{case}{'-crash' if crash else ''}.md"
+        cli(f"--write, {what}", ["--write", *selected(str(written), at_fixture)], EXIT_OK, case=case, base=base, crash=crash, said=words)
+        check(written.is_file() and written.read_bytes() == text.encode("utf-8"), f"command line, --write, {what}: the file is the page")
+        r = cli(f"no mode, {what}", selected(str(written), at_fixture), EXIT_OK, case=case, base=base, crash=crash, said=words)
+        check(r.stdout == text, f"command line, no mode, {what}: stdout is the page")
+        cli(f"--check-page on what --write gave, {what}", ["--check-page", *selected(str(written), at_fixture)], EXIT_OK, case=case, base=base, crash=crash, said=words)
 
     def selected(page_path: str, lines_path: str) -> list[str]:
         return ["--out", page_path, "--lines", lines_path]
@@ -2947,11 +2964,7 @@ def _cli_selftest(check, tmp: Path, port: int, lines_doc, supported, fixture, pa
         said=("channel statement", "verdict: ok (exit 0)"),
         env={C.ENV_BASES_NAME: "http://127.0.0.1:1/chtypes/v2-dev", C.ENV_TRUSTED_KEYS_NAME: other},
     )
-    r = cli("no mode prints the page", selected(str(tmp / "absent.md"), agreed), EXIT_OK, case=case)
-    check(r.stdout == text, "command line, no mode: stdout is the page")
-    written = tmp / "written.md"
-    cli("--write writes", ["--write", *selected(str(written), agreed)], EXIT_OK, case=case)
-    check(written.is_file() and written.read_text(encoding="utf-8") == text, "command line, --write: the file is the page")
+    from_this_tree("a document published", case)
     r = cli("--print-document", ["--print-document", *selected(good, agreed)], EXIT_OK, case=case, said=("printing the channel statement",))
     document_text = r.stdout
     found_tag = re.search(r"printing the channel statement ([0-9T]+Z)", r.stderr)
@@ -2975,9 +2988,7 @@ def _cli_selftest(check, tmp: Path, port: int, lines_doc, supported, fixture, pa
     cli("--check, no lines.json", ["--check", *selected(good, str(tmp / "absent.json"))], EXIT_CHANNEL, case=case, said=("refused [lines-source]",))
     r = cli("--print-document, nothing published", ["--print-document", *selected(good, at_fixture)], EXIT_USAGE, case=case, said=("no channel document to print",))
     check(r.stdout == "", "command line, --print-document with nothing published: stdout is empty")
-    unwritten = tmp / "unwritten-latched.md"
-    cli("--write, latched", ["--write", *selected(str(unwritten), agreed)], EXIT_CHANNEL, case=case)
-    check(not unwritten.exists(), "command line, --write latched: nothing was written")
+    from_this_tree("nothing published", case)
     cli("--check, every statement bad", ["--check", *selected(good, at_fixture)], EXIT_NOTHING, case=case, keys_hex=other, said=("no platform of any line verified",))
     cli("--check, a crash", ["--check", *selected(good, at_fixture)], EXIT_CRASH, case=case, crash=True, said=("RuntimeError escaped",))
 
@@ -2985,11 +2996,7 @@ def _cli_selftest(check, tmp: Path, port: int, lines_doc, supported, fixture, pa
     case = "cli-refused"
     good = write("good-refused.md", page_of(case))
     cli("--check, refused", ["--check", *selected(good, agreed)], EXIT_CHANNEL, case=case, said=("refused [artifact-type]",))
-    r = cli("no mode, refused", selected(good, agreed), EXIT_CHANNEL, case=case)
-    check(r.stdout == "", "command line, no mode refused: stdout is empty")
-    unwritten = tmp / "unwritten-refused.md"
-    cli("--write, refused", ["--write", *selected(str(unwritten), agreed)], EXIT_CHANNEL, case=case)
-    check(not unwritten.exists(), "command line, --write refused: nothing was written")
+    from_this_tree("the document refused", case)
     r = cli("--print-document, refused", ["--print-document", *selected(good, agreed)], EXIT_CHANNEL, case=case)
     check(r.stdout == "", "command line, --print-document refused: stdout is empty")
 
@@ -2998,15 +3005,19 @@ def _cli_selftest(check, tmp: Path, port: int, lines_doc, supported, fixture, pa
     text = page_of(case)
     good = write("good-failed.md", text)
     cli("--check, a line failed", ["--check", *selected(good, agreed)], EXIT_PARTIAL, case=case, said=("26.7: supported, and no platform", "not comparing"))
-    r = cli("no mode, a line failed", selected(good, agreed), EXIT_PARTIAL, case=case)
-    check(r.stdout == text, "command line, no mode with a line failed: the page is still printed")
-    written = tmp / "written-failed.md"
-    cli("--write, a line failed", ["--write", *selected(str(written), agreed)], EXIT_PARTIAL, case=case)
-    check(written.is_file(), "command line, --write with a line failed: the page is still written")
+    from_this_tree("a line failed", case)
     r = cli("--print-document, a line failed", ["--print-document", *selected(good, agreed)], EXIT_PARTIAL, case=case)
     check(bool(r.stdout), "command line, --print-document with a line failed: the document is printed, the status is 3")
 
     release_flow(document_text, document_tag)
+
+    # No registry at all: nothing listens on this base, and resolving a line would raise.
+    # The control is --check under the same channel, which does read it and cannot.
+    nobody = "http://127.0.0.1:1/chtypes/v1"
+    away = write("good-nobody.md", page_of("nobody", nobody))
+    cli("--check, nothing answers (the control)", ["--check", *selected(away, at_fixture)], EXIT_CHANNEL, case="nobody", base=nobody, said=("could not be read",))
+    from_this_tree("nothing answers", "nobody", base=nobody)
+    from_this_tree("resolving a line raises", "cli-published", crash=True)
 
     # --check-page needs no channel: this is the script itself, as a command. Its page is
     # the active channel's, the dev one in a real process.
@@ -3043,7 +3054,7 @@ def _guarded(body: Callable[[], int], say, selection: str = "") -> int:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     g = ap.add_mutually_exclusive_group()
-    g.add_argument("--write", action="store_true", help="write docs/support-v2.md")
+    g.add_argument("--write", action="store_true", help="write docs/support-v2.md, with no registry read")
     g.add_argument("--check", action="store_true", help="fail unless the page and lines.json are current")
     g.add_argument("--check-page", action="store_true", help="the same for what needs no registry")
     g.add_argument("--print-document", action="store_true", help="print the verified channel document")
@@ -3055,16 +3066,17 @@ def main(argv: list[str] | None = None) -> int:
         return _selftest()
     picked = [("--out", args.out, PAGE), ("--lines", args.lines, LINES_JSON)]
     selection = " ".join(f"{flag} {value}" for flag, value, default in picked if value.resolve() != default)
-    mode = (
-        "write" if args.write else "check" if args.check else "document" if args.print_document else "print"
-    )
 
     def say(message: str) -> None:
         print(message, file=sys.stderr)
 
     if args.check_page:
         return _guarded(lambda: check_page(args.out, args.lines, say, selection), say, selection)
-    return _guarded(lambda: run(mode, args.out, args.lines, say, selection), say, selection)
+    if args.check or args.print_document:
+        mode = "check" if args.check else "document"
+        return _guarded(lambda: run(mode, args.out, args.lines, say, selection), say, selection)
+    target = args.out if args.write else None
+    return _guarded(lambda: produce_page(target, say, selection), say, selection)
 
 
 if __name__ == "__main__":
