@@ -84,6 +84,9 @@ tests.abi2.test_conformance::test_case[chs_block_create.status.CHS_INTERNAL]
 tests.abi2.test_conformance::test_case[chs_block_create.status.CHS_INVALID_ARGUMENT]
 tests.abi2.test_conformance::test_case[chs_build_info.handshake]
 tests.abi2.test_conformance::test_case[chs_clickhouse_version.handshake]
+tests.abi2.test_conformance::test_case[chs_cpu_floor.handshake]
+tests.abi2.test_conformance::test_case[chs_cpu_message.handshake]
+tests.abi2.test_conformance::test_case[chs_cpu_missing.handshake]
 tests.abi2.test_conformance::test_case[chs_discover_columns.echo]
 tests.abi2.test_conformance::test_case[chs_discover_columns.status.CHS_DECLINED]
 tests.abi2.test_conformance::test_case[chs_discover_columns.status.CHS_INTERNAL]
@@ -191,6 +194,11 @@ tests.abi2.test_conformance::test_case[server_profile.every_member_accepted]
 tests.abi2.test_conformance::test_case[server_profile.schema_on_server_accepted]
 tests.abi2.test_conformance::test_case[session_timezone.filter_eval_body]
 tests.abi2.test_conformance::test_case[session_timezone.preview_row]
+tests.abi2.test_cpu_floor::test_absent_is_the_fingerprint_refusal
+tests.abi2.test_cpu_floor::test_refused_through_a_load
+tests.abi2.test_cpu_floor::test_refused_under_a_signed_statement
+tests.abi2.test_cpu_floor::test_the_code_is_the_generated_table
+tests.abi2.test_cpu_floor::test_the_ok_stub_opens
 tests.abi2.test_dev_fingerprint::test_dev_fingerprint_beats_a_missing_symbol
 tests.abi2.test_dev_fingerprint::test_dev_fingerprint_message_is_rule_r6_exactly
 tests.abi2.test_dev_fingerprint::test_dev_fingerprint_refusal_through_a_load
@@ -201,6 +209,8 @@ tests.abi2.test_loader::test_case[loader.build-info-bad-json]
 tests.abi2.test_loader::test_case[loader.build-info-dup-key]
 tests.abi2.test_loader::test_case[loader.build-info-non-ascii]
 tests.abi2.test_loader::test_case[loader.build-info-null]
+tests.abi2.test_loader::test_case[loader.cpu-floor-absent]
+tests.abi2.test_loader::test_case[loader.cpu-floor-refused]
 [darwin] tests.abi2.test_loader::test_case[loader.ctor-marker.darwin]
 [linux] tests.abi2.test_loader::test_case[loader.ctor-marker.linux]
 tests.abi2.test_loader::test_case[loader.declined-settings]
@@ -221,6 +231,9 @@ tests.abi2.test_loader::test_case[loader.missing-chs_cancel_fire]
 tests.abi2.test_loader::test_case[loader.missing-chs_cancel_fired]
 tests.abi2.test_loader::test_case[loader.missing-chs_cancel_free]
 tests.abi2.test_loader::test_case[loader.missing-chs_clickhouse_version]
+tests.abi2.test_loader::test_case[loader.missing-chs_cpu_floor]
+tests.abi2.test_loader::test_case[loader.missing-chs_cpu_message]
+tests.abi2.test_loader::test_case[loader.missing-chs_cpu_missing]
 tests.abi2.test_loader::test_case[loader.missing-chs_discover_columns]
 tests.abi2.test_loader::test_case[loader.missing-chs_discover_query]
 tests.abi2.test_loader::test_case[loader.missing-chs_error_ch_code]

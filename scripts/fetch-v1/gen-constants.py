@@ -132,8 +132,9 @@ def code_suffix(code: str) -> str:
 
 def code_pascal(code: str) -> str:
     """`CHTYPES_ARTIFACT_MISSING` -> `ArtifactMissing`: a Go code constant is
-    `Code` followed by this."""
-    return "".join(p.capitalize() for p in code_suffix(code).split("_"))
+    `Code` followed by this. An initialism stays in capitals, as revive's
+    var-naming requires: `CHTYPES_CPU_UNSUPPORTED` -> `CPUUnsupported`."""
+    return "".join(p if p == "CPU" else p.capitalize() for p in code_suffix(code).split("_"))
 
 
 def _go_code_consts(data: dict[str, Any]) -> list[str]:
@@ -1079,8 +1080,8 @@ def render_guide_block(data: dict[str, Any], sha: str) -> str:
         "status (every binding's CLI agreed on 2026-10-01: the four \"verification failed\" codes all exit "
         "1, `CHTYPES_ARTIFACT_UNPUBLISHED` exits 4, `CHTYPES_SOURCE_UNREACHABLE` exits 3). The new v1-only "
         "codes have no v0 precedent and are assigned here: the first four by lane 0A, "
-        "`CHTYPES_CACHE_UNUSABLE` by public issue #486, `CHTYPES_SOURCE_RETIRED` by public issue #571 and "
-        "`CHTYPES_ARTIFACT_REVOKED` by public issue #625:"
+        "`CHTYPES_CACHE_UNUSABLE` by public issue #486, `CHTYPES_SOURCE_RETIRED` by public issue #571, "
+        "`CHTYPES_ARTIFACT_REVOKED` by public issue #625 and `CHTYPES_CPU_UNSUPPORTED` with the CPU floor:"
     )
     lines.append("")
     lines.append(
@@ -1118,6 +1119,13 @@ def render_guide_block(data: dict[str, Any], sha: str) -> str:
         "Gone` whose body says the tag is revoked (\"Build-level revocation\"). Its message names the advisory, "
         "made safe to print. Never `CHTYPES_ARTIFACT_PINNED`, `CHTYPES_ARTIFACT_UNTRUSTED` or "
         "`CHTYPES_SOURCE_RETIRED`. Assigned by public issue #625."
+    )
+    lines.append(
+        "- `CHTYPES_CPU_UNSUPPORTED` — the **FFI/loader layer**, generation 2 only, never the fetch layer: a "
+        "CPU below the floor of the library's build (`docs/install.md`, CPU requirements). Opening the library "
+        "succeeds and nothing of it runs; the loader's step 2b refuses it (`cpu_floor`) with the library's own "
+        "sentence. Its class stays `CHTYPES_ARTIFACT_INCOMPATIBLE`'s, so a handler of a failed open still "
+        "catches it."
     )
     lines.append("")
     lines.append(GUIDE_END)

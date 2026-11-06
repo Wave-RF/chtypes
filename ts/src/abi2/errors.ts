@@ -23,7 +23,7 @@
  * (the string every `Error` has) is the one lossy display form.
  */
 
-import { ArtifactCorruptError, ChtypesError, CODE_ARTIFACT_INCOMPATIBLE, FetchV1Error, type RefusalFields } from '../ocifetch/index.js';
+import { ArtifactCorruptError, ChtypesError, CODE_ARTIFACT_INCOMPATIBLE, type ErrorCode, FetchV1Error, type RefusalFields } from '../ocifetch/index.js';
 import { ABI_STABILITY } from './decls.gen.js';
 import { Status } from './vocab.gen.js';
 
@@ -150,18 +150,19 @@ export function devFingerprintMessage(sdk: string, library: string): string {
   return `this SDK speaks dev fingerprint ${sdk}; the library has ${library} — update your dev SDK`;
 }
 
-/** An incompatible-artifact refusal's message: rule r6's exact text for a fingerprint refusal while the description is unstable (a 2.0.0-dev SDK), the loader's own otherwise. */
+/** An incompatible-artifact refusal's message: rule r6's exact text for a fingerprint refusal while the description is unstable (a 2.0.0-dev SDK), the path and the library's own sentence for a CPU below its floor, the loader's own otherwise. */
 function incompatibleMessage(f: RefusalFields): string {
   if (f.reason === 'fingerprint' && ABI_STABILITY === 'unstable' && f.want !== undefined && f.got !== undefined) {
     return devFingerprintMessage(f.want, f.got);
   }
+  if (f.message !== undefined && f.message !== '') return `chtypes: ${f.path}: ${f.message}`;
   return renderLoaderMessage('incompatible artifact', f);
 }
 
-/** A loader step 1-4 or 6 refusal: the artifact is not one this binding can speak to (wrong ABI generation, a different fingerprint, a missing symbol, an unresolvable link). A fingerprint refusal by a 2.0.0-dev SDK carries rule r6's exact message. */
+/** A loader step 1-4 or 6 refusal: the artifact is not one this binding can speak to (wrong ABI generation, a CPU below the build's floor, a different fingerprint, a missing symbol, an unresolvable link). `code` is `CHTYPES_ARTIFACT_INCOMPATIBLE` unless the refusal carries its own. A fingerprint refusal by a 2.0.0-dev SDK carries rule r6's exact message. */
 export class ArtifactIncompatibleError extends FetchV1Error {
-  constructor(f: RefusalFields) {
-    super(CODE_ARTIFACT_INCOMPATIBLE, incompatibleMessage(f), { refusal: f });
+  constructor(f: RefusalFields, code: ErrorCode = CODE_ARTIFACT_INCOMPATIBLE) {
+    super(code, incompatibleMessage(f), { refusal: f });
   }
 }
 

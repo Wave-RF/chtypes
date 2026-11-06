@@ -9,11 +9,12 @@ wired up; `predicate` is passed through exactly as that seam promises.
 Every `chs_*` spelling in this module is forbidden by
 scripts/abi-v1/check-no-hand-decls.py (it is not a generated file), so this
 calls ONLY python/src/chtypes/_abi2/_decls.py's non-`chs_`-prefixed surface:
-`resolve_abi_version()`, `resolve_build_info()`, `resolve_all()`, and the `Api` object they return.
+`read_cpu_floor()`, `resolve_abi_version()`, `resolve_build_info()`, `resolve_all()`, and the `Api`
+object they return.
 
 Steps 1-7 run in the documented order, the order Go, TypeScript and Rust
-run: glibc (1), dlopen (2), `chs_abi_version` alone (3), `chs_build_info`
-alone, parsed strictly and its fingerprint compared (4: rule r6's exact
+run: glibc (1), dlopen (2), the CPU floor (2b), `chs_abi_version` alone (3),
+`chs_build_info` alone, parsed strictly and its fingerprint compared (4: rule r6's exact
 message wins here), the signed-statement cross-check (5), and only then the
 resolve-every-declared-symbol sweep (6). A library with another fingerprint
 that also lacks a symbol this SDK declares (every fingerprint move that adds
@@ -127,6 +128,24 @@ def _dlopen(path: str) -> ctypes.CDLL:
         raise _errmap.loader_error_class("dlopen")(reason="dlopen", path=path, got=str(e)) from e
 
 
+def _check_cpu_floor(lib: ctypes.CDLL, path: str) -> None:
+    """Loader step 2b, before anything else of the library is called. A library
+    that does not export the list predates the check and goes on: steps 3 and 4
+    refuse it by its fingerprint. An empty list goes on too. Any other list
+    refuses, with the library's three answers verbatim; it is never parsed, and
+    the image stays mapped, as every refused image does."""
+    answers = _decls.read_cpu_floor(lib)
+    if answers is None or not answers[1]:
+        return
+    want, got, sentence = answers
+    refusal = _errmap.loader_error_class("cpu_floor")(
+        f"{path}: {sentence}" if sentence else "", reason="cpu_floor", path=path, want=want, got=got
+    )
+    # The class a handler of a failed open catches, with the refusal's own code.
+    refusal.code = _errmap.loader_error_code("cpu_floor")
+    raise refusal
+
+
 def _parse_build_info(raw: bytes, path: str) -> dict:
     """Parse `chs_build_info()` strictly (loader step 4): ASCII only,
     duplicate keys refused, `schema == 1`, the fields loader step 5 will
@@ -194,6 +213,7 @@ def _open(
         _check_glibc(path, predicate)
 
     lib = _dlopen(path)
+    _check_cpu_floor(lib, path)
 
     try:
         abi_version_fn = _decls.resolve_abi_version(lib)

@@ -4000,6 +4000,39 @@
       "params": []
     },
     {
+      "name": "chs_cpu_floor",
+      "class": "handshake",
+      "thread": "any",
+      "init": "any",
+      "returns": {
+        "kind": "scalar",
+        "type": "cstr_static"
+      },
+      "params": []
+    },
+    {
+      "name": "chs_cpu_missing",
+      "class": "handshake",
+      "thread": "any",
+      "init": "any",
+      "returns": {
+        "kind": "scalar",
+        "type": "cstr_static"
+      },
+      "params": []
+    },
+    {
+      "name": "chs_cpu_message",
+      "class": "handshake",
+      "thread": "any",
+      "init": "any",
+      "returns": {
+        "kind": "scalar",
+        "type": "cstr_static"
+      },
+      "params": []
+    },
+    {
       "name": "chs_abi_revision",
       "class": "tombstone",
       "thread": "any",

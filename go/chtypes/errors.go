@@ -196,11 +196,17 @@ var (
 	ErrCacheUnusable        = ocifetch.ErrCacheUnusable
 	ErrSourceRetired        = ocifetch.ErrSourceRetired
 	ErrArtifactRevoked      = ocifetch.ErrArtifactRevoked
+	// ErrCPUUnsupported is the loader's, like ErrArtifactIncompatible, which a
+	// CodeCPUUnsupported error matches too: it is a failed open of that class.
+	ErrCPUUnsupported = errors.New(string(CodeCPUUnsupported))
 )
 
 func sentinel(c ErrorCode) error {
-	if c == CodeArtifactIncompatible {
+	switch c {
+	case CodeArtifactIncompatible:
 		return ErrArtifactIncompatible
+	case CodeCPUUnsupported:
+		return ErrCPUUnsupported
 	}
 	return ocifetch.ErrorCode(c).Sentinel()
 }
@@ -242,8 +248,15 @@ func (e *ArtifactError) Error() string { return e.msg }
 // Unwrap exposes the underlying cause.
 func (e *ArtifactError) Unwrap() error { return e.cause }
 
-// Is makes errors.Is(err, ErrArtifact...) true for the matching code.
-func (e *ArtifactError) Is(target error) bool { return target != nil && target == sentinel(e.Code) }
+// Is makes errors.Is(err, ErrArtifact...) true for the matching code, and for
+// ErrArtifactIncompatible when the code is CodeCPUUnsupported, so a handler of a
+// failed open still catches a CPU below the library's floor.
+func (e *ArtifactError) Is(target error) bool {
+	if target == nil {
+		return false
+	}
+	return target == sentinel(e.Code) || (e.Code == CodeCPUUnsupported && target == ErrArtifactIncompatible)
+}
 
 // fetchError wraps the fetch layer's error in this family. A fetch-layer error
 // that is not a *ocifetch.FetchError (a refused spelling, a platform outside
@@ -272,6 +285,9 @@ func loadError(err error) error {
 		if le.Class() == "artifact_corrupt" {
 			code = CodeArtifactCorrupt
 		}
+		if c := le.Code(); c != "" {
+			code = ErrorCode(c)
+		}
 		var detail string
 		switch {
 		case le.Want != "":
@@ -280,7 +296,10 @@ func loadError(err error) error {
 			detail = fmt.Sprintf(" (%s)", le.Got)
 		}
 		msg := fmt.Sprintf("chtypes: %s refused: %s%s [%s]", le.Path, le.Reason, detail, code)
-		if exact := le.Message(); exact != "" {
+		if le.Sentence != "" {
+			// A CPU below the library's floor: the library's own sentence, verbatim.
+			msg = fmt.Sprintf("chtypes: %s refused: %s [%s]", le.Path, le.Sentence, code)
+		} else if exact := le.Message(); exact != "" {
 			// A dev SDK's fingerprint refusal carries rule r6's exact message.
 			msg = exact
 		}

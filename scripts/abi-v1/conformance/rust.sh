@@ -20,7 +20,7 @@
 # cases fail.
 #
 # The same cargo invocation also runs the public-API suites (api_v1,
-# api_v1_setup, api_v1_setup_cases, reader_rules, null_input, no_unload) and the crate's own unit
+# api_v1_setup, api_v1_setup_cases, reader_rules, null_input, no_unload, cpu_floor) and the crate's own unit
 # tests (--lib: the registry over a real signed OCI layout lives there, because
 # only a unit test reaches the fetch layer's test-only seam), which read the
 # same CHTYPES_ABI<N>_STUBS and prove the public layer's plumbing over the
@@ -80,7 +80,7 @@ trap 'rm -rf "$OUT"' EXIT
 # `lib` is --lib; every other name is a --test target. goldens_v1_runner has no
 # libtest harness (harness = false): it ignores the trailing arguments, and the
 # census counts it as one test, passed when it exits 0.
-TARGETS=(lib "abi${MAJOR}_conformance" api_v1 api_v1_setup api_v1_setup_cases reader_rules null_input no_unload goldens_v1_runner)
+TARGETS=(lib "abi${MAJOR}_conformance" api_v1 api_v1_setup api_v1_setup_cases reader_rules null_input no_unload cpu_floor goldens_v1_runner)
 rc=0
 echo "rust.sh: ABI v$MAJOR: cargo test, one target at a time ($STUBS_VAR=${!STUBS_VAR})"
 for target in "${TARGETS[@]}"; do

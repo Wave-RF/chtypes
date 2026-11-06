@@ -131,6 +131,10 @@ The `darwin-arm64` lifts are measured: the producer's differential ran those pai
 
 The parse-once block twin sits under the same guarantee. For the rule a filter's own result type must follow, see [`guides/filters.md` → Writing a filter's result type](guides/filters.md#writing-a-filters-result-type).
 
+## A library has a CPU floor
+
+Each library needs a CPU at or above its build's floor, which depends on the architecture and the line. Below it, opening the library fails with `CHTYPES_CPU_UNSUPPORTED`, an ordinary error you can report while your process keeps serving, never a crash. The floors are in [`install.md`, CPU requirements](install.md#cpu-requirements).
+
 ## Some formats depend on the artifact, not the binding
 
 Which input formats a library reads is a property of the **loaded artifact**, not of your binding's version: every 1.0 build lists them in its `build_info`. Probe that rather than assuming from the package version. A format the loaded library does not read is refused with 73 or 117, exactly as its own server would refuse it.

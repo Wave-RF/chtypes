@@ -64,6 +64,9 @@ conformance.test.ts :: abi v2 conformance (ts) handshake chs_abi_revision.tombst
 conformance.test.ts :: abi v2 conformance (ts) handshake chs_abi_version.handshake
 conformance.test.ts :: abi v2 conformance (ts) handshake chs_build_info.handshake
 conformance.test.ts :: abi v2 conformance (ts) handshake chs_clickhouse_version.handshake
+conformance.test.ts :: abi v2 conformance (ts) handshake chs_cpu_floor.handshake
+conformance.test.ts :: abi v2 conformance (ts) handshake chs_cpu_message.handshake
+conformance.test.ts :: abi v2 conformance (ts) handshake chs_cpu_missing.handshake
 conformance.test.ts :: abi v2 conformance (ts) lifecycle cancel.chs_block_create.after_last
 conformance.test.ts :: abi v2 conformance (ts) lifecycle cancel.chs_block_create.during
 conformance.test.ts :: abi v2 conformance (ts) lifecycle cancel.chs_block_create.never_fired
@@ -96,6 +99,8 @@ conformance.test.ts :: abi v2 conformance (ts) loader loader.build-info-bad-json
 conformance.test.ts :: abi v2 conformance (ts) loader loader.build-info-dup-key
 conformance.test.ts :: abi v2 conformance (ts) loader loader.build-info-non-ascii
 conformance.test.ts :: abi v2 conformance (ts) loader loader.build-info-null
+conformance.test.ts :: abi v2 conformance (ts) loader loader.cpu-floor-absent
+conformance.test.ts :: abi v2 conformance (ts) loader loader.cpu-floor-refused
 conformance.test.ts :: abi v2 conformance (ts) loader loader.ctor-marker.darwin
 conformance.test.ts :: abi v2 conformance (ts) loader loader.ctor-marker.linux
 conformance.test.ts :: abi v2 conformance (ts) loader loader.declined-settings
@@ -116,6 +121,9 @@ conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_cancel_
 conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_cancel_fired
 conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_cancel_free
 conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_clickhouse_version
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_cpu_floor
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_cpu_message
+conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_cpu_missing
 conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_discover_columns
 conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_discover_query
 conformance.test.ts :: abi v2 conformance (ts) loader loader.missing-chs_error_ch_code
@@ -237,6 +245,10 @@ conformance.test.ts :: abi v2 conformance (ts) status input_document.chs_server_
 conformance.test.ts :: abi v2 conformance (ts) status input_document.chs_server_create.profile.not_an_object_refused
 conformance.test.ts :: abi v2 conformance (ts) status input_document.chs_server_create.profile.unknown_key_refused
 conformance.test.ts :: abi v2 conformance (ts) status one_create.second_statement_refused
+cpu-floor.test.ts :: step 2b over the stubs opens the ok stub, which answers ""
+cpu-floor.test.ts :: step 2b over the stubs reads a library from before the check as the fingerprint refusal: not cpu_floor, and not a missing symbol
+cpu-floor.test.ts :: step 2b over the stubs refuses a library below its floor, verified and unverified, with the three answers verbatim
+cpu-floor.test.ts :: the code, with no library is the generated table, and the class stays the one a handler of a failed open catches
 dev-fingerprint.test.ts :: rule r6: a library with another fingerprint is refused with the dev message the refusal alone, with no library: CHTYPES_ARTIFACT_INCOMPATIBLE carrying exactly the rule's message
 dev-fingerprint.test.ts :: rule r6: a library with another fingerprint is refused with the dev message through a real load of the stub that reports another fingerprint, verified and unverified
 dev-fingerprint.test.ts :: the compiled-in identity is ABI v2 and a full sha256 fingerprint, printed for the jobs that assert it

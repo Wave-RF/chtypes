@@ -11,6 +11,10 @@ github.com/wave-rf/chtypes/go/v2/chtypes TestAFailedFetchBeforeStep7UnlocksTheSe
 github.com/wave-rf/chtypes/go/v2/chtypes TestAFailedOpenUnlocksOnlyItsOwnRecordAndNeverALatchedOne
 github.com/wave-rf/chtypes/go/v2/chtypes TestARetiredRepositoryIsTheSourceRetiredCode
 github.com/wave-rf/chtypes/go/v2/chtypes TestBindingDetectedMisuseHasTheInvalidArgumentShape
+github.com/wave-rf/chtypes/go/v2/chtypes TestCPUFloorAbsentIsTheFingerprintRefusal
+github.com/wave-rf/chtypes/go/v2/chtypes TestCPUFloorMapping
+github.com/wave-rf/chtypes/go/v2/chtypes TestCPUFloorOKStubOpens
+github.com/wave-rf/chtypes/go/v2/chtypes TestCPUFloorRefusedThroughALoad
 github.com/wave-rf/chtypes/go/v2/chtypes TestCacheRootAndSearchDirsCreateNothing
 github.com/wave-rf/chtypes/go/v2/chtypes TestCacheRootPrecedence
 github.com/wave-rf/chtypes/go/v2/chtypes TestCacheRootsSharedTable
@@ -268,6 +272,9 @@ github.com/wave-rf/chtypes/go/v2/internal/abi2 TestConformance/chs_block_create.
 github.com/wave-rf/chtypes/go/v2/internal/abi2 TestConformance/chs_block_create.status.CHS_INVALID_ARGUMENT
 github.com/wave-rf/chtypes/go/v2/internal/abi2 TestConformance/chs_build_info.handshake
 github.com/wave-rf/chtypes/go/v2/internal/abi2 TestConformance/chs_clickhouse_version.handshake
+github.com/wave-rf/chtypes/go/v2/internal/abi2 TestConformance/chs_cpu_floor.handshake
+github.com/wave-rf/chtypes/go/v2/internal/abi2 TestConformance/chs_cpu_message.handshake
+github.com/wave-rf/chtypes/go/v2/internal/abi2 TestConformance/chs_cpu_missing.handshake
 github.com/wave-rf/chtypes/go/v2/internal/abi2 TestConformance/chs_discover_columns.echo
 github.com/wave-rf/chtypes/go/v2/internal/abi2 TestConformance/chs_discover_columns.status.CHS_DECLINED
 github.com/wave-rf/chtypes/go/v2/internal/abi2 TestConformance/chs_discover_columns.status.CHS_INTERNAL
@@ -372,6 +379,8 @@ github.com/wave-rf/chtypes/go/v2/internal/abi2 TestConformance/loader.build-info
 github.com/wave-rf/chtypes/go/v2/internal/abi2 TestConformance/loader.build-info-dup-key
 github.com/wave-rf/chtypes/go/v2/internal/abi2 TestConformance/loader.build-info-non-ascii
 github.com/wave-rf/chtypes/go/v2/internal/abi2 TestConformance/loader.build-info-null
+github.com/wave-rf/chtypes/go/v2/internal/abi2 TestConformance/loader.cpu-floor-absent
+github.com/wave-rf/chtypes/go/v2/internal/abi2 TestConformance/loader.cpu-floor-refused
 [darwin] github.com/wave-rf/chtypes/go/v2/internal/abi2 TestConformance/loader.ctor-marker.darwin
 [linux] github.com/wave-rf/chtypes/go/v2/internal/abi2 TestConformance/loader.ctor-marker.linux
 github.com/wave-rf/chtypes/go/v2/internal/abi2 TestConformance/loader.declined-settings
@@ -392,6 +401,9 @@ github.com/wave-rf/chtypes/go/v2/internal/abi2 TestConformance/loader.missing-ch
 github.com/wave-rf/chtypes/go/v2/internal/abi2 TestConformance/loader.missing-chs_cancel_fired
 github.com/wave-rf/chtypes/go/v2/internal/abi2 TestConformance/loader.missing-chs_cancel_free
 github.com/wave-rf/chtypes/go/v2/internal/abi2 TestConformance/loader.missing-chs_clickhouse_version
+github.com/wave-rf/chtypes/go/v2/internal/abi2 TestConformance/loader.missing-chs_cpu_floor
+github.com/wave-rf/chtypes/go/v2/internal/abi2 TestConformance/loader.missing-chs_cpu_message
+github.com/wave-rf/chtypes/go/v2/internal/abi2 TestConformance/loader.missing-chs_cpu_missing
 github.com/wave-rf/chtypes/go/v2/internal/abi2 TestConformance/loader.missing-chs_discover_columns
 github.com/wave-rf/chtypes/go/v2/internal/abi2 TestConformance/loader.missing-chs_discover_query
 github.com/wave-rf/chtypes/go/v2/internal/abi2 TestConformance/loader.missing-chs_error_ch_code
@@ -440,6 +452,7 @@ github.com/wave-rf/chtypes/go/v2/internal/abi2 TestConformance/server_profile.ev
 github.com/wave-rf/chtypes/go/v2/internal/abi2 TestConformance/server_profile.schema_on_server_accepted
 github.com/wave-rf/chtypes/go/v2/internal/abi2 TestConformance/session_timezone.filter_eval_body
 github.com/wave-rf/chtypes/go/v2/internal/abi2 TestConformance/session_timezone.preview_row
+github.com/wave-rf/chtypes/go/v2/internal/abi2 TestLoadLinkedRefusesBelowTheCPUFloor
 github.com/wave-rf/chtypes/go/v2/internal/ocifetch TestAFailedWriteIsCacheUnusable
 github.com/wave-rf/chtypes/go/v2/internal/ocifetch TestAStrictSystemDirFaultIsAnError
 github.com/wave-rf/chtypes/go/v2/internal/ocifetch TestAddIndexEntryMerges

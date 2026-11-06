@@ -875,6 +875,24 @@ def cancel_unknown_message(param: str, cancel_id: str) -> str:
     """The message the stub gives for an options `cancel` naming no token."""
     return CANCEL["unknown"].format(param=param, id=cancel_id)
 
+# The CPU floor (generation 2, the `cpu_floor` refusal): what the three handshake
+# exports answer. The `cpu-floor-refused` variant plants a CPU below the floor
+# on every CI leg, with no emulation: chs_cpu_missing answers the list, and
+# chs_initialize answers CHS_INTERNAL with the library's own sentence, as every
+# entry of a real gated library does, so a binding that reaches it does not
+# read as a refusal. `cpu-floor-absent` is a library from before the check: no
+# chs_cpu_* symbol and another fingerprint. The ordinary stubs answer "".
+CPU_FLOOR = {
+    "define": "CHS_STUB_CPU_FLOOR_REFUSED",
+    "floor": "x86-64-v3+pclmul",
+    "missing": "avx2,bmi2",
+    "message": (
+        "this CPU cannot run this library: missing avx2,bmi2 (the 26.8 linux-amd64 build requires "
+        "x86-64-v3+pclmul). Use a CPU at or above that floor."
+    ),
+    "reason": "cpu-unsupported",
+}
+
 # The symbol a loader checks before any other (step 3): it gets its own named
 # variant ("no-abi-version", reason "not_v1") rather than folding into the
 # generic missing-<sym> sweep, because a real loader distinguishes "this is
@@ -976,6 +994,19 @@ def plan(model) -> list[Variant]:
             Variant(
                 "fingerprint-other-missing-symbol",
                 (("CHS_STUB_FINGERPRINT_OTHER", "1"), (omit_define(absent), None)),
+                "fingerprint",
+            )
+        )
+    refusal = model.library_refusal()
+    if refusal is not None:
+        out.append(Variant("cpu-floor-refused", ((CPU_FLOOR["define"], "1"),), refusal["reason"]))
+        out.append(
+            Variant(
+                "cpu-floor-absent",
+                (
+                    ("CHS_STUB_FINGERPRINT_OTHER", "1"),
+                    *((omit_define(refusal[m]), None) for m in ("want", "got", "message")),
+                ),
                 "fingerprint",
             )
         )

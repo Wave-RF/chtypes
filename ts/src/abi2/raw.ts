@@ -104,9 +104,10 @@ export type RawApi = Readonly<Record<string, RawFn>>;
 
 /**
  * `define()` the whole described surface against one already-opened image
- * (`libraryKey`, via `./libc.ts`'s `ffiOpen` — call that FIRST). One call
- * builds every chs_* function this image exposes; `rawCall` below is the
- * only thing that ever invokes the result.
+ * (`libraryKey`, via `./libc.ts`'s `ffiOpen` — call that FIRST), or just the
+ * `names` given (loader step 2b's handshake, before the rest). One call builds
+ * every chs_* function this image exposes; `rawCall` below is the only thing
+ * that ever invokes the result.
  *
  * The table is keyed by each function's OWN chs_* name, never
  * `CAMEL_NAMES`: `define()`'s per-entry type
@@ -121,9 +122,10 @@ export type RawApi = Readonly<Record<string, RawFn>>;
  * one (scripts/abi-v1/check-no-hand-decls.py's rule 3 matches a LITERAL
  * `chs_x: {`, never a key built from a loop variable).
  */
-export function defineRawFunctions(libraryKey: string): RawApi {
+export function defineRawFunctions(libraryKey: string, names?: readonly string[]): RawApi {
   const table: Record<string, { library: string; retType: DataType; paramsType: DataType[] }> = {};
   for (const [name, spec] of Object.entries(FUNCTION_SPECS)) {
+    if (names !== undefined && !names.includes(name)) continue;
     table[name] = { library: libraryKey, retType: retDataType(spec), paramsType: spec.params.flatMap((p) => paramDataTypes(p)) };
   }
   return define(table) as unknown as RawApi;
