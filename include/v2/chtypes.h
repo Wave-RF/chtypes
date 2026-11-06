@@ -1715,17 +1715,19 @@ CHS_API chs_status chs_preview_batch(
  * would otherwise accept (a computed value the output cannot carry, the cases `chs_preview_batch`
  * reports as `export_declined`) makes the whole call a decline: `outcome` `unsupported`, `code`
  * `CHS_CODE_DECLINED`, `reason` the output decline's catalog id (such as
- * `export-computed-value-not-carried`), `refused_at` `body_step`, and no output. The call's job is
- * to produce the rows to store; when it cannot, it cannot answer. This is stricter than a server
- * INSERT, which may have committed earlier blocks of the body before a later block's refusal (which
- * of them is not determined by the body): nothing of a refused body is ever handed out. The output
- * settings are the call's settings (the `output_format_*` settings among them). A line format
- * (`JSONCompactEachRow`, and any format that writes one line per row) is written block by block by
- * the vendored output format, each block cut to its `t` rows under a filter by ClickHouse's own
- * column filter, as a server's WHERE cuts a block. For `CHS_NATIVE` the stored columns, cut the
- * same way, accumulate and are written once, as one Native block: the same single block
- * `chs_preview_batch` exports (`document:batch`, The Native export). The document carries no
- * `row_positions` or `row_spans`.
+ * `export-computed-value-not-carried`), `refused_at` `body_step`, and no output. When a row's
+ * output value cannot be produced (a DEFAULT the build declines, omitted by the row), the call
+ * declines at that row, as `chs_preview_batch` does, unless an earlier row was refused; a refusal a
+ * later row would meet is not reached. The call's job is to produce the rows to store; when it
+ * cannot, it cannot answer. This is stricter than a server INSERT, which may have committed earlier
+ * blocks of the body before a later block's refusal (which of them is not determined by the body):
+ * nothing of a refused body is ever handed out. The output settings are the call's settings (the
+ * `output_format_*` settings among them). A line format (`JSONCompactEachRow`, and any format that
+ * writes one line per row) is written block by block by the vendored output format, each block cut
+ * to its `t` rows under a filter by ClickHouse's own column filter, as a server's WHERE cuts a
+ * block. For `CHS_NATIVE` the stored columns, cut the same way, accumulate and are written once, as
+ * one Native block: the same single block `chs_preview_batch` exports (`document:batch`, The Native
+ * export). The document carries no `row_positions` or `row_spans`.
  *
  * **The projection rule.** For the same schema, format, body, settings, columns, filter and
  * options, against `chs_preview_batch` with any `doc_flags` and `export_format` equal to
