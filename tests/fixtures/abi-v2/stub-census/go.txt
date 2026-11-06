@@ -75,6 +75,7 @@ github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/equal-count
 github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/equal-csv-filter-mixed
 github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/equal-csv-no-filter-all-accepted
 github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/equal-declined
+github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/equal-declined-default-at-row-0-before-a-check-refusal
 github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/equal-declined-output-is-the-call-decline
 github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/equal-declined-output-under-a-filter-counts-zero
 github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/equal-e-row-decides-where-the-export-was-declined

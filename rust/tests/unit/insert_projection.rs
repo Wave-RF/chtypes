@@ -772,7 +772,7 @@ fn every_case_of_the_shared_fixture_gives_its_expected_projection_result() {
     );
     assert_eq!(
         (cases.len(), equal, exceptions, reds),
-        (65, 25, 1, 39),
+        (66, 26, 1, 39),
         "the fixture's census (cases, equal, exception, planted reds)"
     );
     // A rule with no planted red is a rule the gate cannot see fail.

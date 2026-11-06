@@ -245,6 +245,7 @@ insert-projection.test.ts :: the insert projection gate over the shared fixture 
 insert-projection.test.ts :: the insert projection gate over the shared fixture equal-counts-undecided-zero-when-only-a-skipped-record-is-d: "equal"
 insert-projection.test.ts :: the insert projection gate over the shared fixture equal-csv-filter-mixed: "equal"
 insert-projection.test.ts :: the insert projection gate over the shared fixture equal-csv-no-filter-all-accepted: "equal"
+insert-projection.test.ts :: the insert projection gate over the shared fixture equal-declined-default-at-row-0-before-a-check-refusal: "equal"
 insert-projection.test.ts :: the insert projection gate over the shared fixture equal-declined-output-is-the-call-decline: "equal"
 insert-projection.test.ts :: the insert projection gate over the shared fixture equal-declined-output-under-a-filter-counts-zero: "equal"
 insert-projection.test.ts :: the insert projection gate over the shared fixture equal-declined: "equal"

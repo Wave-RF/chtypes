@@ -465,7 +465,7 @@ def verdict(case: dict):
 
 @needs_fixture
 def test_the_fixture_is_the_shape_this_gate_expects() -> None:
-    assert sum(c["expect"] == "equal" for c in CASES) == 25
+    assert sum(c["expect"] == "equal" for c in CASES) == 26
     assert sum(isinstance(c["expect"], dict) and "exception" in c["expect"] for c in CASES) == 1
     for rule in RULES:
         assert any(c["expect"] == {"violates": rule} for c in CASES), rule
@@ -529,4 +529,4 @@ def test_the_fixture_gate_ran_cases() -> None:
                 f"CHTYPES_REQUIRE_FIXTURES=1 and the insert-projection fixture is absent: {FIXTURE}"
             )
         pytest.skip(f"insert-projection fixture absent ({FIXTURE}): not a full-repository tree")
-    assert len(CASES) == 65
+    assert len(CASES) == 66

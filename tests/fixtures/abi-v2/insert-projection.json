@@ -1282,6 +1282,82 @@
    "expect": "equal"
   },
   {
+   "id": "equal-declined-default-at-row-0-before-a-check-refusal",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "unsupported",
+    "code": -2,
+    "reason": "expression-masked-secret",
+    "err": "DEFAULT encrypt(...) holds the server's mask '[HIDDEN]' in its secret arguments: the definition was read back from a server, which hides the key, so the table's own call cannot be computed here",
+    "rows_read": 1,
+    "rows_skipped": 0,
+    "export_declined": "batch outcome is 'unsupported': only a fully accepted batch exports bytes",
+    "export_declined_reason": "export-batch-not-accepted",
+    "framing": {
+     "bom_skipped": false,
+     "container": "stream",
+     "header": null
+    },
+    "unconsumed": [],
+    "rows": [
+     {
+      "outcome": "unsupported",
+      "code": -2,
+      "reason": "expression-masked-secret",
+      "err": "DEFAULT encrypt(...) holds the server's mask '[HIDDEN]' in its secret arguments: the definition was read back from a server, which hides the key, so the table's own call cannot be computed here",
+      "cols": [],
+      "input_span": {
+       "off": 0,
+       "len": 19
+      },
+      "transformed": []
+     }
+    ],
+    "unsupported_settings": [],
+    "refused_at": "row",
+    "refused_row": 0,
+    "transformed": []
+   },
+   "batch_export_b64": null,
+   "body_records": [
+    {
+     "off": 0,
+     "len": 19
+    },
+    {
+     "off": 20,
+     "len": 28
+    }
+   ],
+   "insert": {
+    "outcome": "unsupported",
+    "code": -2,
+    "reason": "expression-masked-secret",
+    "err": "DEFAULT encrypt(...) holds the server's mask '[HIDDEN]' in its secret arguments: the definition was read back from a server, which hides the key, so the table's own call cannot be computed here",
+    "rows_read": 1,
+    "rows_skipped": 0,
+    "framing": {
+     "bom_skipped": false,
+     "container": "stream",
+     "header": null
+    },
+    "unsupported_settings": [],
+    "refused_at": "row"
+   },
+   "insert_rows_b64": null,
+   "expect": "equal",
+   "provenance": {
+    "batch": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    },
+    "insert": {
+     "build": "20261105.095805",
+     "line": "26.10"
+    }
+   }
+  },
+  {
    "id": "equal-not-accepted-batch-with-d-rows-counts-zero",
    "output_format": "JSONCompactEachRow",
    "batch": {
