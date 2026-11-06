@@ -1,0 +1,32 @@
+{
+ "schema": 1,
+ "repository": "chtypes/v2-dev",
+ "produced_at": "2026-11-06T12:00:00Z",
+ "lines": {
+  "26.3": {
+   "state": "supported",
+   "since": "2026-03-27",
+   "security_md_commit": "c83af5faec994e817495082ef70a1d1e2f248944"
+  },
+  "26.7": {
+   "state": "retired",
+   "since": "2026-10-24",
+   "security_md_commit": "df15fe8945630254b70fc35adb38bd0774ac7bf7"
+  },
+  "26.8": {
+   "state": "supported",
+   "since": "2026-08-30",
+   "security_md_commit": "9da503327ac5257be4242fcb8720d5317437d869"
+  },
+  "26.9": {
+   "state": "supported",
+   "since": "2026-09-21",
+   "security_md_commit": "543631e63d6b7f88a6092fa231eea9cdc8e54129"
+  },
+  "26.10": {
+   "state": "supported",
+   "since": "2026-10-24",
+   "security_md_commit": "df15fe8945630254b70fc35adb38bd0774ac7bf7"
+  }
+ }
+}
