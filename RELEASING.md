@@ -100,15 +100,16 @@ The Go twin reads the version list rather than the version, so a dry run never a
 
 **The lock.** When #511's conditions hold, nothing in these workflows changes: a `2.N.N` tag already selects the stable mode below, and the maintainer's repository variable is what lets it publish. SDK `2.0.0` then ships from production, signed with the release key.
 
-The pull request that locks goes in this order, and its red checks before step 1 are expected, because they ask for what only step 1 publishes:
+The pull request that locks goes in this order, and its red checks before step 2 are expected, because they ask for what only step 2 publishes:
 
-1. The production channel's first publication, its libraries and its channel document, signed with the release key by the maintainer.
-2. On that pull request's branch, `lines.json` names the publication (the steps under "After the first publication" below), and its live `gen.py --check` re-runs and passes.
-3. It merges on the maintainer's word.
+1. If `lines.json` names a publication, which before the lock is a dev one, that pull request sets `source` back to the fixture marker by hand, in a commit of its own whose message gives the reason. The file is on a protected path, so that commit is reviewed, and this is the move `regen-where-settings.py` refuses.
+2. The production channel's first publication, its libraries and its channel document, signed with the release key on the maintainer's approval.
+3. `lines.json` names that publication (the steps under "After the first publication" below), and the pull request's live `gen.py --check` re-runs and passes. At the marker it exits 1.
+4. It merges on the maintainer's word.
 
-Before step 1 its live `gen.py --check` exits 4, because the channel's listing names no line. `gen.py --write` and `--check-page` read no registry, so neither waits for step 1.
+Before step 2 its live `gen.py --check` exits 4, because the channel's listing names no line. `gen.py --write` and `--check-page` read no registry, so neither waits for step 2.
 
-**A dev tag does not carry over.** A `source` that names a publication belongs to the channel it was read from, and the lock changes the channel. If `lines.json` names a dev publication, production's listing cannot name it: `gen.py --check` exits 5 `[no-document]` before step 1, and after step 1 `gen.py --print-document` exits 5 `[lines-source]`, so step 2 has no document to start from. The pull request that locks therefore sets `source` back to the fixture marker before step 1, by hand, because `regen-where-settings.py` refuses that move. While it is at the marker its `lines` must also be the fixture's, or `--check-page` names the difference, and that red ends at step 2 too.
+**Why step 1.** A `source` that names a publication belongs to the channel it was read from, and the lock changes the channel. Production's listing cannot name a dev publication: with one in `lines.json`, `gen.py --check` exits 5 `[no-document]` before step 2, and after step 2 `gen.py --print-document` exits 5 `[lines-source]`, so step 3 has no document to start from. While `source` is at the marker its `lines` must also be the fixture's, or `--check-page` names the difference, and that red ends at step 3 too.
 
 ## Stable releases (2.N.N)
 
@@ -183,7 +184,7 @@ uv run scripts/support-v2/gen.py --check
 **What these checks don't cover.** They guard a descriptive page and a generated list, and these limits are accepted on that basis. If the page or `lines.json` ever feeds a binding or an enforcement step, a real evaluator of the workflow's steps comes first.
 
 - The workflow's steps are guarded by `.github/**` being a protected path. `gen.py --selftest` checks that the steps are present, not what they do, so a weakened step (`|| true`, `continue-on-error`, a swapped gate) passes it.
-- A hand edit of `lines.json` from a published tag back to the fixture marker, while the listing is empty, can't be seen offline. The writer refuses that move, and the file is on a protected path.
+- A hand edit of `lines.json` from a published tag back to the fixture marker, while the listing is empty, can't be seen offline. The writer refuses that move, and the file is on a protected path. The lock makes this edit on purpose, as its own reviewed commit.
 - A hand edit of a per-tag where-settings list can't be judged offline, because its sha table is computed from the file it certifies. `regen-where-settings.py --control` compares against the producer's files by hand.
 - Before the first publication the live comparison is NOT JUDGED, and the registry answers an empty listing for any repository name, so a first publication under the wrong name stays NOT JUDGED until someone checks. Once `lines.json` names a published tag, an empty listing is a hard refusal.
 - The channel listing is unsigned and cached (60 s on staging, 300 s in production), so a new publication can stay invisible for that long, and a silent server cap on the listing can't be detected.

@@ -3000,7 +3000,7 @@ def _cli_selftest(check, tmp: Path, port: int, lines_doc, supported, fixture, pa
     document_tag = found_tag.group(1) if found_tag else ""
     document = {**fixture, "repository": f"s-{case}/chtypes/v1"}
     check(json.loads(r.stdout or "null") == document, "command line, --print-document: stdout is the signed document")
-    # The lock's second step starts here: with lines.json at the marker the first
+    # The lock's third step starts here: with lines.json at the marker the first
     # publication prints, and at a tag this channel never published, which is a dev tag
     # on production, nothing does.
     r = cli("--print-document, lines.json at the marker", ["--print-document", *selected(good, at_fixture)], EXIT_OK, case=case)
