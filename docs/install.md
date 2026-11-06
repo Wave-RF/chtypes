@@ -74,7 +74,7 @@ A spelling is two, three or four parts (`26.8`, `26.8.15`, `26.8.15.10`), with n
 
 Before anything lands, the command verifies a Sigstore bundle signed under the release key and the digest of every byte. `fetch --all` takes every line the registry publishes for this platform; `verify`, `list`, `where`, `resolve` (what a line resolves to, installing nothing) and `prune` (remove the builds newer ones supersede) are the other five subcommands. [`guides/artifacts.md`](guides/artifacts.md) has the whole story, including pinning for CI with `--lock` and `--frozen`.
 
-Pick a line you actually need. Each artifact is 160–300 MB on disk and about 120 MB resident once loaded, so fetch the versions your deployments run rather than all of them.
+Pick a line you actually need. Each artifact is 160–300 MB on disk and about 180–194 MiB resident once loaded, so fetch the versions your deployments run rather than all of them.
 
 **Or let the first open fetch it.** A registry fetches a missing version on demand when its `autofetch` option is on, or when `CHTYPES_AUTOFETCH=1` is set for the process. It is off by default, because a production process should not begin a 250 MB download inside a request.
 
