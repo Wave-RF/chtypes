@@ -487,6 +487,25 @@ def union_problems(docs: dict, lines: list[str], union_bytes: bytes) -> list[str
     return out
 
 
+def gitignore_lines(root: Path) -> list[str] | None:
+    path = root / ".gitignore"
+    return path.read_text(encoding="utf-8").splitlines() if path.exists() else None
+
+
+def ignored_problems(table: dict[str, str], gitignore: list[str] | None) -> list[str]:
+    """What is wrong with an IGNORED table: an entry that is not a dot file, has no
+    reason, or is no longer in .gitignore (its reason has gone stale)."""
+    out = []
+    for name, why in table.items():
+        if not name.startswith("."):
+            out.append(f"IGNORED {name!r}: not a dot file")
+        if not why.strip():
+            out.append(f"IGNORED {name!r}: no reason")
+        if gitignore is not None and name not in gitignore:
+            out.append(f"IGNORED {name!r}: no longer in .gitignore, so its reason is stale")
+    return out
+
+
 def load(directory: Path) -> tuple[dict[str, bytes], str]:
     """Every file of the directory but the README, whatever its name: reading only
     the names lines.json gives would make a stray list invisible. The only files
@@ -694,7 +713,17 @@ def selftest() -> int:
         on_disk("a dot file that only starts like an ignored one", lambda d: (d / ".DS_Store2").write_bytes(b"x\n"), "stray")
         # Each named entry is passed over, has a reason, and is still in .gitignore:
         # an entry whose reason has gone stale fails here.
-        gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines() if (ROOT / ".gitignore").exists() else None
+        fails.extend(ignored_problems(IGNORED, gitignore_lines(ROOT)))
+        for what, table, ignore_lines, want in (
+            ("not a dot file", {"notes": "r"}, [".DS_Store", "notes"], "not a dot file"),
+            ("no reason", {".x": " "}, [".x"], "no reason"),
+            ("gone from .gitignore", {".x": "r"}, [".DS_Store"], "stale"),
+        ):
+            planted += 1
+            if not any(want in x for x in ignored_problems(table, ignore_lines)):
+                fails.append(f"planted case 'IGNORED {what}': not reported")
+        if ignored_problems({".x": "r"}, [".x"]):
+            fails.append("positive control: a sound IGNORED table is reported")
         for ignored, why in IGNORED.items():
             planted += 1
             d = Path(tmp) / f"ignored-{planted}"
@@ -705,10 +734,6 @@ def selftest() -> int:
             (d / ignored).write_bytes(b"x\n")
             if verdict(*load(d))[0] != 0:
                 fails.append(f"IGNORED {ignored!r}: a copy holding it is not clean")
-            if not ignored.startswith(".") or not why.strip():
-                fails.append(f"IGNORED {ignored!r}: not a dot file, or no reason")
-            if gitignore is not None and ignored not in gitignore:
-                fails.append(f"IGNORED {ignored!r}: no longer in .gitignore, so its reason is stale")
         on_disk("lines.json empty on disk", lambda d: (d / LINES_FILE).write_bytes(dump({**doc, "lines": []})), "lines")
         on_disk("lines.json deleted on disk", lambda d: (d / LINES_FILE).unlink(), "lines")
         on_disk("the union deleted on disk", lambda d: (d / UNION).unlink(), "union")

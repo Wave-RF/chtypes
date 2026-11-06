@@ -1931,7 +1931,7 @@ def _selftest() -> int:
         ("a diff that follows renames", workflow.replace("--no-renames ", ""), "the gate's diff is not --no-renames"),
         ("the fixture out of the gate", workflow.replace("|tests/fixtures/support-v2/", ""), "the gate does not fire on tests/fixtures/support-v2/channel-statement.json"),
         ("the page out of the gate", workflow.replace("docs/support-v2\\.md|", ""), "the gate does not fire on docs/support-v2.md"),
-        ("the gate firing on README", workflow.replace("^(docs/", "^(README\\.md|docs/"), "the gate fires on README.md"),
+        ("the gate firing on README", workflow.replace("regen-where-settings\\.py)'", "regen-where-settings\\.py|README\\.md)'"), "the gate fires on README.md"),
     ):
         problems = _workflow_problems(planted)
         check(planted != workflow and any(named in x for x in problems), f"ci.yml: {what} is caught, as {named!r}")
@@ -1968,6 +1968,7 @@ def _selftest() -> int:
         ("a commit with a trailing newline", lambda d: d["lines"]["26.8"].update(security_md_commit="a" * 40 + "\n")),
         ("no commit", lambda d: d["lines"]["26.8"].pop("security_md_commit")),
         ("schema 1.0", lambda d: d.update(schema=1.0)),
+        ("a repository that is not a string", lambda d: d.update(repository=1)),
         ("a key with a trailing newline", lambda d: d["lines"].update({"26.8\n": d["lines"]["26.8"]})),
         ("a key with three parts", lambda d: d["lines"].update({"26.8.1": d["lines"]["26.8"]})),
         ("a key with a letter", lambda d: d["lines"].update({"x.8": d["lines"]["26.8"]})),
