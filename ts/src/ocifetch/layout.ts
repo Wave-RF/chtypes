@@ -1,10 +1,11 @@
 /**
  * The cache (`docs/guides/fetch-v1.md` §1): a standard OCI image layout
  * rooted at `CHTYPES_CACHE` or `${XDG_CACHE_HOME:-~/.cache}/chtypes/v1/` under
- * the v1 contract; under the ABI v2 dev channel (`./channel.ts`, rule r5) at
- * `<CHTYPES_CACHE>/v2-dev` or `${XDG_CACHE_HOME:-~/.cache}/chtypes/v2-dev/`,
- * with `verified.json` records of schema 2, so no released 1.x reader ever
- * reads it,
+ * the v1 contract; under the production generation-2 channel (`./channel.ts`)
+ * at `<CHTYPES_CACHE>/v2` or `${XDG_CACHE_HOME:-~/.cache}/chtypes/v2/` (the dev
+ * channel's, which a 2.0.0-dev SDK used and a test can select, is
+ * `.../v2-dev`, rule r5), with `verified.json` records of schema 2, so no
+ * released 1.x reader ever reads it,
  * `unpacked/sha256/<manifest-hex>/` beside it, each carrying its own
  * `verified.json` — the durable, **immutable once written** proof a
  * directory was verified, which `resolve_installed`/`--offline` trust

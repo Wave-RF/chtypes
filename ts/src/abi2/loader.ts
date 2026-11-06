@@ -1,5 +1,5 @@
 /**
- * The ABI v2 loader (plan §3, steps 1-7; the 2.0.0-dev binding, public issue #511). Hand-written (the plan's "about 200
+ * The ABI v2 loader (plan §3, steps 1-7; the ABI v2 binding, public issue #511). Hand-written (the plan's "about 200
  * lines per binding" FIRM piece); everything it reaches for — `rawDlopen`/
  * `rawDlsym`/`glibcVersionString` (`./libc.ts`), `defineRawFunctions`/
  * `rawCall` (`./raw.ts`), `DESCRIBED_SYMBOLS`/`SYMBOL`/`ABI_FINGERPRINT`/

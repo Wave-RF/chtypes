@@ -134,10 +134,12 @@ func goldensPlatform() (key, osArch string) {
 
 func TestGoldensV1Runner(t *testing.T) {
 	if os.Getenv(envLibrary) == "" {
-		// Against a registry, the runner fetches exactly as a non-test
-		// binary of this 2.0.0-dev SDK does: the ABI v2 dev channel, its
-		// staging base and its staging key only, whatever base the caller
-		// names (spec/abi-v2/docs.md, rule r6). The goldens are an OCI
+		// Against a registry, the runner fetches under the ABI v2 dev
+		// channel, selected explicitly (since the lock a non-test binary
+		// speaks the production channel; moving the runner there waits for
+		// a production build that carries goldens): its staging base and its
+		// staging key only, whatever base the caller names
+		// (spec/abi-v2/docs.md, rule r6). The goldens are an OCI
 		// referrer of the platform manifest signed with that key, and the
 		// highest verified revision wins (docs/guides/goldens-v1.md).
 		t.Cleanup(ocifetch.UseDevChannelForTests())

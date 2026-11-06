@@ -1,12 +1,14 @@
 """The public API under the ABI v2 dev channel (spec/abi-v2/docs.md, rules r5 and
-r6), as a user's process speaks it (no seam is active outside the directories
-that install one): `Registry` refuses a lock, frozen or update request as the
+r6), as a 2.0.0-dev SDK's process spoke it (every test here selects the dev
+channel with `use_dev_channel_for_tests`; since the lock a process speaks the
+production channel by default): `Registry` refuses a lock, frozen or update request as the
 caller's misuse before any request, and `FetchOptions` ignores every base, trust
 and unsigned override, naming each once. Needs no library and no network.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -16,6 +18,17 @@ from chtypes import FetchOptions, Registry, UsageError
 from chtypes._ocifetch import _channel
 from chtypes._ocifetch import _constants as C
 from chtypes._ocifetch._dsse import fixture_trusted_keys
+
+
+@pytest.fixture(autouse=True)
+def _dev_channel() -> Iterator[None]:
+    """These tests exercise the dev channel's own rules, which a 2.0.0-dev SDK
+    spoke by default; since the lock they select it explicitly."""
+    restore = _channel.use_dev_channel_for_tests()
+    try:
+        yield
+    finally:
+        restore()
 
 
 @pytest.fixture(autouse=True)
@@ -38,7 +51,7 @@ def no_network(monkeypatch: pytest.MonkeyPatch) -> list[object]:
     return seen
 
 
-def test_this_process_speaks_the_dev_channel() -> None:
+def test_a_test_run_that_selects_the_dev_channel_speaks_it() -> None:
     assert _channel.channel_name() == "v2-dev" and _channel.abi() == 2
 
 

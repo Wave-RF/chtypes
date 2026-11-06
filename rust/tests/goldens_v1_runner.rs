@@ -32,10 +32,13 @@
 //! `CHTYPES_GOLDENS_REPORT` and `CHTYPES_GOLDENS_DOCUMENT`. Unset, the runner
 //! skips LOUDLY by name and exits 0, so a plain `cargo test` stays green.
 //!
-//! THE DEV CHANNEL. This is the 2.0.0-dev binding (ABI v2): against a registry
-//! it fetches only from the staging dev channel under the staging key, and a
-//! build with no goldens referrer is a skip by name ("no v2-dev goldens
-//! published yet"), never a pass (`fetch_inputs`).
+//! THE DEV CHANNEL. A build now speaks the production generation-2 channel by
+//! default, which has no builds yet. Until it has, this runner selects the dev
+//! channel explicitly (`use_dev_channel_for_tests`, a follow-up moves it once
+//! production has builds): against a registry it fetches only from the staging
+//! dev channel under the staging key, and a build with no goldens referrer is a
+//! skip by name ("no v2-dev goldens published yet"), never a pass
+//! (`fetch_inputs`).
 //!
 //! PROVING IT BEFORE A REAL ARTIFACT EXISTS (the stub). Two overrides bypass the
 //! fetch: `CHTYPES_GOLDENS_LIBRARY` (a library to load, unverified) with
@@ -204,13 +207,15 @@ fn host_platform_key() -> String {
 /// goldens, which takes the PLATFORM manifest digest and does the referrer
 /// selection itself: this runner does no lookup of its own.
 ///
-/// This 2.0.0-dev binding fetches exactly as a user's build does: the ABI v2
-/// dev channel, its staging base and its staging key only, whatever base
+/// This runner fetches under the ABI v2 dev channel, selected explicitly for
+/// this thread (see the header): its staging base and its staging key only, whatever base
 /// `CHTYPES_GOLDENS_REGISTRY_BASE` names (spec/abi-v2/docs.md, rule r6; the
 /// fetch layer warns once that it ignores it). A published build with no
 /// goldens referrer (the first v2-dev builds ship none) is a skip BY NAME,
 /// never a pass: `Ok(None)`, and the workflow reads the line.
 fn fetch_inputs() -> Result<Option<Inputs>, String> {
+    // The guard lives to the end of this function, which makes every fetch.
+    let _dev = ocifetch::channel::use_dev_channel_for_tests();
     let base = std::env::var(ENV_REGISTRY_BASE).map_err(|e| e.to_string())?;
     let version = std::env::var(ENV_VERSION).map_err(|e| e.to_string())?;
     let platform = std::env::var(ENV_PLATFORM).map_err(|e| e.to_string())?;

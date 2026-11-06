@@ -54,4 +54,4 @@ def test_seam_opens_only_while_pytest_runs_a_test(
     got = _run(import_pytest=import_pytest, current_test=current_test)
     assert got.startswith(want), got
     if want == "REFUSED":
-        assert "rule r6" in got, got
+        assert "speaks only the production channel" in got, got

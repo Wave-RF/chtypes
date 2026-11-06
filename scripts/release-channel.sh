@@ -12,8 +12,9 @@
 #   scripts/release-channel.sh get <rust|ts|python|go> <tag> <NAME>
 #       print one constant of the mode the tag selects
 #   scripts/release-channel.sh get <NAME>
-#       the same, of the dev mode: the channel every non-test binary of this
-#       branch speaks until the lock (scripts/fetch-v1/cache-interop.py reads it)
+#       the same, of the stable mode: the production channel every non-test
+#       binary of this branch speaks since the lock (it was the dev mode
+#       before it; scripts/fetch-v1/cache-interop.py reads it)
 #   scripts/release-channel.sh go-module <go.mod>
 #       refuse unless that go.mod's module path is exactly the one this branch
 #       releases
@@ -724,7 +725,8 @@ if [ "${1:-}" = "--selftest" ]; then
   grep -q "^#define CHS_ABI_VERSION $ABI\$" "$ROOT/$HEADER" || { echo "selftest FAIL: $HEADER is not generation $ABI" >&2; exit 1; }
   echo "selftest ok: $HEADER is generation $ABI"; n=$((n + 1))
   ok "get, of the dev mode, by its tag" "dev" bash "$me" get ts ts/v2.0.0-dev.3 NPM_DIST_TAG
-  ok "get <NAME> alone is the dev mode (cache-interop.py)" "v2-dev" bash "$me" get CACHE_SUBROOT
+  ok "get <NAME> alone is the stable mode since the lock (cache-interop.py)" "v2" bash "$me" get CACHE_SUBROOT
+  ok "get <NAME> alone names the production registry" "https://registry.wavehouse.dev/chtypes/v2" bash "$me" get REGISTRY_BASE
   ok "the dev mode is a pre-release" "1" bash "$me" get python python/v2.0.0-dev.3 PRERELEASE
 
   # ---- The stable mode: the production generation-2 channel, from constants.json ----
@@ -978,9 +980,9 @@ case "$cmd" in
   tag) [ "$#" = 2 ] || rc_fail "usage: tag <rust|ts|python|go> <tag>"; channel_tag "$1" "$2" ;;
   get)
     case "$#" in
-      1) channel_select dev; name="$1" ;;
+      1) channel_select stable; name="$1" ;;
       3) channel_tag "$1" "$2" > /dev/null; name="$3" ;;
-      *) rc_fail "usage: get <rust|ts|python|go> <tag> <NAME>, or get <NAME> for the dev mode" ;;
+      *) rc_fail "usage: get <rust|ts|python|go> <tag> <NAME>, or get <NAME> for the stable mode" ;;
     esac
     case "$name" in
       MODE | CHANNEL | VERSION_RE | VERSION_FORM | PRERELEASE | NPM_DIST_TAG | DEFAULT_MAJOR | ABI | HEADER | REGISTRY_BASE | KEY | KEY_ID | CACHE_SUBROOT | RECORD_SCHEMA | FP_ALIAS | READBACK_WINDOW | GO_MODULE | GO_LATEST_MODULE | GO_DEFAULT_MODULE | NPM_PACKAGE | PYPI_PROJECT | CRATE | LOCKED_FP_VARIABLE)

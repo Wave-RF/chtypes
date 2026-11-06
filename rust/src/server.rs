@@ -32,7 +32,8 @@ pub struct ServerProfile {
     /// layer. `Some` of an empty map is sent as `{}`.
     pub settings: Option<BTreeMap<String, String>>,
     /// The server's `<macros>`, which a Replicated engine's ZooKeeper path and
-    /// replica name expand. `None` omits it, and the server's macros are
+    /// replica name read (validated, and applied only by a build that advertises
+    /// `server_profile.macros`). `None` omits it, and the server's macros are
     /// UNKNOWN: a schema whose engine reads one is declined. `Some`, even of an
     /// empty map, is sent (`{}` when empty) and is the server's COMPLETE set
     /// (its whole `system.macros`): a macro the set lacks is then the server's

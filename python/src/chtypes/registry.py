@@ -91,13 +91,12 @@ class FetchOptions:
     falls back to the fetch layer's own defaults and environment
     (`CHTYPES_CACHE`, `CHTYPES_DOWNLOAD_TOKEN`).
 
-    2.0.0-dev (spec/abi-v2/docs.md, rules r5 and r6): this SDK fetches only from
-    the staging dev channel and trusts only its key. `bases`, `trusted_keys` and
-    `allow_unsigned`, and `CHTYPES_ARTIFACTS_URL`, `CHTYPES_TRUSTED_KEYS` and
-    `CHTYPES_ALLOW_UNSIGNED`, are ignored, each with one warning. `frozen`,
-    `lock_path`, `lock_write` and `update` are refused before any network call,
-    as a `UsageError`. A `cache_dir` (or `CHTYPES_CACHE`) is used through its
-    `v2-dev` subroot.
+    ABI v2 (docs/guides/fetch-v1.md, "Generation 2 after the lock"): this SDK
+    fetches from the production channel, https://registry.wavehouse.dev/chtypes/v2,
+    under the release key. `bases`, `trusted_keys`, `allow_unsigned`, `frozen`,
+    `lock_path`, `lock_write` and `update` are honored, as are
+    `CHTYPES_ARTIFACTS_URL`, `CHTYPES_TRUSTED_KEYS` and `CHTYPES_ALLOW_UNSIGNED`.
+    A `cache_dir` (or `CHTYPES_CACHE`) is used through its `v2` subroot.
     """
 
     bases: Sequence[str] = ()
@@ -177,9 +176,9 @@ class FetchOptions:
 
 def cache_root(options: FetchOptions | None = None) -> Path:
     """The cache root a fetch, list or `chtypes where` with `options` would use:
-    `options.cache_dir`, else `CHTYPES_CACHE` (each used through its `v2-dev`
-    subroot, spec/abi-v2/docs.md rule r5), else
-    `${XDG_CACHE_HOME:-~/.cache}/chtypes/v2-dev`.
+    `options.cache_dir`, else `CHTYPES_CACHE` (each used through its `v2`
+    subroot, docs/guides/fetch-v1.md, "Generation 2 after the lock"), else
+    `${XDG_CACHE_HOME:-~/.cache}/chtypes/v2`.
 
     It is the fetch layer's own resolution, `search_dirs(options)[0]`. It
     creates nothing and reads no cache."""
@@ -494,9 +493,11 @@ def _check_revocation(resolved: Resolved, options: Options) -> None:
 
 
 def _refuse_pinning(options: Options) -> None:
-    """The fetch layer's contract check, ahead of everything else: a 2.0.0-dev
-    SDK refuses a lock, frozen or update request as the caller's misuse, before
-    any network call, and names each ignored override once (rule r6)."""
+    """The fetch layer's contract check, ahead of everything else: under the dev
+    channel (a 2.0.0-dev SDK's, reachable only from a test run) a lock, frozen
+    or update request is the caller's misuse, refused before any network call,
+    and each ignored override is named once (rule r6); under the production
+    channel nothing is refused."""
     try:
         _fetch_channel.enforce(options)
     except _fetch_channel.PinningRefusedError as exc:

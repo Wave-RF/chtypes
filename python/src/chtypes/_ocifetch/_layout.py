@@ -60,11 +60,12 @@ def resolve_cache_root(cache_dir: str | os.PathLike[str] | None = None) -> Path:
     """`CHTYPES_CACHE` (or an explicit override) names the cache directory
     ITSELF, not a parent `chtypes/` to append to (constants: `cache.root_template`).
 
-    The active fetch contract decides the rest (_channel.py): under the dev
-    channel an explicit cache, from the environment or the option, is used
-    through its subroot `<cache>/v2-dev`, never as a whole layout, which a 1.x
-    binding uses (rule r5, a MUST), and the default root is
-    `${XDG_CACHE_HOME:-~/.cache}/chtypes/v2-dev`. The result is absolute (#541)."""
+    The active fetch contract decides the rest (_channel.py): under a
+    generation-2 channel an explicit cache, from the environment or the option,
+    is used through its subroot (`<cache>/v2`, or `<cache>/v2-dev` on the dev
+    channel), never as a whole layout, which a 1.x binding uses (rule r5, a
+    MUST), and the default root is `${XDG_CACHE_HOME:-~/.cache}/chtypes/v2`
+    (or `.../v2-dev`). The result is absolute (#541)."""
     channel = _channel.active()
     explicit = os.fspath(cache_dir) if cache_dir is not None else ""
     if not explicit:

@@ -1,10 +1,10 @@
 # Go API reference
 
 ```go
-import "github.com/wave-rf/chtypes/go/chtypes"
+import "github.com/wave-rf/chtypes/go/v2/chtypes"
 ```
 
-Module path `github.com/wave-rf/chtypes/go`: lowercase, the Go norm, frozen since the first tag; what stays provisional until 1.0 is in [`support-v1.md`](../support-v1.md#pre-10). `go doc github.com/wave-rf/chtypes/go/chtypes` is the same surface with the full prose; every exported symbol carries its contract.
+Module path `github.com/wave-rf/chtypes/go/v2`: lowercase, the Go norm, with the `/v2` Go's major-version rule requires for SDK 2.x (`github.com/wave-rf/chtypes/go` is the 1.x module); what stayed provisional until 1.0 is in [`support-v1.md`](../support-v1.md#pre-10). `go doc github.com/wave-rf/chtypes/go/v2/chtypes` is the same surface with the full prose; every exported symbol carries its contract.
 
 This page lists only what is Go's own: the spellings, the options and the error types. The operations, the document shapes, the vocabularies and the error classes are the same in all four bindings and are specified once, in [`bindings-v1.md`](bindings-v1.md); the fetch wire contract is [`fetch-v1.md`](../guides/fetch-v1.md). Known limits of 1.0 are in [Known gaps in 1.0](../limitations.md#known-gaps-in-10).
 
@@ -66,7 +66,7 @@ The library carries no exit status. `ErrorCode` and its `Code…` constants are 
 `go/cmd/chtypes` is the artifact tool every binding spells identically, over the fetch layer of [`fetch-v1.md`](../guides/fetch-v1.md). It runs without installing anything:
 
 ```sh
-go run github.com/wave-rf/chtypes/go/cmd/chtypes@latest fetch 26.8
+go run github.com/wave-rf/chtypes/go/v2/cmd/chtypes@latest fetch 26.8
 ```
 
 | command                          | meaning                                                                                                                                                                                                |

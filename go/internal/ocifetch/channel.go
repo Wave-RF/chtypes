@@ -1,8 +1,12 @@
 package ocifetch
 
-// channel.go — the fetch contract this build speaks. A 2.0.0-dev SDK speaks
-// the ABI v2 dev channel (spec/abi-v2/docs.md, rules r5 and r6), which is the
-// v1 fetch contract (docs/guides/fetch-v1.md) narrowed in five ways:
+// channel.go — the fetch contract this build speaks. Every non-test binary of
+// this module speaks the production generation-2 channel (prodV2Channel;
+// docs/guides/fetch-v1.md, "Generation 2 after the lock"): the v1 fetch
+// contract with v2 values. A 2.0.0-dev SDK spoke the ABI v2 dev channel
+// (spec/abi-v2/docs.md, rules r5 and r6), which stays here, reachable only
+// from a test binary (UseDevChannelForTests), and is the v1 fetch contract
+// (docs/guides/fetch-v1.md) narrowed in five ways:
 //
 //   - it fetches ONLY from DevChannelBase and trusts ONLY the staging key
 //     (DevKeyHex, id DevKeyID); the release key is not in its trust list;
@@ -106,8 +110,8 @@ type channel struct {
 	revocation bool
 }
 
-// devChannel is what a 2.0.0-dev SDK speaks, and what every non-test binary of
-// this module speaks.
+// devChannel is what a 2.0.0-dev SDK speaks. Since the lock only a test binary
+// selects it (UseDevChannelForTests, AllowOverridesForTests).
 var devChannel = channel{
 	name:         "v2-dev",
 	abi:          DevABIGeneration,
@@ -141,9 +145,8 @@ var fetchV1Channel = channel{
 // after the lock: the v1 contract with v2 values, from the generated
 // constants (docs/guides/fetch-v1.md, "Generation 2 after the lock"). It
 // trusts the release key, honors every override and pin, and has no alias step
-// and no own-fingerprint filter. It is NOT the default; only
-// UseProdV2ForTests selects it, until the lock change makes it active()'s
-// fallback.
+// and no own-fingerprint filter. It is active()'s fallback: what every non-test
+// binary speaks since the lock.
 var prodV2Channel = channel{
 	name:         ProdV2Name,
 	abi:          ProdV2ABIGeneration,
@@ -160,18 +163,18 @@ var prodV2Channel = channel{
 
 var current atomic.Pointer[channel]
 
-// active is the contract this process fetches under: the dev channel, unless
-// a test binary selected another.
+// active is the contract this process fetches under: the production
+// generation-2 channel, unless a test binary selected another.
 func active() *channel {
 	if c := current.Load(); c != nil {
 		return c
 	}
-	return &devChannel
+	return &prodV2Channel
 }
 
 func testOnly(what string) {
 	if !testing.Testing() {
-		panic("ocifetch: " + what + " is test-only; a 2.0.0-dev SDK has no override (spec/abi-v2/docs.md, rule r6)")
+		panic("ocifetch: " + what + " is test-only: a non-test binary speaks only the production channel")
 	}
 }
 
@@ -317,7 +320,7 @@ func aheadMessage(own string, pred map[string]any) string {
 }
 
 // UseDevChannelForTests makes this TEST binary speak the dev channel exactly
-// as a non-test binary does (undoing either function above, for a test that
+// as a 2.0.0-dev SDK did (undoing either function above, for a test that
 // checks the dev channel itself). It returns the restore function.
 func UseDevChannelForTests() (restore func()) {
 	testOnly("UseDevChannelForTests")
@@ -325,7 +328,7 @@ func UseDevChannelForTests() (restore func()) {
 	return use(&c)
 }
 
-// ChannelName is the fetch contract this process speaks: "v2-dev" in every
+// ChannelName is the fetch contract this process speaks: "v2" in every
 // non-test binary.
 func ChannelName() string { return active().name }
 

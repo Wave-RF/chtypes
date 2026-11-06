@@ -10,11 +10,11 @@
  *   CHTYPES_TARGET           `platform`: one of the three platform keys
  *   CHTYPES_REGISTRY         retired: one warning, otherwise ignored
  *
- * This is a 2.0.0-dev SDK: its fetch contract (`./ocifetch/channel.ts`, rule
- * r6) honors no trust or unsigned override, so `CHTYPES_TRUSTED_KEYS` and
- * `CHTYPES_ALLOW_UNSIGNED` are not read into options here; the fetch layer
- * names each one it ignores, once and loudly. A test that selected the v1
- * contract reads them as v1 does.
+ * The production channel (`./ocifetch/channel.ts`) honors every override, so
+ * all of them are read into options here. Under the dev channel (a 2.0.0-dev
+ * SDK's, selectable by a test; rule r6), which honors no trust or unsigned
+ * override, `CHTYPES_TRUSTED_KEYS` and `CHTYPES_ALLOW_UNSIGNED` are not read
+ * into options; the fetch layer names each one it ignores, once and loudly.
  */
 
 import { usageError } from './abi2/index.js';

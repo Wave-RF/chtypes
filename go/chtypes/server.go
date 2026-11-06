@@ -29,7 +29,8 @@ type ServerProfile struct {
 	// settings layer. A non-nil empty map is sent as {}.
 	Settings map[string]string
 	// Macros is the server's <macros>, which a Replicated engine's ZooKeeper
-	// path and replica name expand. nil omits it, and the server's macros are
+	// path and replica name read. They are validated, and applied only by a
+	// build that advertises server_profile.macros. nil omits it, and the server's macros are
 	// UNKNOWN: a schema whose engine reads one is declined. A non-nil map, even
 	// an empty one, is sent ({} when empty) and is the server's COMPLETE set
 	// (its whole system.macros): a macro the set lacks is then the server's own

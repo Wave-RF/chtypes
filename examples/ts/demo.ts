@@ -788,7 +788,7 @@ function section11(lib: Library): void {
   note('a deployment that declared date_time_input_format=best_effort takes the ISO-8601');
   note('timestamp; a stock compile answers for a server the tenant does not have.');
   note('Discovering the deployment\'s settings is what closes that gap (the caller supplies');
-  note('them: 1.0 has no call that reads a server\'s settings).');
+  note('them: 2.0 has no call that reads a server\'s settings; docs/limitations.md, Known gaps).');
 }
 
 // ---------------------------------------------------------------------------
@@ -1121,8 +1121,8 @@ function section17(lib: Library): void {
 // DEFAULT, and binds a zone-less DateTime, differently. Without a server the
 // library refuses timezone() as a server constant it cannot know.
 // LOOK FOR: the row fed only `k`, and `tz` filled by the server's own zone;
-// the description naming the server. A build that does not compile on a server
-// yet DECLINES, and this section then says SKIPPED by name.
+// the description naming the server. A library that declines a server
+// profile makes this section say SKIPPED by name; a library that supports it compiles on one.
 // C API: chs_server_create, chs_server_free, and chs_schema_create's server.
 // ---------------------------------------------------------------------------
 function section18(lib: Library): void {

@@ -103,6 +103,8 @@ Safe across threads at every level ([§3](bindings-v1.md)). `ctypes` releases th
 
 Create a `CancelToken` and pass it as `cancel=` to `Schema.row`, `rows`, `insert`, `parse_block`, `Filter.rows` or `Library.compile_table`; `tok.cancel()` from any thread makes every call holding the token raise `CallCanceledError` (not `asyncio.CancelledError`). A call that has already passed the library's last check point returns its complete answer. A token is one-shot. Ctrl-C cannot interrupt a call on the main thread, because Python delivers the signal only when the call returns: run the call on a worker thread, or with `asyncio.to_thread`, and call `tok.cancel()` from the main thread or on `asyncio.CancelledError`. `Filter.eval` over a block is not cancelable. The shape and the rules are in [`bindings-v1.md`](bindings-v1.md#cancellation-and-the-typescript-async-calls).
 
-## Known gaps in 1.0
+<a id="known-gaps-in-10"></a>
 
-What the 1.0 binding does not do, what happens instead, and the workaround for each are in [`limitations.md`](../limitations.md#known-gaps-in-10).
+## Known gaps in 2.0
+
+What the binding does not do, what happens instead, and the workaround for each are in [`limitations.md`](../limitations.md#known-gaps-in-10).

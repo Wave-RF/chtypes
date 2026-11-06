@@ -189,4 +189,4 @@ What you do close is the handles you open: a schema, a filter or a block, whose 
 
 - [`artifacts.md`](artifacts.md#loading) — what the loader checks before a library is usable.
 - [`discovery.md`](discovery.md) — how you learn which version a given deployment actually needs.
-- [`../support-v1.md`](../support-v1.md) — what is known about which lines exist to be loaded.
+- [`../support-v2.md`](../support-v2.md) — what is known about which lines exist to be loaded.

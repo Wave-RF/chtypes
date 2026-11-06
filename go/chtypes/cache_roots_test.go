@@ -1,7 +1,9 @@
 package chtypes_test
 
 // cache_roots_test.go — public issue #530: CacheRoot and SearchDirs report the
-// resolution the fetch layer runs, and create nothing.
+// resolution the fetch layer runs, and create nothing. Every test here runs
+// under the production generation-2 channel, the default a user's process
+// speaks since the lock (this package's TestMain selects the dev channel).
 
 import (
 	"encoding/json"
@@ -12,10 +14,12 @@ import (
 	"testing"
 
 	"github.com/wave-rf/chtypes/go/v2/chtypes"
+	"github.com/wave-rf/chtypes/go/v2/internal/ocifetch"
 )
 
 func clearCacheEnv(t *testing.T) {
 	t.Helper()
+	t.Cleanup(ocifetch.UseProdV2ForTests())
 	t.Setenv("CHTYPES_CACHE", "")
 	t.Setenv("XDG_CACHE_HOME", "")
 }
@@ -28,18 +32,18 @@ func TestCacheRootPrecedence(t *testing.T) {
 
 	clearCacheEnv(t)
 	t.Setenv("HOME", home)
-	if got, err := chtypes.CacheRoot(chtypes.FetchOptions{}); err != nil || got != filepath.Join(home, ".cache", "chtypes", "v2-dev") {
+	if got, err := chtypes.CacheRoot(chtypes.FetchOptions{}); err != nil || got != filepath.Join(home, ".cache", "chtypes", "v2") {
 		t.Errorf("~/.cache: %q, %v", got, err)
 	}
 	t.Setenv("XDG_CACHE_HOME", xdg)
-	if got, err := chtypes.CacheRoot(chtypes.FetchOptions{}); err != nil || got != filepath.Join(xdg, "chtypes", "v2-dev") {
+	if got, err := chtypes.CacheRoot(chtypes.FetchOptions{}); err != nil || got != filepath.Join(xdg, "chtypes", "v2") {
 		t.Errorf("XDG_CACHE_HOME: %q, %v", got, err)
 	}
 	t.Setenv("CHTYPES_CACHE", env)
-	if got, err := chtypes.CacheRoot(chtypes.FetchOptions{}); err != nil || got != filepath.Join(env, "v2-dev") {
+	if got, err := chtypes.CacheRoot(chtypes.FetchOptions{}); err != nil || got != filepath.Join(env, "v2") {
 		t.Errorf("CHTYPES_CACHE: %q, %v", got, err)
 	}
-	if got, err := chtypes.CacheRoot(chtypes.FetchOptions{CacheDir: explicit}); err != nil || got != filepath.Join(explicit, "v2-dev") {
+	if got, err := chtypes.CacheRoot(chtypes.FetchOptions{CacheDir: explicit}); err != nil || got != filepath.Join(explicit, "v2") {
 		t.Errorf("explicit: %q, %v", got, err)
 	}
 }
@@ -51,8 +55,8 @@ func TestSearchDirsOrderAndSystemDirs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sub := filepath.Join(cache, "v2-dev")
-	if want := []string{sub, "/usr/local/share/chtypes/v2-dev", "/opt/chtypes/v2-dev"}; !reflect.DeepEqual(defaults, want) {
+	sub := filepath.Join(cache, "v2")
+	if want := []string{sub, "/usr/local/share/chtypes/v2", "/opt/chtypes/v2"}; !reflect.DeepEqual(defaults, want) {
 		t.Errorf("default system dirs: %v, want %v", defaults, want)
 	}
 	custom, err := chtypes.SearchDirs(chtypes.FetchOptions{CacheDir: cache, SystemDirs: []string{"/b", "/a"}})

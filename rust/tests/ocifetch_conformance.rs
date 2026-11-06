@@ -293,9 +293,10 @@ const RUNNER_TRANSPORTS: &[&str] = &["file", "http", "registry"];
 #[test]
 fn conformance() {
     // The fetch-v1 cases specify the v1 contract, and this run speaks it: the
-    // ABI v2 dev channel this 2.0.0-dev binding ships narrows it (rules r5 and
-    // r6), and its own rules are tests/devchannel.rs. The seam is test-only and
-    // per thread; every case runs on this one.
+    // production generation-2 channel this binding ships (its default) is the
+    // second corpus below, and the dev channel's own rules (rules r5 and r6)
+    // are tests/devchannel.rs. The seam is test-only and per thread; every
+    // case runs on this one.
     {
         let _v1 = ocifetch::channel::use_fetch_v1_for_tests();
         run_corpus(&RUN_V1);

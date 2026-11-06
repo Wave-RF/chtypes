@@ -11,17 +11,19 @@
 //! adapts it and runs loader steps 1 to 7 against the stub. A second layout
 //! whose signed statement disagrees with the library must be refused at step 5.
 //!
-//! WHY A UNIT TEST. This 2.0.0-dev SDK honors no trust override (rule r6,
-//! spec/abi-v2/docs.md): the test key is reachable only through the fetch
-//! layer's test-only seam (`channel::allow_overrides_for_tests`, which exists
-//! under `cfg(test)` alone), and an integration test links the crate as an
-//! ordinary dependency, where no seam exists. So this suite is a unit-test
+//! WHY A UNIT TEST. These cases run under the dev channel, which honors no
+//! trust override (rule r6, spec/abi-v2/docs.md; the production channel does,
+//! but no published build carries the test key): the test key is reachable
+//! only through the fetch layer's test-only seam
+//! (`channel::allow_overrides_for_tests`, which exists under `cfg(test)`
+//! alone), and an integration test links the crate as an ordinary dependency,
+//! where no seam exists. So this suite is a unit-test
 //! module of the crate (src/lib.rs declares it with `#[path]`), kept under
 //! tests/unit/ so that cargo does not build it as an integration test of its own.
 //! The layout is written where the fetch layer reads the explicit cache: its
 //! `v2-dev` subroot (rule r5), asked of the fetch layer itself. The last test
-//! drops the seam and proves the dev channel exactly as a user gets it refuses
-//! the same layout, the test key named as an option notwithstanding.
+//! selects the plain dev channel (no overrides) and proves it refuses the same
+//! layout, the test key named as an option notwithstanding.
 //!
 //! `CHTYPES_ABI2_STUBS` unset: this suite skips LOUDLY by name and passes.
 
@@ -421,8 +423,8 @@ fn a_signed_layout_resolves_adapts_and_loads_and_a_mismatch_is_refused() {
     let _ = std::fs::remove_dir_all(&work);
 }
 
-/// Rule r6, as a user gets it: under the dev channel exactly (no test seam),
-/// the `trusted_keys` option naming the test key is IGNORED, with one warning,
+/// Rule r6, as a 2.0.0-dev SDK had it: under the dev channel exactly (its own
+/// seam, with no overrides), the `trusted_keys` option naming the test key is IGNORED, with one warning,
 /// so the layout the test above opens is refused as untrusted (nothing
 /// installed answers the request).
 #[test]

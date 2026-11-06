@@ -1,8 +1,8 @@
 /**
  * The ABI v2 dev channel (`src/ocifetch/channel.ts`; `spec/abi-v2/docs.md`,
- * rules r5 and r6), tested as every process but a test speaks it: this file
- * selects it with `useDevChannelForTests` (the default already; said
- * explicitly), and only the control of the last case switches to the v1
+ * rules r5 and r6), which a 2.0.0-dev SDK spoke: this file selects it with
+ * `useDevChannelForTests` (since the lock the default is the production
+ * channel, so a test of the dev channel says so), and only the control of the last case switches to the v1
  * contract for its own duration. Nothing here reaches the network: every
  * refusal is proven to come before the first request, and every cache read is
  * offline. Go's `go/internal/ocifetch/devchannel_test.go` is the same test.

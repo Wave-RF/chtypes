@@ -74,7 +74,13 @@ func DevFingerprintMessage(sdk, library string) string {
 // devFingerprintMessage is the r6 message for a fingerprint refusal while
 // this generation's description is unstable (a dev SDK), and false otherwise.
 func devFingerprintMessage(e *LoadError) (string, bool) {
-	if e.Reason != "fingerprint" || ChsAbiStability != "unstable" {
+	return devFingerprintMessageAt(ChsAbiStability, e)
+}
+
+// devFingerprintMessageAt is devFingerprintMessage at a given stability, so a
+// test selects either side explicitly, whichever the description declares.
+func devFingerprintMessageAt(stability string, e *LoadError) (string, bool) {
+	if e.Reason != "fingerprint" || stability != "unstable" {
 		return "", false
 	}
 	return DevFingerprintMessage(e.Want, e.Got), true

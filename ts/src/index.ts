@@ -1,8 +1,9 @@
 /**
  * `@wavehouse/chtypes`: ClickHouse's own type system, per version, over the
- * C ABI. This is the 2.0.0-dev binding: it speaks ABI v2, whose description is
- * UNSTABLE (`spec/abi-v2/docs.md`), fetches only from the staging dev channel,
- * and is not for production (public issue #511). `docs/reference/bindings-v1.md`
+ * C ABI. This is the ABI v2 binding: it speaks the locked ABI v2 description
+ * (`docs/reference/abi-v2.md`) and fetches from the production channel,
+ * https://registry.wavehouse.dev/chtypes/v2 under the release key
+ * (`docs/guides/fetch-v1.md`, "Generation 2 after the lock"). `docs/reference/bindings-v1.md`
  * is the shape it keeps; every vocabulary gains rule r3's unknown(n) member,
  * told apart by its `*Known` function.
  *

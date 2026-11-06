@@ -135,19 +135,24 @@ run_binding() {
 
 # expected_for <binding> <scratch>: the expectation file for one binding. A
 # binding that speaks ABI v2 (spec/binding-majors.json, scripts/abi-v1/majors.py)
-# reads an explicit cache through its v2-dev subroot (spec/abi-v2/docs.md, rule
-# r5, a MUST), so its `where` names <DIR>/v2-dev, and `where --all` names the
-# v2-dev system directories too; every other row is shared.
+# speaks the production generation-2 channel by default since the lock, and
+# reads an explicit cache through that channel's subroot (spec/abi-v2/docs.md,
+# rule r5, a MUST), so its `where` names <DIR>/<leaf>, and `where --all` names
+# that channel's system directories too; every other row is shared. The leaf
+# and the directories are `prod_v2` of spec/fetch-v1/constants.json, the
+# values every binding is generated from, never typed here.
 expected_for() {
-  local binding="$1" scratch="$2" major=1
+  local binding="$1" scratch="$2" major=1 leaf sys1 sys2
   case "$binding" in go | python | ts | rust) major="$(python3 "$root/scripts/abi-v1/majors.py" get "$binding")" ;; esac
   if [ "$major" = "1" ]; then
     printf '%s\n' "$expected"
     return
   fi
+  read -r leaf sys1 sys2 < <(python3 -c 'import json, sys; p = json.load(open(sys.argv[1]))["prod_v2"]; d = p["system_dirs"]; assert len(d) == 2, d; print(p["cache_leaf"], d[0], d[1])' "$root/spec/fetch-v1/constants.json")
+  [ -n "$sys2" ] || { echo "check-cli-parity: could not read prod_v2 from spec/fetch-v1/constants.json" >&2; return 2; }
   sed -E \
-    -e 's#^(where(-strict)? [|] exit=0 [|] stderr=empty [|] stdout=)<DIR>[|]$#\1<DIR>/v2-dev|#' \
-    -e 's#^(where-all [|] exit=0 [|] stderr=empty [|] stdout=)<DIR>[|]/usr/local/share/chtypes/v1[|]/opt/chtypes/v1[|]$#\1<DIR>/v2-dev|/usr/local/share/chtypes/v2-dev|/opt/chtypes/v2-dev|#' \
+    -e "s#^(where(-strict)? [|] exit=0 [|] stderr=empty [|] stdout=)<DIR>[|]\$#\\1<DIR>/$leaf|#" \
+    -e "s#^(where-all [|] exit=0 [|] stderr=empty [|] stdout=)<DIR>[|]/usr/local/share/chtypes/v1[|]/opt/chtypes/v1[|]\$#\\1<DIR>/$leaf|$sys1|$sys2|#" \
     "$expected" >"$scratch/expected-$binding.txt"
   printf '%s\n' "$scratch/expected-$binding.txt"
 }
@@ -157,7 +162,7 @@ compare() { # compare <binding> <scratch>
   want="$(expected_for "$binding" "$scratch")"
   run_binding "$binding" "$scratch" >"$got"
   if diff -u "$want" "$got" >"$scratch/diff-$binding.txt"; then
-    echo "check-cli-parity: $binding matches scripts/cli-parity/expected.txt$([ "$want" = "$expected" ] || echo " with its ABI v2 where rows (<DIR>/v2-dev)") ($(wc -l <"$got" | tr -d ' ') cases)"
+    echo "check-cli-parity: $binding matches scripts/cli-parity/expected.txt$([ "$want" = "$expected" ] || echo " with its ABI v2 where rows (the production channel's subroot)") ($(wc -l <"$got" | tr -d ' ') cases)"
     return 0
   fi
   echo "check-cli-parity: $binding DIFFERS from scripts/cli-parity/expected.txt:" >&2

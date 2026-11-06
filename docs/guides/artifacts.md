@@ -9,10 +9,10 @@ This page is what a consumer needs. [`fetch-v1.md`](fetch-v1.md) is the normativ
 Every binding ships the same command, so you need nothing from this repository:
 
 ```sh
-go run github.com/wave-rf/chtypes/go/cmd/chtypes@latest fetch 26.8   # Go
-python -m chtypes fetch 26.8                                         # Python
-npx @wavehouse/chtypes fetch 26.8                                    # TypeScript
-cargo install chtypes && chtypes fetch 26.8                          # Rust
+go run github.com/wave-rf/chtypes/go/v2/cmd/chtypes@latest fetch 26.8   # Go
+python -m chtypes fetch 26.8                                            # Python
+npx @wavehouse/chtypes fetch 26.8                                       # TypeScript
+cargo install chtypes && chtypes fetch 26.8                             # Rust
 ```
 
 `fetch --all` takes every line the registry publishes for this platform. A spelling is two, three or four parts (`26.8`, `26.8.15`, `26.8.15.10`) with no `v` prefix and no channel suffix; a floating one resolves to the newest build inside it. The commands are spelled identically in all four bindings:
@@ -73,4 +73,4 @@ Artifacts are **Elastic License 2.0**, a different license from the Apache 2.0 b
 
 **macOS artifacts match ClickHouse on macOS.** On 26.7 and later, macOS and Linux ClickHouse agree bit for bit. On 26.3, ClickHouse's own parse of Float values from text input formats differs by operating system and architecture, so running the library on the server's own operating system and architecture is a requirement. See [`../limitations.md`](../limitations.md#macos-artifacts-match-clickhouse-on-macos-on-263-match-the-servers-platform).
 
-**Which lines exist is a question the registry answers.** `chtypes list` prints the lines it publishes, and [`../support-v1.md`](../support-v1.md) says what this repository can and cannot claim about them: the v1 channel carries no statement of which lines are supported, so a line's support reads unknown, never unsupported.
+**Which lines exist is a question the registry answers.** `chtypes list` prints the lines it publishes, and [`../support-v2.md`](../support-v2.md) says what this repository can and cannot claim about them: where it has no statement for a line, that line's support reads unknown, never unsupported.

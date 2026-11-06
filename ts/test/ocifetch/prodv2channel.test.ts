@@ -1,7 +1,7 @@
 /**
  * The production generation-2 channel (`src/ocifetch/channel.ts`,
  * `PROD_V2_CHANNEL`; `docs/guides/fetch-v1.md`, "Generation 2 after the lock"),
- * built and tested but not the default. The fetch conformance cases run under
+ * the default every process outside a test speaks since the lock. The fetch conformance cases run under
  * it in `conformance.test.ts`; these are the pins those cases do not reach.
  * Nothing here reaches the network.
  */
@@ -58,16 +58,24 @@ describe('the production generation-2 channel', () => {
     }
   });
 
-  it('is not the default: a process with no seam selected speaks the dev channel', () => {
+  it('is the default: a process with no seam selected speaks the production channel', () => {
+    // No seam is selected in this file's tests that reach here; the dev channel is a seam, and its restore returns to the default.
+    for (const k of OVERRIDE_ENV) vi.stubEnv(k, '');
+    expect(channelName()).toBe('v2');
+    const c = activeChannel();
+    expect([c.name, c.abi, c.recordSchema, c.rootLeaf, c.subroot]).toEqual(['v2', 2, 2, 'v2', 'v2']);
+    expect(c.overridable && c.pinnable).toBe(true);
+    expect(c.ownFingerprint).toBe('');
+    const eff = effectiveFetchOptions({});
+    expect(eff.bases).toEqual(['https://registry.wavehouse.dev/chtypes/v2']);
+    expect(eff.trustedKeys[0]?.keyid).toBe('deb275922dbff76e');
+    expect(eff.trustedKeys.map((k) => k.ed25519Hex)).not.toContain(DEV_KEY_HEX);
     const restoreDev = useDevChannelForTests();
     try {
-      expect(channelName()).toBe('v2-dev');
-      const restore = useProdV2ForTests();
-      expect(channelName()).toBe('v2');
-      restore();
       expect(channelName()).toBe('v2-dev');
     } finally {
       restoreDev();
     }
+    expect(channelName()).toBe('v2');
   });
 });

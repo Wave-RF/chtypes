@@ -23,10 +23,11 @@ INPUTS (the environment):
     CHTYPES_GOLDENS_DOCUMENT        where the document's exact bytes are written
 
 Without the first three the test SKIPS LOUDLY, by name, and exits 0. The fetch runs
-in this process exactly as a user's process of this 2.0.0-dev SDK fetches: the ABI
-v2 dev channel, its staging base and its staging key only, whatever base
-CHTYPES_GOLDENS_REGISTRY_BASE names (spec/abi-v2/docs.md, rule r6; the base is
-ignored with a warning). A published build that carries no goldens referrer (the
+in this process under the ABI v2 dev channel, selected explicitly (since the lock a
+user's process speaks the production channel; moving the runner there waits for a
+production build that carries goldens): its staging base and its staging key only,
+whatever base CHTYPES_GOLDENS_REGISTRY_BASE names (spec/abi-v2/docs.md, rule r6;
+the base is ignored with a warning). A published build that carries no goldens referrer (the
 first v2-dev builds ship none) is the other skip, BY NAME and never a pass:
 "SKIPPED: no v2-dev goldens published yet", which the workflows read.
 
@@ -251,21 +252,25 @@ def _fetch(base: str, version: str, platform_key: str, cache: Path) -> tuple[byt
     from chtypes._ocifetch._errors import ArtifactUnpublishedError
     from chtypes.registry import FetchOptions
 
-    options = FetchOptions(bases=(base,), cache_dir=cache)._to_options(platform_key)
-    resolved = ensure(Request(version), options)
-    manifest = resolved.digests["manifest"]
+    restore = _channel.use_dev_channel_for_tests()
     try:
-        fetched = fetch_signed("", manifest, C.PREDICATE_TYPE_GOLDENS, options)
-    except ArtifactUnpublishedError as exc:
-        if _channel.channel_name() != "v2-dev":
-            raise
-        # The build is published (ensure above succeeded) and carries no goldens
-        # referrer. A skip BY NAME, never a pass: the workflows read this line.
-        pytest.skip(
-            f"SKIPPED: no v2-dev goldens published yet: {version} {platform_key} ({manifest}) "
-            f"has no goldens referrer on {_channel.DEV_CHANNEL_BASE}; the goldens did not run "
-            f"({exc})"
-        )
+        options = FetchOptions(bases=(base,), cache_dir=cache)._to_options(platform_key)
+        resolved = ensure(Request(version), options)
+        manifest = resolved.digests["manifest"]
+        try:
+            fetched = fetch_signed("", manifest, C.PREDICATE_TYPE_GOLDENS, options)
+        except ArtifactUnpublishedError as exc:
+            if _channel.channel_name() != "v2-dev":
+                raise
+            # The build is published (ensure above succeeded) and carries no goldens
+            # referrer. A skip BY NAME, never a pass: the workflows read this line.
+            pytest.skip(
+                f"SKIPPED: no v2-dev goldens published yet: {version} {platform_key} ({manifest}) "
+                f"has no goldens referrer on {_channel.DEV_CHANNEL_BASE}; the goldens did not run "
+                f"({exc})"
+            )
+    finally:
+        restore()
     return Path(fetched["path"]).read_bytes(), fetched
 
 

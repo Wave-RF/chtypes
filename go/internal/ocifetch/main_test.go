@@ -2,9 +2,10 @@ package ocifetch
 
 // main_test.go — which fetch contract this package's tests run under.
 //
-// This module's non-test binaries speak the ABI v2 dev channel (channel.go).
-// Most tests here, and TestConformanceV1 above all, exercise the v1 fetch
-// contract the dev channel narrows: the fetch-v1 conformance cases
+// This module's non-test binaries speak the production generation-2 channel
+// (channel.go), the v1 contract with v2 values. Most tests here, and
+// TestConformanceV1 above all, exercise the v1 fetch contract itself: the
+// fetch-v1 conformance cases
 // (tests/fixtures/fetch-v1) are its specification, and every one names its own
 // fixture registry and the test key, sets locks, and reads schema-1 records and
 // abi-1 predicates. So the package runs under UseFetchV1ForTests, and the

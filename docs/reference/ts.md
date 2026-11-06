@@ -4,7 +4,7 @@
 import { Format, Registry, setup } from '@wavehouse/chtypes';
 ```
 
-`@wavehouse/chtypes` runs on Node 22.21 or later and is **ESM only**. Native calls go through `ffi-rs`, prebuilt for darwin arm64/x64 and linux arm64/x64 (gnu and musl), so there is no build step. This page lists what the package ships and where TypeScript spells something its own way; every operation's meaning, the types, the error table and the document fields are [`bindings-v1.md`](bindings-v1.md), which is the contract and is not restated here. The cross-language gaps in 1.0 are in the "Known gaps in 1.0" section of [`limitations.md`](../limitations.md).
+`@wavehouse/chtypes` runs on Node 22.21 or later and is **ESM only**. Native calls go through `ffi-rs`, prebuilt for darwin arm64/x64 and linux arm64/x64 (gnu and musl), so there is no build step. This page lists what the package ships and where TypeScript spells something its own way; every operation's meaning, the types, the error table and the document fields are [`bindings-v1.md`](bindings-v1.md), which is the contract and is not restated here. The cross-language gaps are in the "Known gaps" section of [`limitations.md`](../limitations.md).
 
 ## How to read this
 

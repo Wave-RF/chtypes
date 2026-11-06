@@ -38,6 +38,15 @@ def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
+def dev_channel() -> Iterator[None]:
+    restore = _channel.use_dev_channel_for_tests()
+    try:
+        yield
+    finally:
+        restore()
+
+
+@pytest.fixture
 def prod_v2() -> Iterator[None]:
     restore = _channel.use_prod_v2_for_tests()
     try:
@@ -47,7 +56,7 @@ def prod_v2() -> Iterator[None]:
 
 
 def test_support_v2_generator_derives_its_channel_from_active_dev(
-    clean_env: None, tmp_path: Path
+    clean_env: None, dev_channel: None, tmp_path: Path
 ) -> None:
     ctx = gen.channel_context()
     assert (ctx.name, ctx.abi, ctx.production) == ("v2-dev", 2, False)

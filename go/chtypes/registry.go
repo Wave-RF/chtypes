@@ -75,9 +75,9 @@ type Advisory = ocifetch.Advisory
 var revocationWarnings io.Writer = os.Stderr
 
 // CacheRoot is the cache root a fetch, list or `chtypes where` with o would
-// use: o.CacheDir, else CHTYPES_CACHE, each through the dev channel's v2-dev
-// subroot (spec/abi-v2/docs.md, rule r5), else
-// `${XDG_CACHE_HOME:-~/.cache}/chtypes/v2-dev`. It is the very resolution the
+// use: o.CacheDir, else CHTYPES_CACHE, each through the v2 subroot
+// (spec/abi-v2/docs.md, rule r5), else
+// `${XDG_CACHE_HOME:-~/.cache}/chtypes/v2`. It is the very resolution the
 // fetch layer runs, and it creates nothing and reads no cache. It is the first
 // entry of SearchDirs.
 func CacheRoot(o FetchOptions) (string, error) { return ocifetch.CacheRoot(o.internal()) }

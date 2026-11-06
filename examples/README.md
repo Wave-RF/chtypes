@@ -55,7 +55,7 @@ Read any tour top to bottom as a tutorial; every section carries a comment block
 15. **Export: bytes + spans** — serializing the batch's accepted rows to wire bytes, addressed per row by index-aligned spans, and the fail-closed export declines.
 16. **Filters: WHERE semantics at the edge** — one boolean expression compiled against the schema and evaluated per row, query parameters, and the block twin.
 17. **The INSERT column list** — a list naming an `EPHEMERAL` column whose value is read and feeds a DEFAULT but is never stored, then one refusal.
-18. **The server profile (ABI v2)** — a server described by its timezone, a table compiled on it, and a `timezone()` DEFAULT filled with the server's zone. A build that does not compile on a server yet declines, and the section says SKIPPED by name.
+18. **The server profile (ABI v2)** — a server described by its timezone, a table compiled on it, and a `timezone()` DEFAULT filled with the server's zone. A library that declines a server profile makes the section say SKIPPED by name; a library that supports the server profile compiles on a server.
 19. **Insert equals batch (ABI v2)** — the insert call over a filtered body, with an output, compared with the batch call's export: the same outcome and counts, and output bytes equal to the export's spans of the rows the WHERE keeps.
 20. **A Native round trip (ABI v2)** — the insert call's Native output read back as a Native body: the same rows and values.
 21. **The memory limit declines (ABI v2)** — a forced tiny `memory_limit_bytes` declines the whole call (`call-memory-budget`) with no output.

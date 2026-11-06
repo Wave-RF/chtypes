@@ -2,7 +2,7 @@
 
 One artifact, one schema, one row — the same program in each language. It shows the thing chtypes exists for: the row is **accepted**, and `256` is silently stored as `0`.
 
-You need a binding and a fetched artifact for line 26.8: [`install.md`](install.md) if you have neither, or `chtypes fetch 26.8` once the binding is installed. Any line the registry publishes works; 26.8 is just the one spelled below. What 1.0 does not do yet is in [`limitations.md`](limitations.md#known-gaps-in-10), and which lines and platforms exist is [`support-v1.md`](support-v1.md).
+You need a binding and a fetched artifact for line 26.8: [`install.md`](install.md) if you have neither, or `chtypes fetch 26.8` once the binding is installed. Any line the registry publishes works; 26.8 is just the one spelled below. What 2.0 does not do yet is in [`limitations.md`](limitations.md#known-gaps-in-10), and which lines and platforms exist is [`support-v2.md`](support-v2.md).
 
 Three steps, in every language: **set up** the process (optional, and first), **open a library** for a version through a registry, then **compile one `CREATE TABLE` statement** and ask it about a body.
 
@@ -17,7 +17,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/wave-rf/chtypes/go/chtypes"
+	"github.com/wave-rf/chtypes/go/v2/chtypes"
 )
 
 const ddl = "CREATE TABLE t (x UInt8, ts DateTime DEFAULT now()) ENGINE = MergeTree ORDER BY tuple()"

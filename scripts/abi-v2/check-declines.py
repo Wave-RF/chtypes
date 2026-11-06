@@ -17,8 +17,9 @@ Rules (each has a planted case in --selftest):
               so order is not checked; uniqueness is)
   class       a class outside the nine the data uses
   field       an entry missing a field, or a code without `chs` and `ch`
-  line        a `lines` value outside the file's top-level `lines`, or empty
-              outside a dormant entry
+  line        a `lines` value outside the file's top-level `lines`; an empty
+              `lines` on an entry that is not `dormant: …`, or a non-empty one
+              on an entry that is (a dormant reason no pinned line can emit)
   private     a string that points into the private half: a private CI
               path, the private repository's name, a private notes path or
               "#<digit>" (JSON strings and the README)
@@ -42,7 +43,17 @@ NAME = "declines.json"
 SCHEMA = "chtypes.filter-declines/1"
 # Derived from the copied file (declines.json at the producer's commit) and pinned.
 CLASSES = frozenset(
-    {"decline", "server-check", "create-decline", "call-decline", "row-decline", "batch-precedence", "export-decline", "misuse", "canceled"}
+    {
+        "decline",
+        "server-check",
+        "create-decline",
+        "call-decline",
+        "row-decline",
+        "batch-precedence",
+        "export-decline",
+        "misuse",
+        "canceled",
+    }
 )
 FIELDS = ("id", "class", "trigger", "code", "lines", "paths", "retirement", "description")
 # Built from parts so this file does not itself spell a private name (lint-public).
@@ -91,11 +102,13 @@ def check(raw: bytes, readme: str) -> list[str]:
         if not isinstance(code, dict) or "chs" not in code or "ch" not in code:
             out.append(f"{NAME}: {who}: code lacks chs or ch (field)")
         ls = e.get("lines")
-        # A dormant entry (its retirement starts "dormant") has had every line
-        # it applied to retired, so it lists none; any other entry names at least one.
-        dormant = str(e.get("retirement", "")).startswith("dormant")
-        if not isinstance(ls, list) or (not ls and not dormant):
-            out.append(f"{NAME}: {who}: lines is empty or not a list (line)")
+        dormant = str(e.get("retirement", "")).startswith("dormant:")
+        if not isinstance(ls, list):
+            out.append(f"{NAME}: {who}: lines is not a list (line)")
+        elif dormant and ls:
+            out.append(f"{NAME}: {who}: a dormant entry lists lines {ls!r} (line)")
+        elif not ls and not dormant:
+            out.append(f"{NAME}: {who}: lines is empty on an entry that is not dormant (line)")
         else:
             for x in ls:
                 if x not in top:
@@ -157,7 +170,12 @@ def selftest() -> int:
         variant("missing " + f, lambda d, f=f: d["declines"][3].pop(f), "field")
     variant("code without ch", lambda d: d["declines"][0]["code"].pop("ch"), "field")
     variant("line outside the file's lines", lambda d: d["declines"][0]["lines"].append("25.1"), "line")
-    variant("empty lines", lambda d: d["declines"][0].update(lines=[], retirement="none"), "line")
+    variant("empty lines", lambda d: d["declines"][0].update(lines=[]), "line")
+    variant(
+        "dormant with lines",
+        lambda d: d["declines"][0].update(retirement="dormant: planted", lines=[d["lines"][0]]),
+        "line",
+    )
     for needle in ("ci" + "/steps/x.sh", "the chtypes" + "-core repo", "see notes" + "/plan.md", "fixed in #123"):
         variant("private string " + needle, lambda d, n=needle: d["declines"][0].update(description=n), "private")
     variant("stale README table", lambda d: d["declines"][0].update(description="changed"), "table", fix_table=False)

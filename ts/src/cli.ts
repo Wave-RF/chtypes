@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
  * `chtypes`: the one CLI every SDK carries, over the v1 fetch layer
- * (`docs/guides/fetch-v1.md`), spelled identically in all four. This is the
- * 2.0.0-dev CLI: it speaks the ABI v2 dev channel (`./ocifetch/channel.ts`;
- * `spec/abi-v2/docs.md`, rules r5 and r6), so it fetches only from the staging
- * dev channel under the staging key, ignores every base and trust override
- * with one warning each, refuses `--frozen`, `--lock` and `--update` with the
- * usage status before anything else, and keeps its cache under `v2-dev`:
+ * (`docs/guides/fetch-v1.md`), spelled identically in all four. This CLI
+ * speaks ABI v2's production channel (`./ocifetch/channel.ts`;
+ * `docs/guides/fetch-v1.md`, "Generation 2 after the lock"): it fetches from
+ * https://registry.wavehouse.dev/chtypes/v2 under the release key, honors the
+ * source and trust overrides and `--frozen`, `--lock` and `--update`, and keeps
+ * its cache under `v2`:
  *
  *   chtypes fetch <version>... | --all  [--frozen] [--offline] [--lock <file>] [--update] [--strict]
  *                                       [--allow-revoked] [--require-revocation-check]
@@ -43,16 +43,13 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { ChtypesError, UsageError } from './abi2/index.js';
 import { withEnvironment } from './env.js';
-import { CODE_ARTIFACT_CORRUPT, CODE_ARTIFACT_REVOKED, ERROR_EXIT_CODES } from './ocifetch/constants.gen.js';
+import { CODE_ARTIFACT_CORRUPT, CODE_ARTIFACT_REVOKED, ERROR_EXIT_CODES, PROD_V2_BASES, PROD_V2_CACHE_DIR } from './ocifetch/constants.gen.js';
 import { strictMode } from './ocifetch/faults.js';
 import {
   activeChannel,
   ArtifactMissingError,
   ArtifactUnpublishedError,
   cacheRoot,
-  DEV_CACHE_DIR,
-  DEV_CHANNEL_BASE,
-  DEV_KEY_ID,
   ensure,
   exitStatusOf,
   FetchV1Error,
@@ -113,16 +110,14 @@ const USAGE = `usage: chtypes <command> [options]
   --lock      record what was installed into this lock file
   --update    re-resolve every request the lock holds and rewrite it (requires --lock; not with --frozen or --offline)
   --platform  <os>-<arch>: linux-amd64, linux-arm64 or darwin-arm64 (default: this host, or CHTYPES_TARGET)
-  --cache     a cache, used through its ${DEV_CACHE_DIR} subroot (default: CHTYPES_CACHE/${DEV_CACHE_DIR}, else \${XDG_CACHE_HOME:-~/.cache}/chtypes/${DEV_CACHE_DIR})
+  --cache     a cache, used through its ${PROD_V2_CACHE_DIR} subroot (default: CHTYPES_CACHE/${PROD_V2_CACHE_DIR}, else \${XDG_CACHE_HOME:-~/.cache}/chtypes/${PROD_V2_CACHE_DIR})
   --strict    a cache that cannot be read is CHTYPES_CACHE_UNUSABLE, never not-installed (default: CHTYPES_CACHE_STRICT=1)
   --allow-revoked             use a revoked build anyway, with a warning (this call only; never a lock or an update)
   --require-revocation-check  a revocation status that cannot be read is an error, not a warning
   -h, --help  this text;  --version  "chtypes <version>"
 
-this is a 2.0.0-dev CLI (UNSTABLE, staging only, not for production): it fetches only from
-${DEV_CHANNEL_BASE} and trusts only the staging key ${DEV_KEY_ID};
-CHTYPES_ARTIFACTS_URL, CHTYPES_TRUSTED_KEYS and CHTYPES_ALLOW_UNSIGNED are ignored with a warning,
-and --frozen, --lock and --update are refused (a dev build is replaceable, so nothing may pin one)
+ABI v2: fetches from ${PROD_V2_BASES[0]} under the release key, and caches under
+<cache>/${PROD_V2_CACHE_DIR} (docs/guides/fetch-v1.md, "Generation 2 after the lock").
 
 exit status: 0 ok, 2 usage; a fetch error exits with its code's status in spec/fetch-v1/constants.json
 environment: CHTYPES_ARTIFACTS_URL, CHTYPES_CACHE, CHTYPES_DOWNLOAD_TOKEN, CHTYPES_TRUSTED_KEYS,
@@ -233,7 +228,7 @@ export async function runCli(argv: readonly string[], io: CliIo = defaultIo): Pr
 }
 
 function fetchOptions(values: Values, forFetch: boolean): FetchV1Options {
-  // A 2.0.0-dev CLI refuses every pinning flag before anything else, the network above all (rule r6).
+  // The dev channel pins nothing: under it every pinning flag is refused before anything else, the network above all (rule r6). The production channel honors every pin.
   if (!activeChannel().pinnable) {
     const requested = pinningRequested({
       frozen: values.frozen === true,

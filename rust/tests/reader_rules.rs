@@ -11,7 +11,8 @@
 //!   `r3-unknown-capabilities`); a call status outside the closed set is an
 //!   internal error naming `unknown(n)`;
 //! * r6: a library with another fingerprint is refused as
-//!   `CHTYPES_ARTIFACT_INCOMPATIBLE`, with exactly the rule's message (stub
+//!   `CHTYPES_ARTIFACT_INCOMPATIBLE`, naming both fingerprints; the description
+//!   is locked, so with the loader's own message, never the dev one (stub
 //!   variant `fingerprint-other`).
 //!
 //! The documents and the planted values are `scripts/abi-v1/emit/_stubshared.py`'s
@@ -474,11 +475,15 @@ fn r3_unknown_capabilities_are_kept(dir: &Path, variants: &serde_json::Map<Strin
     );
 }
 
-/// r6: a library built to report another fingerprint is refused as
-/// `CHTYPES_ARTIFACT_INCOMPATIBLE` with exactly the rule's message. The message
-/// is spelled out here, not taken from the code under test, and this SDK's own
-/// fingerprint is read from the stubs' manifest (rendered from the description
-/// this binding is generated from), not from the binding.
+/// r6 after the lock: a library built to report another fingerprint (as a
+/// 2.0.0-dev build does) is refused as `CHTYPES_ARTIFACT_INCOMPATIBLE`, naming
+/// both fingerprints, with the loader's own message: the dev message
+/// (`... — update your dev SDK`) is a 2.0.0-dev SDK's alone, and this SDK's
+/// description is locked. The expected text is spelled out here, not taken
+/// from the code under test, and this SDK's own fingerprint is read from the
+/// stubs' manifest (rendered from the description this binding is generated
+/// from), not from the binding. The dev side, rule r6's exact text, is the
+/// crate's own `abi2::loader::tests::a_dev_fingerprint_refusal_is_rule_r6_exactly`.
 fn r6_another_fingerprint_is_refused_with_the_rules_message(
     dir: &Path,
     variants: &serde_json::Map<String, Value>,
@@ -487,16 +492,21 @@ fn r6_another_fingerprint_is_refused_with_the_rules_message(
         .as_str()
         .expect("the ok stub's predicate names its abi_fingerprint");
     let theirs = format!("sha256:{}", "0".repeat(64));
-    let want = format!(
-        "this SDK speaks dev fingerprint {ours}; the library has {theirs} — update your dev SDK"
-    );
     let err = Library::open_unverified(variant_path(dir, variants, "fingerprint-other"), true)
         .expect_err("a library with another fingerprint must be refused");
     let Error::ArtifactIncompatible(refusal) = &err else {
         panic!("another fingerprint = {err:?}; want ArtifactIncompatible")
     };
     assert_eq!(refusal.reason, "fingerprint", "{err:?}");
+    assert_eq!(refusal.want.as_deref(), Some(ours), "{err:?}");
+    assert_eq!(refusal.got.as_deref(), Some(theirs.as_str()), "{err:?}");
     assert_eq!(err.code(), Some("CHTYPES_ARTIFACT_INCOMPATIBLE"));
-    assert_eq!(err.to_string(), want);
-    assert_eq!(refusal.dev_message().as_deref(), Some(want.as_str()));
+    assert_eq!(refusal.dev_message(), None, "{err}");
+    let shown = err.to_string();
+    let tail = format!(": fingerprint (want {ours}, got {theirs})");
+    assert!(
+        shown.starts_with("CHTYPES_ARTIFACT_INCOMPATIBLE: ") && shown.ends_with(&tail),
+        "{shown}"
+    );
+    assert!(!shown.contains("dev fingerprint"), "{shown}");
 }

@@ -1,12 +1,16 @@
 //! The ABI v2 dev channel (`src/ocifetch/channel.rs`; spec/abi-v2/docs.md,
-//! rules r5 and r6), tested as a user's build speaks it: no test here selects a
-//! seam except the one control that reads a 1.x cache under the v1 contract.
+//! rules r5 and r6), which a 2.0.0-dev SDK spoke. Since the lock a build speaks
+//! the production generation-2 channel by default (tests/prodv2channel.rs), so
+//! each test here selects the dev channel through `use_dev_channel_for_tests`
+//! (or `allow_overrides_for_tests`, which keeps the rest of it), and holds the
+//! returned guard for the whole test; the control that reads a 1.x cache also
+//! selects the v1 contract for a moment.
 //! Nothing here reaches the network: every refusal is proven to come before the
 //! layout is made, which every request follows, and every cache read is
 //! offline. Nothing here sets an environment variable, so these tests run in
-//! parallel with the fetch layer's own unit tests this file recompiles; the
-//! environment overrides are proven against the real binary
-//! (tests/cli_v1.rs).
+//! parallel with the fetch layer's own unit tests this file recompiles. The
+//! real binary no longer speaks the dev channel, so its production behavior is
+//! proven in tests/cli_v1.rs.
 //!
 //! WHY THIS FILE RE-DECLARES `src/ocifetch` WITH `#[path]`. The fetch layer is
 //! not public API (see `src/ocifetch/mod.rs`), so this suite compiles it under
@@ -45,6 +49,7 @@ fn hex(bytes: &[u8]) -> String {
 /// release key is not in the dev trust list.
 #[test]
 fn the_dev_channel_pins_the_staging_base_and_key() {
+    let _dev = channel::use_dev_channel_for_tests();
     assert_eq!(
         DEV_CHANNEL_BASE,
         "https://registry-staging.wavehouse.dev/chtypes/v2-dev"
@@ -88,6 +93,7 @@ fn the_dev_channel_pins_the_staging_base_and_key() {
 /// each is named exactly once per process, however many calls see it.
 #[test]
 fn the_dev_channel_ignores_every_override_option_loudly_once() {
+    let _dev = channel::use_dev_channel_for_tests();
     channel::capture_warnings_for_tests();
     let test_key = ocifetch::constants::TEST_KEYS[0].ed25519_hex.to_string();
     let cache = scratch("overrides");
@@ -156,6 +162,7 @@ fn the_dev_channel_ignores_every_override_option_loudly_once() {
 /// read, and the cache layout every request follows is never made.
 #[test]
 fn the_dev_channel_refuses_pinning_before_any_request() {
+    let _dev = channel::use_dev_channel_for_tests();
     let dir = scratch("pinning");
     std::fs::create_dir_all(&dir).unwrap();
     let lock = dir.join("chtypes.lock");
@@ -214,14 +221,14 @@ fn the_dev_channel_refuses_pinning_before_any_request() {
 /// layout; the default root and the system directories are v2-dev ones.
 #[test]
 fn the_dev_channel_cache_roots() {
+    let _dev = channel::use_dev_channel_for_tests();
     let opt = scratch("roots");
     assert_eq!(
         layout::cache_root(Some(&opt.to_string_lossy())).unwrap(),
         opt.join(DEV_CACHE_DIR)
     );
     // The default root (or CHTYPES_CACHE's subroot, when the environment
-    // names one) ends in v2-dev either way; the binary's own run pins each
-    // spelling (tests/cli_v1.rs).
+    // names one) ends in v2-dev either way.
     let default_root = layout::cache_root(None).expect("a default root");
     assert!(
         default_root.ends_with(DEV_CACHE_DIR),
@@ -263,6 +270,7 @@ fn sample_record() -> VerifiedRecord {
 /// lists says abi 2.
 #[test]
 fn the_dev_channel_records_are_schema_2() {
+    let _dev = channel::use_dev_channel_for_tests();
     let bytes = sample_record().to_json_bytes().unwrap();
     let text = String::from_utf8(bytes.clone()).unwrap();
     assert!(
@@ -302,6 +310,7 @@ fn the_dev_channel_records_are_schema_2() {
 /// refused even when every other field matches.
 #[test]
 fn the_dev_channel_predicate_is_abi_2() {
+    let _dev = channel::use_dev_channel_for_tests();
     let request = VersionRequest::parse("26.8").unwrap();
     let mut predicate = serde_json::json!({
         "abi": 1,
@@ -337,6 +346,7 @@ fn copy_dir(src: &Path, dst: &Path) {
 /// are absent). The control is the same cache read under the v1 contract.
 #[test]
 fn the_dev_channel_never_reads_a_v1_cache() {
+    let _dev = channel::use_dev_channel_for_tests();
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../tests/fixtures/fetch-v1/layouts/cache-record-canonical");
     assert!(fixture.is_dir(), "{} is missing", fixture.display());
@@ -383,6 +393,7 @@ fn the_dev_channel_never_reads_a_v1_cache() {
 /// seam) has none.
 #[test]
 fn the_dev_channel_aliases_with_its_own_generated_fingerprint() {
+    let _dev = channel::use_dev_channel_for_tests();
     let fp = ocifetch::abi_fingerprint::DEV_ABI_FINGERPRINT;
     let hex = fp
         .strip_prefix("sha256:")
@@ -528,6 +539,7 @@ fn the_dev_channel_requests_its_own_alias_first() {
 /// v1 contract (the control, under its seam) sees every record.
 #[test]
 fn the_dev_channel_sees_only_its_own_fingerprints_records() {
+    let _dev = channel::use_dev_channel_for_tests();
     let own = ocifetch::abi_fingerprint::DEV_ABI_FINGERPRINT;
     let other = format!("sha256:{}", "0".repeat(64));
     assert!(channel::visible(

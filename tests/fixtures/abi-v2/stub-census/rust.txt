@@ -9,6 +9,7 @@
 # runs on that OS only. Keep the lines sorted.
 abi2_conformance abi2_conformance
 abi2_conformance loader::tests::a_dev_fingerprint_refusal_is_rule_r6_exactly
+abi2_conformance loader::tests::a_fingerprint_refusal_after_the_lock_keeps_the_loaders_shape
 abi2_conformance loader::tests::dotted_version_cmp_orders_components_numerically_not_lexically
 abi2_conformance loader::tests::parse_build_info_refuses_a_duplicate_key
 abi2_conformance loader::tests::parse_build_info_refuses_bad_json
@@ -18,6 +19,7 @@ api_v1_setup setup_records_and_a_step_7_failure_is_the_calls_own_error
 api_v1_setup_cases setup_cases
 goldens_v1_runner
 lib abi2::loader::tests::a_dev_fingerprint_refusal_is_rule_r6_exactly
+lib abi2::loader::tests::a_fingerprint_refusal_after_the_lock_keeps_the_loaders_shape
 lib abi2::loader::tests::dotted_version_cmp_orders_components_numerically_not_lexically
 lib abi2::loader::tests::parse_build_info_refuses_a_duplicate_key
 lib abi2::loader::tests::parse_build_info_refuses_bad_json
@@ -64,8 +66,8 @@ lib decode::tests::the_raw_value_comes_from_value_b64_alone
 lib decode::tests::unsupported_settings_are_name_objects_and_surface_as_bytes
 lib decode::tests::values_is_the_subset_whose_source_is_stored
 lib error::tests::a_detected_misuse_carries_the_invalid_argument_shape
-lib error::tests::a_dev_fingerprint_refusal_is_incompatible_with_rule_r6s_message
 lib error::tests::a_fetch_error_joins_the_one_family
+lib error::tests::a_fingerprint_refusal_after_the_lock_is_incompatible_with_the_loaders_message
 lib error::tests::a_refusal_and_a_decline_are_peers_never_one_another
 lib error::tests::a_status_outside_the_closed_set_is_internal_and_names_its_unknown
 lib error::tests::each_status_maps_to_its_own_class_and_the_six_fields_survive

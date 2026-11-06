@@ -1,7 +1,8 @@
 """The production generation-2 channel (`chtypes._ocifetch._channel.PROD_V2_CHANNEL`;
-docs/guides/fetch-v1.md, "Generation 2 after the lock"), built and tested but not
-the default. The fetch conformance cases run under it in `test_conformance.py`;
-these are the pins those cases do not reach. Nothing here reaches the network.
+docs/guides/fetch-v1.md, "Generation 2 after the lock"), the default every
+non-test process speaks since the lock. The fetch conformance cases run under it
+in `test_conformance.py`; these are the pins those cases do not reach. Nothing here
+reaches the network.
 """
 
 from __future__ import annotations
@@ -60,11 +61,22 @@ def test_the_production_v2_channel_cache_roots(
     assert roots[1:] == (Path("/usr/local/share/chtypes/v2"), Path("/opt/chtypes/v2"))
 
 
-def test_the_production_v2_channel_is_not_the_default() -> None:
-    # What an ordinary process speaks, with no seam selected.
+def test_the_production_v2_channel_is_the_default() -> None:
+    # What an ordinary process speaks, with no seam selected (the autouse
+    # fixture above selected one, so clear it for this test).
+    restore = _channel._use(None)  # type: ignore[arg-type]
+    try:
+        assert _channel.active() is _channel.PROD_V2_CHANNEL
+        assert _channel.channel_name() == "v2"
+        c = _channel.active()
+        assert c.bases == C.PROD_V2_BASES and c.keys == C.RELEASE_KEYS
+        assert c.own_fingerprint == "" and c.pinnable and c.overridable
+        assert [k.keyid for k in _channel.trusted_keys()] == [k["keyid"] for k in C.RELEASE_KEYS]
+    finally:
+        restore()
+    # The dev channel is reachable only through a test seam.
     restore = _channel.use_dev_channel_for_tests()
     try:
         assert _channel.channel_name() == "v2-dev"
     finally:
         restore()
-    assert _channel.channel_name() == "v2"

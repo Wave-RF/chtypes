@@ -1,7 +1,8 @@
 """The command line under the ABI v2 dev channel (spec/abi-v2/docs.md, rules r5 and
 r6). The first tests run the in-process CLI switched to the dev channel; the last
 runs the real `chtypes` command in a child process, which no test seam can reach
-(each one refuses outside a test run), and proves the same answers from it.
+(each one refuses outside a test run), and proves that since the lock it speaks the
+production generation-2 channel instead.
 Nothing here reaches the network.
 """
 
@@ -106,10 +107,12 @@ def _real_cli() -> list[str]:
     return [script] if script else [sys.executable, "-m", "chtypes"]
 
 
-def test_the_real_cli_speaks_the_dev_channel(tmp_path: Path) -> None:
-    """A child process, which no seam reaches: the subroot, the default root, the
-    pinning refusals, and one warning for each ignored override all come from
-    the command a user runs."""
+def test_the_real_cli_speaks_the_production_channel(tmp_path: Path) -> None:
+    """A child process, which no seam reaches: since the lock it speaks the
+    production generation-2 channel (docs/guides/fetch-v1.md, "Generation 2 after
+    the lock"), never the dev channel. Its default root and an explicit cache's
+    subroot are v2, its system directories are v2's, a pin is honored (never the
+    dev channel's refusal), and no override is ignored."""
     cmd = _real_cli()
     xdg = tmp_path / "xdg"
 
@@ -126,23 +129,25 @@ def test_the_real_cli_speaks_the_dev_channel(tmp_path: Path) -> None:
         return done.returncode, done.stdout, done.stderr
 
     code, out, err = real({}, "where")
-    assert (code, out.strip()) == (0, str(xdg / "chtypes" / "v2-dev")), err
+    assert (code, out.strip()) == (0, str(xdg / "chtypes" / "v2")), err
     cache = tmp_path / "cache"
     code, out, err = real({C.ENV_CACHE_NAME: str(cache)}, "where")
-    assert (code, out.strip()) == (0, str(cache / "v2-dev")), err
-    for argv in PINNING:
-        args = [str(tmp_path / "chtypes.lock") if a == "@LOCK@" else a for a in argv]
-        code, out, err = real({C.ENV_CACHE_NAME: str(cache)}, *args)
-        assert (code, out) == (2, "") and _channel.PINNING_REFUSED in err, (args, err)
+    assert (code, out.strip()) == (0, str(cache / "v2")), err
+    code, out, err = real({}, "where", "--all", "--cache", str(cache))
+    want = f"{cache / 'v2'}\n/usr/local/share/chtypes/v2\n/opt/chtypes/v2\n"
+    assert (code, out) == (0, want), err
+    # A pin is honored: --frozen with no lock file fails on the missing lock
+    # (CHTYPES_ARTIFACT_PINNED), never with the dev channel's refusal.
+    code, out, err = real({C.ENV_CACHE_NAME: str(cache)}, "fetch", "26.8", "--frozen")
+    assert _channel.PINNING_REFUSED not in err and "requires a lock file" in err, (code, err)
     overrides = {
         C.ENV_CACHE_NAME: str(cache),
-        C.ENV_BASES_NAME: "http://127.0.0.1:9/chtypes/v1",
+        C.ENV_BASES_NAME: "http://127.0.0.1:9/chtypes/v2",
         C.ENV_TRUSTED_KEYS_NAME: str(C.TEST_KEYS[0]["ed25519_hex"]),
         C.ENV_ALLOW_UNSIGNED_NAME: "1",
     }
     code, out, err = real(overrides, "fetch", "26.8", "--offline", "--platform", "linux-amd64")
     assert (code, out) == (C.ERROR_EXIT_CODES["CHTYPES_ARTIFACT_MISSING"], ""), err
     assert "CHTYPES_ARTIFACT_MISSING" in err
-    for name in (C.ENV_BASES_NAME, C.ENV_TRUSTED_KEYS_NAME, C.ENV_ALLOW_UNSIGNED_NAME):
-        assert err.count(f"WARNING: {name} is set and IGNORED") == 1, err
+    assert "is set and IGNORED" not in err, err
     assert not (tmp_path / "chtypes.lock").exists()

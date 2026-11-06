@@ -1,8 +1,8 @@
 //! The production generation-2 channel (`src/ocifetch/channel.rs`,
 //! `PROD_V2_CHANNEL`; docs/guides/fetch-v1.md, "Generation 2 after the lock"),
-//! built and tested but not the default. The fetch conformance cases run under
-//! it in tests/ocifetch_conformance.rs; these are the pins those cases do not
-//! reach. Nothing here sets an environment variable or reaches the network.
+//! the default every non-test build speaks since the lock. The fetch
+//! conformance cases run under it in tests/ocifetch_conformance.rs; these are
+//! the pins those cases do not reach. Nothing here sets an environment variable or reaches the network.
 //!
 //! The fetch layer is not public API (see `src/ocifetch/mod.rs`), so this suite
 //! compiles it under its own crate root, as tests/devchannel.rs does.
@@ -48,14 +48,24 @@ fn the_production_v2_channel_trusts_the_release_key_and_not_the_staging_key() {
     }
 }
 
-/// A build with no test seam speaks the dev channel: the production-v2 channel
-/// is reachable only through `use_prod_v2_for_tests`.
+/// A build with no test seam speaks the production channel: it is the default,
+/// and the dev channel is reachable only through a test seam.
 #[test]
-fn the_production_v2_channel_is_not_the_default() {
-    assert_eq!(channel::active().name, "v2-dev");
+fn the_production_v2_channel_is_the_default() {
+    let a = channel::active();
+    assert_eq!(a.name, "v2");
+    assert_eq!(
+        a.bases,
+        &["https://registry.wavehouse.dev/chtypes/v2"],
+        "the default channel's bases are the generated production ones"
+    );
+    assert_eq!(a.bases, constants::PROD_V2_BASES);
+    assert_eq!(a.keys[0].0, constants::RELEASE_KEYS[0].keyid);
+    assert_eq!(a.keys[0].1, constants::RELEASE_KEYS[0].ed25519_hex);
+    assert!(a.own_fingerprint.is_none() && a.pinnable && a.overridable);
     {
-        let _prod = channel::use_prod_v2_for_tests();
-        assert_eq!(channel::active().name, "v2");
+        let _dev = channel::use_dev_channel_for_tests();
+        assert_eq!(channel::active().name, "v2-dev");
     }
-    assert_eq!(channel::active().name, "v2-dev");
+    assert_eq!(channel::active().name, "v2");
 }

@@ -94,7 +94,7 @@ export interface VerifiedBundle {
 
 /** What a fetch returns on success (`docs/guides/fetch-v1.md` §9). */
 export interface Resolved {
-  /** The ABI generation the fetch contract speaks: 2 for this 2.0.0-dev SDK (`./channel.ts`). */
+  /** The ABI generation the fetch contract speaks: 2 for the generation-2 channels (`./channel.ts`). */
   readonly abiGeneration: number;
   readonly platform: PlatformKey;
   readonly request: VersionRequest;

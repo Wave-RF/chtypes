@@ -1,10 +1,12 @@
 /**
  * The command line under the ABI v2 dev channel (`spec/abi-v2/docs.md`, rules
- * r5 and r6). The first cases drive the CLI in-process (`runCli`) on the dev
- * channel exactly as every process but a test speaks it; the last runs the
- * real built CLI (`dist/cli.js`, what `npm install` puts on PATH), which no
- * test seam can reach (they throw outside a vitest worker), and proves the
- * same answers from it. Nothing here reaches the network. Go's
+ * r5 and r6), which a 2.0.0-dev SDK spoke. The first cases drive the CLI
+ * in-process (`runCli`) switched to the dev channel; the last runs the real
+ * built CLI (`dist/cli.js`, what `npm install` puts on PATH), which no test
+ * seam can reach (they throw outside a vitest worker), and proves that since
+ * the lock it speaks the production generation-2 channel instead
+ * (`docs/guides/fetch-v1.md`, "Generation 2 after the lock"). Nothing here
+ * reaches the network. Go's
  * `go/cmd/chtypes/devchannel_test.go` is the same test.
  *
  * The real CLI needs a build (`pnpm build`); without `dist/cli.js` that case
@@ -104,34 +106,42 @@ describe('the CLI on the dev channel, in process', () => {
 const CLI = path.resolve(import.meta.dirname, '../dist/cli.js');
 const built = existsSync(CLI);
 if (!built) {
-  console.warn(`the real CLI on the dev channel: SKIPPED. ${CLI} does not exist; run \`pnpm build\` in ts first.`);
+  console.warn(`the real CLI on the production channel: SKIPPED. ${CLI} does not exist; run \`pnpm build\` in ts first.`);
 }
 
-describe.skipIf(!built)('the real built CLI speaks the dev channel, with no test seam', () => {
-  it('names the v2-dev roots, refuses pinning, and names each ignored override exactly once', () => {
-    // A build older than the dev channel is a stale build, never a pass.
-    expect(existsSync(path.resolve(import.meta.dirname, '../dist/ocifetch/channel.js')), 'dist/ predates the dev channel: run pnpm build').toBe(true);
+describe.skipIf(!built)('the real built CLI speaks the production channel, with no test seam', () => {
+  it('names the v2 roots, honors pinning, ignores no override, and an offline fetch from an empty cache is ARTIFACT_MISSING', () => {
+    // A build older than the channel module is a stale build, never a pass.
+    expect(existsSync(path.resolve(import.meta.dirname, '../dist/ocifetch/channel.js')), 'dist/ predates the channel module: run pnpm build').toBe(true);
     const xdg = tempDir();
     const home = tempDir();
+    const cwd = tempDir();
     const cli = (env: Record<string, string>, ...args: string[]) => {
       const r = spawnSync(process.execPath, [CLI, ...args], {
+        cwd,
         env: { HOME: home, XDG_CACHE_HOME: xdg, PATH: process.env['PATH'] ?? '', ...env },
         encoding: 'utf8',
       });
       return { code: r.status, out: r.stdout, err: r.stderr };
     };
 
-    expect(cli({}, 'where')).toMatchObject({ code: 0, out: `${path.join(xdg, 'chtypes', DEV_CACHE_DIR)}\n` });
+    expect(cli({}, 'where')).toMatchObject({ code: 0, out: `${path.join(xdg, 'chtypes', 'v2')}\n` });
     const cache = tempDir();
-    expect(cli({ CHTYPES_CACHE: cache }, 'where')).toMatchObject({ code: 0, out: `${path.join(cache, DEV_CACHE_DIR)}\n` });
+    expect(cli({ CHTYPES_CACHE: cache }, 'where')).toMatchObject({ code: 0, out: `${path.join(cache, 'v2')}\n` });
+    expect(cli({}, 'where', '--all', '--cache', cache)).toMatchObject({
+      code: 0,
+      out: `${path.join(cache, 'v2')}\n/usr/local/share/chtypes/v2\n/opt/chtypes/v2\n`,
+    });
 
+    // A pin is honored: --frozen with no lock file reads the lock and fails on it, never with the dev channel's refusal.
     const frozen = cli({ CHTYPES_CACHE: cache }, 'fetch', '26.8', '--frozen');
-    expect(frozen.code).toBe(EXIT_USAGE);
-    expect(frozen.err).toContain(PINNING_REFUSED);
+    expect(frozen.err).not.toContain(PINNING_REFUSED);
+    expect(frozen.code).toBe(ERROR_EXIT_CODES['CHTYPES_ARTIFACT_PINNED']);
+    expect(frozen.err).toContain('chtypes.lock');
 
     const overrides = {
       CHTYPES_CACHE: cache,
-      CHTYPES_ARTIFACTS_URL: 'http://127.0.0.1:9/chtypes/v1',
+      CHTYPES_ARTIFACTS_URL: 'http://127.0.0.1:9/chtypes/v2',
       CHTYPES_TRUSTED_KEYS: TEST_KEYS[0].ed25519Hex,
       CHTYPES_ALLOW_UNSIGNED: '1',
     };
@@ -139,8 +149,6 @@ describe.skipIf(!built)('the real built CLI speaks the dev channel, with no test
     expect(offline.code, offline.err).toBe(ERROR_EXIT_CODES['CHTYPES_ARTIFACT_MISSING']);
     expect(offline.out).toBe('');
     expect(offline.err).toContain('CHTYPES_ARTIFACT_MISSING');
-    for (const name of ['CHTYPES_ARTIFACTS_URL', 'CHTYPES_TRUSTED_KEYS', 'CHTYPES_ALLOW_UNSIGNED']) {
-      expect(offline.err.split(`WARNING: ${name} is set and IGNORED`).length - 1, `${name} warned once by the real CLI`).toBe(1);
-    }
+    expect(offline.err, 'the production channel ignores no override').not.toContain('is set and IGNORED');
   });
 });

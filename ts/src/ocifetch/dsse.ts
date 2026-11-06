@@ -286,7 +286,7 @@ export function checkArtifactStatement(
     );
   }
   const p = statement.predicate;
-  // The active contract's generation: 2 on the ABI v2 dev channel (rule r6),
+  // The active contract's generation: 2 on the generation-2 channels (rule r6),
   // so a 1.x build's abi-1 predicate is refused there.
   const abi = activeChannel().abi;
   if (p['abi'] !== abi) {

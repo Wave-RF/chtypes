@@ -66,9 +66,10 @@ pub struct VerifyResult {
 
 /// Options shared by every entry point. A library caller builds one per
 /// call; nothing here is read from `std::env` except where documented. Under
-/// the dev channel this build speaks (channel.rs; spec/abi-v2/docs.md, rule
-/// r6), the base, trust and unsigned fields and their variables are ignored
-/// with one warning each, and the four pinning fields are refused.
+/// the dev channel (channel.rs; spec/abi-v2/docs.md, rule r6), which only a
+/// test build selects, the base, trust and unsigned fields and their variables
+/// are ignored with one warning each, and the four pinning fields are refused;
+/// the production channel this build speaks honors them all.
 pub struct Options {
     /// The platform key (`"linux-arm64"`, …). Defaults to the host platform.
     pub platform: Option<String>,
@@ -175,7 +176,8 @@ pub(super) struct Resources {
 
 /// The ordered base list one call uses: the options' own, else
 /// `$CHTYPES_ARTIFACTS_URL` (comma-separated), else the contract's default;
-/// under the dev channel, `channel::DEV_CHANNEL_BASE` alone, always.
+/// under the dev channel (test builds only), `channel::DEV_CHANNEL_BASE` alone,
+/// always.
 pub fn configured_bases(options: &Options) -> Vec<String> {
     channel::bases(options.bases.as_deref())
 }

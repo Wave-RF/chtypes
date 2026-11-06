@@ -57,22 +57,20 @@ use crate::setup;
 /// default (the environment, then the built-in value); the test hooks of the
 /// fetch layer's own options are not reachable from here.
 ///
-/// **2.0.0-dev.** This SDK speaks the ABI v2 dev channel (spec/abi-v2/docs.md,
-/// rules r5 and r6): `bases`, `trusted_keys` and `allow_unsigned` (and
-/// `CHTYPES_ARTIFACTS_URL`, `CHTYPES_TRUSTED_KEYS` and `CHTYPES_ALLOW_UNSIGNED`)
-/// are ignored, each with one warning per process; `frozen`, `lock_path`,
-/// `lock_write` and `update` are refused as [`Error::Usage`] before any
-/// network call; and `cache_dir` (or `CHTYPES_CACHE`) is used through its
-/// subroot `<cache_dir>/v2-dev`.
+/// This SDK speaks ABI v2's production channel (docs/guides/fetch-v1.md,
+/// "Generation 2 after the lock"): `bases`, `trusted_keys` and
+/// `allow_unsigned` (and `CHTYPES_ARTIFACTS_URL`, `CHTYPES_TRUSTED_KEYS` and
+/// `CHTYPES_ALLOW_UNSIGNED`) are honored, as are `frozen`, `lock_path`,
+/// `lock_write` and `update`; and `cache_dir` (or `CHTYPES_CACHE`) is used
+/// through its subroot `<cache_dir>/v2`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FetchOptions {
     /// Base URLs, most-preferred first. `None` is `$CHTYPES_ARTIFACTS_URL`, else
-    /// the built-in default. Ignored by this 2.0.0-dev SDK, which fetches only
-    /// from `https://registry-staging.wavehouse.dev/chtypes/v2-dev`.
+    /// the built-in default (`https://registry.wavehouse.dev/chtypes/v2`).
     pub bases: Option<Vec<String>>,
     /// The cache. `None` is `$CHTYPES_CACHE`, else the per-user cache
-    /// (`${XDG_CACHE_HOME:-~/.cache}/chtypes/v2-dev`); an explicit cache is used
-    /// through its subroot `<cache_dir>/v2-dev`.
+    /// (`${XDG_CACHE_HOME:-~/.cache}/chtypes/v2`); an explicit cache is used
+    /// through its subroot `<cache_dir>/v2`.
     pub cache_dir: Option<String>,
     /// Read-only system directories, searched after the cache. `None` is the
     /// built-in list.
@@ -95,8 +93,7 @@ pub struct FetchOptions {
     /// A non-empty list REPLACES the default trust (the release key); `None`
     /// reads `$CHTYPES_TRUSTED_KEYS` (comma-separated), else the release key.
     /// It never appends to the default. The SDK's own fixture key is trusted
-    /// only by naming it here. Ignored by this 2.0.0-dev SDK, which trusts only
-    /// the staging key.
+    /// only by naming it here.
     pub trusted_keys: Option<Vec<String>>,
     /// An access token; `None` is `$CHTYPES_DOWNLOAD_TOKEN`.
     pub token: Option<String>,
@@ -144,9 +141,9 @@ impl FetchOptions {
 }
 
 /// The cache root a fetch, list or `chtypes where` with `options` would use:
-/// `options.cache_dir`, else `CHTYPES_CACHE` (each used through its `v2-dev`
-/// subroot, `spec/abi-v2/docs.md` rule r5), else
-/// `${XDG_CACHE_HOME:-~/.cache}/chtypes/v2-dev`.
+/// `options.cache_dir`, else `CHTYPES_CACHE` (each used through its `v2`
+/// subroot, `docs/guides/fetch-v1.md`, "Generation 2 after the lock"), else
+/// `${XDG_CACHE_HOME:-~/.cache}/chtypes/v2`.
 ///
 /// It is the fetch layer's own resolution and the first entry of
 /// [`search_dirs`]. It creates nothing and reads no cache.
@@ -703,8 +700,8 @@ mod tests {
     /// sentence the offline fetch gives (public issue #486).
     #[test]
     fn a_missing_request_from_a_zero_x_registry_names_it() {
-        // The 0.x upgrade hint is the v1 contract's: a dev SDK reads an
-        // explicit cache through its v2-dev subroot, where no 0.x registry sits.
+        // The 0.x upgrade hint is the v1 contract's: a v2 SDK reads an
+        // explicit cache through its v2 subroot, where no 0.x registry sits.
         let _v1 = crate::ocifetch::channel::use_fetch_v1_for_tests();
         let dir = std::env::temp_dir().join(format!(
             "chtypes_registry_zero_x_{}_{:?}",

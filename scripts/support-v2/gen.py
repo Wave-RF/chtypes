@@ -22,8 +22,8 @@ bytes.
 
 WHERE THE FACTS COME FROM. The Python binding's ACTIVE generation-2 channel
 decides the registry, the key and the generation (`chtypes._ocifetch._channel.
-active()`): the staging dev channel today, production `chtypes/v2` with the
-release key after the lock change flips `active()`, with no change here. This
+active()`): production `chtypes/v2` with the release key since the lock
+flipped `active()` (it was the staging dev channel before). This
 script reads those three values and nothing else about the channel; an
 environment variable cannot redirect it (the base and the keys are passed as
 explicit options, which beat the environment on a channel that honors it).
@@ -1890,15 +1890,20 @@ def _selftest() -> int:
             failures.append(what)
 
     # The derivation: a channel gives its own base, keys and generation, and
-    # the active one is the dev channel outside a test run.
+    # the active one is the production channel outside a test run (since the
+    # lock; it was the dev channel before).
     dev, prod = channel_context(_channel.DEV_CHANNEL), channel_context(_channel.PROD_V2_CHANNEL)
-    check(_channel.active() is _channel.DEV_CHANNEL, "the active channel is the dev channel")
+    check(_channel.active() is _channel.PROD_V2_CHANNEL, "the active channel is the production channel")
     check(
-        channel_context() == dev
-        and not dev.production
-        and dev.base == _channel.DEV_CHANNEL_BASE
-        and dev.key_ids == (_channel.DEV_KEY_ID,),
-        "by default the context is the dev base and the dev key",
+        channel_context() == prod
+        and prod.production
+        and prod.base == C.PROD_V2_BASES[0]
+        and prod.key_ids == tuple(k["keyid"] for k in C.RELEASE_KEYS),
+        "by default the context is the production base and the release key",
+    )
+    check(
+        not dev.production and dev.base == _channel.DEV_CHANNEL_BASE and dev.key_ids == (_channel.DEV_KEY_ID,),
+        "the dev channel gives the dev base and the dev key",
     )
     check(
         prod.production
@@ -2378,7 +2383,7 @@ def _selftest() -> int:
         finally:
             restore()
         cli_runs = _cli_selftest(
-            check, tmp / "cli", port, lines_doc, fixture_doc.supported, fixture, page, signer[1], pub, other, cli_case_ids,
+            check, tmp / "cli", port, lines_doc, fixture_doc.supported, fixture, render(channel_context()), signer[1], pub, other, cli_case_ids,
         )
     finally:
         server.terminate()
@@ -3066,7 +3071,7 @@ def _cli_selftest(check, tmp: Path, port: int, lines_doc, supported, fixture, pa
     from_this_tree("resolving a line raises", "cli-published", crash=True)
 
     # --check-page needs no channel: this is the script itself, as a command. Its page is
-    # the active channel's, the dev one in a real process.
+    # the active channel's, the production one in a real process since the lock.
     good = write("good-page.md", page)
     stale = write("stale-page.md", page + "\n")
     cli("--check-page, all agrees", ["--check-page", *selected(good, at_fixture)], EXIT_OK, said=("no registry read", "--out", "--lines", "not the committed files"))

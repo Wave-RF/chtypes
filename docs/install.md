@@ -7,18 +7,18 @@ Two steps, in this order: the **binding** for your language, then at least one *
 <details open><summary><b>Go</b></summary>
 
 ```sh
-go get github.com/wave-rf/chtypes/go
+go get github.com/wave-rf/chtypes/go/v2
 ```
 
-The module path is lowercase — the Go norm — and froze at the first tag. Import it as:
+The module path is lowercase — the Go norm — and ends in `/v2` for SDK 2.x, as Go's major-version rule requires (`github.com/wave-rf/chtypes/go` stays the 1.x module). Import it as:
 
 ```go
-import "github.com/wave-rf/chtypes/go/chtypes"
+import "github.com/wave-rf/chtypes/go/v2/chtypes"
 ```
 
 The default build is **dlopen-only**: it compiles with cgo (for `dlfcn`) but links nothing, includes no header, and needs no build tree. That is what `go get` gives a consumer, and it is all you need.
 
-**cgo is required to build, and glibc to run.** The package's untagged `import "C"` is a thin layer of C shims over each artifact's `chs_*` function table, so a build needs `CGO_ENABLED=1` and a C compiler on `PATH`. Go switches cgo off by itself when it finds no compiler or is cross-compiling, and the build then fails with an undefined-name error that does not mention cgo. At run time the artifact is a shared object that needs only the C library and carries its C++ runtime inside. On Linux it needs a glibc at or above the floor the build records in its own signed statement; a host below it is refused at open with `CHTYPES_ARTIFACT_INCOMPATIBLE` ([`support-v1.md`](support-v1.md#platforms)). So a glibc image such as `debian:bookworm-slim` can run it, while `FROM scratch`, `gcr.io/distroless/static` and musl distributions such as Alpine cannot (`inferred` from the loader; musl is support unknown). Build in a glibc image that has a compiler, such as the Debian-based `golang` images.
+**cgo is required to build, and glibc to run.** The package's untagged `import "C"` is a thin layer of C shims over each artifact's `chs_*` function table, so a build needs `CGO_ENABLED=1` and a C compiler on `PATH`. Go switches cgo off by itself when it finds no compiler or is cross-compiling, and the build then fails with an undefined-name error that does not mention cgo. At run time the artifact is a shared object that needs only the C library and carries its C++ runtime inside. On Linux it needs a glibc at or above the floor the build records in its own signed statement; a host below it is refused at open with `CHTYPES_ARTIFACT_INCOMPATIBLE` ([`support-v2.md`](support-v2.md#platforms)). So a glibc image such as `debian:bookworm-slim` can run it, while `FROM scratch`, `gcr.io/distroless/static` and musl distributions such as Alpine cannot (`inferred` from the loader; musl is support unknown). Build in a glibc image that has a compiler, such as the Debian-based `golang` images.
 
 </details>
 
@@ -43,7 +43,7 @@ npm install @wavehouse/chtypes
 
 ESM only, Node 22.21 or newer. Native calls go through `ffi-rs`, prebuilt for darwin arm64/x64 and linux arm64/x64 (gnu and musl), so there is no build step.
 
-⚠️ That is the FFI loader's matrix, not the artifact's. chtypes artifacts are published for **darwin-arm64, linux-amd64 and linux-arm64 only** ([`support-v1.md`](support-v1.md#platforms)). On an Intel Mac or a musl distribution the package installs and `ffi-rs` resolves, and then `chtypes fetch <line>` answers `CHTYPES_ARTIFACT_UNPUBLISHED`.
+⚠️ That is the FFI loader's matrix, not the artifact's. chtypes artifacts are published for **darwin-arm64, linux-amd64 and linux-arm64 only** ([`support-v2.md`](support-v2.md#platforms)). On an Intel Mac or a musl distribution the package installs and `ffi-rs` resolves, and then `chtypes fetch <line>` answers `CHTYPES_ARTIFACT_UNPUBLISHED`.
 
 </details>
 
@@ -57,17 +57,17 @@ Rust 1.87 or newer, edition 2024. The fetch layer and the `chtypes` binary are p
 
 </details>
 
-Version requirements per language and the platforms artifacts are published for are in [`support-v1.md`](support-v1.md). The ClickHouse lines that are available are whatever the registry publishes (`chtypes list`); the v1 channel carries no statement of which are supported, so a line's support reads **unknown**, never unsupported.
+Version requirements per language and the platforms artifacts are published for are in [`support-v2.md`](support-v2.md). The ClickHouse lines that are available are whatever the registry publishes (`chtypes list`); where the page has no statement for a line, its support reads **unknown**, never unsupported.
 
 ## 2. An artifact
 
 Each binding ships the same fetch command, so you need nothing from this repository:
 
 ```sh
-go run github.com/wave-rf/chtypes/go/cmd/chtypes@latest fetch 26.8   # Go
-python -m chtypes fetch 26.8                                         # Python
-npx @wavehouse/chtypes fetch 26.8                                    # TypeScript
-cargo install chtypes && chtypes fetch 26.8                          # Rust
+go run github.com/wave-rf/chtypes/go/v2/cmd/chtypes@latest fetch 26.8   # Go
+python -m chtypes fetch 26.8                                            # Python
+npx @wavehouse/chtypes fetch 26.8                                       # TypeScript
+cargo install chtypes && chtypes fetch 26.8                             # Rust
 ```
 
 A spelling is two, three or four parts (`26.8`, `26.8.15`, `26.8.15.10`), with no `v` prefix and no channel suffix. The command installs into the per-user OCI cache `${XDG_CACHE_HOME:-~/.cache}/chtypes/v1/`, which every binding reads by default, so **one machine set up once serves all four**. `CHTYPES_CACHE` overrides the cache directory, and `chtypes where` prints the one in use. `CHTYPES_REGISTRY`, which the previous generation used, is retired: set, it warns once and is otherwise ignored.
@@ -144,8 +144,8 @@ If you are developing against this repository rather than consuming a release:
 <details open><summary><b>Go</b></summary>
 
 ```text
-require github.com/wave-rf/chtypes/go v0.0.0
-replace github.com/wave-rf/chtypes/go => ../path/to/chtypes/go
+require github.com/wave-rf/chtypes/go/v2 v2.0.0
+replace github.com/wave-rf/chtypes/go/v2 => ../path/to/chtypes/go
 ```
 
 The `require` version is never resolved once the module is replaced by a path, so `v0.0.0` is the honest placeholder — it is what `examples/go/go.mod` in this repository uses.
@@ -191,4 +191,4 @@ A library you built yourself, for example the artifact producer's own unpublishe
 
 ## Next
 
-[`quickstart.md`](quickstart.md) — one artifact, one schema, one row, in whichever of the four you just installed. What 1.0 does not do yet is in [`limitations.md`](limitations.md#known-gaps-in-10).
+[`quickstart.md`](quickstart.md) — one artifact, one schema, one row, in whichever of the four you just installed. What the SDK does not do yet is in [`limitations.md`](limitations.md#known-gaps-in-10).

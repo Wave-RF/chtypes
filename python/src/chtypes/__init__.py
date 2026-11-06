@@ -1,10 +1,10 @@
 """chtypes: ClickHouse's own type system, per version, from Python.
 
-2.0.0-dev: UNSTABLE, staging only, not for production. This pre-release speaks
-the ABI v2 dev description (spec/abi-v2/docs.md): it fetches only from the
-staging dev channel and trusts only its key, refuses locks and frozen fetches,
-caches under its own `v2-dev` root, and refuses a library built from any other
-dev fingerprint (rules r5 and r6).
+This is the ABI v2 binding: it speaks the locked ABI v2 description
+(spec/abi-v2/docs.md), refuses a library built from any other fingerprint, and
+fetches from the production channel, https://registry.wavehouse.dev/chtypes/v2,
+under the release key, caching under its own `v2` root (docs/guides/fetch-v1.md,
+"Generation 2 after the lock").
 
 One question, exactly: *if this row were inserted into this ClickHouse table on
 this ClickHouse version, what would happen?* The answer comes from ClickHouse's
