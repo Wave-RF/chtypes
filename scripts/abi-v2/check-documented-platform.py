@@ -29,6 +29,7 @@ Python standard library only.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import sys
 from pathlib import Path
@@ -38,8 +39,9 @@ DIR = ROOT / "spec" / "abi-v2" / "documented-platform"
 NAME = "documented-platform.tsv"
 HEADER = ("platform", "line", "class", "kind", "server", "rule", "ruling")
 PLATFORMS = ("linux-amd64", "linux-arm64", "darwin-arm64")
-# The lines the where-settings files use (check-where-settings.py LINES).
-LINES = ("26.3", "26.7", "26.8", "26.9")
+# The lines the where-settings files use: spec/abi-v2/where-settings/lines.json,
+# the one place they are named.
+LINES = tuple(json.loads((ROOT / "spec" / "abi-v2" / "where-settings" / "lines.json").read_bytes())["lines"])
 SERVER = re.compile(r"^server e:[0-9]+$")
 # Built from parts so this file does not itself spell a private name (lint-public).
 PRIVATE = re.compile("|".join(["ci" + "/steps", "chtypes" + "-core", "chtypes" + "-infra", "notes" + "/", "#[0-9]"]))
