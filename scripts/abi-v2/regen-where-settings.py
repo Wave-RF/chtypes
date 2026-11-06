@@ -42,6 +42,19 @@ with it. Without --from only lines.json and its README row are written, which is
 right only while the supported lines do not change (a first publication that names
 the same lines), so anything else is refused, naming --from.
 
+`source` never moves backward here: once it names a publication, a run that would
+write the fixture marker, or an older tag, is refused (scripts/support-v2/gen.py's
+THE LATCH). A hand edit of lines.json is not seen by this script; that file is under
+`spec/**`, a protected path.
+
+--lines-source needs --lines-document, and --control takes --from and nothing else:
+each is a usage error (exit status 2, no verdict line).
+
+A read or write that fails (an unreadable file, a producer file that is not UTF-8, a
+target that cannot be written) ends the run with exit status 1 and its verdict line,
+naming the error. A write that fails part-way leaves the tree part-written; the run
+says to read it with check-where-settings.py --check.
+
 Every mode but --selftest ends with one `regen: verdict:` line on stderr, naming its
 exit status, and --selftest drives each through this file's real entry point in a
 subprocess, on a planted tree.
@@ -55,6 +68,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -133,12 +147,34 @@ def on_disk_verdict(dst: Path, say) -> int:
     return rc
 
 
+def source_of(data: bytes | None) -> str:
+    """lines.json's `source` in `data`, or "" when there is none to read."""
+    try:
+        doc = checker.strict_json(data) if data is not None else None
+    except ValueError:
+        return ""
+    source = doc.get("source") if isinstance(doc, dict) else None
+    return source if isinstance(source, str) else ""
+
+
+def refuse_backward(current: bytes | None, new_lines: bytes) -> None:
+    """THE LATCH only turns one way: a source that names a publication does not
+    become the fixture marker or an older publication."""
+    old, new = source_of(current), source_of(new_lines)
+    if not (checker.PUBLICATION_TAG.fullmatch(old) and not checker.source_problem(old)):
+        return
+    if new == checker.FIXTURE_SOURCE or (checker.PUBLICATION_TAG.fullmatch(new) and new < old):
+        raise Refused(f"--lines-source {new} moves lines.json's source backward from the publication {old}")
+
+
 def regen(src: Path, dst: Path, say, new_lines: bytes | None = None, *, write=Path.write_bytes) -> int:
     """`new_lines`, a new lines.json, is written with everything else, so a run that
     is refused leaves the old one in place too. `write` is how a file reaches the
     disk: the selftest plants a write that goes wrong through it, which nothing
     short of a failing disk can otherwise do."""
     path = dst / checker.LINES_FILE
+    if new_lines is not None:
+        refuse_backward(path.read_bytes() if path.exists() else None, new_lines)
     current = new_lines if new_lines is not None else (path.read_bytes() if path.exists() else None)
     lines, problems = checker.lines_of({} if current is None else {checker.LINES_FILE: current})
     if problems or not lines:
@@ -192,6 +228,7 @@ def relabel(dst: Path, say, new_lines: bytes, *, write=Path.write_bytes) -> int:
     """lines.json alone, with its README row: the supported lines stay where they
     are, so no list has to move. `write` is regen's."""
     raw, readme = checker.load(dst)
+    refuse_backward(raw.get(checker.LINES_FILE), new_lines)
     old, _ = checker.lines_of(raw)
     new, problems = checker.lines_of({checker.LINES_FILE: new_lines})
     if problems or not new:
@@ -449,6 +486,17 @@ def selftest() -> int:
         for name, data in before.items():
             (dst / name).write_bytes(data)
 
+        # The latch turns one way: a tag does not go back to the marker or to an older tag.
+        two = {"1.2": "supported", "1.10": "supported"}
+        for what, new in (
+            ("the fixture marker", lines_doc(document(two), checker.FIXTURE_SOURCE)),
+            ("an older tag", lines_doc(document(two, "2026-01-01T03:04:05Z"), "20260101T030405Z")),
+        ):
+            refused_with(f"--lines-document, back to {what}, no --from", "backward", lambda n=new: relabel(dst, said.append, n))
+            refused_with(f"--lines-document, back to {what}, with --from", "backward", lambda n=new: regen(src, dst, said.append, n))
+            if tree_now() != before:
+                fails.append(f"--lines-document, back to {what}: the tree changed")
+
         # A README with no sha256 rows: refused, and nothing was written first.
         (dst / "README.md").write_text("no rows\n", encoding="utf-8")
         held = tree_now()
@@ -625,12 +673,42 @@ def cli_selftest(fails: list[str], tag: str, tag2: str, lists, document, header:
         unchanged("--lines-document, no such file", root, ["--lines-document", str(base / "absent.json"), "--lines-source", tag2], "could not be read")
         unchanged("--lines-source outside the closed form", root, ["--lines-document", same, "--lines-source", "a note"], "is neither")
         # A source lines.json does not already name: writing it would change the tree.
-        first = file("first.json", document({"1.2": "supported", "1.3": "retired", "1.10": "supported"}))
+        first = file("first.json", document({"1.2": "supported", "1.3": "retired", "1.10": "supported"}, "2026-01-04T03:04:05Z"))
         stray = root / DIR.relative_to(ROOT) / "extra.txt"
         stray.write_bytes(b"x\n")
-        unchanged("--lines-document, a tree that would fail a rule", root, ["--lines-document", first, "--lines-source", tag], "(stray)")
+        unchanged("--lines-document, a tree that would fail a rule", root, ["--lines-document", first, "--lines-source", "20260104T030405Z"], "(stray)")
         stray.unlink()
         run("--lines-document needs --lines-source", root, ["--lines-document", same], 2)
+        run("--lines-source needs --lines-document", root, ["--from", str(src), "--lines-source", tag], 2, "--lines-source needs --lines-document")
+        run("--control takes no --lines-source", root, ["--from", str(src), "--control", "--lines-source", tag], 2, "--control takes --from")
+
+        # The latch turns one way, and the refusal leaves the tree as it was.
+        root = fresh_tree("backward")
+        three = {"1.2": "supported", "1.3": "retired", "1.10": "supported"}
+        marker_doc = file("marker.json", document(three))
+        old_doc = file("old.json", document(three, "2025-12-31T03:04:05Z"))
+        for extra in ([], ["--from", str(src)]):
+            unchanged("--lines-source the fixture marker over a tag", root, ["--lines-document", marker_doc, "--lines-source", checker.FIXTURE_SOURCE, *extra], "backward")
+            unchanged("--lines-source an older tag", root, ["--lines-document", old_doc, "--lines-source", "20251231T030405Z", *extra], "backward")
+
+        # A read or a write that fails ends in a verdict line, not a traceback.
+        root = fresh_tree("io")
+        nonutf = base / "nonutf"
+        shutil.copytree(src, nonutf)
+        (nonutf / checker.TSV).write_bytes(b"\xff\xfe\n")
+        unchanged("--from, a producer TSV that is not UTF-8", root, ["--from", str(nonutf)], "UnicodeDecodeError")
+        if hasattr(os, "geteuid") and os.geteuid() != 0:
+            changed = base / "changed"
+            shutil.copytree(src, changed)
+            d = json.loads(producer["1.2"])
+            d["settings"][0]["reason"] = "moved"
+            (changed / "1.2.json").write_bytes((json.dumps(d, indent=1) + "\n").encode())
+            union = root / DIR.relative_to(ROOT) / checker.UNION
+            union.chmod(0o444)
+            try:
+                run("--from, a target that cannot be written", root, ["--from", str(changed)], 1, "PermissionError")
+            finally:
+                union.chmod(0o644)
 
         # --lines-document, with --from: the lists move with it.
         root = fresh_tree("both")
@@ -664,10 +742,12 @@ def main(argv: list[str] | None = None) -> int:
 def run_mode(args: argparse.Namespace, ap: argparse.ArgumentParser, say) -> int:
     try:
         if args.control:
-            if not args.src or args.lines_document:
+            if not args.src or args.lines_document or args.lines_source:
                 ap.error("--control takes --from, and nothing else")
             return control(args.src, say)
         if not args.lines_document:
+            if args.lines_source:
+                ap.error("--lines-source needs --lines-document")
             if not args.src:
                 ap.error("--from is required")
             return regen(args.src, DIR, say)
@@ -683,6 +763,9 @@ def run_mode(args: argparse.Namespace, ap: argparse.ArgumentParser, say) -> int:
         return relabel(DIR, say, out)
     except Refused as e:
         say(f"regen: nothing written: {e}")
+        return 1
+    except (OSError, UnicodeDecodeError) as e:
+        say(f"regen: failed: {type(e).__name__}: {e}; read what is on disk with check-where-settings.py --check")
         return 1
 
 
