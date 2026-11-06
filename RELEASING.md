@@ -147,7 +147,16 @@ The manifests must say `2.0.0` (and Go's `bindingVersion`) for the version agree
 
 **The support page after a publish.** Nothing to do: a publish opens no pull request here. [`docs/support-v2.md`](docs/support-v2.md) holds only what the SDK owns (languages, SDK to ABI, platforms, the rule for a line's support), so no publish can make it stale. The per-line page is the artifact producer's: its publish job renders it and serves it at `<channel base>/support-matrix.md` (dev: <https://registry-staging.wavehouse.dev/chtypes/v2-dev/support-matrix.md>; production at the lock: <https://registry.wavehouse.dev/chtypes/v2/support-matrix.md>).
 
-A line is supported exactly while upstream's `SECURITY.md` lists it, and the only source of per-line state is the channel's signed document in the repository `<channel>/channel`, whose contract is in `scripts/support-v2/gen.py`'s header. What this repository commits from it is [`spec/abi-v2/where-settings/lines.json`](spec/abi-v2/where-settings/lines.json). On a pull request that touches the page, the generator or `spec/abi-v2/where-settings/`, `checks` runs `gen.py --check`, which fails if the page differs from the output, a supported line has no verifiable build, or `lines.json` disagrees with the newest document; every other pull request skips it, so a publish can never redden one. Until the first document is published that check prints `live check off` and the per-line comparison is NOT JUDGED; it turns on by itself with the first publication.
+A line is supported exactly while upstream's `SECURITY.md` lists it, and the only source of per-line state is the channel's signed document in the repository `<channel>/channel`, whose contract is in `scripts/support-v2/gen.py`'s header. What this repository commits from it is [`spec/abi-v2/where-settings/lines.json`](spec/abi-v2/where-settings/lines.json), whose `source` is the dry-run fixture's path until the first publication and that publication's tag after it. On every pull request `checks` runs `gen.py --check-page`, which reads no registry and fails if the page differs from the output, because a pull request that bumps a binding's manifest changes the page. On a pull request that touches the page, the generator, `spec/abi-v2/where-settings/`, its fixture under `tests/fixtures/support-v2/` or `scripts/abi-v2/check-where-settings.py` and `regen-where-settings.py`, `checks` also runs `gen.py --check`, which fails if a supported line has no verifiable build or `lines.json` disagrees with the newest document; every other pull request skips it, so a publish can never redden one. Until the first document is published that check prints `live check off`, with a warning annotation, and the per-line comparison is NOT JUDGED; `lines.json` is then held to the fixture's lines instead.
+
+**After the first publication.** The comparison turns on by itself, and the next pull request that touches those paths fails until `lines.json` names the publication, because that is what stops the channel's listing from turning the comparison off again: once `source` is a tag, a listing that names no publication, or only older ones, is a refusal, not "nothing yet". If the supported lines are the same as the fixture's, no list moves:
+
+```sh
+uv run scripts/support-v2/gen.py --print-document > document.json
+python3 scripts/abi-v2/regen-where-settings.py --lines-document document.json --lines-source <tag>
+```
+
+If they differ, it is the case below.
 
 **When a line is added or retired.** Take the supported lines from the verified document, then copy the artifact producer's lists (`<dir>` holds its `<line>.json` files and its `documented-pathological.tsv`; the first command also names the tag to use as the source):
 
@@ -157,7 +166,7 @@ python3 scripts/abi-v2/regen-where-settings.py --lines-document document.json --
 uv run scripts/support-v2/gen.py --write
 ```
 
-`regen-where-settings.py` copies each list byte for byte, deletes a list `lines.json` does not name, drops the TSV rows on such a line, derives `union.json` and rewrites the README's sha256 list; it never takes a list by hand. The exit statuses of `gen.py` are in its header: 0 is fine (or NOT JUDGED, named), 1 is a committed file that differs, 3 is a line that failed (named on stderr: read them before committing), 4 is a channel whose lines could not be read, and 5 is a channel document that was refused. No older document is ever read in place of a refused one.
+`regen-where-settings.py` copies each list byte for byte, deletes a list `lines.json` does not name, drops the TSV rows on such a line, derives `union.json` and rewrites the README's sha256 list; it never takes a list by hand, and it judges the whole tree before it writes a byte. The exit statuses of `gen.py` are in its header: 0 is fine (or NOT JUDGED, named), 1 is a committed file that differs, 3 is a line that failed (named on stderr: read them before committing), 4 is a channel whose lines could not be read, and 5 is a channel document that was refused. No older document is ever read in place of a refused one.
 
 ## Before the first tag of each package
 

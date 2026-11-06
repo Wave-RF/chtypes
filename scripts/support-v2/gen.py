@@ -8,7 +8,8 @@ against its signed per-line document (public issue #438).
 
     uv run scripts/support-v2/gen.py                  print the page to stdout
     uv run scripts/support-v2/gen.py --write          write docs/support-v2.md
-    uv run scripts/support-v2/gen.py --check          the committed page and lines.json must agree
+    uv run scripts/support-v2/gen.py --check-page     the committed page must agree, with no registry read
+    uv run scripts/support-v2/gen.py --check          the committed page and lines.json must agree with the channel
     uv run scripts/support-v2/gen.py --print-document print the verified channel document to stdout
     uv run scripts/support-v2/gen.py --selftest       prove every rule below on a fixture registry
 
@@ -49,17 +50,19 @@ Each step below refuses with its own name in brackets on stderr:
     form it takes is the one measured on both registries (2026-11-06): a 200 whose
     JSON has this repository's `name` and a `tags` list. Those registries answer
     that for ANY repository name, so a 404 is not this answer: it, a transport
-    failure, a 5xx, a 401, a 403 or an unreadable body is [listing] or
-    [listing-shape]. A listing that may be cut off ([listing-truncated]: a `Link`
-    next page, or a full page) cannot name the newest tag.
+    failure, a 5xx, a 401, a 403, any other 2xx or an unreadable body is [listing]
+    or [listing-shape]. A listing that may be cut off ([listing-truncated]: a next
+    page on any `Link` line, or a full page) cannot name the newest tag.
  2. The tag's manifest must have the channel artifactType ([artifact-type]) and
-    exactly one layer, of the channel media type ([layers]).
+    exactly one layer, of the channel media type ([layers]), and no member twice
+    ([manifest]): a repeated `layers` would otherwise read as its last one.
  3. A bundle referrer counts only if it verifies under the channel's own keys, the
     ones that verify an artifact there ([bundle-untrusted]), with the channel
     predicateType ([predicate-type]) and exactly one subject ([subject-count]),
     equal to the layer's sha256 ([subject-digest]). None listed is [no-bundle].
  4. The layer's sha256 must match ([layer-sha]), and its JSON must be value-equal
-    to the predicate ([layer-value]): JSON values, so `true` is not `1`.
+    to the predicate ([layer-value]): JSON values, so `true` is not `1`. NaN, an
+    infinity and a number too large for a double are not JSON values ([layer-json]).
  5. In the predicate: schema is 1 ([schema]), repository is the channel being read
     ([repository]), produced_at in basic form equals the tag ([produced-at]), and
     every entry has the shape above ([entry]).
@@ -82,38 +85,65 @@ failed.
     unknown, none published named      3                 NOT JUDGED   3
 
 While no document is published the per-line comparison is NOT JUDGED, printed as
-`live check off`: only a line with no build gets that leniency, and it ends with the
-first publication. A statement that does not verify is never excused, published or
-not, except on a retired line. Messages never carry a predicate's or a registry's
-value, and every run ends with one `verdict` line that agrees with its status.
+`live check off`, and as a `::warning::` under GitHub Actions: only a line with no
+build gets that leniency. A listing with tags and none spelled like a publication
+says exactly that, not "published yet". A statement that does not verify is never
+excused, published or not, except on a retired line. A supported line with a
+verified build that is absent on some platforms has them named on stderr, and its
+status does not change. Messages never carry a predicate's or a registry's value,
+and every run ends with one `verdict` line that agrees with its status and names
+any --out or --lines it was given.
+
+THE LATCH. That leniency ends with the first publication and does not come back.
+spec/abi-v2/where-settings/lines.json names its source in a closed form
+(scripts/abi-v2/check-where-settings.py): the dry-run fixture's path until the first
+publication, then the tag of the publication its lines were taken from. A tag says
+a publication was made, so a listing naming none is a refusal ([no-document]), not
+"nothing yet", and so is a newest publication older than that tag
+([older-than-lines]): an emptied or rolled-back listing cannot turn the comparison
+off. A source of any other form, or no readable lines.json, proves nothing about
+the past, so the leniency is refused then too ([lines-source]). --check also fails
+while a document exists and lines.json still names the fixture: until it moves, the
+latch is not set.
 
 NOTHING PRIVATE. In a build's statement every field checked must match its format
 (version, build id, glibc floor), and no string anywhere in it may match a
 private-name pattern; a build that fails either counts as failed.
 
---check, once a document exists, also compares spec/abi-v2/where-settings/lines.json
-with the document's supported lines. A publish cannot redden an unrelated pull
-request: .github/workflows/ci.yml runs --check only on one that touches these paths.
+--check, once a document exists, also compares lines.json with the document's
+supported lines; while none exists, with the dry-run fixture's, whatever else
+lines.json says. --check-page needs no registry: the page, lines.json's source, and
+in the fixture state its lines. .github/workflows/ci.yml runs --check-page on every
+pull request; a publish cannot redden an unrelated one, because --check runs only
+on one that touches these paths.
+
+KNOWN LIMITS. A registry that silently caps a listing under the page asked for, with
+no `Link` and short of a full page, hides the newest tag from rule 1, and nothing
+here can see that: the answer is indistinguishable from a shorter listing. The latch
+narrows it (a publication older than lines.json's is refused) and does not close it.
 
 EXIT STATUSES
     0  the page is current or written: every line fine, or NOT JUDGED (named)
-    1  --check: the committed page or lines.json differs from the output (named)
+    1  --check or --check-page: the committed page or lines.json differs (named)
     2  usage error, or --print-document with nothing published
     3  the page was produced, but a line failed by the table above (named);
        --check does not compare, and fails
     4  nothing was written: the channel's tag listing was unreadable, named no line,
        or no platform of any line verified
-    5  nothing was written: the channel document was refused, rules 1 to 6 (named)
+    5  nothing was written: the channel document was refused, rules 1 to 6 or the
+       latch (named)
    70  a crash in this script, which is never a verdict
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import copy
 import hashlib
 import importlib.util
 import json
+import math
 import os
 import re
 import shutil
@@ -140,6 +170,7 @@ from chtypes._ocifetch import (  # noqa: E402
     resolve_each,
 )
 from chtypes._ocifetch import _constants as C  # noqa: E402
+from chtypes._ocifetch import _http  # noqa: E402
 from chtypes._ocifetch._dsse import (  # noqa: E402
     loads_no_duplicate_keys,
     trusted_keys_from_hex,
@@ -162,6 +193,19 @@ from chtypes._ocifetch._referrers import discover_referrers  # noqa: E402
 
 PAGE = ROOT / "docs" / "support-v2.md"
 LINES_JSON = ROOT / "spec" / "abi-v2" / "where-settings" / "lines.json"
+
+
+def _script(path: Path, name: str):
+    """A standard-library script of this repository, by path."""
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+# lines.json's closed form, and the one way to spell a workflow command.
+lines_rules = _script(ROOT / "scripts" / "abi-v2" / "check-where-settings.py", "check_where_settings")
+annotate = _script(ROOT / "scripts" / "lib" / "gha_annotate.py", "gha_annotate")
 
 EXIT_OK = 0
 EXIT_DIFF = 1
@@ -205,9 +249,18 @@ VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$")
 BUILD_RE = re.compile(r"^[0-9]{8}\.[0-9]{6}$")
 GLIBC_RE = re.compile(r"^[0-9]+\.[0-9]+(\.[0-9]+)?$")
 
-# The selftest's planted strings, one per pattern below, built at run time.
+# The selftest's planted strings, one per pattern below in its order, built at run
+# time; the selftest proves each matches its own pattern and no other.
 PLANTED_NAME = "chtypes-" + "zz"
 PLANTED_PATH = "/" + "Users" + "/someone/lib.so"
+PLANTED_PRIVATE = (
+    PLANTED_NAME,
+    "wave" + "-rf",
+    PLANTED_PATH,
+    "core" + "#1",
+    "ci" + "/x",
+    "AUDIT" + "-x.md",
+)
 
 # Shapes that point into the private half or at a developer's machine. The page
 # is also scanned by scripts/lint-public.sh, whose rules these mirror in kind;
@@ -288,6 +341,37 @@ class ChannelRefused(Exception):
 
 
 @dataclass(frozen=True)
+class NoPublication:
+    """Rule 1's one answer that means no publication exists. `listed` counts the tags
+    the listing did name, none of them spelled like a publication."""
+
+    listed: int
+
+
+@dataclass(frozen=True)
+class LinesSource:
+    """What lines.json's `source` says of the channel's past: `tag` is the publication
+    its lines were taken from, "" for the dry-run fixture (none made when it was
+    written); `problem` is why neither can be read from it. See THE LATCH."""
+
+    tag: str = ""
+    problem: str = ""
+
+
+def lines_source(lines_json: Path) -> LinesSource:
+    """lines.json's `source`, in its closed form."""
+    try:
+        doc = lines_rules.strict_json(lines_json.read_bytes())
+    except (OSError, ValueError) as exc:
+        return LinesSource(problem=f"{lines_json.name} could not be read ({type(exc).__name__})")
+    source = doc.get("source") if isinstance(doc, dict) else None
+    problem = lines_rules.source_problem(source)
+    if problem:
+        return LinesSource(problem=f"{lines_json.name}'s source is neither the fixture marker nor a publication tag")
+    return LinesSource() if source == lines_rules.FIXTURE_SOURCE else LinesSource(tag=source)
+
+
+@dataclass(frozen=True)
 class ChannelDocument:
     """A verified predicate, and the tag it was published under."""
 
@@ -310,28 +394,75 @@ def _json_value(value: object) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
-def _channel_tags(bases, ctx: Context, policy: FetchPolicy, retry: RetryPolicy) -> list[str]:
-    """Rule 1's listing. Only a 200 in the form the registries were measured to
-    answer can come back: anything else raises, never an empty list."""
+@contextlib.contextmanager
+def _link_headers():
+    """Every `Link` line of each answer read inside the block. `HttpResponse.headers`
+    is a plain dict of the answer's headers, which keeps only the first of a repeated
+    one, so a `rel="next"` behind a `rel="prev"` never reaches it. This watches the
+    fetch layer's one opener instead, for this block only. If that layer ever stops
+    using it, no answer is seen and the caller refuses."""
+    answers: list[list[str]] = []
+    real = _http._opener
+
+    def opener(url: str):
+        built = real(url)
+        unwatched = built.open
+
+        def watched(*args, **kwargs):
+            answer = unwatched(*args, **kwargs)
+            answers.append(answer.headers.get_all("Link") or [])
+            return answer
+
+        built.open = watched
+        return built
+
+    _http._opener = opener
     try:
-        resp = fetch_from_bases(
-            bases,
-            "/tags/list",
-            mode="tag",
-            accept=("application/json",),
-            max_bytes=C.TAGS_LIST_MAX_BYTES,
-            policy=policy,
-            retry=retry,
-            query=f"n={LISTING_PAGE}",
-        )
-    except TransportError as exc:
-        raise ChannelRefused(
-            "listing", f"the channel's tag listing could not be read ({type(exc).__name__})"
-        ) from exc
+        yield answers
+    finally:
+        _http._opener = real
+
+
+def _read_listing(bases, what: str, policy: FetchPolicy, retry: RetryPolicy) -> tuple[object, str]:
+    """A tag listing's JSON and every `Link` value it was answered with. Only a 200
+    comes back: anything else raises, never an empty list."""
+    with _link_headers() as answers:
+        try:
+            resp = fetch_from_bases(
+                bases,
+                "/tags/list",
+                mode="tag",
+                accept=("application/json",),
+                max_bytes=C.TAGS_LIST_MAX_BYTES,
+                policy=policy,
+                retry=retry,
+                query=f"n={LISTING_PAGE}",
+            )
+        except TransportError as exc:
+            raise ChannelRefused("listing", f"{what} could not be read ({type(exc).__name__})") from exc
+    if resp.status != 200:
+        raise ChannelRefused("listing", f"{what} answered {resp.status}, not 200")
+    if not answers:
+        raise ChannelRefused("listing", f"{what}: the fetch layer's answer was not seen")
     try:
         doc = loads_no_duplicate_keys(resp.body)
     except ArtifactCorruptError as exc:
-        raise ChannelRefused("listing-shape", "the channel's tag listing is not JSON") from exc
+        raise ChannelRefused("listing-shape", f"{what} is not JSON") from exc
+    return doc, ", ".join(answers[-1])
+
+
+def _refuse_cut_off(tags: list[str], link: str, what: str) -> None:
+    if "next" in link.lower() or len(tags) >= LISTING_PAGE:
+        raise ChannelRefused(
+            "listing-truncated",
+            f"{what} may be cut off at {LISTING_PAGE} tags, so it cannot name the newest",
+        )
+
+
+def _channel_tags(bases, ctx: Context, policy: FetchPolicy, retry: RetryPolicy) -> list[str]:
+    """Rule 1's listing, in the form the registries were measured to answer."""
+    what = "the channel's tag listing"
+    doc, link = _read_listing(bases, what, policy, retry)
     want_name = f"{ctx.repository}/{CHANNEL_REPOSITORY}"
     tags = doc.get("tags") if isinstance(doc, dict) else None
     if (
@@ -340,17 +471,23 @@ def _channel_tags(bases, ctx: Context, policy: FetchPolicy, retry: RetryPolicy) 
         or not isinstance(tags, list)
         or not all(isinstance(t, str) for t in tags)
     ):
-        raise ChannelRefused(
-            "listing-shape", f"the channel's tag listing is not a tag list of {want_name}"
-        )
-    link = next((v for k, v in resp.headers.items() if k.lower() == "link"), "")
-    if "next" in link.lower() or len(tags) >= LISTING_PAGE:
-        raise ChannelRefused(
-            "listing-truncated",
-            f"the channel's tag listing may be cut off at {LISTING_PAGE} tags, "
-            "so it cannot name the newest",
-        )
+        raise ChannelRefused("listing-shape", f"{what} is not a tag list of {want_name}")
+    _refuse_cut_off(tags, link, what)
     return tags
+
+
+def _line_tags(options: Options) -> list[str]:
+    """The published lines, by the same spelling `chtypes list` keeps (the CLI's
+    `_LINE_SPELLING`), read here because a listing cut off would drop lines from the
+    judgment with nothing said: the CLI's own reader has no such check."""
+    what = "the registry's tag listing"
+    policy = FetchPolicy(token=options.token, clock=options.clock)
+    doc, link = _read_listing(options.resolved_bases(), what, policy, options.retry)
+    tags = doc.get("tags") if isinstance(doc, dict) else None
+    if not isinstance(tags, list) or not all(isinstance(t, str) for t in tags):
+        raise ChannelRefused("listing-shape", f"{what} is not a tag list")
+    _refuse_cut_off(tags, link, what)
+    return [t for t in tags if cli._LINE_SPELLING.fullmatch(t)]
 
 
 def _counting_predicates(
@@ -400,6 +537,18 @@ def _counting_predicates(
     if not counted:
         raise first
     return counted
+
+
+def _non_finite(value: object) -> bool:
+    """Whether `value` holds a number JSON cannot carry: json.loads reads NaN and
+    Infinity as numbers, and 1e400 as infinity, so two different texts compare equal."""
+    if isinstance(value, float):
+        return not math.isfinite(value)
+    if isinstance(value, dict):
+        return any(_non_finite(v) for v in value.values())
+    if isinstance(value, list):
+        return any(_non_finite(v) for v in value)
+    return False
 
 
 def _basic_form(produced_at: object) -> str:
@@ -453,21 +602,23 @@ def _check_predicate(predicate: dict, ctx: Context, tag: str) -> None:
             raise ChannelRefused("entry", f"the entry for {line}: {problem}")
 
 
-def read_channel_document(options: Options, ctx: Context) -> ChannelDocument | None:
-    """Rules 1 to 5 on the newest publication. None means no publication exists,
-    and nothing else does; any other trouble raises ChannelRefused."""
+def read_channel_document(options: Options, ctx: Context) -> ChannelDocument | NoPublication:
+    """Rules 1 to 5 on the newest publication. NoPublication means no publication
+    exists, and nothing else does; any other trouble raises ChannelRefused."""
     bases = tuple(f"{b.rstrip('/')}/{CHANNEL_REPOSITORY}" for b in options.resolved_bases())
     policy = FetchPolicy(token=options.token, clock=options.clock)
     retry = options.retry
     tags = _channel_tags(bases, ctx, policy, retry)
     stamped = [t for t in tags if PUBLICATION_TAG_RE.fullmatch(t)]
     if not stamped:
-        return None
+        return NoPublication(len(tags))
     tag = max(stamped)  # fixed width, so the largest is the newest
 
     try:
-        manifest, _raw, digest, _ = fetch_manifest_by_tag(bases, tag, policy=policy, retry=retry)
-    except (TransportError, ValueError) as exc:
+        _parsed, raw, digest, _ = fetch_manifest_by_tag(bases, tag, policy=policy, retry=retry)
+        # The fetch layer's own parse keeps the last of a repeated member.
+        manifest = loads_no_duplicate_keys(raw)
+    except (TransportError, ValueError, ArtifactCorruptError) as exc:
         raise ChannelRefused(
             "manifest", f"the manifest of {tag} could not be read ({type(exc).__name__})"
         ) from exc
@@ -500,6 +651,8 @@ def read_channel_document(options: Options, ctx: Context) -> ChannelDocument | N
         document = loads_no_duplicate_keys(body)
     except ArtifactCorruptError as exc:
         raise ChannelRefused("layer-json", "the layer is not JSON") from exc
+    if _non_finite(document):
+        raise ChannelRefused("layer-json", "the layer holds a number JSON cannot carry")
     for predicate in predicates:
         if _json_value(document) != _json_value(predicate):
             raise ChannelRefused("layer-value", "the layer's JSON is not value-equal to the predicate")
@@ -528,10 +681,17 @@ class LineFacts:
 
     rows: list[Row] = field(default_factory=list)
     failed: list[str] = field(default_factory=list)
+    failed_platforms: set[str] = field(default_factory=set)
 
     @property
     def verified(self) -> bool:
         return any(r.published for r in self.rows)
+
+    @property
+    def absent(self) -> list[str]:
+        """The platforms with neither a verified build nor a read that failed."""
+        here = {r.platform for r in self.rows if r.published} | self.failed_platforms
+        return [p["key"] for p in C.PLATFORMS if p["key"] not in here]
 
 
 @dataclass
@@ -581,9 +741,9 @@ def _refusal(line: str, platform: str, predicate: dict) -> str:
 def collect(options: Options) -> Collected:
     out = Collected()
     try:
-        tags = cli._published_tags(options)
-    except FetchError as exc:
-        out.fatal = f"the registry's tag listing could not be read ({getattr(exc, 'code', '')})"
+        tags = _line_tags(options)
+    except ChannelRefused as refused:
+        out.fatal = f"[{refused.name}] {refused.why}"
         return out
     lines = sorted({t for t in tags if LINE_RE.fullmatch(t)}, key=lambda t: _num(t))
     if not lines:
@@ -609,6 +769,7 @@ def collect(options: Options) -> Collected:
                 facts.failed.append(
                     f"{line} {o.platform}: omitted, its statement did not verify ({o.error.code})"
                 )
+                facts.failed_platforms.add(o.platform)
             elif o.resolution is None:
                 facts.rows.append(Row(o.platform, published=False))
             else:
@@ -616,6 +777,7 @@ def collect(options: Options) -> Collected:
                 why = _refusal(line, o.platform, predicate)
                 if why:
                     facts.failed.append(f"{line} {o.platform}: omitted, {why}")
+                    facts.failed_platforms.add(o.platform)
                     continue
                 facts.rows.append(
                     Row(
@@ -654,6 +816,8 @@ def judge(data: Collected, document: ChannelDocument | None, say) -> int:
                 fine.append(line)
             if state is None:
                 say(f"support-v2: {line}: support unknown: the line has a verified build")
+            elif facts.absent:
+                say(f"support-v2: {line}: supported, and absent on {', '.join(facts.absent)}")
             continue
         if state == "supported":
             say(f"support-v2: {line}: supported, and no platform of the line verified")
@@ -818,23 +982,51 @@ class Outcome:
     document: ChannelDocument | None = None
 
 
-def generate(options: Options, ctx: Context, say) -> Outcome:
-    """Rules 1 to 7, then the table in this file's header. The channel document is
-    read first: with it refused, nothing else can be judged."""
+def _hold_to_latch(found: ChannelDocument | NoPublication, source: LinesSource) -> None:
+    """THE LATCH, in this file's header: what lines.json's `source` forbids the
+    listing's answer to be."""
+    if isinstance(found, NoPublication):
+        if source.problem:
+            raise ChannelRefused(
+                "lines-source", f"the listing names no publication, and {source.problem}, so nothing says none was made"
+            )
+        if source.tag:
+            raise ChannelRefused(
+                "no-document",
+                f"lines.json was taken from the publication {source.tag}, and the listing names no publication",
+            )
+    elif source.tag and found.tag < source.tag:
+        raise ChannelRefused(
+            "older-than-lines",
+            f"the newest publication {found.tag} is older than {source.tag}, the one lines.json was taken from",
+        )
+
+
+def generate(options: Options, ctx: Context, say, source: LinesSource) -> Outcome:
+    """Rules 1 to 7, the latch, then the table in this file's header. The channel
+    document is read first: with it refused, nothing else can be judged."""
     try:
-        document = read_channel_document(options, ctx)
+        found = read_channel_document(options, ctx)
+        _hold_to_latch(found, source)
     except ChannelRefused as refused:
         say(
             f"support-v2: channel statement refused [{refused.name}]: {refused.why}; "
             "no older document is read"
         )
         return Outcome(EXIT_CHANNEL)
-    if document is None:
-        say(
-            "support-v2: live check off: no channel statement published yet; "
-            "the per-line comparison is NOT JUDGED"
+    if isinstance(found, NoPublication):
+        document = None
+        reason = (
+            f"the channel's tag listing names {found.listed} tags and none is spelled like a publication"
+            if found.listed
+            else "no channel statement published yet"
         )
+        line = f"live check off: {reason}; the per-line comparison is NOT JUDGED"
+        say(f"support-v2: {line}")
+        if os.environ.get("GITHUB_ACTIONS"):
+            say(annotate.format_command("warning", line, title="support-v2"))
     else:
+        document = found
         say(f"support-v2: channel statement {document.tag} verified")
     data = collect(options)
     if data.fatal:
@@ -846,37 +1038,82 @@ def generate(options: Options, ctx: Context, say) -> Outcome:
     return Outcome(judge(data, document, say), render(ctx), document)
 
 
-def verdict_line(status: int, judged: bool) -> str:
-    word = VERDICTS[status]
+def verdict_line(status: int, judged: bool, selection: str = "", word: str = "") -> str:
+    word = word or VERDICTS[status]
     if status == EXIT_OK and not judged:
         word = "ok, the live comparison NOT JUDGED"
-    return f"support-v2: verdict: {word} (exit {status})"
+    named = f"; judged {selection}, not the committed files" if selection else ""
+    return f"support-v2: verdict: {word} (exit {status}){named}"
 
 
-def run(mode: str, out: Path, lines_json: Path, say) -> int:
+def run(mode: str, out: Path, lines_json: Path, say, selection: str = "") -> int:
+    source = lines_source(lines_json)
     ctx = channel_context()
     with tempfile.TemporaryDirectory(prefix="support-v2-cache-") as cache:
-        outcome = generate(channel_options(cache), ctx, say)
-    return conclude(mode, out, lines_json, outcome, say)
+        outcome = generate(channel_options(cache), ctx, say, source)
+    return conclude(mode, out, lines_json, outcome, say, selection)
 
 
-def conclude(mode: str, out: Path, lines_json: Path, outcome: Outcome, say) -> int:
+def conclude(mode: str, out: Path, lines_json: Path, outcome: Outcome, say, selection: str = "") -> int:
     """Act on a judgment and say the verdict: the status returned is the one said."""
     status = _finish(mode, out, lines_json, outcome, say)
-    say(verdict_line(status, outcome.document is not None))
+    say(verdict_line(status, outcome.document is not None, selection))
     return status
 
 
-def _lines_problem(lines_json: Path, document: ChannelDocument) -> str:
-    """How lines.json disagrees with the document's supported lines, or ""."""
+def _page_problem(out: Path, page: str) -> str:
+    """How the committed page differs from the generator's output, or ""."""
+    have = out.read_text(encoding="utf-8") if out.exists() else ""
+    if have != page:
+        return (
+            f"{out.name} differs from the generator's output; run "
+            "`uv run scripts/support-v2/gen.py --write`"
+        )
+    return ""
+
+
+def _lines_member(lines_json: Path) -> tuple[object, str]:
+    """lines.json's `lines`, and why it could not be read."""
     try:
-        have = json.loads(lines_json.read_bytes())["lines"]
+        return lines_rules.strict_json(lines_json.read_bytes())["lines"], ""
     except (OSError, ValueError, KeyError, TypeError) as exc:
-        return f"{lines_json.name} could not be read ({type(exc).__name__})"
+        return None, f"{lines_json.name} could not be read ({type(exc).__name__})"
+
+
+def _fixture_problem(lines_json: Path) -> str:
+    """While no document exists: how lines.json disagrees with the dry-run fixture's
+    supported lines, or "". It does not ask lines.json's `source`: a line dropped
+    with a reworded source is still a line dropped."""
+    have, why = _lines_member(lines_json)
+    if why:
+        return why
+    fixture_supported = ChannelDocument("", json.loads(CHANNEL_FIXTURE.read_bytes())).supported
+    if have != fixture_supported:
+        return (
+            f"{lines_json.name} names {have}, and with no channel statement published its lines "
+            f"are the dry-run fixture's, {fixture_supported}"
+        )
+    return ""
+
+
+def _lines_problem(lines_json: Path, document: ChannelDocument) -> str:
+    """How lines.json disagrees with the document, or "": its lines must be the
+    document's supported lines, and its source a publication's tag."""
+    have, why = _lines_member(lines_json)
+    if why:
+        return why
     if have != document.supported:
         return (
             f"{lines_json.name} names {have}, the channel statement {document.tag}'s supported "
             f"lines are {document.supported}; RELEASING.md has the steps"
+        )
+    source = lines_source(lines_json)
+    if source.problem:
+        return source.problem
+    if not source.tag:
+        return (
+            f"{lines_json.name}'s source still names the dry-run fixture, and the channel published "
+            f"{document.tag}, so the latch is not set; RELEASING.md has the steps"
         )
     return ""
 
@@ -898,24 +1135,44 @@ def _finish(mode: str, out: Path, lines_json: Path, outcome: Outcome, say) -> in
             say("support-v2: not comparing: a line failed")
             return status
         differs = False
-        have = out.read_text(encoding="utf-8") if out.exists() else ""
-        if have != page:
-            say(
-                f"support-v2: {out.name} differs from the generator's output; run "
-                "`uv run scripts/support-v2/gen.py --write`"
-            )
+        problem = _page_problem(out, page)
+        if problem:
+            say(f"support-v2: {problem}")
             differs = True
         if document is not None:
             problem = _lines_problem(lines_json, document)
-            if problem:
-                say(f"support-v2: {problem}")
-                differs = True
+        else:
+            problem = _fixture_problem(lines_json)
+        if problem:
+            say(f"support-v2: {problem}")
+            differs = True
         return EXIT_DIFF if differs else EXIT_OK
     if mode == "write":
         out.write_text(page, encoding="utf-8")
     else:
         sys.stdout.write(page)
         sys.stdout.flush()
+    return status
+
+
+def check_page(out: Path, lines_json: Path, say, selection: str = "") -> int:
+    """--check-page: what can be judged with no registry at all, so it can run on every
+    pull request. The page depends on the SDK's own manifests and the active channel's
+    identity. lines.json's source must be in its closed form, and in the fixture state
+    its lines are the fixture's; a tag can only be judged against the channel."""
+    differs = False
+    problem = _page_problem(out, render(channel_context()))
+    if problem:
+        say(f"support-v2: {problem}")
+        differs = True
+    source = lines_source(lines_json)
+    problem = source.problem or ("" if source.tag else _fixture_problem(lines_json))
+    if problem:
+        say(f"support-v2: {problem}")
+        differs = True
+    status = EXIT_DIFF if differs else EXIT_OK
+    word = "ok, the page and lines.json's source, no registry read" if status == EXIT_OK else ""
+    say(verdict_line(status, True, selection, word))
     return status
 
 
@@ -963,10 +1220,7 @@ def _sha(data: bytes) -> str:
 
 def _jcs():
     """The repository's RFC 8785 canonicalizer, scripts/abi-v1/jcs.py."""
-    spec = importlib.util.spec_from_file_location("jcs", ROOT / "scripts" / "abi-v1" / "jcs.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return _script(ROOT / "scripts" / "abi-v1" / "jcs.py", "jcs")
 
 
 def _build_bundle():
@@ -1093,8 +1347,11 @@ class ChannelRepo:
     one answers its listing exactly as the registries were measured to on
     2026-11-06, a 200 with this repository's name and no tags."""
 
-    def __init__(self, tree_root: Path, signer: tuple[bytes, str], document: dict) -> None:
+    def __init__(
+        self, tree_root: Path, signer: tuple[bytes, str], document: dict, repository: str = "chtypes/v2-dev"
+    ) -> None:
         self.root = tree_root / CHANNEL_REPOSITORY
+        self.repository = repository
         for d in ("blobs", "manifests", "referrers", "tags"):
             (self.root / d).mkdir(parents=True)
         self.signer = signer
@@ -1104,7 +1361,7 @@ class ChannelRepo:
         self.write_listing()
 
     def write_listing(self, **replace_fields) -> None:
-        body = {"name": "chtypes/v2-dev/channel", "tags": self.tags, **replace_fields}
+        body = {"name": f"{self.repository}/{CHANNEL_REPOSITORY}", "tags": self.tags, **replace_fields}
         (self.root / "tags" / "list").write_text(json.dumps(body), encoding="utf-8")
 
     def doc(self) -> dict:
@@ -1125,6 +1382,7 @@ class ChannelRepo:
         manifest: Callable[[dict], None] | None = None,
         signers: list[tuple[bytes, str]] | None = None,
         bundle_bytes: bytes | None = None,
+        statement_of: list[Callable[[dict], None] | None] | None = None,
     ) -> tuple[str, str]:
         doc = self.doc() if doc is None else doc
         tag = tag or _basic_form(doc.get("produced_at")) or NEWEST
@@ -1155,11 +1413,15 @@ class ChannelRepo:
         if statement is not None:
             statement(st)
         entries = []
-        for seed, keyid in [self.signer] if signers is None else signers:
+        for i, (seed, keyid) in enumerate([self.signer] if signers is None else signers):
             bundle = bundle_bytes
             if bundle is None:
+                # `statement_of` plants one defect per bundle of the referrers list.
+                signed = copy.deepcopy(st)
+                if statement_of is not None and statement_of[i] is not None:
+                    statement_of[i](signed)
                 bundle = json.dumps(
-                    _build_bundle()(seed, keyid, subject_sha256="", statement=st)
+                    _build_bundle()(seed, keyid, subject_sha256="", statement=signed)
                 ).encode("utf-8")
             d_bundle = self.blob(bundle)
             rm = {
@@ -1287,8 +1549,59 @@ def _channel_plants(other: tuple[bytes, str]) -> list[tuple[str, str, Callable[[
     def schema_two_newest(ch: ChannelRepo) -> None:
         statement_doc(ch, lambda d: d.update(schema=2))
 
+    def empty_answer(status: int) -> dict:
+        return {"status": status, "body": json.dumps({"name": "chtypes/v2-dev/channel", "tags": []})}
+
+    def manifest_bytes(change: Callable[[bytes], bytes]) -> Callable[[ChannelRepo], None]:
+        """Serve other bytes for the tag's manifest, its referrers still found: the
+        digest the registry is asked about is the served bytes'."""
+
+        def build(ch: ChannelRepo) -> None:
+            d_m, _ = ch.publish()
+            path = ch.root / "manifests" / NEWEST
+            data = change(path.read_bytes())
+            path.write_bytes(data)
+            shutil.copyfile(ch.root / "referrers" / d_m, ch.root / "referrers" / _sha(data))
+
+        return build
+
+    def repeat_member(name: bytes, first: bytes) -> Callable[[bytes], bytes]:
+        def change(data: bytes) -> bytes:
+            planted = data.replace(b'"' + name + b'":', b'"' + name + b'": ' + first + b', "' + name + b'":', 1)
+            if planted == data:
+                raise ValueError(f"no {name!r} member to repeat")
+            return planted
+
+        return change
+
+    def other_value(st: dict) -> None:
+        st["predicate"]["lines"]["26.7"]["state"] = "supported"
+
+    def wrong_type(st: dict) -> None:
+        st["predicateType"] = C.PREDICATE_TYPE_ARTIFACT
+
+    def layer_with(number: bytes, predicate_value: float) -> Callable[[ChannelRepo], None]:
+        """A document whose unknown key holds `number` in the layer's text, and whose
+        predicate holds the value json.loads reads it as."""
+
+        def build(ch: ChannelRepo) -> None:
+            doc = ch.doc()
+            doc["future"] = predicate_value
+            ch.publish(doc, layer=json.dumps(ch.doc())[:-1].encode() + b', "future": ' + number + b"}")
+
+        return build
+
+    def predicate_only_infinite(ch: ChannelRepo) -> None:
+        doc = ch.doc()
+        doc["future"] = float("inf")
+        ch.publish(doc, layer=json.dumps({**ch.doc(), "future": 1}).encode())
+
     return [
         # Rule 1: everything that is not "no such tag".
+        ("listing-201", "listing", good_listing_answers(empty_answer(201))),
+        ("listing-202", "listing", good_listing_answers(empty_answer(202))),
+        ("listing-203", "listing", good_listing_answers(empty_answer(203))),
+        ("listing-206", "listing", good_listing_answers(empty_answer(206))),
         ("listing-503", "listing", good_listing_answers({"status": 503})),
         ("listing-500", "listing", good_listing_answers({"status": 500})),
         ("listing-401", "listing", good_listing_answers({"status": 401})),
@@ -1302,6 +1615,7 @@ def _channel_plants(other: tuple[bytes, str]) -> list[tuple[str, str, Callable[[
         ("listing-tags-null", "listing-shape", listing_body(tags=None)),
         ("listing-tags-not-strings", "listing-shape", listing_body(tags=[1])),
         ("listing-no-tags-member", "listing-shape", listing_bytes(b'{"name":"chtypes/v2-dev/channel"}')),
+        ("listing-repeated-member", "listing-shape", listing_bytes(b'{"name":"chtypes/v2-dev/channel","tags":["20261106T120000Z"],"tags":[]}')),
         (
             "listing-next-page",
             "listing-truncated",
@@ -1314,13 +1628,34 @@ def _channel_plants(other: tuple[bytes, str]) -> list[tuple[str, str, Callable[[
             ),
         ),
         ("listing-full-page", "listing-truncated", full_page),
+        # Two `Link` lines: the second is the one a mapping of the headers loses. The
+        # header names differ in case because the fixture server's are a mapping too.
+        (
+            "listing-next-page-second-line",
+            "listing-truncated",
+            good_listing_answers(
+                {
+                    "status": 200,
+                    "headers": {
+                        "Link": f'<{LISTING_ROUTE}?n=1000&last=w>; rel="prev"',
+                        "link": f'<{LISTING_ROUTE}?n=1000&last=x>; rel="next"',
+                    },
+                    "body": json.dumps({"name": "chtypes/v2-dev/channel", "tags": [NEWEST]}),
+                }
+            ),
+        ),
         # Rule 2.
         ("manifest-404", "manifest", manifest_404),
         ("manifest-not-json", "manifest", manifest_not_json),
+        ("manifest-not-an-object", "manifest", manifest_bytes(lambda _: b"[]")),
+        ("manifest-artifact-type-twice", "manifest", manifest_bytes(repeat_member(b"artifactType", b'"application/vnd.other"'))),
+        ("manifest-layers-twice", "manifest", manifest_bytes(repeat_member(b"layers", b"[]"))),
         ("wrong-artifact-type", "artifact-type", lambda ch: ch.publish(manifest=lambda m: m.update(artifactType=C.ARTIFACT_TYPE))),
         ("two-layers", "layers", two_layers),
         ("no-layer", "layers", lambda ch: ch.publish(manifest=lambda m: m.update(layers=[]))),
         ("layer-media-type", "layers", lambda ch: ch.publish(manifest=lambda m: m["layers"][0].update(mediaType=C.MEDIA_TYPE_LAYER))),
+        ("layer-digest-not-sha256", "layers", lambda ch: ch.publish(manifest=lambda m: m["layers"][0].update(digest="md5:abc"))),
+        ("layer-digest-not-a-string", "layers", lambda ch: ch.publish(manifest=lambda m: m["layers"][0].update(digest=1))),
         # Rule 3.
         ("no-bundle", "no-bundle", lambda ch: ch.publish(signers=[])),
         ("referrers-503", "referrers", referrers_503),
@@ -1329,6 +1664,8 @@ def _channel_plants(other: tuple[bytes, str]) -> list[tuple[str, str, Callable[[
         ("wrong-predicate-type", "predicate-type", lambda ch: ch.publish(statement=lambda st: st.update(predicateType=C.PREDICATE_TYPE_ARTIFACT))),
         ("two-subjects", "subject-count", lambda ch: ch.publish(statement=lambda st: st["subject"].append(dict(st["subject"][0])))),
         ("wrong-subject", "subject-digest", lambda ch: ch.publish(statement=lambda st: st["subject"][0]["digest"].update(sha256="0" * 64))),
+        # With none counting, the first bundle's reason is the refusal.
+        ("first-reason-kept", "bundle-untrusted", lambda ch: ch.publish(signers=[other, ch.signer], statement_of=[None, wrong_type])),
         # Rule 4.
         ("tampered-layer", "layer-sha", tampered_layer),
         ("layer-404", "layer", layer_404),
@@ -1336,6 +1673,13 @@ def _channel_plants(other: tuple[bytes, str]) -> list[tuple[str, str, Callable[[
         ("layer-duplicate-key", "layer-json", lambda ch: ch.publish(layer=b'{"schema":1,"schema":1}')),
         ("layer-other-value", "layer-value", lambda ch: ch.publish(layer=_jcs().canonicalize({**ch.doc(), "schema": 3}))),
         ("layer-true-for-one", "layer-value", lambda ch: ch.publish(layer=_jcs().canonicalize({**ch.doc(), "schema": True}))),
+        # Every bundle that counts must be value-equal, in either order.
+        ("second-counted-bundle-differs", "layer-value", lambda ch: ch.publish(signers=[ch.signer, ch.signer], statement_of=[None, other_value])),
+        ("first-counted-bundle-differs", "layer-value", lambda ch: ch.publish(signers=[ch.signer, ch.signer], statement_of=[other_value, None])),
+        ("layer-nan", "layer-json", layer_with(b"NaN", float("nan"))),
+        ("layer-infinity", "layer-json", layer_with(b"Infinity", float("inf"))),
+        ("layer-overflow", "layer-json", layer_with(b"1e400", float("inf"))),
+        ("predicate-infinite-layer-not", "layer-value", predicate_only_infinite),
         # Rule 5.
         ("schema-2", "schema", schema_two_newest),
         ("schema-true", "schema", lambda ch: statement_doc(ch, lambda d: d.update(schema=True))),
@@ -1351,9 +1695,12 @@ def _channel_plants(other: tuple[bytes, str]) -> list[tuple[str, str, Callable[[
         ("state-missing", "entry", lambda ch: statement_doc(ch, lambda d: d["lines"]["26.8"].pop("state"))),
         ("since-not-a-date", "entry", entry(since="2026-02-30")),
         ("since-missing", "entry", without_since),
+        ("since-not-padded", "entry", entry(since="2026-2-3")),
         ("commit-null", "entry", entry(security_md_commit=None)),
         ("commit-short", "entry", entry(security_md_commit="abc")),
         ("commit-uppercase", "entry", entry(security_md_commit="A" * 40)),
+        ("commit-41-hex", "entry", entry(security_md_commit="a" * 41)),
+        ("commit-trailing-newline", "entry", entry(security_md_commit="a" * 40 + "\n")),
         ("entry-not-object", "entry", lambda ch: statement_doc(ch, lambda d: d["lines"].update({"26.8": "supported"}))),
         ("lines-not-object", "entry", lambda ch: statement_doc(ch, lambda d: d.update(lines=[]))),
         ("line-key-not-a-line", "entry", lambda ch: statement_doc(ch, lambda d: d["lines"].update({"latest": d["lines"]["26.8"]}))),
@@ -1362,6 +1709,65 @@ def _channel_plants(other: tuple[bytes, str]) -> list[tuple[str, str, Callable[[
         ("newest-wrong-key-older-good", "bundle-untrusted", lambda ch: newest_bad(ch, wrong_key)),
         ("newest-schema-2-older-good", "schema", lambda ch: newest_bad(ch, schema_two_newest)),
     ]  # fmt: skip
+
+
+# The child a command-line case runs: this script's real main() in a real process,
+# against a fixture registry. The one thing it sets up is the active channel, through
+# the seam the selftest itself uses, because no option or environment variable can
+# redirect a real run; run() still derives everything from that channel.
+CLI_DRIVER = """
+import importlib.util, json, sys
+from dataclasses import replace
+
+script, setup, *argv = sys.argv[1:]
+setup = json.loads(setup)
+spec = importlib.util.spec_from_file_location("gen_under_test", script)
+gen = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = gen
+spec.loader.exec_module(gen)
+channel = replace(gen._channel.FETCH_V1_CHANNEL, name="selftest", bases=(setup["base"],), keys=tuple(setup["keys"]))
+gen._channel._use(channel)
+if setup.get("crash"):
+    def boom(*_a, **_k):
+        raise RuntimeError("planted")
+    gen.collect = boom
+sys.exit(gen.main(argv))
+"""
+
+# What a pull request must touch for --check to run, and what it must not.
+LIVE_GATE_PATHS = (
+    "docs/support-v2.md",
+    "scripts/support-v2/gen.py",
+    "spec/abi-v2/where-settings/lines.json",
+    "spec/abi-v2/where-settings/26.8.json",
+    "tests/fixtures/support-v2/channel-statement.json",
+    "scripts/abi-v2/check-where-settings.py",
+    "scripts/abi-v2/regen-where-settings.py",
+)
+LIVE_GATE_NOT = ("rust/Cargo.toml", "python/src/chtypes/_ocifetch/_channel.py", "README.md")
+
+
+def _workflow_problems(text: str) -> list[str]:
+    """How .github/workflows/ci.yml has come apart from what this script's header and
+    RELEASING.md say it does. The step's own regular expression is evaluated."""
+    problems = []
+    steps = text.split("\n      - ")
+    page = [t for t in steps if "gen.py --check-page" in t]
+    if len(page) != 1 or "\n        if:" in page[0]:
+        problems.append("--check-page is not one step that always runs")
+    live = [t for t in steps if re.search(r"gen\.py --check\b(?!-)", t)]
+    if len(live) != 1 or "\n        if: steps.support-v2.outputs.touched == 'true'" not in live[0]:
+        problems.append("--check is not one step gated on the paths")
+    gate = [t for t in steps if "id: support-v2" in t]
+    found = re.search(r"grep -qE '([^']+)'", gate[0]) if len(gate) == 1 else None
+    if found is None:
+        problems.append("the gate step and its filter were not found")
+    else:
+        if "git diff --name-only --no-renames HEAD^1 HEAD" not in gate[0]:
+            problems.append("the gate's diff is not --no-renames: a rename out of a path would not count")
+        problems += [f"the gate does not fire on {x}" for x in LIVE_GATE_PATHS if not re.search(found.group(1), x)]
+        problems += [f"the gate fires on {x}" for x in LIVE_GATE_NOT if re.search(found.group(1), x)]
+    return problems
 
 
 def _selftest() -> int:
@@ -1413,12 +1819,57 @@ def _selftest() -> int:
         "a publication's layer is the canonical form (RFC 8785, jcs.py), not the file's bytes",
     )
     fixture_doc = ChannelDocument(NEWEST, fixture)
-    fixture_lines = json.loads(LINES_JSON.read_bytes())
-    if str(CHANNEL_FIXTURE.relative_to(ROOT)) in fixture_lines.get("source", ""):
-        check(
-            fixture_lines["lines"] == fixture_doc.supported,
-            "lines.json, while it names the fixture as its source, is the fixture's supported lines",
-        )
+    # The committed lines.json: closed form, and in the fixture state the fixture's lines.
+    committed = lines_source(LINES_JSON)
+    check(not committed.problem, f"the committed lines.json's source is in its closed form {committed.problem}")
+    if not committed.tag:
+        check(not _fixture_problem(LINES_JSON), "the committed lines.json, in the fixture state, is the fixture's supported lines")
+    check(lines_rules.FIXTURE_SOURCE == str(CHANNEL_FIXTURE.relative_to(ROOT)), "the fixture marker is this fixture's path")
+    # The CI wiring, read from the workflow: a step removed would pass everything else.
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    check(not _workflow_problems(workflow), f"ci.yml runs --check-page always and --check behind the paths {_workflow_problems(workflow)}")
+    for what, planted in (
+        ("no --check-page step", workflow.replace("gen.py --check-page", "gen.py --print-page")),
+        ("--check-page behind the gate", workflow.replace("run: uv run scripts/support-v2/gen.py --check-page", "if: always()\n        run: uv run scripts/support-v2/gen.py --check-page")),
+        ("--check ungated", workflow.replace("if: steps.support-v2.outputs.touched == 'true'", "if: always()")),
+        ("a diff that follows renames", workflow.replace("--no-renames ", "")),
+        ("the fixture out of the gate", workflow.replace("|tests/fixtures/support-v2/", "")),
+    ):
+        check(planted != workflow and bool(_workflow_problems(planted)), f"ci.yml: {what} is caught")
+    # Rule 5's other copy, which the writer of lines.json needs with no binding. Each
+    # plant is refused by both, so neither can drift into accepting what the other refuses.
+    regen = _script(ROOT / "scripts" / "abi-v2" / "regen-where-settings.py", "regen_where_settings")
+
+    def rule_5_says(doc: dict) -> str:
+        try:
+            _check_predicate(doc, dev, NEWEST)
+        except ChannelRefused as refused:
+            return refused.name
+        return ""
+
+    check(not rule_5_says(fixture) and not regen.document_problem(fixture), "rule 5's two copies accept the fixture")
+    for what, change in (
+        ("schema 2", lambda d: d.update(schema=2)),
+        ("schema true", lambda d: d.update(schema=True)),
+        ("no schema", lambda d: d.pop("schema")),
+        ("no repository", lambda d: d.pop("repository")),
+        ("produced_at no date", lambda d: d.update(produced_at="2026-13-06T12:00:00Z")),
+        ("no produced_at", lambda d: d.pop("produced_at")),
+        ("lines a list", lambda d: d.update(lines=[])),
+        ("a key no line", lambda d: d["lines"].update(latest=d["lines"]["26.8"])),
+        ("an entry a string", lambda d: d["lines"].update({"26.8": "supported"})),
+        ("a state outside the two", lambda d: d["lines"]["26.8"].update(state="deprecated")),
+        ("no state", lambda d: d["lines"]["26.8"].pop("state")),
+        ("since not a date", lambda d: d["lines"]["26.8"].update(since="2026-02-30")),
+        ("since not padded", lambda d: d["lines"]["26.8"].update(since="2026-2-3")),
+        ("no since", lambda d: d["lines"]["26.8"].pop("since")),
+        ("a commit of 41", lambda d: d["lines"]["26.8"].update(security_md_commit="a" * 41)),
+        ("a commit in capitals", lambda d: d["lines"]["26.8"].update(security_md_commit="A" * 40)),
+        ("no commit", lambda d: d["lines"]["26.8"].pop("security_md_commit")),
+    ):
+        doc = copy.deepcopy(fixture)
+        change(doc)
+        check(bool(rule_5_says(doc)) and bool(regen.document_problem(doc)), f"rule 5's two copies both refuse: {what}")
 
     # The page: what the SDK owns, nothing per line, and the link for its channel.
     page, prod_page = render(dev), render(prod)
@@ -1500,6 +1951,11 @@ def _selftest() -> int:
         doc["lines"]["26.8"]["future"] = "ignored"
         ch.publish(doc)
 
+    def finite_float(ch: ChannelRepo) -> None:
+        doc = ch.doc()
+        doc["future"] = 1.5
+        ch.publish(doc, layer=json.dumps(doc).encode())
+
     def rotation(ch: ChannelRepo) -> None:
         ch.publish(signers=[other_signer, signer])
 
@@ -1536,6 +1992,7 @@ def _selftest() -> int:
     reader_good = {
         "doc-good": NEWEST,
         "reader-unknown-keys": NEWEST,
+        "reader-finite-float": NEWEST,
         "reader-key-rotation": NEWEST,
         "reader-other-tags": NEWEST,
         "reader-newest-wins": NEWEST,
@@ -1544,6 +2001,7 @@ def _selftest() -> int:
         "reader-empty-commit": NEWEST,
     }
     channel_only("reader-unknown-keys", unknown_keys)
+    channel_only("reader-finite-float", finite_float)
     channel_only("reader-key-rotation", rotation)
     channel_only("reader-other-tags", other_tags)
     channel_only("reader-newest-wins", older_then_newer)
@@ -1616,6 +2074,41 @@ def _selftest() -> int:
         "planted-hidden",
         change=lambda t: t.plant(t.platform_manifest("26.8", "linux-arm64"), library=PLANTED_PATH),
     )
+    # One registry per private pattern, in a field nothing renders. PLANTED_PRIVATE's
+    # comment claims one each: the check below proves each is its pattern's alone.
+    for i, planted_string in enumerate(PLANTED_PRIVATE):
+        full_case(
+            f"private-pattern-{i}",
+            change=lambda t, x=planted_string: t.plant(t.platform_manifest("26.8", "linux-arm64"), library=x),
+        )
+
+    def plant_26_8(**fields: str) -> Callable[[Tree], None]:
+        return lambda t: t.plant(t.platform_manifest("26.8", "linux-arm64"), **fields)
+
+    def darwin_only_26_8(t: Tree) -> None:
+        path = t.root / "manifests" / "26.8"
+        index = json.loads(path.read_text(encoding="utf-8"))
+        index["manifests"] = [m for m in index["manifests"] if m["platform"]["os"] == "darwin"]
+        path.write_text(json.dumps(index), encoding="utf-8")
+
+    full_case("refused-version-shape", change=plant_26_8(clickhouse_version="26.8"))
+    full_case("refused-version-of-another-line", change=plant_26_8(clickhouse_version="26.9.25.15"))
+    full_case("refused-build-shape", change=plant_26_8(build="not-a-build"))
+    full_case("refused-glibc-shape", change=plant_26_8(glibc_floor="not-a-glibc"))
+    full_case("supported-served-on-one-platform", doc=copy.deepcopy(fixture), change=darwin_only_26_8)
+
+    # The line listing is held to what the channel's is: a line cut off must not read as
+    # a line that does not exist.
+    lines_route = "/v2/chtypes/v1/tags/list"
+    lines_body = json.dumps({"name": "chtypes/v1", "tags": list(TREE_LINES)})
+
+    def listing_route(*responses: dict) -> list[dict]:
+        return [{"method": "GET", "path": lines_route, "responses": list(responses)}]
+
+    full_case("lines-listing-next-page", routes=listing_route({"status": 200, "headers": {"Link": f'<{lines_route}?last=x>; rel="next"'}, "body": lines_body}))
+    full_case("lines-listing-next-page-second-line", routes=listing_route({"status": 200, "headers": {"Link": f'<{lines_route}?last=w>; rel="prev"', "link": f'<{lines_route}?last=x>; rel="next"'}, "body": lines_body}))
+    full_case("lines-listing-full-page", change=lambda t: t.set_tags([*TREE_LINES, *(f"sha256-{i:064x}" for i in range(LISTING_PAGE))]))
+    full_case("lines-listing-203", routes=listing_route({"status": 203, "body": lines_body}))
     full_case("supported-no-build", doc=calls_26_7_supported)
     full_case("supported-not-listed", doc=copy.deepcopy(fixture), tags=tuple(n for n in TREE_LINES if n != "26.9"))
     full_case("supported-one-platform-bad", doc=copy.deepcopy(fixture), change=tamper_26_8)
@@ -1627,8 +2120,29 @@ def _selftest() -> int:
     full_case("unknown-read-fails-published", doc=not_naming_26_7, routes=index_503)
     full_case("retired-read-fails", doc=copy.deepcopy(fixture), routes=index_503)
 
+    # What the command-line runs below read, each named for the channel the child's
+    # active channel is: its listing and its document say that repository.
+    cli_case_ids: list[str] = []
+
+    def cli_case(name: str, doc: dict | None, plant: Callable[[ChannelRepo], None] | None = None) -> None:
+        t = Tree(tmp / "base" / TREE, tmp / "trees" / name / TREE)
+        t.set_tags(list(TREE_LINES))
+        repository = f"s-{name}/chtypes/v1"
+        ch = ChannelRepo(t.root, signer, {**fixture, "repository": repository}, repository=repository)
+        if doc is not None:
+            ch.publish({**doc, "repository": repository})
+        if plant is not None:
+            plant(ch)
+        os.symlink(tmp / "trees" / name / TREE, fixtures / "trees" / name)
+        cli_case_ids.append(name)
+
+    cli_case("cli-published", copy.deepcopy(fixture))
+    cli_case("cli-unpublished", None)
+    cli_case("cli-refused", None, lambda ch: ch.publish(manifest=lambda m: m.update(artifactType=C.ARTIFACT_TYPE)))
+    cli_case("cli-line-failed", calls_26_7_supported)
+
     (fixtures / "cases.json").write_text(
-        json.dumps({"schema": 1, "cases": [{"id": n, "tree": n} for n in case_ids]}),
+        json.dumps({"schema": 1, "cases": [{"id": n, "tree": n} for n in case_ids + cli_case_ids]}),
         encoding="utf-8",
     )
 
@@ -1647,16 +2161,22 @@ def _selftest() -> int:
         rc: int
         log: list[dict]
 
+    def lines_doc(source: object, lines: list[str]) -> str:
+        return json.dumps({"schema": lines_rules.LINES_SCHEMA, "source": source, "lines": lines})
+
     out_page, out_lines = tmp / "page.md", tmp / "lines.json"
     out_page.write_text(page, encoding="utf-8")
-    out_lines.write_text(json.dumps({"lines": fixture_doc.supported}), encoding="utf-8")
+    out_lines.write_text(lines_doc(NEWEST, fixture_doc.supported), encoding="utf-8")
+    latch_results: dict[str, Result] = {}
+    cli_runs = 0
     try:
         port = int(server.stdout.readline().split()[1])
         restore = _channel._use(replace(_channel.FETCH_V1_CHANNEL, name="selftest"))
         try:
             results: dict[str, Result] = {}
             crashed: list[str] = []
-            for name in case_ids:
+
+            def run_case(name: str, source: LinesSource) -> Result | None:
                 base_url = f"http://127.0.0.1:{port}/s-{name}/chtypes/v1"
                 options = Options(
                     bases=(base_url,),
@@ -1673,30 +2193,53 @@ def _selftest() -> int:
                 if name == "tampered-env":
                     os.environ[C.ENV_ALLOW_UNSIGNED_NAME] = "1"
                 try:
-                    outcome = generate(options, dev, said.append)
+                    outcome = generate(options, dev, said.append, source)
                     rc = conclude("check", out_page, out_lines, outcome, said.append)
                 except Exception as exc:  # noqa: BLE001 - the judge's own failure, reported per case
                     crashed.append(f"{name}: {exc!r}")
-                    continue
+                    return None
                 finally:
                     if name == "tampered-env":
                         del os.environ[C.ENV_ALLOW_UNSIGNED_NAME]
                 log = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/_log/s-{name}").read())  # noqa: S310
-                results[name] = Result(outcome.status, outcome.page, "\n".join(said), outcome.document, rc, log)
                 if os.environ.get("SUPPORT_V2_SELFTEST_SHOW") == name:
                     print("\n".join(said), f"rc={rc}", sep="\n")
+                return Result(outcome.status, outcome.page, "\n".join(said), outcome.document, rc, log)
+
+            for name in case_ids:
+                result = run_case(name, LinesSource())
+                if result is not None:
+                    results[name] = result
+            # The latch: the same registries, under what lines.json says of the past.
+            for label, name, source in (
+                ("empty", "reader-empty", LinesSource(tag=NEWEST)),
+                ("other-tags", "reader-only-other-tags", LinesSource(tag=NEWEST)),
+                ("older", "reader-older-alone", LinesSource(tag=NEWEST)),
+                ("no-form-empty", "reader-empty", LinesSource(problem="planted")),
+                ("same", "doc-good", LinesSource(tag=NEWEST)),
+                ("newer", "doc-good", LinesSource(tag=OLDER)),
+                ("no-form-document", "doc-good", LinesSource(problem="planted")),
+            ):
+                result = run_case(name, source)
+                if result is not None:
+                    latch_results[label] = result
         finally:
             restore()
+        cli_runs = _cli_selftest(
+            check, tmp / "cli", port, lines_doc, fixture_doc.supported, fixture, page, signer[1], pub, other, cli_case_ids,
+        )
     finally:
         server.terminate()
         server.wait(timeout=10)
 
     check(not build_failures, f"every plant could be built {build_failures[:3]}")
     check(not crashed, f"no case crashed the judge {crashed[:3]}")
+    # A selftest that saw a failure ends the process itself: it is the one mode whose
+    # status no selftest can read, and CI's whole trust in it is that status.
     if build_failures or crashed:
         print(f"support-v2 gen.py --selftest: {len(failures)} FAILED", file=sys.stderr)
         tmp_ctx.cleanup()
-        return 1
+        sys.exit(1)
 
     def verdict_agrees(name: str, r: Result) -> bool:
         return (
@@ -1753,23 +2296,55 @@ def _selftest() -> int:
           "the largest tag is read, not the last one listed")  # fmt: skip
     check("future" in results["reader-unknown-keys"].document.predicate,
           "unknown keys are ignored, at both levels")  # fmt: skip
-    # No such tag: the measured empty answer, and a listing with no publication in it.
-    for name in ("reader-empty", "reader-only-other-tags"):
-        r = results[name]
+    # No such tag: the measured empty answer, and a listing with no publication in it,
+    # each saying exactly which.
+    r = results["reader-empty"]
+    check(
+        r.document is None and "support-v2: live check off: no channel statement published yet" in r.said,
+        "reader-empty: no such tag reads as unpublished, loudly",
+    )
+    r = results["reader-only-other-tags"]
+    check(
+        r.document is None
+        and "live check off: the channel's tag listing names 2 tags and none is spelled like a publication" in r.said
+        and "published yet" not in r.said,
+        "reader-only-other-tags: tags, none a publication: it says that, not that nothing is published",
+    )
+
+    # The latch: once lines.json names a publication, no answer turns the comparison off.
+    for label, rule in (
+        ("empty", "no-document"),
+        ("other-tags", "no-document"),
+        ("older", "older-than-lines"),
+        ("no-form-empty", "lines-source"),
+    ):
+        r = latch_results[label]
         check(
-            r.document is None and "support-v2: live check off: no channel statement published yet" in r.said,
-            f"{name}: no such tag reads as unpublished, loudly",
+            r.status == EXIT_CHANNEL and r.rc == EXIT_CHANNEL and f"refused [{rule}]:" in r.said and "live check off" not in r.said,
+            f"latch, {label}: exit 5 with [{rule}], and the comparison stays on",
+        )
+    for label in ("same", "newer", "no-form-document"):
+        r = latch_results[label]
+        check(
+            r.status != EXIT_CHANNEL and r.document is not None and r.document.tag == NEWEST,
+            f"latch, {label}: the document verifies, so the latch has nothing to refuse",
         )
 
-    # Each registry below differs from the plain one it is judged against, except
-    # the two whose plant is what is trusted rather than what is served.
+    # Each registry below differs from the plain one it is judged against. These are
+    # the exceptions, and an entry that no longer is one fails rather than hides a plant.
+    serves_the_plain_registry = {
+        "published": "it is the plain registry with a document",
+        "unpublished": "it is the plain registry with none",
+        "allbad": "its plant is the key the run trusts, not what the registry serves",
+    }
+    for name, why in serves_the_plain_registry.items():
+        plain = "published" if full_docs.get(name) else "unpublished"
+        check(name in full and prints[name] == prints[plain], f"{name} serves the plain registry: {why}")
     for name in full:
         plain = "published" if full_docs[name] else "unpublished"
-        if name not in ("published", "unpublished", "allbad", "tampered-env", "tampered-allowed"):
+        if name not in serves_the_plain_registry:
             check(prints[name] != prints[plain], f"{name}: the plant changed what the registry serves")
     check(prints["published"] != prints["unpublished"], "published and unpublished: the registries differ")
-    check(prints["tampered-env"] != prints["unpublished"] and prints["tampered-allowed"] != prints["unpublished"],
-          "tampered-env and tampered-allowed: the registries are tampered")  # fmt: skip
 
     # The classification.
     r = results["published"]
@@ -1855,6 +2430,58 @@ def _selftest() -> int:
     check(any("/referrers/" in e["path"] or "sha256-" in e["path"] for e in log),
           "the registry's own log: the signatures were requested")  # fmt: skip
 
+    # One plant per private pattern, each caught by its own pattern and no other.
+    check(
+        len(PLANTED_PRIVATE) == len(PRIVATE_PATTERNS)
+        and all(
+            p.search(x) and sum(bool(q.search(x)) for q in PRIVATE_PATTERNS) == 1
+            for p, x in zip(PRIVATE_PATTERNS, PLANTED_PRIVATE, strict=True)
+        ),
+        "each private pattern has one plant, which only it catches",
+    )
+    for i, planted_string in enumerate(PLANTED_PRIVATE):
+        r = results[f"private-pattern-{i}"]
+        check(
+            r.status == EXIT_PARTIAL
+            and "26.8 linux-arm64: omitted, a field" in r.said
+            and planted_string not in r.said
+            and r.page == page,
+            f"private pattern {i}: its string fails that build (3), named, said nowhere, and the page is unchanged",
+        )
+    # A statement that verifies and whose facts are not of the shape they claim.
+    exit_3("refused-version-shape", "a version of another shape", "26.8 linux-arm64: omitted, its version is not a four-part ClickHouse version")
+    exit_3("refused-version-of-another-line", "a version of another line", "26.8 linux-arm64: omitted, its statement did not verify")
+    # The fetch layer refuses that one first (a version outside the request is corrupt),
+    # so a registry cannot reach this script's own rule: it is judged directly.
+    good_predicate = {"clickhouse_version": "26.8.34.13", "build": "20261106.120000", "glibc_floor": "2.17"}
+    check(_refusal("26.8", "linux-arm64", good_predicate) == "", "the control: a build of the line is not refused")
+    check(
+        _refusal("26.8", "linux-arm64", {**good_predicate, "clickhouse_version": "26.9.25.15"}) == "its version does not belong to the line",
+        "a version of another line is refused by this script's own rule too",
+    )
+    exit_3("refused-build-shape", "a build id of another shape", "26.8 linux-arm64: omitted, its build id is not a build id")
+    exit_3("refused-glibc-shape", "a glibc floor of another shape", "26.8 linux-arm64: omitted, its glibc floor is not a glibc version")
+
+    # A supported line absent on a platform is named, and changes no status; served
+    # on all of them, nothing is said.
+    r = results["supported-served-on-one-platform"]
+    check(
+        r.status == EXIT_OK and "26.8: supported, and absent on linux-amd64, linux-arm64" in r.said,
+        "a supported line on one platform of three: exit 0, the absent platforms named",
+    )
+    check("absent on" not in results["published"].said, "a supported line on every platform: no platform named")
+    check("absent on" not in results["supported-one-platform-bad"].said, "a platform whose statement failed is named as that, not as absent")
+
+    # A line listing that may be cut off stops the run: a line it hides is not judged.
+    for name, rule in (
+        ("lines-listing-next-page", "listing-truncated"),
+        ("lines-listing-next-page-second-line", "listing-truncated"),
+        ("lines-listing-full-page", "listing-truncated"),
+        ("lines-listing-203", "listing"),
+    ):
+        r = results[name]
+        check(r.status == EXIT_NOTHING and f"nothing written: [{rule}]" in r.said, f"{name}: nothing written (4), [{rule}]")
+
     # The file-level contract: --check, --write and --print-document on each outcome.
     good = results["published"]
     published = Outcome(EXIT_OK, good.page, good.document)
@@ -1870,7 +2497,7 @@ def _selftest() -> int:
         path.write_text(content if isinstance(content, str) else json.dumps(content), encoding="utf-8")
         return path
 
-    agreed = lines_file("agreed", {"lines": ["26.3", "26.8", "26.9", "26.10"]})
+    agreed = lines_file("agreed", {"source": NEWEST, "lines": ["26.3", "26.8", "26.9", "26.10"]})
     check(concluded("check", out_page, agreed, published)[0] == EXIT_OK, "--check: page and lines.json agree (0)")
     rc, said = concluded("check", tmp / "absent.md", agreed, published)
     check(rc == EXIT_DIFF and "absent.md differs" in said, "--check: no page differs (1), named")
@@ -1880,12 +2507,15 @@ def _selftest() -> int:
     check(rc == EXIT_DIFF and "wrong.md differs" in said and "verdict: a committed file differs (exit 1)" in said,
           "--check: a changed page differs (1), named")  # fmt: skip
     for name, content, what in (
-        ("kept", {"lines": ["26.3", "26.7", "26.8", "26.9", "26.10"]}, "still lists the retired line"),
-        ("dropped", {"lines": ["26.3", "26.8", "26.9"]}, "misses a supported line"),
-        ("order", {"lines": ["26.10", "26.3", "26.8", "26.9"]}, "out of order"),
-        ("empty", {"lines": []}, "empty"),
-        ("nomember", {"schema": "x"}, "no lines member"),
+        ("kept", {"source": NEWEST, "lines": ["26.3", "26.7", "26.8", "26.9", "26.10"]}, "still lists the retired line"),
+        ("dropped", {"source": NEWEST, "lines": ["26.3", "26.8", "26.9"]}, "misses a supported line"),
+        ("order", {"source": NEWEST, "lines": ["26.10", "26.3", "26.8", "26.9"]}, "out of order"),
+        ("empty", {"source": NEWEST, "lines": []}, "empty"),
+        ("nomember", {"source": NEWEST, "schema": "x"}, "no lines member"),
         ("garbage", "not json", "not JSON"),
+        ("repeated", '{"source": "' + NEWEST + '", "lines": [], "lines": ["26.3", "26.8", "26.9", "26.10"]}', "a repeated member, the last one right"),
+        ("fixture", {"source": lines_rules.FIXTURE_SOURCE, "lines": ["26.3", "26.8", "26.9", "26.10"]}, "still names the fixture, so the latch is not set"),
+        ("noform", {"source": "a note", "lines": ["26.3", "26.8", "26.9", "26.10"]}, "a source of no form"),
     ):
         path = lines_file(name, content)
         rc, said = concluded("check", out_page, path, published)
@@ -1893,9 +2523,35 @@ def _selftest() -> int:
               f"--check: lines.json {what}: disagrees with the document (1), named")  # fmt: skip
     rc, said = concluded("check", out_page, tmp / "no-such-lines.json", published)
     check(rc == EXIT_DIFF and "no-such-lines.json could not be read" in said, "--check: no lines.json at all (1), named")
-    disagreeing = lines_file("disagree", {"lines": ["1.1"]})
-    rc, said = concluded("check", out_page, disagreeing, unpublished)
-    check(rc == EXIT_OK and "NOT JUDGED" in said, "--check, unpublished: lines.json is not compared (0), and the verdict says so")
+    fixture_state = lines_file("fixture-state", {"source": lines_rules.FIXTURE_SOURCE, "lines": fixture_doc.supported})
+    rc, said = concluded("check", out_page, fixture_state, unpublished)
+    check(rc == EXIT_OK and "NOT JUDGED" in said, "--check, unpublished, lines.json the fixture's: fine (0), and the verdict says the live comparison was not judged")
+    # While nothing is published lines.json is the fixture's, whatever its source says.
+    for name, source in (("fixture", lines_rules.FIXTURE_SOURCE), ("reworded", "a note"), ("tag", NEWEST), ("none", None)):
+        path = lines_file(f"dropped-{name}", {"source": source, "lines": ["26.3", "26.8", "26.9"]})
+        rc, said = concluded("check", out_page, path, unpublished)
+        check(rc == EXIT_DIFF and "dry-run fixture" in said, f"--check, unpublished, a line dropped with source {name}: differs (1), named")
+        check(_fixture_problem(path) != "", f"the fixture guard: a line dropped with source {name}")
+    check(_fixture_problem(fixture_state) == "", "the fixture guard's control: the fixture's own lines pass")
+    repeated_right_last = lines_file("repeated-fixture", '{"lines": [], "lines": ' + json.dumps(fixture_doc.supported) + "}")
+    check(_fixture_problem(repeated_right_last) != "", "the fixture guard: a repeated `lines` is not read as its last one")
+
+    # lines.json's source, each form.
+    for name, source, want in (
+        ("fixture", lines_rules.FIXTURE_SOURCE, LinesSource()),
+        ("tag", NEWEST, LinesSource(tag=NEWEST)),
+    ):
+        check(lines_source(lines_file(f"form-{name}", {"source": source})) == want, f"lines.json's source: {name} reads as itself")
+    for name, content in (
+        ("reworded", {"source": "the producer's dry-run document"}),
+        ("absent", {}),
+        ("not-a-string", {"source": 1}),
+        ("a-tag-no-time", {"source": "20261399T999999Z"}),
+        ("not-json", "not json"),
+        ("not-an-object", "[]"),
+    ):
+        check(bool(lines_source(lines_file(f"noform-{name}", content)).problem), f"lines.json's source: {name} has no form, and proves nothing")
+    check(bool(lines_source(tmp / "no-such-lines.json").problem), "lines.json's source: no file proves nothing")
     check(concluded("check", out_page, agreed, Outcome(EXIT_PARTIAL, page, good.document))[0] == EXIT_PARTIAL,
           "--check: a failed line fails (3), not compared")  # fmt: skip
     check(concluded("check", out_page, agreed, Outcome(EXIT_NOTHING))[0] == EXIT_NOTHING, "--check: nothing readable fails (4)")
@@ -1909,6 +2565,19 @@ def _selftest() -> int:
           "--write: writes the page (0)")  # fmt: skip
     check(concluded("document", written, agreed, unpublished)[0] == EXIT_USAGE,
           "--print-document with nothing published: nothing to print (2)")  # fmt: skip
+
+    # If the fetch layer stops going through the opener this script watches, the `Link`
+    # lines go unseen: that is a refusal, not an answer with none.
+    unwatched = fetch_from_bases
+    globals()["fetch_from_bases"] = lambda *_a, **_k: _http.HttpResponse(200, {}, b'{"tags": []}', "planted")
+    try:
+        _read_listing((), "a listing", FetchPolicy(), RetryPolicy())
+        unseen = ""
+    except ChannelRefused as refused:
+        unseen = refused.name
+    finally:
+        globals()["fetch_from_bases"] = unwatched
+    check(unseen == "listing", "an answer the Link watch did not see: refused [listing]")
 
     # A crash is its own status, never a verdict on the registry.
     said_crash: list[str] = []
@@ -1927,9 +2596,174 @@ def _selftest() -> int:
     tmp_ctx.cleanup()
     if failures:
         print(f"support-v2 gen.py --selftest: {len(failures)} FAILED", file=sys.stderr)
-        return 1
-    print(f"support-v2 gen.py --selftest: OK ({len(plants)} plants, {len(results)} registry cases)")
+        sys.exit(1)
+    print(
+        f"support-v2 gen.py --selftest: OK ({len(plants)} plants, {len(results)} registry cases, "
+        f"{cli_runs} command-line runs, each process's status equal to its verdict line)"
+    )
     return 0
+
+
+def _cli_selftest(check, tmp: Path, port: int, lines_doc, supported, fixture, page, keyid, pub, other, cases) -> int:
+    """main() in a real process, in every mode, on a planted tree: nothing else reads
+    the status CI reads. Each run must end with one verdict line, whose status is the
+    process's and the one expected. `cases` are registries served for this."""
+    tmp.mkdir()
+    verdict_re = re.compile(r"^support-v2: verdict: .*\(exit ([0-9]+)\)", re.M)
+    me = str(Path(__file__).resolve())
+    env_base = {k: v for k, v in os.environ.items() if k != "GITHUB_ACTIONS" and not k.startswith("CHTYPES_")}
+    runs = 0
+
+    def setup(case: str, keys_hex: str = pub, crash: bool = False) -> str:
+        return json.dumps(
+            {
+                "base": f"http://127.0.0.1:{port}/s-{case}/chtypes/v1",
+                "keys": [{"keyid": keyid if keys_hex == pub else hashlib.sha256(bytes.fromhex(keys_hex)).hexdigest()[:16], "ed25519_hex": keys_hex}],
+                "crash": crash,
+            }
+        )
+
+    def cli(
+        what: str,
+        args: list[str],
+        want: int,
+        *,
+        case: str = "",
+        keys_hex: str = pub,
+        crash: bool = False,
+        said: tuple[str, ...] = (),
+        unsaid: tuple[str, ...] = (),
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess:
+        """`case` runs main() under that fixture channel; no case runs the script itself
+        as a command, which is only ever an offline mode or a usage error."""
+        nonlocal runs
+        runs += 1
+        command = (
+            [sys.executable, "-c", CLI_DRIVER, me, setup(case, keys_hex, crash), *args]
+            if case
+            else [sys.executable, me, *args]
+        )
+        r = subprocess.run(command, capture_output=True, text=True, cwd=tmp, timeout=120, env={**env_base, **(env or {})})
+        found = verdict_re.findall(r.stderr)
+        agrees = r.returncode == want and (want == EXIT_USAGE and not case and not found or found == [str(want)])
+        missing = [x for x in said if x not in r.stderr]
+        spoken = [x for x in unsaid if x in r.stderr]
+        check(
+            agrees and not missing and not spoken,
+            f"command line, {what}: status {want} and its verdict line"
+            + ("" if agrees and not missing and not spoken else f" (status {r.returncode}, verdicts {found}, missing {missing}, said {spoken}: {r.stderr[-400:]})"),
+        )
+        return r
+
+    def write(name: str, content: str) -> str:
+        path = tmp / name
+        path.write_text(content, encoding="utf-8")
+        return str(path)
+
+    tag = NEWEST
+    agreed = write("agreed.json", lines_doc(tag, supported))
+    at_fixture = write("at-fixture.json", lines_doc(lines_rules.FIXTURE_SOURCE, supported))
+    dropped_tag = write("dropped-tag.json", lines_doc(tag, supported[:-1]))
+    dropped_fixture = write("dropped-fixture.json", lines_doc(lines_rules.FIXTURE_SOURCE, supported[:-1]))
+    dropped_reworded = write("dropped-reworded.json", lines_doc("a note", supported[:-1]))
+    no_form = write("no-form.json", lines_doc("a note", supported))
+
+    def page_of(case: str) -> str:
+        """The page the child's channel generates, a file it must agree with, and stale."""
+        channel = replace(_channel.FETCH_V1_CHANNEL, name="selftest", bases=(f"http://127.0.0.1:{port}/s-{case}/chtypes/v1",))
+        return render(channel_context(channel))
+
+    def selected(page_path: str, lines_path: str) -> list[str]:
+        return ["--out", page_path, "--lines", lines_path]
+
+    check(set(cases) == {"cli-published", "cli-unpublished", "cli-refused", "cli-line-failed"}, "the command-line registries are the ones used below")
+
+    # A document published, every supported line built.
+    case = "cli-published"
+    text = page_of(case)
+    good = write("good.md", text)
+    stale = write("stale.md", text + "\n")
+    cli("--check, all agrees", ["--check", *selected(good, agreed)], EXIT_OK, case=case, said=("channel statement", "verdict: ok (exit 0)", "--out", "--lines", "not the committed files"))
+    cli("--check, a stale page", ["--check", *selected(stale, agreed)], EXIT_DIFF, case=case, said=("stale.md differs",))
+    cli("--check, a missing page", ["--check", *selected(str(tmp / "absent.md"), agreed)], EXIT_DIFF, case=case, said=("absent.md differs",))
+    cli("--check, lines.json misses a line", ["--check", *selected(good, dropped_tag)], EXIT_DIFF, case=case, said=("dropped-tag.json names",))
+    cli("--check, lines.json still at the fixture", ["--check", *selected(good, at_fixture)], EXIT_DIFF, case=case, said=("the latch is not set",))
+    cli("--check, lines.json's source of no form", ["--check", *selected(good, no_form)], EXIT_DIFF, case=case, said=("neither the fixture marker",))
+    r = cli("no mode prints the page", selected(str(tmp / "absent.md"), agreed), EXIT_OK, case=case)
+    check(r.stdout == text, "command line, no mode: stdout is the page")
+    written = tmp / "written.md"
+    cli("--write writes", ["--write", *selected(str(written), agreed)], EXIT_OK, case=case)
+    check(written.is_file() and written.read_text(encoding="utf-8") == text, "command line, --write: the file is the page")
+    r = cli("--print-document", ["--print-document", *selected(good, agreed)], EXIT_OK, case=case, said=("printing the channel statement",))
+    document = {**fixture, "repository": f"s-{case}/chtypes/v1"}
+    check(json.loads(r.stdout or "null") == document, "command line, --print-document: stdout is the signed document")
+
+    # Nothing published.
+    case = "cli-unpublished"
+    text = page_of(case)
+    good = write("good-unpublished.md", text)
+    stale = write("stale-unpublished.md", text + "\n")
+    words = ("live check off: no channel statement published yet", "verdict: ok, the live comparison NOT JUDGED (exit 0)")
+    cli("--check, the fixture state", ["--check", *selected(good, at_fixture)], EXIT_OK, case=case, said=words, unsaid=("::warning",))
+    cli("--check, the fixture state, in CI", ["--check", *selected(good, at_fixture)], EXIT_OK, case=case, said=(*words, "::warning title=support-v2::live check off"), env={"GITHUB_ACTIONS": "true"})
+    cli("--check, a stale page", ["--check", *selected(stale, at_fixture)], EXIT_DIFF, case=case, said=("differs",))
+    cli("--check, a line dropped", ["--check", *selected(good, dropped_fixture)], EXIT_DIFF, case=case, said=("dry-run fixture",))
+    cli("--check, latched", ["--check", *selected(good, agreed)], EXIT_CHANNEL, case=case, said=("refused [no-document]",), unsaid=("NOT JUDGED",))
+    cli("--check, a line dropped behind a made-up tag", ["--check", *selected(good, dropped_tag)], EXIT_CHANNEL, case=case, said=("refused [no-document]",))
+    cli("--check, a source of no form", ["--check", *selected(good, no_form)], EXIT_CHANNEL, case=case, said=("refused [lines-source]",))
+    cli("--check, no lines.json", ["--check", *selected(good, str(tmp / "absent.json"))], EXIT_CHANNEL, case=case, said=("refused [lines-source]",))
+    r = cli("--print-document, nothing published", ["--print-document", *selected(good, at_fixture)], EXIT_USAGE, case=case, said=("no channel document to print",))
+    check(r.stdout == "", "command line, --print-document with nothing published: stdout is empty")
+    unwritten = tmp / "unwritten-latched.md"
+    cli("--write, latched", ["--write", *selected(str(unwritten), agreed)], EXIT_CHANNEL, case=case)
+    check(not unwritten.exists(), "command line, --write latched: nothing was written")
+    cli("--check, every statement bad", ["--check", *selected(good, at_fixture)], EXIT_NOTHING, case=case, keys_hex=other, said=("no platform of any line verified",))
+    cli("--check, a crash", ["--check", *selected(good, at_fixture)], EXIT_CRASH, case=case, crash=True, said=("RuntimeError escaped",))
+
+    # The document refused.
+    case = "cli-refused"
+    good = write("good-refused.md", page_of(case))
+    cli("--check, refused", ["--check", *selected(good, agreed)], EXIT_CHANNEL, case=case, said=("refused [artifact-type]",))
+    r = cli("no mode, refused", selected(good, agreed), EXIT_CHANNEL, case=case)
+    check(r.stdout == "", "command line, no mode refused: stdout is empty")
+    unwritten = tmp / "unwritten-refused.md"
+    cli("--write, refused", ["--write", *selected(str(unwritten), agreed)], EXIT_CHANNEL, case=case)
+    check(not unwritten.exists(), "command line, --write refused: nothing was written")
+    r = cli("--print-document, refused", ["--print-document", *selected(good, agreed)], EXIT_CHANNEL, case=case)
+    check(r.stdout == "", "command line, --print-document refused: stdout is empty")
+
+    # A supported line with no build: the page is produced, and the status says 3.
+    case = "cli-line-failed"
+    text = page_of(case)
+    good = write("good-failed.md", text)
+    cli("--check, a line failed", ["--check", *selected(good, agreed)], EXIT_PARTIAL, case=case, said=("26.7: supported, and no platform", "not comparing"))
+    r = cli("no mode, a line failed", selected(good, agreed), EXIT_PARTIAL, case=case)
+    check(r.stdout == text, "command line, no mode with a line failed: the page is still printed")
+    written = tmp / "written-failed.md"
+    cli("--write, a line failed", ["--write", *selected(str(written), agreed)], EXIT_PARTIAL, case=case)
+    check(written.is_file(), "command line, --write with a line failed: the page is still written")
+    r = cli("--print-document, a line failed", ["--print-document", *selected(good, agreed)], EXIT_PARTIAL, case=case)
+    check(bool(r.stdout), "command line, --print-document with a line failed: the document is printed, the status is 3")
+
+    # --check-page needs no channel: this is the script itself, as a command. Its page is
+    # the active channel's, the dev one in a real process.
+    good = write("good-page.md", page)
+    stale = write("stale-page.md", page + "\n")
+    cli("--check-page, all agrees", ["--check-page", *selected(good, at_fixture)], EXIT_OK, said=("no registry read", "--out", "--lines", "not the committed files"))
+    cli("--check-page, a stale page", ["--check-page", *selected(stale, at_fixture)], EXIT_DIFF, said=("stale-page.md differs",))
+    cli("--check-page, a missing page", ["--check-page", *selected(str(tmp / "absent.md"), at_fixture)], EXIT_DIFF, said=("absent.md differs",))
+    cli("--check-page, a line dropped", ["--check-page", *selected(good, dropped_fixture)], EXIT_DIFF, said=("dry-run fixture",))
+    cli("--check-page, a source of no form with a line dropped", ["--check-page", *selected(good, dropped_reworded)], EXIT_DIFF, said=("neither the fixture marker",))
+    cli("--check-page, a publication tag is judged live, not here", ["--check-page", *selected(good, dropped_tag)], EXIT_OK)
+    # With no selection, on the committed tree: the status must still be the verdict's.
+    r = subprocess.run([sys.executable, me, "--check-page"], capture_output=True, text=True, cwd=tmp, timeout=120, env=env_base)
+    runs += 1
+    found = verdict_re.findall(r.stderr)
+    check(found == [str(r.returncode)] and r.returncode in (EXIT_OK, EXIT_DIFF), "command line, --check-page on the committed tree: its status is its verdict line's")
+    check("not the committed files" not in r.stderr, "command line, the default selection names nothing")
+    cli("two modes at once", ["--check", "--write"], EXIT_USAGE)
+    return runs
 
 
 def _guarded(body: Callable[[], int], say) -> int:
@@ -1949,6 +2783,7 @@ def main(argv: list[str] | None = None) -> int:
     g = ap.add_mutually_exclusive_group()
     g.add_argument("--write", action="store_true", help="write docs/support-v2.md")
     g.add_argument("--check", action="store_true", help="fail unless the page and lines.json are current")
+    g.add_argument("--check-page", action="store_true", help="the same for what needs no registry")
     g.add_argument("--print-document", action="store_true", help="print the verified channel document")
     g.add_argument("--selftest", action="store_true", help="prove the rules on a fixture registry")
     ap.add_argument("--out", type=Path, default=PAGE, help=argparse.SUPPRESS)
@@ -1956,6 +2791,8 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     if args.selftest:
         return _selftest()
+    picked = [("--out", args.out, PAGE), ("--lines", args.lines, LINES_JSON)]
+    selection = " ".join(f"{flag} {value}" for flag, value, default in picked if value.resolve() != default)
     mode = (
         "write" if args.write else "check" if args.check else "document" if args.print_document else "print"
     )
@@ -1963,7 +2800,9 @@ def main(argv: list[str] | None = None) -> int:
     def say(message: str) -> None:
         print(message, file=sys.stderr)
 
-    return _guarded(lambda: run(mode, args.out, args.lines, say), say)
+    if args.check_page:
+        return _guarded(lambda: check_page(args.out, args.lines, say, selection), say)
+    return _guarded(lambda: run(mode, args.out, args.lines, say, selection), say)
 
 
 if __name__ == "__main__":
