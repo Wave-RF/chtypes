@@ -348,7 +348,7 @@ def render_decls(model) -> str:
         "/// and the tombstone, all for presence). Built only by `Api::resolve_all`.",
         "pub(crate) struct Api {",
         "    /// Held so the mapping outlives every symbol; never dropped (D2: no",
-        "    /// `dlclose`, ever — see `rust/src/ffi.rs`'s identical v0 rule).",
+        "    /// `dlclose`, ever — the image may be one built without `-z nodelete`).",
         "    _lib: std::mem::ManuallyDrop<UnixLibrary>,",
     ]
     for fn in model.functions:
@@ -360,10 +360,16 @@ def render_decls(model) -> str:
         "    /// Resolve every described symbol by name, naming the FIRST one that is",
         "    /// missing (`sdk.json`'s `missing_symbol:<name>` loader refusal, step 6).",
         "    ///",
+        "    /// `lib` arrives already wrapped in `ManuallyDrop`, so the early `?` return of",
+        "    /// a missing symbol drops only the wrapper, a no-op: a refused image is never",
+        "    /// `dlclose`d, and neither is an accepted one.",
+        "    ///",
         "    /// # Safety",
         "    /// `lib` must be a library this process just `dlopen`'d, past steps 1-5,",
         "    /// and will never `dlclose` (D2).",
-        "    pub(crate) unsafe fn resolve_all(lib: UnixLibrary) -> Result<Api, &'static str> {",
+        "    pub(crate) unsafe fn resolve_all(",
+        "        lib: std::mem::ManuallyDrop<UnixLibrary>,",
+        "    ) -> Result<Api, &'static str> {",
         "        // SAFETY: the caller's `# Safety` clause is `Symbol`'s own contract.",
         "        unsafe {",
         "            Ok(Api {",
@@ -373,7 +379,7 @@ def render_decls(model) -> str:
             f'                {fn.name}: lib.get(concat!({_rust_str(fn.name)}, "\\0").as_bytes())'
             f".map_err(|_| {_rust_str(fn.name)})?,"
         )
-    out += ["                _lib: std::mem::ManuallyDrop::new(lib),", "            })", "        }", "    }", "}", ""]
+    out += ["                _lib: lib,", "            })", "        }", "    }", "}", ""]
 
     return "\n".join(out)
 
