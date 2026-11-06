@@ -100,6 +100,16 @@ The Go twin reads the version list rather than the version, so a dry run never a
 
 **The lock.** When #511's conditions hold, nothing in these workflows changes: a `2.N.N` tag already selects the stable mode below, and the maintainer's repository variable is what lets it publish. SDK `2.0.0` then ships from production, signed with the release key.
 
+The pull request that locks goes in this order, and its red checks before step 1 are expected, because they ask for what only step 1 publishes:
+
+1. The production channel's first publication, its libraries and its channel document, signed with the release key by the maintainer.
+2. On that pull request's branch, `lines.json` names the publication (the steps under "After the first publication" below), and its live `gen.py --check` re-runs and passes.
+3. It merges on the maintainer's word.
+
+Before step 1 its live `gen.py --check` exits 4, because the channel's listing names no line. `gen.py --write` and `--check-page` read no registry, so neither waits for step 1.
+
+**A dev tag does not carry over.** A `source` that names a publication belongs to the channel it was read from, and the lock changes the channel. If `lines.json` names a dev publication, production's listing cannot name it: `gen.py --check` exits 5 `[no-document]` before step 1, and after step 1 `gen.py --print-document` exits 5 `[lines-source]`, so step 2 has no document to start from. The pull request that locks therefore sets `source` back to the fixture marker before step 1, by hand, because `regen-where-settings.py` refuses that move. While it is at the marker its `lines` must also be the fixture's, or `--check-page` names the difference, and that red ends at step 2 too.
+
 ## Stable releases (2.N.N)
 
 The stable mode releases SDK `2.0.0` and every later `2.N.N` (public issue #597). It is ready before the lock, so the maintainer's approval can publish in minutes, and until he sets one repository variable it can only dry-run.
@@ -117,7 +127,7 @@ The stable mode releases SDK `2.0.0` and every later `2.N.N` (public issue #597)
 
 **Verify reads the production channel.** In the stable mode `scripts/release-verify.sh` runs the same six checks against the production generation-2 channel every binding carries (`docs/guides/fetch-v1.md`, "Generation 2 after the lock"): the cache subroot `v2`, record schema 2, abi 2, the production repository `https://registry.wavehouse.dev/chtypes/v2`, the release key (key id `deb275922dbff76e`), and no alias step. None of those values is typed in a workflow or in the script: they are `prod_v2` and the release key of `spec/fetch-v1/constants.json`, the definition `scripts/fetch-v1/gen-constants.py` generates into all four bindings. The production repository caches its tags and `tags/list` for 300 s, so the listing check retries for 360 s before it fails (the dev mode still reads once).
 
-**The stand-in, for dry runs only.** Production `chtypes/v2` holds nothing until the lock, so a fetch there answers `CHTYPES_ARTIFACT_UNPUBLISHED`, and a stable dry run's verify could prove nothing against it. A stable dry run therefore verifies against a stand-in (`scripts/release-verify.sh <binding> standin`): the production channel's base and trust point at the staging dev repository `https://registry-staging.wavehouse.dev/chtypes/v2-dev` and the staging key, through that channel's own overrides, `CHTYPES_ARTIFACTS_URL` and `CHTYPES_TRUSTED_KEYS`. The production channel honors them, and the dev channel ignores them, so a CLI that still speaks the dev channel fails check 2 (its cache root is `v2-dev`, not `v2`). Everything else stays the production channel's. The workflows select the stand-in only for a stable dry run, and the script refuses it unless `RELEASE_DRY_RUN=true` and the run is not a tag push: a real release is verified against production and nothing else. It exists only in dry runs because its whole content is a substitution of registry and key, which a release must never make.
+**The stand-in, for dry runs only.** Production `chtypes/v2` holds nothing until its first publication, so a fetch there answers `CHTYPES_ARTIFACT_UNPUBLISHED`, and a stable dry run's verify could prove nothing against it. A stable dry run therefore verifies against a stand-in (`scripts/release-verify.sh <binding> standin`): the production channel's base and trust point at the staging dev repository `https://registry-staging.wavehouse.dev/chtypes/v2-dev` and the staging key, through that channel's own overrides, `CHTYPES_ARTIFACTS_URL` and `CHTYPES_TRUSTED_KEYS`. The production channel honors them, and the dev channel ignores them, so a CLI that still speaks the dev channel fails check 2 (its cache root is `v2-dev`, not `v2`). Everything else stays the production channel's. The workflows select the stand-in only for a stable dry run, and the script refuses it unless `RELEASE_DRY_RUN=true` and the run is not a tag push: a real release is verified against production and nothing else. It exists only in dry runs because its whole content is a substitution of registry and key, which a release must never make.
 
 - **A stable release needs a locked spec.** SDK major == ABI major, and each major is fully locked before any stable release, so `scripts/release-verify.sh` refuses to verify a stable version, in any mode, while `spec/abi-v2/abi.json` is not `locked`, before anything is installed. A stable dry run before the lock therefore fails at its verify, by design. Once the spec is locked, the shipped CLI speaks the production channel by default, and the stand-in runs it as is.
 - The production channel has no alias step, so the stand-in fetches each line's own tag from the staging dev repository. It passes only while that tag serves a build of the tree's fingerprint; otherwise check 5 names both fingerprints.
@@ -165,10 +175,10 @@ Commit `lines.json` and the README's changed row, not `document.json`. The last 
 ```sh
 uv run scripts/support-v2/gen.py --print-document > document.json
 python3 scripts/abi-v2/regen-where-settings.py --lines-document document.json --lines-source <tag> --from <dir>
-uv run scripts/support-v2/gen.py --write
+uv run scripts/support-v2/gen.py --check
 ```
 
-`regen-where-settings.py` copies each list byte for byte, deletes a list `lines.json` does not name, drops the TSV rows on such a line, derives `union.json` and rewrites the README's sha256 list; it never takes a list by hand, and it judges the whole tree before it writes a byte. The exit statuses of `gen.py` are in its header: 0 is fine (or NOT JUDGED, named), 1 is a committed file that differs, 3 is a line that failed (named on stderr: read them before committing), 4 is a channel whose lines could not be read, and 5 is a channel document that was refused. No older document is ever read in place of a refused one.
+`regen-where-settings.py` copies each list byte for byte, deletes a list `lines.json` does not name, drops the TSV rows on such a line, derives `union.json` and rewrites the README's sha256 list; it never takes a list by hand, and it judges the whole tree before it writes a byte. The exit statuses of `gen.py` are in its header: 0 is fine (or NOT JUDGED, named), 1 is a committed file that differs, 3 is a line that failed (named on stderr: read them before committing), 4 is a channel whose lines could not be read or that lists none, and 5 is a channel document that was refused. No older document is ever read in place of a refused one.
 
 **What these checks don't cover.** They guard a descriptive page and a generated list, and these limits are accepted on that basis. If the page or `lines.json` ever feeds a binding or an enforcement step, a real evaluator of the workflow's steps comes first.
 
