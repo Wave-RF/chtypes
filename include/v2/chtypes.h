@@ -1702,7 +1702,9 @@ CHS_API chs_status chs_preview_batch(
  * `async_insert_select_as_async_insert` (on by default) sends it through the asynchronous queue,
  * and with `wait_for_async_insert` 1 (the default) its answer is the synchronous statement's. With
  * `wait_for_async_insert` 0 the server acknowledges before the flush, and the call answers what the
- * flush of this body will do.
+ * flush of this body will do. Through the asynchronous queue, the server can group this statement
+ * with other clients' inserts into one flush, which the call cannot see; such grouping can refuse a
+ * body that the call, and the same body inserted alone, would accept.
  *
  * Refusals are ClickHouse's own. A reader refusal and a whole-body refusal carry ClickHouse's code,
  * and its message verbatim in `err`, exactly as the server's error carries it, `(at row N)`
