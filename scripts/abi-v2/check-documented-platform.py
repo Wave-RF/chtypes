@@ -47,20 +47,39 @@ DIR = ROOT / "spec" / "abi-v2" / "documented-platform"
 NAME = "documented-platform.tsv"
 HEADER = ("platform", "line", "class", "kind", "server", "rule", "ruling")
 PLATFORMS = ("linux-amd64", "linux-arm64", "darwin-arm64")
-# The lines the where-settings files use: spec/abi-v2/where-settings/lines.json,
-# the one place they are named.
-LINES = tuple(json.loads((ROOT / "spec" / "abi-v2" / "where-settings" / "lines.json").read_bytes())["lines"])
+LINES_JSON = ROOT / "spec" / "abi-v2" / "where-settings" / "lines.json"
 SERVER = re.compile(r"^server e:[0-9]+$")
 # Built from parts so this file does not itself spell a private name (lint-public).
 PRIVATE = re.compile("|".join(["ci" + "/steps", "chtypes" + "-core", "chtypes" + "-infra", "notes" + "/", "#[0-9]"]))
 ROW = re.compile(r"^- `documented-platform\.tsv`: `([0-9a-f]{64})`$")
 
 
+def read_lines() -> tuple[str, ...]:
+    """The lines the where-settings files use: spec/abi-v2/where-settings/lines.json,
+    the one place they are named. Read when a mode needs them, never at import, so
+    a lines.json that is missing or unreadable ends in a verdict line like any other
+    failure. Raises OSError or ValueError."""
+
+    def pairs(items: list) -> dict:
+        out: dict = {}
+        for key, value in items:
+            if key in out:
+                raise ValueError(f"the member {key!r} appears twice")
+            out[key] = value
+        return out
+
+    doc = json.loads(LINES_JSON.read_bytes(), object_pairs_hook=pairs)
+    lines = doc.get("lines") if isinstance(doc, dict) else None
+    if not isinstance(lines, list) or not lines or not all(isinstance(x, str) for x in lines):
+        raise ValueError("`lines` is not a list of lines")
+    return tuple(lines)
+
+
 def table_of(raw: bytes) -> str:
     return f"- `{NAME}`: `{hashlib.sha256(raw).hexdigest()}`"
 
 
-def check(raw: bytes, readme: str) -> list[str]:
+def check(raw: bytes, readme: str, lines_named: tuple[str, ...]) -> list[str]:
     out: list[str] = []
     try:
         text = raw.decode("utf-8")
@@ -86,8 +105,8 @@ def check(raw: bytes, readme: str) -> list[str]:
         platform, line, klass, kind, server = cols[:5]
         if platform not in PLATFORMS:
             out.append(f"{NAME}: platform {platform!r} is not one of {PLATFORMS} (platform)")
-        if line not in LINES:
-            out.append(f"{NAME}: line {line!r} is not one of {LINES} (line)")
+        if line not in lines_named:
+            out.append(f"{NAME}: line {line!r} is not one of {lines_named} (line)")
         if not SERVER.match(server):
             out.append(f"{NAME}: server {server!r} is not `server e:<integer>` (server)")
         cell = (platform, line, klass, kind, server)
@@ -108,9 +127,9 @@ def load(directory: Path) -> tuple[bytes, str]:
     return (f.read_bytes() if f.exists() else b""), (rd.read_text(encoding="utf-8") if rd.exists() else "")
 
 
-def verdict(raw: bytes, readme: str) -> tuple[int, list[str]]:
+def verdict(raw: bytes, readme: str, lines_named: tuple[str, ...]) -> tuple[int, list[str]]:
     """The exit status --check answers, and the problems behind it."""
-    probs = check(raw, readme)
+    probs = check(raw, readme, lines_named)
     return (1 if probs else 0), probs
 
 
@@ -123,6 +142,11 @@ def selftest() -> int:
     fails: list[str] = []
     planted = 0
     text = raw.decode()
+    try:
+        named = read_lines()
+    except (OSError, ValueError) as e:
+        print(f"SELFTEST FAIL: lines.json is unusable, nothing to plant on: {e}", file=sys.stderr)
+        sys.exit(1)
 
     def first_row(t: str) -> str:
         return next(x for x in t.splitlines() if x.strip() and not x.startswith("#"))
@@ -139,13 +163,13 @@ def selftest() -> int:
         if r == raw:
             fails.append(f"planted case {name!r}: the plant changed nothing")
         rd = re.sub(r"(?m)^- `documented-platform\.tsv`: `[0-9a-f]{64}`$", table_of(r), readme)
-        rc, probs = verdict(r, rd)
+        rc, probs = verdict(r, rd, named)
         if rc == 0:
             fails.append(f"planted case {name!r}: exit status 0")
         if not any(f"({rule})" in p for p in probs):
             fails.append(f"planted case {name!r}: rule {rule} did not fire; got {probs[:3]}")
 
-    base = check(raw, readme)
+    base = check(raw, readme, named)
     if base:
         fails.append(f"positive control: the tree as committed is not clean: {base[:3]}")
 
@@ -167,7 +191,7 @@ def selftest() -> int:
         planted += 1
         if (r, rd) == (raw, readme):
             fails.append(f"planted case {name!r}: the plant changed nothing")
-        rc, probs = verdict(r, rd)
+        rc, probs = verdict(r, rd, named)
         if rc == 0:
             fails.append(f"planted case {name!r}: exit status 0")
         if not any(f"({rule})" in p for p in probs):
@@ -248,6 +272,17 @@ def cli_selftest(raw: bytes, readme: str, fails: list[str]) -> int:
             fails.append("command line: the moved row changed nothing")
         cli("--check, a row on a line lines.json just added", added, ["--check"], 0)
 
+        # lines.json is read inside the run: a missing or unreadable one is a verdict line
+        # (and --print-table needs none).
+        bad = tree("nolines", on)
+        (bad / "spec" / "abi-v2" / "where-settings" / "lines.json").unlink()
+        cli("--check, no lines.json", bad, ["--check"], 1, "lines.json could not be read")
+        cli("--print-table, no lines.json", bad, ["--print-table"], 0)
+        for what, body in (("not JSON", "nope"), ("a lines that is a string", '{"lines": "26.8"}'), ("a repeated lines", '{"lines": [], "lines": ["' + cols[1] + '"]}')):
+            bad = tree("badlines-" + what.split()[-1], on)
+            (bad / "spec" / "abi-v2" / "where-settings" / "lines.json").write_text(body, encoding="utf-8")
+            cli(f"--check, lines.json {what}", bad, ["--check"], 1, "lines.json could not be read")
+
         empty = tree("empty", on, b"")
         (empty / DIR.relative_to(ROOT) / NAME).unlink()
         cli("--check with no file", empty, ["--check"], 1, "(column)")
@@ -270,7 +305,13 @@ def main(argv: list[str]) -> int:
         print(verdict_line(0, "ok"), file=sys.stderr)
         return 0
     if argv == ["--check"]:
-        rc, probs = verdict(raw, readme)
+        try:
+            named = read_lines()
+        except (OSError, ValueError) as e:
+            print(f"FAIL: {LINES_JSON.name} could not be read ({type(e).__name__}) (line)", file=sys.stderr)
+            print(verdict_line(1, "lines.json unreadable"), file=sys.stderr)
+            return 1
+        rc, probs = verdict(raw, readme, named)
         for p in probs:
             print("FAIL:", p, file=sys.stderr)
         if rc == 0:
