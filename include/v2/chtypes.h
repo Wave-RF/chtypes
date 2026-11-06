@@ -567,12 +567,13 @@ extern "C" {
  *   it, the whole call declines (`reason` `call-memory-budget`, `code` `CHS_CODE_DECLINED`,
  *   `refused_at` `call`) and produces no partial output: no export or output bytes;
  *   `chs_preview_batch` carries `export_declined` where an export was asked for, and
- *   `chs_preview_insert` carries no `export_*` member. It is never a rejection with ClickHouse's
- *   code 241, because the library's peak is not the server's, so a 241 would be an over-reject
- *   wherever the server stays under its limit. A profile's `max_memory_usage` stays a declined
- *   setting. Each of the five calls has a conformance case: at a forced tiny limit the call
- *   declines `call-memory-budget` with no partial output, and absent and `"0"` answer as with no
- *   limit [`insert_options.memory_limit_bytes`].
+ *   `chs_preview_insert` carries no `export_*` member. The call declines when its peak reaches 8
+ *   MiB below `memory_limit_bytes`. It is never a rejection with ClickHouse's code 241, because the
+ *   library's peak is not the server's, so a 241 would be an over-reject wherever the server stays
+ *   under its limit. A profile's `max_memory_usage` stays a declined setting. Each of the five
+ *   calls has a conformance case: at a forced tiny limit the call declines `call-memory-budget`
+ *   with no partial output, and absent and `"0"` answer as with no limit
+ *   [`insert_options.memory_limit_bytes`].
  * - `cancel`: the id of a cancel token (`chs_cancel_create`'s `out_id`: `c` and 16 lowercase
  *   hexadecimal digits), resolved at the call's entry. Absent is no token. Every call that takes
  *   this document honors it, and it means the same at each: a fired token makes the call return
@@ -1058,9 +1059,14 @@ CHS_API chs_buf *chs_error_ch_name(const chs_error *error);
  * includes the UUID clause. For a refusal, these are the only differences from the server's own
  * message text: the omitted UUID, a 497's user, `chs_preview_batch`'s shorter form, which ends
  * before the server's row-position suffix (`chs_preview_insert` carries the server's message
- * whole), and, inside a reader diagnostic that quotes a nested exception, that exception's
- * `(version …)` label, which names the library's vendored source version rather than the server's
- * official build.
+ * whole), inside a reader diagnostic that quotes a nested exception, that exception's `(version …)`
+ * label, which names the library's vendored source version rather than the server's official build,
+ * and a CHECK refusal's text when the server inserts with more than one thread. In a CHECK refusal
+ * (469) when the server inserts with `max_insert_threads` greater than 1 and the body spans more
+ * than one insert block, which constraint and row the message names, and the row's number and
+ * values, depend on the server's thread count and scheduling. The code and the outcome are the
+ * same, and the library reports the first violating row in body order as one thread does. With
+ * `max_insert_threads` 1 the message equals the server's.
  *
  * Class: api. Thread: shared. Init: any. Returns a new chs_buf the caller owns and frees with
  * chs_buf_free; its content is a ClickHouse message: may quote input bytes, so may carry any byte;
@@ -1674,16 +1680,32 @@ CHS_API chs_status chs_preview_batch(
  * `chs_preview_batch`'s order (`batch_outcome`): call-level refusals and declines, then the reader
  * over the whole body, then the body steps block by block.
  *
- * The filter is the INSERT's WHERE. `filter`, when given, models `INSERT INTO t SELECT * FROM
- * input(…) WHERE <filter>`: it is evaluated per block over the stored rows, and only the `t` rows
- * are output, in body order. An `f` row is dropped and counted in `rows_cut`. A `d` row, one the
- * library declines to answer for, is withheld, never output, and counted in `rows_undecided` (and
- * in `rows_cut`, which is the `f` rows and the `d` rows). An `e` row, one the WHERE throws on,
- * fails the whole call with ClickHouse's own code and message, verbatim, as the server's `INSERT …
- * SELECT … WHERE` fails as a whole and stores nothing. With no filter (NULL) every accepted row is
- * output. The counts are present whenever a filter is attached, so a caller whose rule is
- * all-or-nothing refuses on `rows_cut` greater than 0 itself. `filter` must have been compiled on
- * `schema`: a filter from another schema handle is `CHS_INVALID_ARGUMENT`.
+ * The filter is the INSERT's WHERE. `filter`, when given, is evaluated over the rows the INSERT
+ * would store: a field the record omits takes the table's DEFAULT, and a MATERIALIZED column the
+ * filter reads is computed for it. It runs before the INSERT's post-WHERE steps (the CHECK
+ * constraints, the Nested array-sizes check, the stored MATERIALIZED columns, the partition, the
+ * TTL, the projections and the sink), which see only the `t` rows, as a server's `INSERT … SELECT …
+ * WHERE` runs them only for the rows its WHERE keeps. Only the `t` rows are output, in body order.
+ * An `f` row is dropped and counted in `rows_cut`. A `d` row, one the library declines to answer
+ * for, is withheld, never output, and counted in `rows_undecided` (and in `rows_cut`, which is the
+ * `f` rows and the `d` rows). An `e` row, one the WHERE throws on, fails the whole call with
+ * ClickHouse's own code and message, verbatim, as the server's `INSERT … SELECT … WHERE` fails as a
+ * whole and stores nothing. A filter that reads a MATERIALIZED column whose computation throws for
+ * a row makes that row `e`, so the call fails with that error, verbatim. With no filter (NULL)
+ * every accepted row is output. A body the call cannot stream is answered through the per-row path;
+ * there, a refusal a post-WHERE step raises on no `t` row is declined (`post-where-fallback`)
+ * rather than given, and a refusal on a `t` row stands where the per-row path gives the server's
+ * text exactly, and is otherwise declined the same way. The counts are present whenever a filter is
+ * attached, so a caller whose rule is all-or-nothing refuses on `rows_cut` greater than 0 itself.
+ * `filter` must have been compiled on `schema`: a filter from another schema handle is
+ * `CHS_INVALID_ARGUMENT`. With a filter attached, the call models `INSERT … SELECT … WHERE`. Up to
+ * 26.9 the server runs it synchronously whatever `async_insert` says. On 26.10,
+ * `async_insert_select_as_async_insert` (on by default) sends it through the asynchronous queue,
+ * and with `wait_for_async_insert` 1 (the default) its answer is the synchronous statement's. With
+ * `wait_for_async_insert` 0 the server acknowledges before the flush, and the call answers what the
+ * flush of this body will do. Through the asynchronous queue, the server can group this statement
+ * with other clients' inserts into one flush, which the call cannot see; such grouping can refuse a
+ * body that the call, and the same body inserted alone, would accept.
  *
  * Refusals are ClickHouse's own. A reader refusal and a whole-body refusal carry ClickHouse's code,
  * and its message verbatim in `err`, exactly as the server's error carries it, `(at row N)`
@@ -1702,7 +1724,13 @@ CHS_API chs_status chs_preview_batch(
  * would otherwise accept (a computed value the output cannot carry, the cases `chs_preview_batch`
  * reports as `export_declined`) makes the whole call a decline: `outcome` `unsupported`, `code`
  * `CHS_CODE_DECLINED`, `reason` the output decline's catalog id (such as
- * `export-computed-value-not-carried`), `refused_at` `body_step`, and no output. The call's job is
+ * `export-computed-value-not-carried`), `refused_at` `body_step`, and no output. When a row leaves
+ * a column to a DEFAULT the library declines (such as `timezone()`: an omitted key, a null read as
+ * the default, an empty CSV field), or the table has a MATERIALIZED column the library declines,
+ * that row's output value cannot be produced. The first such row declines the call with
+ * `chs_preview_batch`'s answer for it (`unsupported`, the column's catalog id as `reason`,
+ * `refused_at` `row`, `rows_read` counting through that record), and no row after it is read,
+ * unless an earlier row's refusal comes first: then that refusal is the answer. The call's job is
  * to produce the rows to store; when it cannot, it cannot answer. This is stricter than a server
  * INSERT, which may have committed earlier blocks of the body before a later block's refusal (which
  * of them is not determined by the body): nothing of a refused body is ever handed out. The output
@@ -1721,9 +1749,11 @@ CHS_API chs_status chs_preview_batch(
  * - Every member `insert_result` shares with the `batch` document is equal, absent where it is
  *   absent: `outcome`, `code`, `reason`, `refused_at`, `rows_read`, `rows_skipped`,
  *   `unsupported_settings`, `framing`, `partition_count`, `export_columns`, `rows_passed` and
- *   `rows_cut`, except as the cases below say. `rows_undecided` is the number of the batch's rows
- *   whose verdict is `d` in an `accepted` batch, and 0 otherwise. `rows_passed`, `rows_cut` and
- *   `rows_undecided` are 0 whenever this call's outcome is not `accepted`.
+ *   `rows_cut`, except as the cases below say. `rows_undecided` is the number of the batch's
+ *   accepted rows (row outcome `accepted`) whose verdict is `d` in an `accepted` batch, and 0
+ *   otherwise: a record skipped under the error allowance is counted only in `rows_skipped`.
+ *   `rows_passed`, `rows_cut` and `rows_undecided` are 0 whenever this call's outcome is not
+ *   `accepted`.
  * - `err`: the batch's `err` is a prefix of this call's, and the remainder is empty or exactly the
  *   suffix ClickHouse's row reader appends to a parse error, `: (at row N)` and a line feed, so the
  *   two are equal wherever ClickHouse appends nothing.
@@ -1742,14 +1772,28 @@ CHS_API chs_status chs_preview_batch(
  *   `framing` and `partition_count` are the batch's [`insert.export_decline_is_call_decline`].
  *   Under any other batch outcome the batch's `export_declined` has no counterpart here: this call
  *   carries no `export_*` member.
- * - Two cases have no counterpart. A body with an `e` row, which the batch answers `accepted` with
+ * - Four cases have no counterpart. A body with an `e` row, which the batch answers `accepted` with
  *   that row's `verdict_code` and `verdict_err`, is `rejected` here [`insert.e_row_rejects`]:
  *   `code` and `err` are those of the first `e` row in body order (equal to the batch's
  *   `verdict_code` and `verdict_err` for that row, and to the server's own error exactly),
  *   `refused_at` is `row`, `rows_passed`, `rows_cut` and `rows_undecided` are 0, `rows_read` is the
  *   batch's, and there is no output. An `e` row decides the call even where the batch's export was
- *   declined. A value a generator DEFAULT draws is drawn per call, so two calls can draw
- *   differently; every other member is the same.
+ *   declined. A body-step refusal raised only by rows the filter cuts is answered here as the
+ *   insert of the passing rows [`insert.post_where_cut`]: the outcome, `rows_passed`,
+ *   `partition_count` and the output are those of the `t` rows' insert and `rows_read` is the
+ *   records its reader reached, while the batch, which models the whole body, still refuses, so
+ *   `rows_read`, `rows_cut` and `partition_count` have no batch counterpart there. A `d` row is
+ *   withheld before the steps after the WHERE, as an `f` row is: a step that only a `d` row would
+ *   fail does not refuse the call, and `rows_undecided` greater than 0 says that some rows' fate is
+ *   unknown. With a filter attached, when a step after the WHERE (a CHECK, the Nested array-sizes
+ *   check, a MATERIALIZED expression that throws, the partition limit, a TTL, a projection or the
+ *   sink) refuses a row the filter kept, `chs_preview_insert` answers `rejected` with the server's
+ *   own `code` and `err` for the first failing kept row (numbered over the kept rows, as the server
+ *   numbers them) and the `rows_read` its reader reached, while `chs_preview_batch` answers the
+ *   same `code` with its own per-row `err` and `rows_read` for the whole body's refusal, so `err`
+ *   and `rows_read` have no batch counterpart there [`insert.post_where_refusal`]; the outcome
+ *   class and `code` stay equal. A value a generator DEFAULT draws is drawn per call, so two calls
+ *   can draw differently; every other member is the same.
  *
  * An output row whose verdict is not `t` is an over-accept, a security-severity defect, as a `t`
  * where the server would not return the row is.

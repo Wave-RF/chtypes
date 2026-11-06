@@ -161,6 +161,10 @@ A syntax error's message (ClickHouse code 62, for example when `chs_schema_creat
 
 This is by design, because the server does too: on every supported line, compiling such a schema refuses it (`691`, or `70`). The rule and the codes are in [`transformations.md`](guides/transformations.md#an-out-of-domain-enum-default-follows-the-server).
 
+## A call cannot see another client's insert
+
+A call answers for the body it is given. On 26.10 only, a filtered insert (`INSERT … SELECT … WHERE`) can go through the server's asynchronous queue (`async_insert_select_as_async_insert`, on by default on that line), and queued statements group by the statement's text, settings and user. So two clients sending the identical filtered statement at the same time can be refused together where each alone would store: measured with 60 partitions each, both got `252` (`max_partitions_per_insert_block`) on 26.10, and both stored on 26.9. With `wait_for_async_insert` 0 the server acknowledges before the flush.
+
 ## Known divergences
 
 Each entry here is a case where this library and a real ClickHouse server give different answers, and a caller can reach it. Every entry names the direction, the input, both answers, and **which half of the comparison was measured where** — there is no ClickHouse server in this repository, so the server half always comes from the differential proof the artifacts are built from.
