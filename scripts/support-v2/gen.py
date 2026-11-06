@@ -52,7 +52,9 @@ Each step below refuses with its own name in brackets on stderr:
     that for ANY repository name, so a 404 is not this answer: it, a transport
     failure, a 5xx, a 401, a 403, any other 2xx or an unreadable body is [listing]
     or [listing-shape]. A listing that may be cut off ([listing-truncated]: a next
-    page on any `Link` line, or a full page) cannot name the newest tag.
+    page on any `Link` line, or a full page, which is any page of 1000 tags) cannot
+    name the newest tag. The registry's own tag listing, from which the lines come,
+    is read the same way and held to its repository's `name` too.
  2. The tag's manifest must have the channel artifactType ([artifact-type]) and
     exactly one layer, of the channel media type ([layers]), and no member twice
     ([manifest]): a repeated `layers` would otherwise read as its last one.
@@ -62,7 +64,9 @@ Each step below refuses with its own name in brackets on stderr:
     equal to the layer's sha256 ([subject-digest]). None listed is [no-bundle].
  4. The layer's sha256 must match ([layer-sha]), and its JSON must be value-equal
     to the predicate ([layer-value]): JSON values, so `true` is not `1`. NaN, an
-    infinity and a number too large for a double are not JSON values ([layer-json]).
+    infinity, and a number too large for a double (an integer past its range among
+    them) are not JSON values ([layer-json]); nor is an integer past Python's own
+    digit limit, which is refused by name too and never left to crash.
  5. In the predicate: schema is 1 ([schema]), repository is the channel being read
     ([repository]), produced_at in basic form equals the tag ([produced-at]), and
     every entry has the shape above ([entry]).
@@ -94,17 +98,21 @@ status does not change. Messages never carry a predicate's or a registry's value
 and every run ends with one `verdict` line that agrees with its status and names
 any --out or --lines it was given.
 
-THE LATCH. That leniency ends with the first publication and does not come back.
+THE LATCH. That leniency ends with the first publication, once lines.json says so.
 spec/abi-v2/where-settings/lines.json names its source in a closed form
 (scripts/abi-v2/check-where-settings.py): the dry-run fixture's path until the first
 publication, then the tag of the publication its lines were taken from. A tag says
 a publication was made, so a listing naming none is a refusal ([no-document]), not
 "nothing yet", and so is a newest publication older than that tag
 ([older-than-lines]): an emptied or rolled-back listing cannot turn the comparison
-off. A source of any other form, or no readable lines.json, proves nothing about
-the past, so the leniency is refused then too ([lines-source]). --check also fails
-while a document exists and lines.json still names the fixture: until it moves, the
-latch is not set.
+off. Tags are create-only, so a publication that was made stays listed, and a tag
+the listing does not name is no publication ([lines-source]): a made-up tag, or
+00010101T000000Z, does not set the latch. A source of any other form, or no readable
+lines.json, proves nothing about the past, so the leniency is refused then too
+([lines-source]). --check also fails while a document exists and lines.json still
+names the fixture: until it moves, the latch is not set. The writer of lines.json,
+scripts/abi-v2/regen-where-settings.py, refuses to move the source backward, from a
+tag to the fixture marker or to an older tag.
 
 NOTHING PRIVATE. In a build's statement every field checked must match its format
 (version, build id, glibc floor), and no string anywhere in it may match a
@@ -121,6 +129,15 @@ KNOWN LIMITS. A registry that silently caps a listing under the page asked for, 
 no `Link` and short of a full page, hides the newest tag from rule 1, and nothing
 here can see that: the answer is indistinguishable from a shorter listing. The latch
 narrows it (a publication older than lines.json's is refused) and does not close it.
+The listing is cached (`max-age=60` on the development registry, `max-age=300` on
+production, measured 2026-11-06), so a new publication can stay invisible for that
+long, and a run in that window judges the publication before it. A hand edit of lines.json that moves its source from a tag
+back to the fixture marker, while the listing is empty, cannot be seen offline: the
+state is the pre-publication one. What stands in for that is `spec/**` being a
+protected path. The CI wiring is checked by presence only: the selftest finds the
+steps in ci.yml by substring and applies the gate's own pattern to named paths; it
+does not evaluate the workflow, and `.github/**` being a protected path is what
+guards the steps.
 
 EXIT STATUSES
     0  the page is current or written: every line fine, or NOT JUDGED (named)
@@ -373,10 +390,12 @@ def lines_source(lines_json: Path) -> LinesSource:
 
 @dataclass(frozen=True)
 class ChannelDocument:
-    """A verified predicate, and the tag it was published under."""
+    """A verified predicate, and the tag it was published under. `published` is every
+    publication tag the channel's listing named, the newest among them."""
 
     tag: str
     predicate: dict
+    published: tuple[str, ...] = ()
 
     @property
     def lines(self) -> dict[str, dict]:
@@ -446,7 +465,7 @@ def _read_listing(bases, what: str, policy: FetchPolicy, retry: RetryPolicy) -> 
         raise ChannelRefused("listing", f"{what}: the fetch layer's answer was not seen")
     try:
         doc = loads_no_duplicate_keys(resp.body)
-    except ArtifactCorruptError as exc:
+    except (ArtifactCorruptError, ValueError) as exc:  # ValueError: an integer past Python's digit limit
         raise ChannelRefused("listing-shape", f"{what} is not JSON") from exc
     return doc, ", ".join(answers[-1])
 
@@ -476,7 +495,7 @@ def _channel_tags(bases, ctx: Context, policy: FetchPolicy, retry: RetryPolicy) 
     return tags
 
 
-def _line_tags(options: Options) -> list[str]:
+def _line_tags(options: Options, ctx: Context) -> list[str]:
     """The published lines, by the same spelling `chtypes list` keeps (the CLI's
     `_LINE_SPELLING`), read here because a listing cut off would drop lines from the
     judgment with nothing said: the CLI's own reader has no such check."""
@@ -484,8 +503,13 @@ def _line_tags(options: Options) -> list[str]:
     policy = FetchPolicy(token=options.token, clock=options.clock)
     doc, link = _read_listing(options.resolved_bases(), what, policy, options.retry)
     tags = doc.get("tags") if isinstance(doc, dict) else None
-    if not isinstance(tags, list) or not all(isinstance(t, str) for t in tags):
-        raise ChannelRefused("listing-shape", f"{what} is not a tag list")
+    if (
+        not isinstance(doc, dict)
+        or doc.get("name") != ctx.repository
+        or not isinstance(tags, list)
+        or not all(isinstance(t, str) for t in tags)
+    ):
+        raise ChannelRefused("listing-shape", f"{what} is not a tag list of {ctx.repository}")
     _refuse_cut_off(tags, link, what)
     return [t for t in tags if cli._LINE_SPELLING.fullmatch(t)]
 
@@ -541,7 +565,16 @@ def _counting_predicates(
 
 def _non_finite(value: object) -> bool:
     """Whether `value` holds a number JSON cannot carry: json.loads reads NaN and
-    Infinity as numbers, and 1e400 as infinity, so two different texts compare equal."""
+    Infinity as numbers, 1e400 as infinity, and an integer past a double's range as
+    itself, so two different texts compare equal."""
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        try:
+            float(value)
+        except OverflowError:
+            return True
+        return False
     if isinstance(value, float):
         return not math.isfinite(value)
     if isinstance(value, dict):
@@ -649,7 +682,7 @@ def read_channel_document(options: Options, ctx: Context) -> ChannelDocument | N
         raise ChannelRefused("layer", f"the layer could not be read ({type(exc).__name__})") from exc
     try:
         document = loads_no_duplicate_keys(body)
-    except ArtifactCorruptError as exc:
+    except (ArtifactCorruptError, ValueError) as exc:  # ValueError: an integer past Python's digit limit
         raise ChannelRefused("layer-json", "the layer is not JSON") from exc
     if _non_finite(document):
         raise ChannelRefused("layer-json", "the layer holds a number JSON cannot carry")
@@ -659,7 +692,7 @@ def read_channel_document(options: Options, ctx: Context) -> ChannelDocument | N
 
     # Value-equal, so either is the document; rule 7 reads the signed one.
     _check_predicate(predicates[0], ctx, tag)
-    return ChannelDocument(tag, predicates[0])
+    return ChannelDocument(tag, predicates[0], tuple(sorted(stamped)))
 
 
 # ---------------------------------------------------------------------- facts
@@ -738,10 +771,10 @@ def _refusal(line: str, platform: str, predicate: dict) -> str:
     return ""
 
 
-def collect(options: Options) -> Collected:
+def collect(options: Options, ctx: Context) -> Collected:
     out = Collected()
     try:
-        tags = _line_tags(options)
+        tags = _line_tags(options, ctx)
     except ChannelRefused as refused:
         out.fatal = f"[{refused.name}] {refused.why}"
         return out
@@ -1000,6 +1033,12 @@ def _hold_to_latch(found: ChannelDocument | NoPublication, source: LinesSource) 
             "older-than-lines",
             f"the newest publication {found.tag} is older than {source.tag}, the one lines.json was taken from",
         )
+    elif source.tag and source.tag not in found.published:
+        # Tags are create-only, so a publication that was made stays listed.
+        raise ChannelRefused(
+            "lines-source",
+            f"lines.json names the publication {source.tag}, and the channel's listing does not",
+        )
 
 
 def generate(options: Options, ctx: Context, say, source: LinesSource) -> Outcome:
@@ -1028,7 +1067,7 @@ def generate(options: Options, ctx: Context, say, source: LinesSource) -> Outcom
     else:
         document = found
         say(f"support-v2: channel statement {document.tag} verified")
-    data = collect(options)
+    data = collect(options, ctx)
     if data.fatal:
         say(f"support-v2: nothing written: {data.fatal}")
         return Outcome(EXIT_NOTHING, document=document)
@@ -1063,8 +1102,9 @@ def conclude(mode: str, out: Path, lines_json: Path, outcome: Outcome, say, sele
 
 def _page_problem(out: Path, page: str) -> str:
     """How the committed page differs from the generator's output, or ""."""
-    have = out.read_text(encoding="utf-8") if out.exists() else ""
-    if have != page:
+    # Bytes, not text: reading text translates a CRLF or a CR to a newline.
+    have = out.read_bytes() if out.exists() else b""
+    if have != page.encode("utf-8"):
         return (
             f"{out.name} differs from the generator's output; run "
             "`uv run scripts/support-v2/gen.py --write`"
@@ -1148,7 +1188,7 @@ def _finish(mode: str, out: Path, lines_json: Path, outcome: Outcome, say) -> in
             differs = True
         return EXIT_DIFF if differs else EXIT_OK
     if mode == "write":
-        out.write_text(page, encoding="utf-8")
+        out.write_bytes(page.encode("utf-8"))
     else:
         sys.stdout.write(page)
         sys.stdout.flush()
@@ -1233,14 +1273,15 @@ def _build_bundle():
 class Tree:
     """A copy of the fixture registry tree that a case may change."""
 
-    def __init__(self, src: Path, dst: Path) -> None:
+    def __init__(self, src: Path, dst: Path, repository: str = "chtypes/v2-dev") -> None:
         shutil.copytree(src, dst)
         self.root = dst / "v2" / "chtypes" / "v1"
+        self.repository = repository
 
-    def set_tags(self, tags: list[str]) -> None:
-        (self.root / "tags" / "list").write_text(
-            json.dumps({"name": "chtypes/v1", "tags": tags}), encoding="utf-8"
-        )
+    def set_tags(self, tags: list[str], **replace_fields) -> None:
+        """The line listing, named for the repository it is served for."""
+        body = {"name": self.repository, "tags": tags, **replace_fields}
+        (self.root / "tags" / "list").write_text(json.dumps(body), encoding="utf-8")
 
     def platform_manifest(self, line: str, platform: str) -> str:
         os_name, arch = platform.split("-")
@@ -1462,6 +1503,26 @@ class ChannelRepo:
         return _served_print(self.root, self.routes)
 
 
+def _token_flow(case: str, on_token: dict, on_listing: dict) -> Callable[[ChannelRepo], None]:
+    """The listing is asked for twice, behind an anonymous token: the answers the
+    Link watch sees are the token's, then the listing's, and only the last is the
+    listing's own."""
+
+    def build(ch: ChannelRepo) -> None:
+        ch.publish()
+        body = json.dumps({"name": f"{ch.repository}/{CHANNEL_REPOSITORY}", "tags": [NEWEST]})
+        challenge = f'Bearer realm="{{origin}}/v2/s-{case}/chtypes/v1/token"'
+        ch.listing_answers(
+            {"status": 401, "headers": {"WWW-Authenticate": challenge}},
+            {"status": 200, "headers": on_listing, "body": body},
+        )
+        ch.routes.append(
+            {"method": "GET", "path": "/v2/chtypes/v1/token", "responses": [{"status": 200, "headers": on_token, "body": '{"token": "t"}'}]}
+        )
+
+    return build
+
+
 def _channel_plants(other: tuple[bytes, str]) -> list[tuple[str, str, Callable[[ChannelRepo], None]]]:
     """(case, the refusal it must get, what it plants). Every plant keeps a good
     document available wherever one could be read instead."""
@@ -1591,6 +1652,11 @@ def _channel_plants(other: tuple[bytes, str]) -> list[tuple[str, str, Callable[[
 
         return build
 
+    def exactly_a_page(ch: ChannelRepo) -> None:
+        ch.publish()
+        ch.tags += [f"sha256-{i:064x}" for i in range(LISTING_PAGE - len(ch.tags))]
+        ch.write_listing()
+
     def predicate_only_infinite(ch: ChannelRepo) -> None:
         doc = ch.doc()
         doc["future"] = float("inf")
@@ -1628,6 +1694,22 @@ def _channel_plants(other: tuple[bytes, str]) -> list[tuple[str, str, Callable[[
             ),
         ),
         ("listing-full-page", "listing-truncated", full_page),
+        # Exactly a page is a page that may have been cut off, and so is a `NEXT` in capitals.
+        ("listing-exactly-a-page", "listing-truncated", exactly_a_page),
+        (
+            "listing-next-page-capitals",
+            "listing-truncated",
+            good_listing_answers(
+                {
+                    "status": 200,
+                    "headers": {"Link": f'<{LISTING_ROUTE}?n=1000&last=x>; rel="NEXT"'},
+                    "body": json.dumps({"name": "chtypes/v2-dev/channel", "tags": [NEWEST]}),
+                }
+            ),
+        ),
+        # The Link watch reads the listing's own answer, the last one seen.
+        ("listing-token-flow-link-on-listing", "listing-truncated", _token_flow("listing-token-flow-link-on-listing", {}, {"Link": f'<{LISTING_ROUTE}?n=1000&last=x>; rel="next"'})),
+        ("listing-integer-5001-digits", "listing-shape", listing_bytes(b'{"name":"chtypes/v2-dev/channel","tags":[],"x":1' + b"0" * 5000 + b"}")),
         # Two `Link` lines: the second is the one a mapping of the headers loses. The
         # header names differ in case because the fixture server's are a mapping too.
         (
@@ -1679,6 +1761,10 @@ def _channel_plants(other: tuple[bytes, str]) -> list[tuple[str, str, Callable[[
         ("layer-nan", "layer-json", layer_with(b"NaN", float("nan"))),
         ("layer-infinity", "layer-json", layer_with(b"Infinity", float("inf"))),
         ("layer-overflow", "layer-json", layer_with(b"1e400", float("inf"))),
+        # An integer past a double's range is no more a JSON value than 1e400 is; one past
+        # Python's own digit limit is refused by name too, not left to crash.
+        ("layer-integer-401-digits", "layer-json", layer_with(b"1" + b"0" * 400, 10**400)),
+        ("layer-integer-5001-digits", "layer-json", layer_with(b"1" + b"0" * 5000, 1)),
         ("predicate-infinite-layer-not", "layer-value", predicate_only_infinite),
         # Rule 5.
         ("schema-2", "schema", schema_two_newest),
@@ -1711,27 +1797,30 @@ def _channel_plants(other: tuple[bytes, str]) -> list[tuple[str, str, Callable[[
     ]  # fmt: skip
 
 
-# The child a command-line case runs: this script's real main() in a real process,
-# against a fixture registry. The one thing it sets up is the active channel, through
-# the seam the selftest itself uses, because no option or environment variable can
-# redirect a real run; run() still derives everything from that channel.
+# The child a command-line case runs: this script itself, run as `__main__` (runpy, the
+# way `python gen.py` runs it, so its `sys.exit(main())` is the one in play), in a real
+# process against a fixture registry. What it sets up first is the active channel,
+# through the seam the selftest itself uses, because no option or environment variable
+# can redirect a real run; run() still derives everything from that channel. A crash
+# is planted in the fetch layer's resolve_each, which the script binds when it loads.
 CLI_DRIVER = """
-import importlib.util, json, sys
+import json, runpy, sys
 from dataclasses import replace
 
 script, setup, *argv = sys.argv[1:]
 setup = json.loads(setup)
-spec = importlib.util.spec_from_file_location("gen_under_test", script)
-gen = importlib.util.module_from_spec(spec)
-sys.modules[spec.name] = gen
-spec.loader.exec_module(gen)
-channel = replace(gen._channel.FETCH_V1_CHANNEL, name="selftest", bases=(setup["base"],), keys=tuple(setup["keys"]))
-gen._channel._use(channel)
+sys.path.insert(0, setup["src"])
+import chtypes._ocifetch as fetch
+from chtypes._ocifetch import _channel
+
+channel = replace(_channel.FETCH_V1_CHANNEL, name="selftest", bases=(setup["base"],), keys=tuple(setup["keys"]))
+_channel._use(channel)
 if setup.get("crash"):
     def boom(*_a, **_k):
         raise RuntimeError("planted")
-    gen.collect = boom
-sys.exit(gen.main(argv))
+    fetch.resolve_each = boom
+sys.argv = [script, *argv]
+runpy.run_path(script, run_name="__main__")
 """
 
 # What a pull request must touch for --check to run, and what it must not.
@@ -1744,12 +1833,19 @@ LIVE_GATE_PATHS = (
     "scripts/abi-v2/check-where-settings.py",
     "scripts/abi-v2/regen-where-settings.py",
 )
-LIVE_GATE_NOT = ("rust/Cargo.toml", "python/src/chtypes/_ocifetch/_channel.py", "README.md")
+LIVE_GATE_NOT = {
+    "rust/Cargo.toml": "a binding's manifest changes the page, which --check-page judges on every pull request; the live comparison reads nothing of it",
+    "python/src/chtypes/_ocifetch/_channel.py": "the fetch layer is checked by the selftest; gating it on the live registry would redden it whenever the delivery side publishes",
+    "README.md": "a file no part of the comparison reads",
+}
 
 
 def _workflow_problems(text: str) -> list[str]:
     """How .github/workflows/ci.yml has come apart from what this script's header and
-    RELEASING.md say it does. The step's own regular expression is evaluated."""
+    RELEASING.md say it does. A presence check, not an evaluation of the workflow: the
+    steps are found by substring, and the one thing applied is the gate's `grep -E`
+    pattern, to the paths named above. `.github/**` being a protected path is what
+    guards the steps themselves."""
     problems = []
     steps = text.split("\n      - ")
     page = [t for t in steps if "gen.py --check-page" in t]
@@ -1827,15 +1923,19 @@ def _selftest() -> int:
     check(lines_rules.FIXTURE_SOURCE == str(CHANNEL_FIXTURE.relative_to(ROOT)), "the fixture marker is this fixture's path")
     # The CI wiring, read from the workflow: a step removed would pass everything else.
     workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    check(not _workflow_problems(workflow), f"ci.yml runs --check-page always and --check behind the paths {_workflow_problems(workflow)}")
-    for what, planted in (
-        ("no --check-page step", workflow.replace("gen.py --check-page", "gen.py --print-page")),
-        ("--check-page behind the gate", workflow.replace("run: uv run scripts/support-v2/gen.py --check-page", "if: always()\n        run: uv run scripts/support-v2/gen.py --check-page")),
-        ("--check ungated", workflow.replace("if: steps.support-v2.outputs.touched == 'true'", "if: always()")),
-        ("a diff that follows renames", workflow.replace("--no-renames ", "")),
-        ("the fixture out of the gate", workflow.replace("|tests/fixtures/support-v2/", "")),
+    check(not _workflow_problems(workflow), f"ci.yml holds --check-page always and --check behind the paths {_workflow_problems(workflow)}")
+    for what, planted, named in (
+        ("no --check-page step", workflow.replace("gen.py --check-page", "gen.py --print-page"), "--check-page is not one step that always runs"),
+        ("--check-page behind the gate", workflow.replace("run: uv run scripts/support-v2/gen.py --check-page", "if: always()\n        run: uv run scripts/support-v2/gen.py --check-page"), "--check-page is not one step that always runs"),
+        ("--check ungated", workflow.replace("if: steps.support-v2.outputs.touched == 'true'", "if: always()"), "--check is not one step gated on the paths"),
+        ("a diff that follows renames", workflow.replace("--no-renames ", ""), "the gate's diff is not --no-renames"),
+        ("the fixture out of the gate", workflow.replace("|tests/fixtures/support-v2/", ""), "the gate does not fire on tests/fixtures/support-v2/channel-statement.json"),
+        ("the page out of the gate", workflow.replace("docs/support-v2\\.md|", ""), "the gate does not fire on docs/support-v2.md"),
+        ("the gate firing on README", workflow.replace("^(docs/", "^(README\\.md|docs/"), "the gate fires on README.md"),
     ):
-        check(planted != workflow and bool(_workflow_problems(planted)), f"ci.yml: {what} is caught")
+        problems = _workflow_problems(planted)
+        check(planted != workflow and any(named in x for x in problems), f"ci.yml: {what} is caught, as {named!r}")
+    check(all(LIVE_GATE_NOT.values()), "every path the gate must not fire on says why")
     # Rule 5's other copy, which the writer of lines.json needs with no binding. Each
     # plant is refused by both, so neither can drift into accepting what the other refuses.
     regen = _script(ROOT / "scripts" / "abi-v2" / "regen-where-settings.py", "regen_where_settings")
@@ -1865,7 +1965,13 @@ def _selftest() -> int:
         ("no since", lambda d: d["lines"]["26.8"].pop("since")),
         ("a commit of 41", lambda d: d["lines"]["26.8"].update(security_md_commit="a" * 41)),
         ("a commit in capitals", lambda d: d["lines"]["26.8"].update(security_md_commit="A" * 40)),
+        ("a commit with a trailing newline", lambda d: d["lines"]["26.8"].update(security_md_commit="a" * 40 + "\n")),
         ("no commit", lambda d: d["lines"]["26.8"].pop("security_md_commit")),
+        ("schema 1.0", lambda d: d.update(schema=1.0)),
+        ("a key with a trailing newline", lambda d: d["lines"].update({"26.8\n": d["lines"]["26.8"]})),
+        ("a key with three parts", lambda d: d["lines"].update({"26.8.1": d["lines"]["26.8"]})),
+        ("a key with a letter", lambda d: d["lines"].update({"x.8": d["lines"]["26.8"]})),
+        ("since with a trailing newline", lambda d: d["lines"]["26.8"].update(since="2026-02-03\n")),
     ):
         doc = copy.deepcopy(fixture)
         change(doc)
@@ -1999,6 +2105,8 @@ def _selftest() -> int:
         "reader-older-alone": OLDER,
         "reader-layer-file-bytes": NEWEST,
         "reader-empty-commit": NEWEST,
+        "reader-token-link-on-token": NEWEST,
+        "reader-below-a-page": NEWEST,
     }
     channel_only("reader-unknown-keys", unknown_keys)
     channel_only("reader-finite-float", finite_float)
@@ -2008,6 +2116,16 @@ def _selftest() -> int:
     channel_only("reader-older-alone", older_alone)
     channel_only("reader-layer-file-bytes", file_bytes)
     channel_only("reader-empty-commit", empty_commit)
+    # Controls to the listing plants: a `next` on the token's answer is not the listing's,
+    # and a listing one short of a page is not cut off.
+    channel_only("reader-token-link-on-token", _token_flow("reader-token-link-on-token", {"Link": f'<{LISTING_ROUTE}?n=1000&last=x>; rel="next"'}, {}))
+
+    def below_a_page(ch: ChannelRepo) -> None:
+        ch.publish()
+        ch.tags += [f"sha256-{i:064x}" for i in range(LISTING_PAGE - 1 - len(ch.tags))]
+        ch.write_listing()
+
+    channel_only("reader-below-a-page", below_a_page)
     channel_only("reader-empty", lambda ch: None)
     channel_only("reader-only-other-tags", only_other_tags)
 
@@ -2100,7 +2218,7 @@ def _selftest() -> int:
     # The line listing is held to what the channel's is: a line cut off must not read as
     # a line that does not exist.
     lines_route = "/v2/chtypes/v1/tags/list"
-    lines_body = json.dumps({"name": "chtypes/v1", "tags": list(TREE_LINES)})
+    lines_body = json.dumps({"name": "chtypes/v2-dev", "tags": list(TREE_LINES)})
 
     def listing_route(*responses: dict) -> list[dict]:
         return [{"method": "GET", "path": lines_route, "responses": list(responses)}]
@@ -2109,6 +2227,13 @@ def _selftest() -> int:
     full_case("lines-listing-next-page-second-line", routes=listing_route({"status": 200, "headers": {"Link": f'<{lines_route}?last=w>; rel="prev"', "link": f'<{lines_route}?last=x>; rel="next"'}, "body": lines_body}))
     full_case("lines-listing-full-page", change=lambda t: t.set_tags([*TREE_LINES, *(f"sha256-{i:064x}" for i in range(LISTING_PAGE))]))
     full_case("lines-listing-203", routes=listing_route({"status": 203, "body": lines_body}))
+    # Exactly a page, a `NEXT` in capitals, and a listing that is not of this repository
+    # (the channel's is held to its name, and so is this one).
+    full_case("lines-listing-exactly-a-page", change=lambda t: t.set_tags([*TREE_LINES, *(f"sha256-{i:064x}" for i in range(LISTING_PAGE - len(TREE_LINES)))]))
+    full_case("lines-listing-next-page-capitals", routes=listing_route({"status": 200, "headers": {"Link": f'<{lines_route}?last=x>; rel="NEXT"'}, "body": lines_body}))
+    full_case("lines-listing-no-name", routes=listing_route({"status": 200, "body": json.dumps({"tags": list(TREE_LINES)})}))
+    full_case("lines-listing-another-name", change=lambda t: t.set_tags(list(TREE_LINES), name="someone/else"))
+    full_case("lines-listing-integer-5001-digits", routes=listing_route({"status": 200, "body": lines_body[:-1] + ', "x": 1' + "0" * 5000 + "}"}))
     full_case("supported-no-build", doc=calls_26_7_supported)
     full_case("supported-not-listed", doc=copy.deepcopy(fixture), tags=tuple(n for n in TREE_LINES if n != "26.9"))
     full_case("supported-one-platform-bad", doc=copy.deepcopy(fixture), change=tamper_26_8)
@@ -2125,9 +2250,9 @@ def _selftest() -> int:
     cli_case_ids: list[str] = []
 
     def cli_case(name: str, doc: dict | None, plant: Callable[[ChannelRepo], None] | None = None) -> None:
-        t = Tree(tmp / "base" / TREE, tmp / "trees" / name / TREE)
-        t.set_tags(list(TREE_LINES))
         repository = f"s-{name}/chtypes/v1"
+        t = Tree(tmp / "base" / TREE, tmp / "trees" / name / TREE, repository)
+        t.set_tags(list(TREE_LINES))
         ch = ChannelRepo(t.root, signer, {**fixture, "repository": repository}, repository=repository)
         if doc is not None:
             ch.publish({**doc, "repository": repository})
@@ -2217,8 +2342,13 @@ def _selftest() -> int:
                 ("older", "reader-older-alone", LinesSource(tag=NEWEST)),
                 ("no-form-empty", "reader-empty", LinesSource(problem="planted")),
                 ("same", "doc-good", LinesSource(tag=NEWEST)),
-                ("newer", "doc-good", LinesSource(tag=OLDER)),
+                # An older publication that is listed: lines.json may have been taken from it.
+                ("older-listed", "reader-newest-wins", LinesSource(tag=OLDER)),
                 ("no-form-document", "doc-good", LinesSource(problem="planted")),
+                # A tag the listing does not name: tags are create-only, so none was made.
+                ("year-one", "doc-good", LinesSource(tag="00010101T000000Z")),
+                ("made-up", "doc-good", LinesSource(tag="20261105T000000Z")),
+                ("made-up-listing-has-two", "reader-newest-wins", LinesSource(tag="20261105T000000Z")),
             ):
                 result = run_case(name, source)
                 if result is not None:
@@ -2317,13 +2447,16 @@ def _selftest() -> int:
         ("other-tags", "no-document"),
         ("older", "older-than-lines"),
         ("no-form-empty", "lines-source"),
+        ("year-one", "lines-source"),
+        ("made-up", "lines-source"),
+        ("made-up-listing-has-two", "lines-source"),
     ):
         r = latch_results[label]
         check(
             r.status == EXIT_CHANNEL and r.rc == EXIT_CHANNEL and f"refused [{rule}]:" in r.said and "live check off" not in r.said,
             f"latch, {label}: exit 5 with [{rule}], and the comparison stays on",
         )
-    for label in ("same", "newer", "no-form-document"):
+    for label in ("same", "older-listed", "no-form-document"):
         r = latch_results[label]
         check(
             r.status != EXIT_CHANNEL and r.document is not None and r.document.tag == NEWEST,
@@ -2478,6 +2611,11 @@ def _selftest() -> int:
         ("lines-listing-next-page-second-line", "listing-truncated"),
         ("lines-listing-full-page", "listing-truncated"),
         ("lines-listing-203", "listing"),
+        ("lines-listing-exactly-a-page", "listing-truncated"),
+        ("lines-listing-next-page-capitals", "listing-truncated"),
+        ("lines-listing-no-name", "listing-shape"),
+        ("lines-listing-another-name", "listing-shape"),
+        ("lines-listing-integer-5001-digits", "listing-shape"),
     ):
         r = results[name]
         check(r.status == EXIT_NOTHING and f"nothing written: [{rule}]" in r.said, f"{name}: nothing written (4), [{rule}]")
@@ -2506,6 +2644,17 @@ def _selftest() -> int:
     rc, said = concluded("check", wrong_page, agreed, published)
     check(rc == EXIT_DIFF and "wrong.md differs" in said and "verdict: a committed file differs (exit 1)" in said,
           "--check: a changed page differs (1), named")  # fmt: skip
+    # The page is compared as bytes: text mode would read a CRLF or a CR as a newline.
+    for name, translated in (("crlf", page.replace("\n", "\r\n")), ("cr", page.replace("\n", "\r"))):
+        translated_page = tmp / f"{name}.md"
+        translated_page.write_bytes(translated.encode("utf-8"))
+        check(translated != page, f"the {name} page is not the page")
+        rc, said = concluded("check", translated_page, agreed, published)
+        check(rc == EXIT_DIFF and f"{name}.md differs" in said, f"--check: a page with {name} line ends differs (1), named")
+        said_page: list[str] = []
+        at_marker = lines_file(f"marker-{name}", {"source": lines_rules.FIXTURE_SOURCE, "lines": fixture_doc.supported})
+        check(check_page(translated_page, at_marker, said_page.append) == EXIT_DIFF, f"--check-page: a page with {name} line ends differs (1)")
+
     for name, content, what in (
         ("kept", {"source": NEWEST, "lines": ["26.3", "26.7", "26.8", "26.9", "26.10"]}, "still lists the retired line"),
         ("dropped", {"source": NEWEST, "lines": ["26.3", "26.8", "26.9"]}, "misses a supported line"),
@@ -2567,9 +2716,16 @@ def _selftest() -> int:
           "--print-document with nothing published: nothing to print (2)")  # fmt: skip
 
     # If the fetch layer stops going through the opener this script watches, the `Link`
-    # lines go unseen: that is a refusal, not an answer with none.
+    # lines go unseen: that is a refusal, not an answer with none. The same stand-in
+    # records what each listing is asked for.
     unwatched = fetch_from_bases
-    globals()["fetch_from_bases"] = lambda *_a, **_k: _http.HttpResponse(200, {}, b'{"tags": []}', "planted")
+    asked: list[object] = []
+
+    def stand_in(*_a, **kw):
+        asked.append(kw.get("query"))
+        return _http.HttpResponse(200, {}, b'{"tags": []}', "planted")
+
+    globals()["fetch_from_bases"] = stand_in
     try:
         _read_listing((), "a listing", FetchPolicy(), RetryPolicy())
         unseen = ""
@@ -2578,6 +2734,29 @@ def _selftest() -> int:
     finally:
         globals()["fetch_from_bases"] = unwatched
     check(unseen == "listing", "an answer the Link watch did not see: refused [listing]")
+    check(LISTING_PAGE == 1000 and asked == ["n=1000"], "a listing is asked for with n=1000")
+
+    # The opener the watch swaps in is put back when the read fails, not only when it succeeds.
+    real_opener = _http._opener
+
+    def failing(*_a, **_k):
+        raise TransportError("planted")
+
+    globals()["fetch_from_bases"] = failing
+    try:
+        _read_listing((), "a listing", FetchPolicy(), RetryPolicy())
+        failed = ""
+    except ChannelRefused as refused:
+        failed = refused.name
+    finally:
+        globals()["fetch_from_bases"] = unwatched
+    check(failed == "listing" and _http._opener is real_opener, "a failed listing read puts the fetch layer's opener back")
+
+    # lines.json's source is read with the reader that refuses a repeated member.
+    check(
+        bool(lines_source(lines_file("repeated-source", '{"source": "' + lines_rules.FIXTURE_SOURCE + '", "source": "' + NEWEST + '"}')).problem),
+        "lines.json's source: a repeated `source` member is not read as its last one",
+    )
 
     # A crash is its own status, never a verdict on the registry.
     said_crash: list[str] = []
@@ -2592,6 +2771,15 @@ def _selftest() -> int:
         finally:
             sys.stderr = stderr
     check(rc == EXIT_CRASH and verdict_line(EXIT_CRASH, False) in said_crash, "a crash: its own status (70), and the verdict says so")
+    said_crash.clear()
+    with open(os.devnull, "w", encoding="utf-8") as devnull:
+        stderr, sys.stderr = sys.stderr, devnull
+        try:
+            _guarded(boom, said_crash.append, "--out x.md")
+        finally:
+            sys.stderr = stderr
+    check(verdict_line(EXIT_CRASH, False, "--out x.md") in said_crash and "judged --out x.md" in said_crash[-1],
+          "a crash on a selection names it, like every other verdict")  # fmt: skip
 
     tmp_ctx.cleanup()
     if failures:
@@ -2620,6 +2808,7 @@ def _cli_selftest(check, tmp: Path, port: int, lines_doc, supported, fixture, pa
                 "base": f"http://127.0.0.1:{port}/s-{case}/chtypes/v1",
                 "keys": [{"keyid": keyid if keys_hex == pub else hashlib.sha256(bytes.fromhex(keys_hex)).hexdigest()[:16], "ed25519_hex": keys_hex}],
                 "crash": crash,
+                "src": str(ROOT / "python" / "src"),
             }
         )
 
@@ -2634,17 +2823,20 @@ def _cli_selftest(check, tmp: Path, port: int, lines_doc, supported, fixture, pa
         said: tuple[str, ...] = (),
         unsaid: tuple[str, ...] = (),
         env: dict[str, str] | None = None,
+        script: str = me,
+        cwd: Path = tmp,
     ) -> subprocess.CompletedProcess:
-        """`case` runs main() under that fixture channel; no case runs the script itself
-        as a command, which is only ever an offline mode or a usage error."""
+        """`case` runs the script as `__main__` under that fixture channel (CLI_DRIVER);
+        no case runs the script itself as a command, which is only ever an offline
+        mode or a usage error."""
         nonlocal runs
         runs += 1
         command = (
-            [sys.executable, "-c", CLI_DRIVER, me, setup(case, keys_hex, crash), *args]
+            [sys.executable, "-c", CLI_DRIVER, script, setup(case, keys_hex, crash), *args]
             if case
-            else [sys.executable, me, *args]
+            else [sys.executable, script, *args]
         )
-        r = subprocess.run(command, capture_output=True, text=True, cwd=tmp, timeout=120, env={**env_base, **(env or {})})
+        r = subprocess.run(command, capture_output=True, text=True, cwd=cwd, timeout=120, env={**env_base, **(env or {})})
         found = verdict_re.findall(r.stderr)
         agrees = r.returncode == want and (want == EXIT_USAGE and not case and not found or found == [str(want)])
         missing = [x for x in said if x not in r.stderr]
@@ -2664,6 +2856,7 @@ def _cli_selftest(check, tmp: Path, port: int, lines_doc, supported, fixture, pa
     tag = NEWEST
     agreed = write("agreed.json", lines_doc(tag, supported))
     at_fixture = write("at-fixture.json", lines_doc(lines_rules.FIXTURE_SOURCE, supported))
+    made_up = write("made-up.json", lines_doc("20261105T000000Z", supported))
     dropped_tag = write("dropped-tag.json", lines_doc(tag, supported[:-1]))
     dropped_fixture = write("dropped-fixture.json", lines_doc(lines_rules.FIXTURE_SOURCE, supported[:-1]))
     dropped_reworded = write("dropped-reworded.json", lines_doc("a note", supported[:-1]))
@@ -2676,6 +2869,57 @@ def _cli_selftest(check, tmp: Path, port: int, lines_doc, supported, fixture, pa
 
     def selected(page_path: str, lines_path: str) -> list[str]:
         return ["--out", page_path, "--lines", lines_path]
+
+    def release_flow(document_text: str, document_tag: str) -> None:
+        """RELEASING.md's steps after the first publication, end to end, on a copy of
+        the tree: print the verified document, write lines.json from it, regenerate the
+        page, then every judge of the result. A step that works alone and leaves a judge
+        failing (a selftest that assumed the committed lines.json) fails here, where CI
+        would have found it after the merge."""
+        flow = tmp / "flow"
+        for sub in ("support-v2", "abi-v2", "lib"):
+            shutil.copytree(ROOT / "scripts" / sub, flow / "scripts" / sub, ignore=shutil.ignore_patterns("__pycache__"))
+        shutil.copytree(ROOT / "spec", flow / "spec")
+        shutil.copytree(ROOT / "docs", flow / "docs")
+        for entry in ROOT.iterdir():
+            if entry.name not in ("scripts", "spec", "docs", ".git", ".worktrees"):
+                (flow / entry.name).symlink_to(entry)
+        where = flow / "spec" / "abi-v2" / "where-settings"
+        writer = _script(flow / "scripts" / "abi-v2" / "regen-where-settings.py", "regen_for_the_flow")
+        # The flow starts where a repository is before the first publication: lines.json at
+        # the fixture marker. Only possible while its lines are the fixture's.
+        raw, readme = lines_rules.load(where)
+        lines_now = json.loads(raw[lines_rules.LINES_FILE])["lines"]
+        if lines_now != ChannelDocument("", json.loads(CHANNEL_FIXTURE.read_bytes())).supported:
+            check(True, "the release flow: skipped, lines.json no longer names the fixture's lines (the flow is the one before the first publication)")
+            return
+        raw[lines_rules.LINES_FILE] = (
+            json.dumps({"schema": lines_rules.LINES_SCHEMA, "source": lines_rules.FIXTURE_SOURCE, "lines": lines_now}, indent=1) + "\n"
+        ).encode()
+        (where / lines_rules.LINES_FILE).write_bytes(raw[lines_rules.LINES_FILE])
+        (where / "README.md").write_text(writer.with_table(readme, raw), encoding="utf-8")
+        (flow / "document.json").write_text(document_text, encoding="utf-8")
+        copy_of_me = str(flow / "scripts" / "support-v2" / "gen.py")
+        stdlib = {
+            name: str(flow / "scripts" / "abi-v2" / f"{name}.py")
+            for name in ("check-where-settings", "regen-where-settings", "check-documented-platform")
+        }
+
+        def runs_clean(what: str, *argv: str) -> None:
+            r = subprocess.run([sys.executable, "-I", *argv], capture_output=True, text=True, cwd=flow, timeout=300, env=env_base)
+            check(r.returncode == 0, f"the release flow, {what}: exit 0" + ("" if r.returncode == 0 else f" (got {r.returncode}: {(r.stdout + r.stderr)[-500:]})"))
+
+        runs_clean("the dry-run state passes check-where-settings --check", stdlib["check-where-settings"], "--check")
+        runs_clean("regen-where-settings --lines-document --lines-source <tag>", stdlib["regen-where-settings"], "--lines-document", "document.json", "--lines-source", document_tag)
+        state = json.loads((where / lines_rules.LINES_FILE).read_text(encoding="utf-8"))
+        check(state["source"] == document_tag != "", "the release flow: lines.json now names the publication's tag")
+        cli("the release flow, --write", ["--write"], EXIT_OK, case="cli-published", script=copy_of_me, cwd=flow)
+        cli("the release flow, --check against the channel", ["--check"], EXIT_OK, case="cli-published", script=copy_of_me, cwd=flow, said=("channel statement",))
+        runs_clean("check-where-settings --check on the result", stdlib["check-where-settings"], "--check")
+        runs_clean("check-where-settings --selftest on the result", stdlib["check-where-settings"], "--selftest")
+        runs_clean("regen-where-settings --selftest on the result", stdlib["regen-where-settings"], "--selftest")
+        runs_clean("check-documented-platform --selftest on the result", stdlib["check-documented-platform"], "--selftest")
+        runs_clean("check-documented-platform --check on the result", stdlib["check-documented-platform"], "--check")
 
     check(set(cases) == {"cli-published", "cli-unpublished", "cli-refused", "cli-line-failed"}, "the command-line registries are the ones used below")
 
@@ -2690,12 +2934,26 @@ def _cli_selftest(check, tmp: Path, port: int, lines_doc, supported, fixture, pa
     cli("--check, lines.json misses a line", ["--check", *selected(good, dropped_tag)], EXIT_DIFF, case=case, said=("dropped-tag.json names",))
     cli("--check, lines.json still at the fixture", ["--check", *selected(good, at_fixture)], EXIT_DIFF, case=case, said=("the latch is not set",))
     cli("--check, lines.json's source of no form", ["--check", *selected(good, no_form)], EXIT_DIFF, case=case, said=("neither the fixture marker",))
+    cli("--check, lines.json names a tag the listing does not", ["--check", *selected(good, made_up)], EXIT_CHANNEL, case=case, said=("refused [lines-source]",))
+    # An environment that tries to redirect the base and the trust changes nothing: the
+    # channel is pinned, not read from the environment. The base here answers nothing.
+    cli(
+        "--check, the environment tries to redirect the base and the trust",
+        ["--check", *selected(good, agreed)],
+        EXIT_OK,
+        case=case,
+        said=("channel statement", "verdict: ok (exit 0)"),
+        env={C.ENV_BASES_NAME: "http://127.0.0.1:1/chtypes/v2-dev", C.ENV_TRUSTED_KEYS_NAME: other},
+    )
     r = cli("no mode prints the page", selected(str(tmp / "absent.md"), agreed), EXIT_OK, case=case)
     check(r.stdout == text, "command line, no mode: stdout is the page")
     written = tmp / "written.md"
     cli("--write writes", ["--write", *selected(str(written), agreed)], EXIT_OK, case=case)
     check(written.is_file() and written.read_text(encoding="utf-8") == text, "command line, --write: the file is the page")
     r = cli("--print-document", ["--print-document", *selected(good, agreed)], EXIT_OK, case=case, said=("printing the channel statement",))
+    document_text = r.stdout
+    found_tag = re.search(r"printing the channel statement ([0-9T]+Z)", r.stderr)
+    document_tag = found_tag.group(1) if found_tag else ""
     document = {**fixture, "repository": f"s-{case}/chtypes/v1"}
     check(json.loads(r.stdout or "null") == document, "command line, --print-document: stdout is the signed document")
 
@@ -2746,6 +3004,8 @@ def _cli_selftest(check, tmp: Path, port: int, lines_doc, supported, fixture, pa
     r = cli("--print-document, a line failed", ["--print-document", *selected(good, agreed)], EXIT_PARTIAL, case=case)
     check(bool(r.stdout), "command line, --print-document with a line failed: the document is printed, the status is 3")
 
+    release_flow(document_text, document_tag)
+
     # --check-page needs no channel: this is the script itself, as a command. Its page is
     # the active channel's, the dev one in a real process.
     good = write("good-page.md", page)
@@ -2766,7 +3026,7 @@ def _cli_selftest(check, tmp: Path, port: int, lines_doc, supported, fixture, pa
     return runs
 
 
-def _guarded(body: Callable[[], int], say) -> int:
+def _guarded(body: Callable[[], int], say, selection: str = "") -> int:
     """Run `body`. An exception here is a defect of this script, and Python's own
     exit status for it (1) would read as `a committed file differs`."""
     try:
@@ -2774,7 +3034,7 @@ def _guarded(body: Callable[[], int], say) -> int:
     except Exception as exc:  # noqa: BLE001
         traceback.print_exc()
         say(f"support-v2: {type(exc).__name__} escaped this script")
-        say(verdict_line(EXIT_CRASH, False))
+        say(verdict_line(EXIT_CRASH, False, selection))
         return EXIT_CRASH
 
 
@@ -2801,8 +3061,8 @@ def main(argv: list[str] | None = None) -> int:
         print(message, file=sys.stderr)
 
     if args.check_page:
-        return _guarded(lambda: check_page(args.out, args.lines, say, selection), say)
-    return _guarded(lambda: run(mode, args.out, args.lines, say, selection), say)
+        return _guarded(lambda: check_page(args.out, args.lines, say, selection), say, selection)
+    return _guarded(lambda: run(mode, args.out, args.lines, say, selection), say, selection)
 
 
 if __name__ == "__main__":

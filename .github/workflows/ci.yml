@@ -255,7 +255,10 @@ jobs:
       # non-required one could not stop a stale page from being enqueued by
       # scripts/policy-merge-check.py (the page is deliberately not a
       # protected path; the scripts and workflow beside it are). The selftest
-      # reads this file: it holds these steps and this filter to what is said here.
+      # reads this file as text and checks that these steps and this filter are
+      # there (a substring each, and the filter's pattern applied to named paths):
+      # it does not evaluate the workflow. `.github/**` being a protected path is
+      # what guards the steps.
       - name: selftest — the support-v2 generator refuses a channel document on every rule with no fallback, classifies every line, refuses a private name, and takes its channel from the binding
         run: uv run scripts/support-v2/gen.py --selftest
       - name: support-v2 — docs/support-v2.md equals the generator's output, and lines.json's source is in its closed form (no registry)
