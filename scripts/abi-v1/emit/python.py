@@ -398,6 +398,36 @@ def _typed_wrappers(model: Model) -> str:
     return "\n\n".join(out)
 
 
+def _library_refusal_reader(model: Model) -> str:
+    """read_<reason>(): what a loader reads for the refusal the library answers
+    for itself (sdk.json's row with want, got and message), each symbol optional
+    so a library that predates it is not a missing symbol. Empty, so the text
+    around it is unchanged, for a description with no such row."""
+    r = model.library_refusal()
+    if r is None:
+        return ""
+    return f"""
+def read_{r["reason"]}(lib: ctypes.CDLL) -> tuple[str, str, str] | None:
+    \"\"\"The library's own answers for the `{r["reason"]}` refusal, as (want, got,
+    message), verbatim. None when it does not export `{r["got"]}`: an older
+    library, which the later steps refuse by its fingerprint. A `{r["want"]}` or
+    `{r["message"]}` it lacks, or a NULL answer, reads as \"\".\"\"\"
+
+    def answer(name: str) -> str:
+        fn = getattr(lib, name, None)
+        if fn is None:
+            return ""
+        _set_signature(fn, FUNCTIONS[name])
+        raw = fn()
+        return "" if raw is None else raw.decode("ascii", "replace")
+
+    if getattr(lib, {_lit(r["got"])}, None) is None:
+        return None
+    return answer({_lit(r["want"])}), answer({_lit(r["got"])}), answer({_lit(r["message"])})
+
+"""
+
+
 def render_decls(model: Model) -> str:
     handshake = [fn.name for fn in model.functions if fn.cls == "handshake"]
     handle_names = list(model.handles)  # abi.json's own order: buf, error, schema, filter, block
@@ -413,6 +443,7 @@ def render_decls(model: Model) -> str:
     typed_wrappers = _typed_wrappers(model)
     handle_class_dict = _dict_block([(_lit(h), cls) for h, cls in handle_classes.items()])
     cross_check = _cross_check_literal(model)
+    library_refusal_reader = _library_refusal_reader(model)
     # A description that declares chs_error_reason (ABI v2) has every call error
     # carry it; one that does not (ABI v1) emits the layer unchanged.
     has_reason = any(fn.name == "chs_error_reason" for fn in model.functions)
@@ -634,7 +665,7 @@ def resolve_build_info(lib: ctypes.CDLL) -> Callable[..., object]:
     _set_signature(fn, FUNCTIONS["chs_build_info"])
     return fn
 
-
+{library_refusal_reader}
 class Api:
     """Every described symbol, resolved and signature-typed, step 6
     (plan section 3.2). Constructed ONLY by resolve_all(): the constructor
@@ -1562,6 +1593,28 @@ def render_errmap(model: Model) -> str:
     refusal_pairs = [(_lit(reason), _lit(error)) for reason, error in refusal_by_reason.items()]
     class_pairs = [(_lit(key), f"_errors.{c['python']}") for key, c in sdk["errors"]["classes"].items()]
     code_pairs = [(_lit(k), _lit(v)) for k, v in sdk["errors"]["codes"].items()]
+    refusal_code_pairs = [(_lit(r["reason"]), _lit(r["code"])) for r in sdk["loader"]["refusals"] if "code" in r]
+    refusal_code_table = (
+        f"""
+# a loader refusal's BASE reason -> the sdk.json code key it carries in place of
+# its error class's own.
+LOADER_REFUSAL_CODE_KEY: dict[str, str] = {_dict_block(refusal_code_pairs)}
+"""
+        if refusal_code_pairs
+        else ""
+    )
+    refusal_code_fn = (
+        '''
+
+def loader_error_code(reason: str) -> str | None:
+    """The code a loader refusal `reason` (its base, before any ":<suffix>")
+    carries in place of its exception class's own, or None for its class's."""
+    key = LOADER_REFUSAL_CODE_KEY.get(reason.split(":", 1)[0])
+    return None if key is None else ERROR_CODES[key]
+'''
+        if refusal_code_pairs
+        else ""
+    )
 
     return f'''# {banner(model)}  # noqa: E501
 """spec/abi-v1/sdk.json's error-mapping tables, as references to the
@@ -1586,7 +1639,7 @@ UNKNOWN_STATUS_CLASS_KEY: str = {_lit(unknown_class)}
 # a loader refusal's BASE reason (before any ":<suffix>") -> the sdk.json
 # error-class key.
 LOADER_REFUSAL_CLASS_KEY: dict[str, str] = {_dict_block(refusal_pairs)}
-
+{refusal_code_table}
 # sdk.json error-class key -> the actual exception class.
 CLASS_BY_KEY: dict[str, type[_errors.ChtypesError]] = {_dict_block(class_pairs)}
 
@@ -1606,7 +1659,7 @@ def loader_error_class(reason: str) -> type[_errors.ChtypesError]:
     ":<suffix>") maps to."""
     base = reason.split(":", 1)[0]
     return CLASS_BY_KEY[LOADER_REFUSAL_CLASS_KEY[base]]
-'''
+{refusal_code_fn}'''
 
 
 def outputs(model: Model) -> list[Output]:

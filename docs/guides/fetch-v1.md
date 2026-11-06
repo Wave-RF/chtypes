@@ -215,7 +215,7 @@ Every one of the checks above runs **in this order**, and a failure at any step 
 
 <!-- BEGIN GENERATED: fetch-v1 constants -->
 
-Generated from `spec/fetch-v1/constants.json` (sha256:`5aa3d14a5d8b60399040a8242f003135fa5f6c2c402de7d4e2db4c768a3366ae`) by `scripts/fetch-v1/gen-constants.py`; do not hand-edit between the markers. Covers this guide's §7 and §8, plus a quick reference for the media types, predicate types and default trust key introduced in earlier sections.
+Generated from `spec/fetch-v1/constants.json` (sha256:`2ea0e3ba3ba614e6070aaad6188d5a3d1b6de81d97995811e0a3031e99e11a02`) by `scripts/fetch-v1/gen-constants.py`; do not hand-edit between the markers. Covers this guide's §7 and §8, plus a quick reference for the media types, predicate types and default trust key introduced in earlier sections.
 
 ## Reference
 
@@ -281,8 +281,9 @@ The revocation check of a build that is already installed ("Build-level revocati
 | `CHTYPES_CACHE_UNUSABLE`        | 9           |
 | `CHTYPES_SOURCE_RETIRED`        | 10          |
 | `CHTYPES_ARTIFACT_REVOKED`      | 11          |
+| `CHTYPES_CPU_UNSUPPORTED`       | 12          |
 
-The six codes above the line in `spec/fetch-v1/constants.json` carry v0's own real, measured exit status (every binding's CLI agreed on 2026-10-01: the four "verification failed" codes all exit 1, `CHTYPES_ARTIFACT_UNPUBLISHED` exits 4, `CHTYPES_SOURCE_UNREACHABLE` exits 3). The new v1-only codes have no v0 precedent and are assigned here: the first four by lane 0A, `CHTYPES_CACHE_UNUSABLE` by public issue #486, `CHTYPES_SOURCE_RETIRED` by public issue #571 and `CHTYPES_ARTIFACT_REVOKED` by public issue #625:
+The six codes above the line in `spec/fetch-v1/constants.json` carry v0's own real, measured exit status (every binding's CLI agreed on 2026-10-01: the four "verification failed" codes all exit 1, `CHTYPES_ARTIFACT_UNPUBLISHED` exits 4, `CHTYPES_SOURCE_UNREACHABLE` exits 3). The new v1-only codes have no v0 precedent and are assigned here: the first four by lane 0A, `CHTYPES_CACHE_UNUSABLE` by public issue #486, `CHTYPES_SOURCE_RETIRED` by public issue #571, `CHTYPES_ARTIFACT_REVOKED` by public issue #625 and `CHTYPES_CPU_UNSUPPORTED` with the CPU floor:
 
 - `CHTYPES_SOURCE_UNAUTHORIZED` and `CHTYPES_SOURCE_FORBIDDEN` — the fetch layer, a 401 or 403 from a source (§2, §5.1 of this guide).
 - `CHTYPES_SOURCE_INCOMPATIBLE` — the fetch layer, an unrecognized manifest or layer media type during resolve (§3).
@@ -290,6 +291,7 @@ The six codes above the line in `spec/fetch-v1/constants.json` carry v0's own re
 - `CHTYPES_CACHE_UNUSABLE` — the fetch layer, a cache directory or entry it could not read or write, or that strict mode refuses: it names the path and a reason (§1, the cache faults). It is the one code for the local filesystem, never the network's `CHTYPES_SOURCE_UNREACHABLE`, so a retry loop never retries a permission error.
 - `CHTYPES_SOURCE_RETIRED` — the fetch layer, a `410 Gone` from a source: a retired repository, which is permanent, so the request is never retried and never sent to the next base (§2, "A retired repository"; §7). Its message names the URL that answered and carries the registry's own message, made safe to print. Assigned by public issue #571.
 - `CHTYPES_ARTIFACT_REVOKED` — the fetch layer, generation 2 only: a build that a verified, signed revocation refuses, whether found in its referrers listing or stored in its cache entry, or a `410 Gone` whose body says the tag is revoked ("Build-level revocation"). Its message names the advisory, made safe to print. Never `CHTYPES_ARTIFACT_PINNED`, `CHTYPES_ARTIFACT_UNTRUSTED` or `CHTYPES_SOURCE_RETIRED`. Assigned by public issue #625.
+- `CHTYPES_CPU_UNSUPPORTED` — the **FFI/loader layer**, generation 2 only, never the fetch layer: a CPU below the floor of the library's build (`docs/install.md`, CPU requirements). Opening the library succeeds and nothing of it runs; the loader's step 2b refuses it (`cpu_floor`) with the library's own sentence. Its class stays `CHTYPES_ARTIFACT_INCOMPATIBLE`'s, so a handler of a failed open still catches it.
 
 <!-- END GENERATED: fetch-v1 constants -->
 

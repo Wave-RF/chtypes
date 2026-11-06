@@ -15,7 +15,9 @@ use std::fmt;
 use std::path::PathBuf;
 
 use crate::abi2::calls_gen::RawCallError;
-use crate::abi2::errmap_gen::{ErrorClass, RefusalClass, refusal_class, status_class};
+use crate::abi2::errmap_gen::{
+    ErrorClass, RefusalClass, refusal_class, refusal_code, status_class,
+};
 use crate::abi2::vocab_gen::{Status, status};
 use crate::ocifetch::constants::code;
 use crate::raw::RawText;
@@ -146,9 +148,10 @@ pub enum Error {
     /// `CHS_INTERNAL`; a status outside the closed set, naming its
     /// `unknown(n)` (rule r3); a document that does not decode.
     Internal(CallError),
-    /// A loader refusal at steps 1, 2, 3, 4 (the fingerprint) or 6. A dev SDK's
-    /// fingerprint refusal displays exactly rule r6's message
-    /// ([`Refusal::dev_message`]).
+    /// A loader refusal at steps 1, 2, 2b, 3, 4 (the fingerprint) or 6. A dev
+    /// SDK's fingerprint refusal displays exactly rule r6's message
+    /// ([`Refusal::dev_message`]). Step 2b, a CPU below the library's floor,
+    /// carries the code `CHTYPES_CPU_UNSUPPORTED` and the library's own sentence.
     ArtifactIncompatible(Refusal),
     /// A loader refusal at step 5 or a malformed `build_info`, and the fetch
     /// layer's own corruption.
@@ -214,7 +217,9 @@ impl Error {
     /// [`crate::code`] constants; `None` for a call error.
     pub fn code(&self) -> Option<&'static str> {
         Some(match self {
-            Error::ArtifactIncompatible(_) => code::ARTIFACT_INCOMPATIBLE,
+            Error::ArtifactIncompatible(r) => {
+                refusal_code(&r.reason).unwrap_or(code::ARTIFACT_INCOMPATIBLE)
+            }
             Error::ArtifactCorrupt(_) => code::ARTIFACT_CORRUPT,
             Error::ArtifactMissing(_) => code::ARTIFACT_MISSING,
             Error::ArtifactUntrusted(_) => code::ARTIFACT_UNTRUSTED,
@@ -498,6 +503,15 @@ mod tests {
             Error::from_refusal(refusal("build_info_malformed")),
             Error::ArtifactCorrupt(_)
         ));
+        // A CPU below the library's floor: the class a handler of a failed open
+        // catches, with its own code. Every other refusal keeps its class's.
+        let below_floor = Error::from_refusal(refusal("cpu_floor"));
+        assert!(matches!(below_floor, Error::ArtifactIncompatible(_)));
+        assert_eq!(below_floor.code(), Some(code::CPU_UNSUPPORTED));
+        assert_eq!(
+            Error::from_refusal(refusal("dlopen")).code(),
+            Some(code::ARTIFACT_INCOMPATIBLE)
+        );
     }
 
     #[test]

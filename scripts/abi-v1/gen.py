@@ -1276,6 +1276,21 @@ def _selftest_v2() -> list[str]:
             "errors.fetch_codes CHTYPES_SOURCE_FORBIDDEN = 7",
         )
         plant(
+            "a loader refusal whose code is not in errors.codes",
+            lambda w: _json_edit(w / sdk, lambda d: d["loader"]["refusals"][4].update(code="no_such_code")),
+            "loader refusal cpu_floor: code 'no_such_code' is not in errors.codes",
+        )
+        plant(
+            "a loader refusal with got but no want",
+            lambda w: _json_edit(w / sdk, lambda d: d["loader"]["refusals"][4].pop("want")),
+            "loader refusal cpu_floor: want, got and message come together",
+        )
+        plant(
+            "a loader refusal whose answer is not a handshake function",
+            lambda w: _json_edit(w / sdk, lambda d: d["loader"]["refusals"][4].update(got="chs_initialize")),
+            "loader refusal cpu_floor: got 'chs_initialize' is not a handshake function",
+        )
+        plant(
             "(r4) an errors.codes entry naming a code the fetch table lacks",
             lambda w: _json_edit(w / sdk, lambda d: d["errors"]["codes"].update(later="CHTYPES_NOT_A_FETCH_CODE")),
             "errors.codes later = 'CHTYPES_NOT_A_FETCH_CODE' is not in errors.fetch_codes",

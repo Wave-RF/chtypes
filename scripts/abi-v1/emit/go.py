@@ -179,7 +179,7 @@ TAB = "\t"
 
 # Go initialisms (revive's var-naming): a word that is one is written in
 # capitals inside a Go identifier. Only the words an ABI name uses today.
-_GO_INITIALISMS = {"id": "ID"}
+_GO_INITIALISMS = {"id": "ID", "cpu": "CPU"}
 
 
 def _pascal_word(word: str) -> str:
@@ -938,6 +938,20 @@ def render_errmap_gen(model) -> str:
     out.append(f"{TAB}}}")
     out.append("}")
     out.append("")
+    refusal_codes = model.refusal_codes()
+    if refusal_codes:
+        out.append("// RefusalCode is the code spec/abi-v1/sdk.json's loader.refusals gives a refusal in")
+        out.append('// place of its error class\'s own, "" for every refusal that carries its class\'s.')
+        out.append("func RefusalCode(reason string) string {")
+        out.append(f"{TAB}switch reason {{")
+        for reason, code in refusal_codes.items():
+            out.append(f"{TAB}case {_go_str(reason)}:")
+            out.append(f"{TAB}{TAB}return {_go_str(code)}")
+        out.append(f"{TAB}default:")
+        out.append(f'{TAB}{TAB}return ""')
+        out.append(f"{TAB}}}")
+        out.append("}")
+        out.append("")
     return "\n".join(out)
 
 

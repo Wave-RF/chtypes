@@ -16,6 +16,7 @@ abi2_conformance loader::tests::parse_build_info_refuses_non_ascii
 api_v1 the_public_api_over_the_stub
 api_v1_setup setup_records_and_a_step_7_failure_is_the_calls_own_error
 api_v1_setup_cases setup_cases
+cpu_floor a_library_below_its_floor_is_an_ordinary_refusal
 goldens_v1_runner
 lib abi2::loader::tests::a_dev_fingerprint_refusal_is_rule_r6_exactly
 lib abi2::loader::tests::dotted_version_cmp_orders_components_numerically_not_lexically

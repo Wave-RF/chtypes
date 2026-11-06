@@ -31,12 +31,13 @@ use serde_json::Value;
 const ENV_STUBS: &str = "CHTYPES_ABI2_STUBS";
 const ENV_UNVERIFIED: &str = "CHTYPES_ALLOW_UNVERIFIED_LIBRARY";
 
-/// The refused stubs, one per place the loader can leave after `dlopen`: the
-/// handshake (`not_v1`, `abi_version`), `chs_build_info` (`build_info_malformed`,
-/// `fingerprint`), and step 6's symbol resolution, which the generated
+/// The refused stubs, one per place the loader can leave after `dlopen`: the CPU
+/// floor (`cpu_floor`), the handshake (`not_v1`, `abi_version`), `chs_build_info`
+/// (`build_info_malformed`, `fingerprint`), and step 6's symbol resolution, which the generated
 /// `Api::resolve_all` returns from. The step-5 cross-check needs a signed
 /// statement and cannot be reached by an unverified open.
 const REFUSED: &[&str] = &[
+    "cpu-floor-refused",
     "no-abi-version",
     "abi-version-1",
     "build-info-bad-json",

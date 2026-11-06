@@ -25,8 +25,8 @@ import {
 /**
  * The shared error codes and their type are generated from
  * `spec/fetch-v1/constants.json` (`./constants.gen.ts`; public issue #500).
- * `CODE_ARTIFACT_INCOMPATIBLE` is the loader's: the fetch layer never raises
- * it. `CODE_CACHE_UNUSABLE` is a cache fault (guide §1; public issue #486), and
+ * `CODE_ARTIFACT_INCOMPATIBLE` and `CODE_CPU_UNSUPPORTED` are the loader's: the
+ * fetch layer never raises them. `CODE_CACHE_UNUSABLE` is a cache fault (guide §1; public issue #486), and
  * `CODE_SOURCE_RETIRED` a source that answered 410 Gone, never retried and
  * never sent to the next base (guide §2; public issue #571). `CODE_ARTIFACT_REVOKED`
  * is a build a verified revocation refuses, or a 410 whose body says the tag is
@@ -41,6 +41,7 @@ export {
   CODE_ARTIFACT_UNPUBLISHED,
   CODE_ARTIFACT_UNTRUSTED,
   CODE_CACHE_UNUSABLE,
+  CODE_CPU_UNSUPPORTED,
   CODE_SOURCE_FORBIDDEN,
   CODE_SOURCE_INCOMPATIBLE,
   CODE_SOURCE_RETIRED,
@@ -66,6 +67,8 @@ export interface RefusalFields {
   readonly path: string;
   readonly want?: string | undefined;
   readonly got?: string | undefined;
+  /** A sentence the refusal has to say for itself, verbatim: the library's own, for a CPU below its floor. */
+  readonly message?: string | undefined;
 }
 
 /**

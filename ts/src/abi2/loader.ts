@@ -12,6 +12,10 @@
  *   1. glibc (Linux only; darwin skips it). BEFORE dlopen.
  *   2. `dlopen(path, RTLD_NOW | RTLD_LOCAL)`, through `./libc.ts` (plan
  *      §3.3(b): the real fix for ffi-rs's own `RTLD_LAZY` open).
+ *   2b. the CPU floor, before anything else of the library is called: the list
+ *      of what this CPU lacks, `dlsym`'d for presence first. Absent is an older
+ *      library, which step 4 refuses by its fingerprint; empty goes on; any
+ *      other answer refuses, with the library's three answers verbatim.
  *   3. `chs_abi_version`: present (`dlsym`, plan §3.3(c)) and, once present,
  *      `=== ABI_VERSION` (2; a real call — only now safe through ffi-rs's own by-name
  *      `open`/`define`, plan §3.3(d), since step 2 already proved the image
@@ -45,6 +49,7 @@ import type { JsExternal } from 'ffi-rs';
 import { type BuildInfo, decodeBuildInfo } from './buildinfo.js';
 import { Calls } from './calls.gen.js';
 import { ABI_FINGERPRINT, ABI_VERSION, CROSS_CHECK, DESCRIBED_SYMBOLS, SYMBOL } from './decls.gen.js';
+import { loaderRefusalCodeFor } from './errmap.gen.js';
 import { ArtifactIncompatibleError, corruptRefusal, UsageError, usageError } from './errors.js';
 import { compareDottedVersions, ffiOpen, glibcVersionString, lastDlError, rawDlopen, rawDlsym } from './libc.js';
 import { defineRawFunctions, defineThreadedRawFunctions, type RawApi, rawCall } from './raw.js';
@@ -188,6 +193,28 @@ function openImage(path: string): JsExternal {
   return handle;
 }
 
+// ------------------------------------------------------------------ step 2b
+
+/** One handshake answer, or '' for a symbol the image does not export or a NULL answer. */
+function cpuAnswer(osHandle: JsExternal, table: RawApi, symbol: string): string {
+  if (rawDlsym(osHandle, symbol) === null) return '';
+  const call = rawCall(table, symbol, []);
+  return call.outcome === 'value' && typeof call.value === 'string' ? call.value : '';
+}
+
+/**
+ * ffi-rs can only call a symbol by name (`./raw.ts`), so the presence check goes through `dlsym` before anything is declared, and the call through a table of just these three, under the same key the whole table takes after this step. The list is never parsed, and the image stays mapped, as every refused image does.
+ */
+function checkCpuFloor(path: string, key: string, osHandle: JsExternal): void {
+  if (rawDlsym(osHandle, SYMBOL.CPU_MISSING) === null) return; // an older library: step 4 refuses it by its fingerprint.
+  ffiOpen(key, path);
+  const table = defineRawFunctions(key, [SYMBOL.CPU_FLOOR, SYMBOL.CPU_MISSING, SYMBOL.CPU_MESSAGE]);
+  const got = cpuAnswer(osHandle, table, SYMBOL.CPU_MISSING);
+  if (got === '') return;
+  const refusal = { reason: 'cpu_floor', path, want: cpuAnswer(osHandle, table, SYMBOL.CPU_FLOOR), got, message: cpuAnswer(osHandle, table, SYMBOL.CPU_MESSAGE) };
+  throw new ArtifactIncompatibleError(refusal, loaderRefusalCodeFor(refusal.reason));
+}
+
 // ------------------------------------------------------------------- step 5
 
 /** `abi_fingerprint` -> `abiFingerprint`: the decoded `BuildInfo`'s own spelling of a build-info key. */
@@ -216,11 +243,13 @@ function checkCrossFields(path: string, buildInfo: BuildInfo, predicate: Predica
 
 /**
  * Steps 2-4 and 6, shared by the verified and the unverified path: open the
- * image `RTLD_NOW`, prove the generation, read and decode the build info and
- * compare its fingerprint, resolve every other described symbol for presence.
+ * image `RTLD_NOW`, check the CPU floor, prove the generation, read and decode
+ * the build info and compare its fingerprint, resolve every other described
+ * symbol for presence.
  */
 function openAndCheck(path: string, key: string): { raw: RawApi; buildInfo: BuildInfo } {
   const osHandle = openImage(path); // step 2
+  checkCpuFloor(path, key, osHandle); // step 2b
 
   // step 3: chs_abi_version present, then (through ffi-rs, now safe) === ABI_VERSION.
   if (rawDlsym(osHandle, SYMBOL.ABI_VERSION) === null) {

@@ -52,6 +52,9 @@ type LoadError struct {
 	Path   string
 	Want   string
 	Got    string
+	// Sentence is the library's own sentence, verbatim: a cpu_floor refusal's
+	// chs_cpu_message answer, and empty for every other refusal.
+	Sentence string
 }
 
 func (e *LoadError) Error() string {
@@ -80,12 +83,21 @@ func devFingerprintMessage(e *LoadError) (string, bool) {
 	return DevFingerprintMessage(e.Want, e.Got), true
 }
 
-// Message is the refusal's complete message: rule r6's exact text for a dev
-// SDK's fingerprint refusal, "" for every other refusal (the public layer then
-// composes its own).
+// Message is what the refusal has to say for itself: rule r6's exact text for
+// a dev SDK's fingerprint refusal, the library's own sentence for a cpu_floor
+// refusal, "" for every other refusal (the public layer then composes its own).
 func (e *LoadError) Message() string {
+	if e.Sentence != "" {
+		return e.Sentence
+	}
 	msg, _ := devFingerprintMessage(e)
 	return msg
+}
+
+// Code is the code spec/abi-v2/sdk.json's loader.refusals gives this refusal in
+// place of its class's own, "" for every refusal that carries its class's.
+func (e *LoadError) Code() string {
+	return RefusalCode(e.Reason)
 }
 
 // Class is the sdk.json errors.loader refusal class this reason maps to
@@ -138,7 +150,7 @@ var crossCheckFields = []string{
 	"inputs_sha256",
 }
 
-// Load runs steps 1-7 against a VERIFIED predicate (in.Predicate must be
+// Load runs steps 1-7, with step 2b, against a VERIFIED predicate (in.Predicate must be
 // non-nil; a caller with no predicate wants OpenUnverified, explicitly). A
 // refusal at steps 1-6 is a *LoadError; a failure at step 7 (chs_initialize or
 // chs_set_defaults) is the call's own *CallError, never a refusal reason: the
@@ -191,7 +203,7 @@ func OpenUnverified(path string, explicit bool, timezone, defaults []byte) (*Tab
 	return load(LoadInput{LibraryPath: path, Predicate: nil, Timezone: timezone, Defaults: defaults})
 }
 
-// LoadLinked runs steps 3, 4, 6 and 7 over a table the linked filler
+// LoadLinked runs steps 2b, 3, 4, 6 and 7 over a table the linked filler
 // (OpenLinked, under -tags chtypes_linked) already populated: there is no
 // dlopen to run and no predicate to check (steps 1, 2 and 5), and step 6 is
 // satisfied by the linker itself.
@@ -234,9 +246,39 @@ func load(in LoadInput) (*Table, error) {
 	return loadFrom(t, in, pred, false)
 }
 
-// loadFrom runs steps 3-7 on an opened table. linked skips the resolve
+// checkCPUFloor is step 2b, before anything else of the library is called. A
+// library that does not export chs_cpu_missing predates the check and goes on:
+// steps 3 and 4 refuse it by its fingerprint, so the symbol is resolved alone
+// here, never as a missing_symbol. An answer of "" goes on too. Any other answer
+// refuses, with the library's three answers verbatim; the list is never parsed,
+// and the image stays mapped, as every refused image does. The floor and the
+// sentence are optional as well: a library that has the list but not those still
+// refuses, with what it has.
+func checkCPUFloor(t *Table, path string, linked bool) *LoadError {
+	if missing := resolveIf(!linked, t.ResolveCPUMissing); missing != "" {
+		return nil
+	}
+	got := t.CPUMissing()
+	if got == "" {
+		return nil
+	}
+	refusal := &LoadError{Reason: "cpu_floor", Path: path, Got: got}
+	if resolveIf(!linked, t.ResolveCPUFloor) == "" {
+		refusal.Want = t.CPUFloor()
+	}
+	if resolveIf(!linked, t.ResolveCPUMessage) == "" {
+		refusal.Sentence = t.CPUMessage()
+	}
+	return refusal
+}
+
+// loadFrom runs steps 2b-7 on an opened table. linked skips the resolve
 // calls, which would dlsym against a table that has no dlopen handle.
 func loadFrom(t *Table, in LoadInput, pred map[string]any, linked bool) (*Table, error) {
+	if refusal := checkCPUFloor(t, in.LibraryPath, linked); refusal != nil {
+		return nil, refusal
+	}
+
 	// Step 3: chs_abi_version ALONE. PM ruling (reverses an earlier `inferred`
 	// call): chs_abi_version answering 1 is what makes a library "an ABI v1+
 	// artifact" at all; if it is present and correct, refusing it as not_v1

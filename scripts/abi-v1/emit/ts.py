@@ -449,6 +449,9 @@ def render_errmap(model) -> str:
     # formatting of whatever text is there).
     classes_used = {ts_class_of[c] for c in status_map.values() if c is not None} | {"InternalError"}
     specifiers = sorted([(c, False) for c in classes_used] + [("CallErrorFields", True), ("ChtypesError", True)])
+    refusal_codes = model.refusal_codes()
+    if refusal_codes:
+        lines.insert(lines.index("import {"), "import type { ErrorCode } from '../ocifetch/constants.gen.js';")
     for name, is_type in specifiers:
         lines.append(f"  {'type ' if is_type else ''}{name},")
     lines += [
@@ -515,6 +518,16 @@ def render_errmap(model) -> str:
         "}",
         "",
     ]
+    if refusal_codes:
+        lines += [
+            "/** The code sdk.json's loader.refusals gives a refusal in place of its class's own; `undefined` for every refusal that carries its class's. */",
+            "export function loaderRefusalCodeFor(reason: string): ErrorCode | undefined {",
+            "  switch (reason) {",
+        ]
+        for reason, code in refusal_codes.items():
+            lines.append(f"    case {reason!r}:")
+            lines.append(f"      return {code!r};")
+        lines += ["    default:", "      return undefined;", "  }", "}", ""]
     return "\n".join(lines)
 
 

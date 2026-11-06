@@ -1,9 +1,10 @@
 package ocifetch
 
 // errors.go — the v1 shared error vocabulary (docs/guides/fetch-v1.md §8),
-// thirteen codes instead of v0's six. CHTYPES_ARTIFACT_INCOMPATIBLE is reserved
-// for the FFI/loader layer (constants_gen.go's comment on ErrorExitCodes);
-// this package's own code never constructs it.
+// fourteen codes instead of v0's six. CHTYPES_ARTIFACT_INCOMPATIBLE and
+// CHTYPES_CPU_UNSUPPORTED are reserved for the FFI/loader layer
+// (constants_gen.go's comment on ErrorExitCodes); this package's own code never
+// constructs them.
 
 import (
 	"errors"
@@ -15,7 +16,8 @@ import (
 // ErrorCode is one of the v1 shared codes in constants_gen.go's
 // ErrorExitCodes map. Its constants (CodeArtifactMissing …) are generated
 // beside that map from spec/fetch-v1/constants.json. CodeArtifactIncompatible
-// is the loader's: the fetch layer never raises it. CodeCacheUnusable's
+// and CodeCPUUnsupported are the loader's: the fetch layer never raises them.
+// CodeCacheUnusable's
 // FetchError names the Path, the Reason and the OSError (§1, the cache
 // faults; public issue #486). CodeSourceRetired is a source that answered 410
 // Gone, never retried and never sent to the next base (§2, "A retired
@@ -43,7 +45,7 @@ var (
 )
 
 // Sentinel returns the errors.Is target for this code, or nil for a code
-// this package never constructs (CodeArtifactIncompatible).
+// this package never constructs (CodeArtifactIncompatible, CodeCPUUnsupported).
 func (c ErrorCode) Sentinel() error {
 	switch c {
 	case CodeArtifactMissing:
