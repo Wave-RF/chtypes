@@ -7,13 +7,19 @@
 //!   `dlopen`), `dlopen(RTLD_NOW | RTLD_LOCAL)`, `chs_abi_version`,
 //!   `chs_build_info`'s fingerprint, the nine-field cross-check, then (and
 //!   only then) resolve every remaining symbol.
-//! * **No `dlclose`, ever** (D2). The opened library is moved into
-//!   [`decls::Api`]'s `ManuallyDrop<Library>` field once step 6 succeeds, and
-//!   on any earlier refusal the (unused) `Library` is also never closed —
-//!   `libloading`'s `Library` has no `Drop` impl that calls `dlclose` unless
-//!   its owner is dropped, and this module never drops one; see
-//!   `rust/src/ffi.rs`'s identical v0 rule for why (a leaked `Context`'s
-//!   destructor order).
+//! * **No `dlclose`, ever** (D2), refused or accepted. `libloading`'s
+//!   `Library` calls `dlclose` in its `Drop`, so every early `?` or
+//!   `return Err` after `dlopen` would unload the image. The opened library is
+//!   therefore wrapped in `ManuallyDrop` the moment `dlopen` succeeds, before
+//!   any fallible step; every refusal drops only that wrapper, which does
+//!   nothing, and a success moves the wrapper into [`decls::Api`]'s
+//!   `ManuallyDrop<Library>` field. This holds because the image may be one
+//!   built without `-z nodelete`, which `dlclose` really unmaps: a library
+//!   that starts background threads at `dlopen` leaves thread-key destructors
+//!   pointing into the unmapped code, and the host can crash seconds later. So
+//!   a library this binding refuses (another fingerprint, a failed
+//!   cross-check, a missing symbol) stays mapped for the life of the process,
+//!   exactly as an accepted one does. `rust/tests/no_unload.rs` pins it.
 //! * **`open_unverified`** is this loader with no signed statement: steps 1
 //!   and 5 are skipped (`LoadInput::predicate` is `None`), and the two-gate
 //!   rule (the caller's `allow` plus `CHTYPES_ALLOW_UNVERIFIED_LIBRARY=1`)
@@ -317,8 +323,14 @@ fn load_checked(input: LoadInput<'_>) -> Result<Checked, Refusal> {
     // RTLD_NOW is required by D2/D3 (no lazy binding, so an unresolved
     // reference fails HERE, not on first use — the "unbound" stub variant's
     // whole point) and RTLD_LOCAL keeps two loaded versions from colliding.
-    let lib = unsafe { UnixLibrary::open(Some(path), RTLD_NOW | RTLD_LOCAL) }
-        .map_err(|e| Refusal::found("dlopen", path, e.to_string()))?;
+    //
+    // The `ManuallyDrop` goes on BEFORE any fallible step: `UnixLibrary`'s
+    // `Drop` is `dlclose`, so a plain `lib` would be dlclosed by every `?`
+    // below. A failed `dlopen` returns here with nothing mapped.
+    let lib = std::mem::ManuallyDrop::new(
+        unsafe { UnixLibrary::open(Some(path), RTLD_NOW | RTLD_LOCAL) }
+            .map_err(|e| Refusal::found("dlopen", path, e.to_string()))?,
+    );
 
     // Step 3: chs_abi_version. `Handshake::resolve` also resolves
     // chs_build_info (step 4 needs it next), so its error names whichever of
@@ -328,9 +340,10 @@ fn load_checked(input: LoadInput<'_>) -> Result<Checked, Refusal> {
     // missing_symbol:<name> at the step that first needs it (the PM's
     // round-2 ruling; sdk.json carries a step-4 missing_symbol row for this).
     // SAFETY: `lib` was just opened above and is never dlclose'd (this
-    // function either returns it inside `Api` or lets it leak, never drops
-    // it), so a `Handshake` resolved from it stays valid for the process's
-    // life, which is all `Handshake::resolve`'s own contract requires.
+    // function either returns it inside `Api` or lets it leak inside its
+    // `ManuallyDrop`, never drops it), so a `Handshake` resolved from it stays
+    // valid for the process's life, which is all `Handshake::resolve`'s own
+    // contract requires.
     let handshake: Handshake = unsafe { Handshake::resolve(&lib) }.map_err(|missing| {
         if missing == "chs_abi_version" {
             Refusal::new("not_v1", path)
@@ -400,7 +413,8 @@ fn load_checked(input: LoadInput<'_>) -> Result<Checked, Refusal> {
     }
 
     // Step 6: resolve every described symbol (api, tooling, the tombstone),
-    // for presence. Only now does `lib` move into `Api`'s own `ManuallyDrop`.
+    // for presence. `lib` moves into `Api`, still inside its `ManuallyDrop`, so
+    // a missing symbol returned from inside `resolve_all` drops only the wrapper.
     // SAFETY: steps 1-5 passed, and `lib` is never dlclose'd (D2).
     // `sdk.json`'s step-6 refusal carries the missing name as a SUFFIX on the
     // reason itself (`missing_symbol:<name>`), the same shape
@@ -508,7 +522,11 @@ fn check_glibc(
     // apply here). The actual symbol lookup lives in generated, banner-exempt
     // code (decls::resolve_glibc_version) per the PM's round-2 ruling: every
     // raw symbol lookup, the glibc probe included, is generated.
-    let this = UnixLibrary::this();
+    // Wrapped in `ManuallyDrop` too, so no path through this module can reach a
+    // `dlclose`: closing the process handle would be harmless (the handle is
+    // reference-counted and the program image cannot be unloaded), but the
+    // rule here is absolute and checkable by reading.
+    let this = std::mem::ManuallyDrop::new(UnixLibrary::this());
     // SAFETY: `this` wraps the running process and is never dlclose'd.
     let version_fn: Symbol<decls::FnGlibcVersion> =
         match unsafe { decls::resolve_glibc_version(&this) } {
