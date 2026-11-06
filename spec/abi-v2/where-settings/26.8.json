@@ -1,32 +1,32 @@
 {
  "schema": "chtypes.where-settings/1",
  "line": "26.8",
- "tag": "v26.8.15.10-lts",
- "version": "26.8.15.10",
+ "tag": "v26.8.34.13-lts",
+ "version": "26.8.34.13",
  "generator": "chtypes where-settings generator",
  "settings": [
   {
    "name": "adaptive_aggregator_freeze_threshold",
    "tier": "execution",
    "kind": "where",
-   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.8, 26.9",
+   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:705 getAggregatorParams"
+    "src/Planner/Planner.cpp:707 getAggregatorParams"
    ]
   },
   {
    "name": "adaptive_aggregator_freeze_threshold_bytes",
    "tier": "execution",
    "kind": "where",
-   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.8, 26.9",
+   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:706 getAggregatorParams"
+    "src/Planner/Planner.cpp:708 getAggregatorParams"
    ]
   },
   {
@@ -38,7 +38,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Utils.cpp:776 parseAdditionalResultFilter"
+    "src/Planner/Utils.cpp:787 parseAdditionalResultFilter"
    ]
   },
   {
@@ -51,10 +51,10 @@
     "planner"
    ],
    "sources": [
-    "src/Analyzer/Resolve/resolveFunction.cpp:414 hasLateAttachedTableFilter",
     "src/Analyzer/Resolve/resolveFunction.cpp:415 hasLateAttachedTableFilter",
-    "src/Planner/Planner.cpp:2595 Planner::buildPlanForQueryNode",
-    "src/Planner/PlannerJoinTree.cpp:960 parseAdditionalFilterAstIfNeeded"
+    "src/Analyzer/Resolve/resolveFunction.cpp:416 hasLateAttachedTableFilter",
+    "src/Planner/Planner.cpp:2604 Planner::buildPlanForQueryNode",
+    "src/Planner/PlannerJoinTree.cpp:979 parseAdditionalFilterAstIfNeeded"
    ]
   },
   {
@@ -89,27 +89,27 @@
    "name": "aggregation_in_order_max_block_bytes",
    "tier": "execution",
    "kind": "where",
-   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:895 addAggregationStep",
-    "src/Planner/Planner.cpp:1066 addMergingAggregatedStep"
+    "src/Planner/Planner.cpp:898 addAggregationStep",
+    "src/Planner/Planner.cpp:1069 addMergingAggregatedStep"
    ]
   },
   {
    "name": "aggregation_memory_efficient_merge_threads",
    "tier": "execution",
    "kind": "where",
-   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:872 addAggregationStep",
-    "src/Planner/Planner.cpp:873 addAggregationStep",
-    "src/Planner/Planner.cpp:1063 addMergingAggregatedStep"
+    "src/Planner/Planner.cpp:875 addAggregationStep",
+    "src/Planner/Planner.cpp:876 addAggregationStep",
+    "src/Planner/Planner.cpp:1066 addMergingAggregatedStep"
    ]
   },
   {
@@ -141,55 +141,55 @@
    "name": "ai_function_embedding_max_batch_size",
    "tier": "execution",
    "kind": "where",
-   "reason": "resources of the AI functions (retries, request timeout, batch size); those functions call an external service and are non-deterministic, which the library declines in a filter; flip: no change on 26.7, 26.8, 26.9",
+   "reason": "resources of the AI functions (retries, request timeout, batch size); those functions call an external service and are non-deterministic, which the library declines in a filter; flip: no change on 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "functions"
    ],
    "sources": [
-    "src/Functions/aiEmbed.cpp:122 executeImpl",
-    "src/Functions/aiSimilarity.cpp:149 executeImpl"
+    "src/Functions/aiEmbed.cpp:126 executeImpl",
+    "src/Functions/aiSimilarity.cpp:153 executeImpl"
    ]
   },
   {
    "name": "ai_function_max_retries",
    "tier": "execution",
    "kind": "where",
-   "reason": "resources of the AI functions (retries, request timeout, batch size); those functions call an external service and are non-deterministic, which the library declines in a filter; flip: no change on 26.7, 26.8, 26.9",
+   "reason": "resources of the AI functions (retries, request timeout, batch size); those functions call an external service and are non-deterministic, which the library declines in a filter; flip: no change on 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "functions"
    ],
    "sources": [
-    "src/Functions/FunctionBaseAI.cpp:485 FunctionBaseAI::executeImpl",
-    "src/Functions/aiEmbed.cpp:119 executeImpl",
-    "src/Functions/aiSimilarity.cpp:146 executeImpl"
+    "src/Functions/FunctionBaseAI.cpp:486 FunctionBaseAI::executeImpl",
+    "src/Functions/aiEmbed.cpp:123 executeImpl",
+    "src/Functions/aiSimilarity.cpp:150 executeImpl"
    ]
   },
   {
    "name": "ai_function_request_timeout_sec",
    "tier": "execution",
    "kind": "where",
-   "reason": "resources of the AI functions (retries, request timeout, batch size); those functions call an external service and are non-deterministic, which the library declines in a filter; flip: no change on 26.7, 26.8, 26.9",
+   "reason": "resources of the AI functions (retries, request timeout, batch size); those functions call an external service and are non-deterministic, which the library declines in a filter; flip: no change on 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "functions"
    ],
    "sources": [
-    "src/Functions/FunctionBaseAI.cpp:484 FunctionBaseAI::executeImpl",
-    "src/Functions/aiEmbed.cpp:118 executeImpl",
-    "src/Functions/aiSimilarity.cpp:155 executeImpl"
+    "src/Functions/FunctionBaseAI.cpp:485 FunctionBaseAI::executeImpl",
+    "src/Functions/aiEmbed.cpp:122 executeImpl",
+    "src/Functions/aiSimilarity.cpp:159 executeImpl"
    ]
   },
   {
    "name": "ai_function_retry_initial_delay_ms",
    "tier": "execution",
    "kind": "where",
-   "reason": "resources of the AI functions (retries, request timeout, batch size); those functions call an external service and are non-deterministic, which the library declines in a filter; flip: no change on 26.7, 26.8, 26.9",
+   "reason": "resources of the AI functions (retries, request timeout, batch size); those functions call an external service and are non-deterministic, which the library declines in a filter; flip: no change on 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "functions"
    ],
    "sources": [
-    "src/Functions/FunctionBaseAI.cpp:486 FunctionBaseAI::executeImpl",
-    "src/Functions/aiEmbed.cpp:120 executeImpl",
-    "src/Functions/aiSimilarity.cpp:147 executeImpl"
+    "src/Functions/FunctionBaseAI.cpp:487 FunctionBaseAI::executeImpl",
+    "src/Functions/aiEmbed.cpp:124 executeImpl",
+    "src/Functions/aiSimilarity.cpp:151 executeImpl"
    ]
   },
   {
@@ -213,9 +213,9 @@
     "functions"
    ],
    "sources": [
-    "src/Functions/FunctionBaseAI.cpp:488 FunctionBaseAI::executeImpl",
-    "src/Functions/aiEmbed.cpp:121 executeImpl",
-    "src/Functions/aiSimilarity.cpp:148 executeImpl"
+    "src/Functions/FunctionBaseAI.cpp:489 FunctionBaseAI::executeImpl",
+    "src/Functions/aiEmbed.cpp:125 executeImpl",
+    "src/Functions/aiSimilarity.cpp:152 executeImpl"
    ]
   },
   {
@@ -253,7 +253,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoins.cpp:878 buildJoinClausesAndActions"
+    "src/Planner/PlannerJoins.cpp:879 buildJoinClausesAndActions"
    ]
   },
   {
@@ -285,7 +285,7 @@
     "src/Functions/isNotNull.cpp:40 create",
     "src/Functions/isNull.cpp:23 FunctionIsNull::create",
     "src/Functions/isNullable.cpp:27 create",
-    "src/Interpreters/ActionsVisitor.cpp:1806 ActionsMatcher::makeSet",
+    "src/Interpreters/ActionsVisitor.cpp:1807 ActionsMatcher::makeSet",
     "src/Interpreters/InterpreterFactory.cpp:147 InterpreterFactory::get",
     "src/Interpreters/InterpreterFactory.cpp:158 InterpreterFactory::get",
     "src/Interpreters/evaluateConstantExpression.cpp:136 evaluateConstantExpressionAsColumnImpl"
@@ -300,8 +300,8 @@
     "analyzer"
    ],
    "sources": [
-    "src/Analyzer/Resolve/QueryAnalyzer.cpp:1457 QueryAnalyzer::tryResolveIdentifierInParentScopes",
-    "src/Analyzer/Resolve/resolveFunction.cpp:1571 QueryAnalyzer::resolveFunction"
+    "src/Analyzer/Resolve/QueryAnalyzer.cpp:1460 QueryAnalyzer::tryResolveIdentifierInParentScopes",
+    "src/Analyzer/Resolve/resolveFunction.cpp:1572 QueryAnalyzer::resolveFunction"
    ]
   },
   {
@@ -345,16 +345,16 @@
     "planner"
    ],
    "sources": [
-    "src/Analyzer/Resolve/QueryAnalyzer.cpp:5686 QueryAnalyzer::resolveJoin",
+    "src/Analyzer/Resolve/QueryAnalyzer.cpp:5689 QueryAnalyzer::resolveJoin",
     "src/Analyzer/Resolve/evaluateScalarSubqueryIfNeeded.cpp:164 QueryAnalyzer::evaluateScalarSubqueryIfNeeded",
     "src/Interpreters/InterpreterSelectQueryAnalyzer.cpp:144 buildContext",
     "src/Interpreters/InterpreterSelectQueryAnalyzer.cpp:178 buildQueryPlanForAutomaticParallelReplicas",
-    "src/Planner/Planner.cpp:2577 Planner::buildPlanForQueryNode",
-    "src/Planner/Planner.cpp:2597 Planner::buildPlanForQueryNode",
-    "src/Planner/Planner.cpp:2641 Planner::buildPlanForQueryNode",
-    "src/Planner/Planner.cpp:2657 Planner::buildPlanForQueryNode",
-    "src/Planner/PlannerJoinTree.cpp:567 applyTrivialCountIfPossible",
-    "src/Planner/PlannerJoinTree.cpp:690 applyTrivialCountWithSparsityFilterIfPossible"
+    "src/Planner/Planner.cpp:2586 Planner::buildPlanForQueryNode",
+    "src/Planner/Planner.cpp:2606 Planner::buildPlanForQueryNode",
+    "src/Planner/Planner.cpp:2650 Planner::buildPlanForQueryNode",
+    "src/Planner/Planner.cpp:2666 Planner::buildPlanForQueryNode",
+    "src/Planner/PlannerJoinTree.cpp:569 applyTrivialCountIfPossible",
+    "src/Planner/PlannerJoinTree.cpp:692 applyTrivialCountWithSparsityFilterIfPossible"
    ]
   },
   {
@@ -366,7 +366,7 @@
     "alias"
    ],
    "sources": [
-    "alias of optimize_use_projections (src/Core/Settings.cpp:5846)"
+    "alias of optimize_use_projections (src/Core/Settings.cpp:5857)"
    ]
   },
   {
@@ -378,7 +378,7 @@
     "alias"
    ],
    "sources": [
-    "alias of enable_time_time64_type (src/Core/Settings.cpp:1376)"
+    "alias of enable_time_time64_type (src/Core/Settings.cpp:1382)"
    ]
   },
   {
@@ -402,8 +402,8 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoins.cpp:685 buildAllJoinClauses",
-    "src/Planner/PlannerJoinsLogical.cpp:533 buildJoinStepLogical"
+    "src/Planner/PlannerJoins.cpp:686 buildAllJoinClauses",
+    "src/Planner/PlannerJoinsLogical.cpp:534 buildJoinStepLogical"
    ]
   },
   {
@@ -573,9 +573,9 @@
    ],
    "sources": [
     "src/Analyzer/Passes/OptimizeGroupByInjectiveFunctionsPass.cpp:56 enterImpl",
-    "src/Analyzer/Resolve/QueryAnalyzer.cpp:4195 QueryAnalyzer::validateGroupByKeyType",
-    "src/Interpreters/ExpressionAnalyzer.cpp:690 ExpressionAnalyzer::makeWindowDescriptionFromAST",
-    "src/Interpreters/ExpressionAnalyzer.cpp:1520 SelectQueryExpressionAnalyzer::validateGroupByKeyType"
+    "src/Analyzer/Resolve/QueryAnalyzer.cpp:4198 QueryAnalyzer::validateGroupByKeyType",
+    "src/Interpreters/ExpressionAnalyzer.cpp:691 ExpressionAnalyzer::makeWindowDescriptionFromAST",
+    "src/Interpreters/ExpressionAnalyzer.cpp:1521 SelectQueryExpressionAnalyzer::validateGroupByKeyType"
    ]
   },
   {
@@ -588,8 +588,8 @@
     "old-analyzer"
    ],
    "sources": [
-    "src/Analyzer/Resolve/QueryAnalyzer.cpp:3986 QueryAnalyzer::validateSortingKeyType",
-    "src/Interpreters/ExpressionAnalyzer.cpp:1795 SelectQueryExpressionAnalyzer::validateOrderByKeyType"
+    "src/Analyzer/Resolve/QueryAnalyzer.cpp:3989 QueryAnalyzer::validateSortingKeyType",
+    "src/Interpreters/ExpressionAnalyzer.cpp:1796 SelectQueryExpressionAnalyzer::validateOrderByKeyType"
    ]
   },
   {
@@ -625,7 +625,7 @@
     "analyzer"
    ],
    "sources": [
-    "src/Analyzer/Resolve/QueryAnalyzer.cpp:6552 QueryAnalyzer::resolveQuery"
+    "src/Analyzer/Resolve/QueryAnalyzer.cpp:6555 QueryAnalyzer::resolveQuery"
    ]
   },
   {
@@ -637,7 +637,7 @@
     "analyzer"
    ],
    "sources": [
-    "src/Analyzer/Resolve/QueryAnalyzer.cpp:6302 tryMoveNonAggregateHavingPredicatesToWhere"
+    "src/Analyzer/Resolve/QueryAnalyzer.cpp:6305 tryMoveNonAggregateHavingPredicatesToWhere"
    ]
   },
   {
@@ -649,7 +649,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Utils.cpp:573 buildSelectQueryInfo"
+    "src/Planner/Utils.cpp:574 buildSelectQueryInfo"
    ]
   },
   {
@@ -661,8 +661,8 @@
     "analyzer"
    ],
    "sources": [
-    "src/Analyzer/Resolve/QueryAnalyzer.cpp:5658 QueryAnalyzer::resolveJoin",
-    "src/Analyzer/Resolve/QueryAnalyzer.cpp:5713 QueryAnalyzer::resolveJoin"
+    "src/Analyzer/Resolve/QueryAnalyzer.cpp:5661 QueryAnalyzer::resolveJoin",
+    "src/Analyzer/Resolve/QueryAnalyzer.cpp:5716 QueryAnalyzer::resolveJoin"
    ]
   },
   {
@@ -674,9 +674,9 @@
     "analyzer"
    ],
    "sources": [
-    "src/Analyzer/Resolve/QueryAnalyzer.cpp:1710 QueryAnalyzer::qualifyColumnNodesWithProjectionNames",
-    "src/Analyzer/Resolve/QueryAnalyzer.cpp:2226 QueryAnalyzer::resolveUnqualifiedMatcher",
-    "src/Analyzer/Resolve/QueryAnalyzer.cpp:3284 QueryAnalyzer::resolveExpressionNode"
+    "src/Analyzer/Resolve/QueryAnalyzer.cpp:1713 QueryAnalyzer::qualifyColumnNodesWithProjectionNames",
+    "src/Analyzer/Resolve/QueryAnalyzer.cpp:2229 QueryAnalyzer::resolveUnqualifiedMatcher",
+    "src/Analyzer/Resolve/QueryAnalyzer.cpp:3287 QueryAnalyzer::resolveExpressionNode"
    ]
   },
   {
@@ -688,8 +688,8 @@
     "analyzer"
    ],
    "sources": [
-    "src/Analyzer/Resolve/IdentifierResolver.cpp:910 IdentifierResolver::tryResolveIdentifierFromTableExpression",
-    "src/Analyzer/Resolve/IdentifierResolver.cpp:1444 IdentifierResolver::tryResolveIdentifierFromJoin"
+    "src/Analyzer/Resolve/IdentifierResolver.cpp:921 IdentifierResolver::tryResolveIdentifierFromTableExpression",
+    "src/Analyzer/Resolve/IdentifierResolver.cpp:1455 IdentifierResolver::tryResolveIdentifierFromJoin"
    ]
   },
   {
@@ -701,7 +701,7 @@
     "analyzer"
    ],
    "sources": [
-    "src/Analyzer/Resolve/QueryAnalyzer.cpp:5805 QueryAnalyzer::inlineViewSubqueryIfNeeded"
+    "src/Analyzer/Resolve/QueryAnalyzer.cpp:5808 QueryAnalyzer::inlineViewSubqueryIfNeeded"
    ]
   },
   {
@@ -714,7 +714,7 @@
     "old-analyzer"
    ],
    "sources": [
-    "src/Analyzer/QueryTreeBuilder.cpp:1081 QueryTreeBuilder::buildJoinTree",
+    "src/Analyzer/QueryTreeBuilder.cpp:1101 QueryTreeBuilder::buildJoinTree",
     "src/Interpreters/TreeRewriter.cpp:1525 TreeRewriter::analyzeSelect"
    ]
   },
@@ -741,7 +741,7 @@
     "old-analyzer"
    ],
    "sources": [
-    "src/Analyzer/Resolve/QueryAnalyzer.cpp:1805 QueryAnalyzer::buildGetColumnsOptions",
+    "src/Analyzer/Resolve/QueryAnalyzer.cpp:1808 QueryAnalyzer::buildGetColumnsOptions",
     "src/Interpreters/IdentifierSemantic.cpp:322 IdentifierMembershipCollector::IdentifierMembershipCollector"
    ]
   },
@@ -755,7 +755,7 @@
     "old-analyzer"
    ],
    "sources": [
-    "src/Analyzer/Resolve/QueryAnalyzer.cpp:1808 QueryAnalyzer::buildGetColumnsOptions",
+    "src/Analyzer/Resolve/QueryAnalyzer.cpp:1811 QueryAnalyzer::buildGetColumnsOptions",
     "src/Interpreters/IdentifierSemantic.cpp:322 IdentifierMembershipCollector::IdentifierMembershipCollector"
    ]
   },
@@ -768,19 +768,19 @@
     "analyzer"
    ],
    "sources": [
-    "src/Analyzer/Resolve/QueryAnalyzer.cpp:1811 QueryAnalyzer::buildGetColumnsOptions"
+    "src/Analyzer/Resolve/QueryAnalyzer.cpp:1814 QueryAnalyzer::buildGetColumnsOptions"
    ]
   },
   {
    "name": "async_socket_for_remote",
    "tier": "execution",
    "kind": "where",
-   "reason": "parallelism: thread, stream and connection counts and the concurrency control; read where the planner sizes the pipeline, never where a value is computed; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "parallelism: thread, stream and connection counts and the concurrency control; read where the planner sizes the pipeline, never where a value is computed; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:1660 buildQueryPlanForTableExpression"
+    "src/Planner/PlannerJoinTree.cpp:1682 buildQueryPlanForTableExpression"
    ]
   },
   {
@@ -917,24 +917,24 @@
    "name": "collect_hash_table_stats_during_aggregation",
    "tier": "execution",
    "kind": "where",
-   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:662 getAggregatorParams"
+    "src/Planner/Planner.cpp:664 getAggregatorParams"
    ]
   },
   {
    "name": "collect_hash_table_stats_during_joins",
    "tier": "execution",
    "kind": "where",
-   "reason": "JOIN resources: spill thresholds, preallocation, bucket counts, block sizes and the hash-table layout; read only where a JOIN is planned, which a single-table WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "JOIN resources: spill thresholds, preallocation, bucket counts, block sizes and the hash-table layout; read only where a JOIN is planned, which a single-table WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoins.cpp:1347 JoinAlgorithmParams::JoinAlgorithmParams"
+    "src/Planner/PlannerJoins.cpp:1349 JoinAlgorithmParams::JoinAlgorithmParams"
    ]
   },
   {
@@ -946,306 +946,307 @@
     "compatibility"
    ],
    "sources": [
-    "src/Core/SettingsChangesHistory.cpp:50 (analyzer_compatibility_allow_cte_redefinition)",
-    "src/Core/SettingsChangesHistory.cpp:51 (validate_group_by_all_key_types)",
-    "src/Core/SettingsChangesHistory.cpp:54 (ai_function_max_retries)",
-    "src/Core/SettingsChangesHistory.cpp:55 (adaptive_aggregator_freeze_threshold_bytes)",
-    "src/Core/SettingsChangesHistory.cpp:57 (enable_group_by_top_k_optimization)",
-    "src/Core/SettingsChangesHistory.cpp:58 (group_by_top_k_optimization_observation_rows)",
-    "src/Core/SettingsChangesHistory.cpp:77 (input_format_json_max_string_column_growth_step)",
-    "src/Core/SettingsChangesHistory.cpp:79 (join_algorithm)",
-    "src/Core/SettingsChangesHistory.cpp:82 (enable_adaptive_aggregator)",
-    "src/Core/SettingsChangesHistory.cpp:83 (adaptive_aggregator_freeze_threshold)",
-    "src/Core/SettingsChangesHistory.cpp:86 (use_query_condition_cache_for_top_k)",
-    "src/Core/SettingsChangesHistory.cpp:96 (allow_lossy_numeric_supertype)",
-    "src/Core/SettingsChangesHistory.cpp:104 (analyzer_compatibility_apply_final_to_all_joined_tables)",
-    "src/Core/SettingsChangesHistory.cpp:105 (enable_parallel_single_level_merge)",
-    "src/Core/SettingsChangesHistory.cpp:106 (ai_function_text_default_credentials)",
-    "src/Core/SettingsChangesHistory.cpp:107 (ai_function_embedding_default_credentials)",
-    "src/Core/SettingsChangesHistory.cpp:110 (ai_function_allow_insecure_endpoint)",
-    "src/Core/SettingsChangesHistory.cpp:115 (page)",
-    "src/Core/SettingsChangesHistory.cpp:116 (limit)",
-    "src/Core/SettingsChangesHistory.cpp:117 (offset)",
-    "src/Core/SettingsChangesHistory.cpp:118 (select)",
-    "src/Core/SettingsChangesHistory.cpp:119 (order)",
-    "src/Core/SettingsChangesHistory.cpp:120 (sort)",
-    "src/Core/SettingsChangesHistory.cpp:121 (filter)",
-    "src/Core/SettingsChangesHistory.cpp:122 (database)",
-    "src/Core/SettingsChangesHistory.cpp:135 (input_format_json_max_object_size)",
-    "src/Core/SettingsChangesHistory.cpp:138 (optimize_trivial_count_with_sparsity_filter)",
-    "src/Core/SettingsChangesHistory.cpp:140 (input_format_read_datetime_number_as_raw_value)",
-    "src/Core/SettingsChangesHistory.cpp:145 (enable_packed_string_keys_in_aggregation)",
-    "src/Core/SettingsChangesHistory.cpp:153 (run_query_in_background)",
-    "src/Core/SettingsChangesHistory.cpp:154 (enable_cascades_optimizer)",
-    "src/Core/SettingsChangesHistory.cpp:156 (analyzer_compatibility_multiple_joins_qualify_column_names)",
-    "src/Core/SettingsChangesHistory.cpp:159 (optimize_trivial_view_pushdown_to_distributed)",
-    "src/Core/SettingsChangesHistory.cpp:163 (enable_function_early_short_circuit)",
-    "src/Core/SettingsChangesHistory.cpp:171 (validate_group_by_all_key_types)",
-    "src/Core/SettingsChangesHistory.cpp:172 (analyzer_compatibility_allow_non_aggregate_in_having)",
-    "src/Core/SettingsChangesHistory.cpp:178 (optimize_trivial_count_with_sparsity_filter)",
-    "src/Core/SettingsChangesHistory.cpp:185 (use_legacy_to_time)",
-    "src/Core/SettingsChangesHistory.cpp:187 (parallel_replicas_plan_based)",
-    "src/Core/SettingsChangesHistory.cpp:189 (optimize_or_like_chain)",
-    "src/Core/SettingsChangesHistory.cpp:190 (optimize_or_like_chain_min_patterns)",
-    "src/Core/SettingsChangesHistory.cpp:191 (optimize_or_like_chain_min_substrings)",
-    "src/Core/SettingsChangesHistory.cpp:207 (optimize_redundant_comparisons)",
-    "src/Core/SettingsChangesHistory.cpp:210 (compile_regular_expressions)",
-    "src/Core/SettingsChangesHistory.cpp:211 (min_count_to_compile_regular_expression)",
-    "src/Core/SettingsChangesHistory.cpp:224 (precise_float_parsing)",
-    "src/Core/SettingsChangesHistory.cpp:225 (optimize_and_compare_chain_max_hash_work)",
-    "src/Core/SettingsChangesHistory.cpp:236 (analyzer_compatibility_apply_final_to_all_joined_tables)",
-    "src/Core/SettingsChangesHistory.cpp:243 (ai_function_embedding_max_batch_size)",
-    "src/Core/SettingsChangesHistory.cpp:244 (enable_nullable_tuple_type)",
-    "src/Core/SettingsChangesHistory.cpp:245 (enable_sharding_aggregator)",
-    "src/Core/SettingsChangesHistory.cpp:249 (enable_streaming_queries)",
-    "src/Core/SettingsChangesHistory.cpp:252 (output_format_float_precision)",
-    "src/Core/SettingsChangesHistory.cpp:255 (optimize_limit_by_function_keys)",
-    "src/Core/SettingsChangesHistory.cpp:256 (optimize_injective_functions_in_limit_by)",
-    "src/Core/SettingsChangesHistory.cpp:257 (optimize_rewrite_has_to_in)",
-    "src/Core/SettingsChangesHistory.cpp:261 (enable_identifier_resolve_cache)",
-    "src/Core/SettingsChangesHistory.cpp:263 (analyzer_compatibility_prefer_alias_over_subcolumn)",
-    "src/Core/SettingsChangesHistory.cpp:268 (output_format_always_write_decimal_point_in_float_and_decimal)",
-    "src/Core/SettingsChangesHistory.cpp:272 (function_base58_max_input_size)",
-    "src/Core/SettingsChangesHistory.cpp:273 (format_avro_schema_registry_max_retries)",
-    "src/Core/SettingsChangesHistory.cpp:285 (optimize_trivial_group_by_limit_query)",
-    "src/Core/SettingsChangesHistory.cpp:286 (date_time_input_format)",
-    "src/Core/SettingsChangesHistory.cpp:287 (cast_string_to_date_time_mode)",
-    "src/Core/SettingsChangesHistory.cpp:291 (optimize_dictget_tuple_element)",
-    "src/Core/SettingsChangesHistory.cpp:304 (format_avro_schema_registry_connection_timeout)",
-    "src/Core/SettingsChangesHistory.cpp:305 (format_avro_schema_registry_send_timeout)",
-    "src/Core/SettingsChangesHistory.cpp:306 (format_avro_schema_registry_receive_timeout)",
-    "src/Core/SettingsChangesHistory.cpp:308 (max_bytes_ratio_before_external_join)",
-    "src/Core/SettingsChangesHistory.cpp:313 (recursive_cte_max_steps_in_type_inference)",
-    "src/Core/SettingsChangesHistory.cpp:314 (use_skip_indexes_for_top_k)",
-    "src/Core/SettingsChangesHistory.cpp:315 (use_top_k_dynamic_filtering)",
-    "src/Core/SettingsChangesHistory.cpp:317 (max_threads_min_free_memory_per_thread)",
-    "src/Core/SettingsChangesHistory.cpp:331 (query_cache_for_subqueries)",
-    "src/Core/SettingsChangesHistory.cpp:342 (analyzer_compatibility_apply_final_to_all_joined_tables)",
-    "src/Core/SettingsChangesHistory.cpp:343 (max_bytes_before_external_join)",
-    "src/Core/SettingsChangesHistory.cpp:348 (asterisk_include_virtual_columns)",
-    "src/Core/SettingsChangesHistory.cpp:349 (max_wkb_geometry_elements)",
-    "src/Core/SettingsChangesHistory.cpp:350 (max_rand_distribution_trials)",
-    "src/Core/SettingsChangesHistory.cpp:351 (max_rand_distribution_parameter)",
-    "src/Core/SettingsChangesHistory.cpp:352 (optimize_truncate_order_by_after_group_by_keys)",
-    "src/Core/SettingsChangesHistory.cpp:367 (optimize_rewrite_array_exists_to_has)",
-    "src/Core/SettingsChangesHistory.cpp:368 (parallel_replicas_allow_view_over_mergetree)",
-    "src/Core/SettingsChangesHistory.cpp:374 (analyzer_inline_views)",
-    "src/Core/SettingsChangesHistory.cpp:376 (highlight_max_matches_per_row)",
-    "src/Core/SettingsChangesHistory.cpp:382 (ai_function_request_timeout_sec)",
-    "src/Core/SettingsChangesHistory.cpp:383 (ai_function_max_retries)",
-    "src/Core/SettingsChangesHistory.cpp:384 (ai_function_retry_initial_delay_ms)",
-    "src/Core/SettingsChangesHistory.cpp:385 (ai_function_throw_on_error)",
-    "src/Core/SettingsChangesHistory.cpp:390 (variant_throw_on_type_mismatch)",
-    "src/Core/SettingsChangesHistory.cpp:391 (dynamic_throw_on_type_mismatch)",
-    "src/Core/SettingsChangesHistory.cpp:398 (output_format_trim_fixed_string)",
-    "src/Core/SettingsChangesHistory.cpp:399 (optimize_syntax_fuse_functions)",
-    "src/Core/SettingsChangesHistory.cpp:401 (enable_materialized_cte)",
-    "src/Core/SettingsChangesHistory.cpp:403 (allow_nullable_tuple_in_extracted_subcolumns)",
-    "src/Core/SettingsChangesHistory.cpp:408 (type_json_allow_duplicated_key_with_literal_and_nested_object)",
-    "src/Core/SettingsChangesHistory.cpp:410 (webassembly_udf_max_fuel)",
-    "src/Core/SettingsChangesHistory.cpp:411 (webassembly_udf_max_memory)",
-    "src/Core/SettingsChangesHistory.cpp:412 (webassembly_udf_max_input_block_size)",
-    "src/Core/SettingsChangesHistory.cpp:413 (webassembly_udf_max_instances)",
-    "src/Core/SettingsChangesHistory.cpp:427 (allow_fuzz_query_functions)",
-    "src/Core/SettingsChangesHistory.cpp:458 (functions_h3_default_if_invalid)",
-    "src/Core/SettingsChangesHistory.cpp:464 (input_format_binary_max_type_complexity)",
-    "src/Core/SettingsChangesHistory.cpp:471 (correlated_subqueries_use_in_memory_buffer)",
-    "src/Core/SettingsChangesHistory.cpp:474 (type_json_use_partial_match_to_skip_paths_by_regexp)",
-    "src/Core/SettingsChangesHistory.cpp:481 (check_conversion_from_numbers_to_enum)",
-    "src/Core/SettingsChangesHistory.cpp:482 (allow_experimental_nullable_tuple_type)",
-    "src/Core/SettingsChangesHistory.cpp:485 (type_json_allow_duplicated_key_with_literal_and_nested_object)",
-    "src/Core/SettingsChangesHistory.cpp:490 (use_variant_default_implementation_for_comparisons)",
-    "src/Core/SettingsChangesHistory.cpp:491 (use_variant_as_common_type)",
-    "src/Core/SettingsChangesHistory.cpp:492 (max_dynamic_subcolumns_in_json_type_parsing)",
-    "src/Core/SettingsChangesHistory.cpp:500 (format_binary_max_object_size)",
-    "src/Core/SettingsChangesHistory.cpp:515 (allow_experimental_time_time64_type)",
-    "src/Core/SettingsChangesHistory.cpp:516 (enable_time_time64_type)",
-    "src/Core/SettingsChangesHistory.cpp:517 (use_skip_indexes_for_top_k)",
-    "src/Core/SettingsChangesHistory.cpp:518 (use_top_k_dynamic_filtering)",
-    "src/Core/SettingsChangesHistory.cpp:519 (query_plan_max_limit_for_top_k_optimization)",
-    "src/Core/SettingsChangesHistory.cpp:520 (aggregate_function_input_format)",
-    "src/Core/SettingsChangesHistory.cpp:525 (serialize_string_in_memory_with_zero_byte)",
-    "src/Core/SettingsChangesHistory.cpp:526 (optimize_inverse_dictionary_lookup)",
-    "src/Core/SettingsChangesHistory.cpp:527 (automatic_parallel_replicas_mode)",
-    "src/Core/SettingsChangesHistory.cpp:529 (type_json_skip_invalid_typed_paths)",
-    "src/Core/SettingsChangesHistory.cpp:533 (parallel_replicas_allow_materialized_views)",
-    "src/Core/SettingsChangesHistory.cpp:540 (output_format_pretty_named_tuples_as_json)",
-    "src/Core/SettingsChangesHistory.cpp:553 (correlated_subqueries_default_join_kind)",
-    "src/Core/SettingsChangesHistory.cpp:563 (optimize_const_name_size)",
-    "src/Core/SettingsChangesHistory.cpp:564 (enable_lazy_columns_replication)",
-    "src/Core/SettingsChangesHistory.cpp:578 (enable_lazy_columns_replication)",
-    "src/Core/SettingsChangesHistory.cpp:579 (correlated_subqueries_default_join_kind)",
-    "src/Core/SettingsChangesHistory.cpp:581 (optimize_rewrite_like_perfect_affix)",
-    "src/Core/SettingsChangesHistory.cpp:582 (allow_dynamic_type_in_join_keys)",
-    "src/Core/SettingsChangesHistory.cpp:590 (temporary_files_buffer_size)",
-    "src/Core/SettingsChangesHistory.cpp:591 (rewrite_in_to_join)",
-    "src/Core/SettingsChangesHistory.cpp:595 (optimize_qbit_distance_function_reads)",
-    "src/Core/SettingsChangesHistory.cpp:600 (inject_random_order_for_select_without_order_by)",
-    "src/Core/SettingsChangesHistory.cpp:602 (optimize_empty_string_comparisons)",
-    "src/Core/SettingsChangesHistory.cpp:604 (schema_inference_make_columns_nullable)",
-    "src/Core/SettingsChangesHistory.cpp:622 (query_plan_display_internal_aliases)",
-    "src/Core/SettingsChangesHistory.cpp:628 (enable_producing_buckets_out_of_order_in_aggregation)",
-    "src/Core/SettingsChangesHistory.cpp:640 (output_format_json_quote_64bit_integers)",
-    "src/Core/SettingsChangesHistory.cpp:642 (optimize_rewrite_regexp_functions)",
-    "src/Core/SettingsChangesHistory.cpp:654 (analyzer_compatibility_allow_compound_identifiers_in_unflatten_nested)",
-    "src/Core/SettingsChangesHistory.cpp:667 (json_type_escape_dots_in_keys)",
-    "src/Core/SettingsChangesHistory.cpp:669 (input_format_json_infer_array_of_dynamic_from_array_of_different_types)",
-    "src/Core/SettingsChangesHistory.cpp:672 (execute_exists_as_scalar_subquery)",
-    "src/Core/SettingsChangesHistory.cpp:697 (allow_experimental_correlated_subqueries)",
-    "src/Core/SettingsChangesHistory.cpp:705 (serialize_string_in_memory_with_zero_byte)",
-    "src/Core/SettingsChangesHistory.cpp:710 (correlated_subqueries_substitute_equivalent_expressions)",
-    "src/Core/SettingsChangesHistory.cpp:711 (function_date_trunc_return_type_behavior)",
-    "src/Core/SettingsChangesHistory.cpp:716 (output_format_json_map_as_array_of_tuples)",
-    "src/Core/SettingsChangesHistory.cpp:717 (input_format_json_map_as_array_of_tuples)",
-    "src/Core/SettingsChangesHistory.cpp:723 (enable_scopes_for_with_statement)",
-    "src/Core/SettingsChangesHistory.cpp:732 (output_format_native_use_flattened_dynamic_and_json_serialization)",
-    "src/Core/SettingsChangesHistory.cpp:733 (cast_string_to_date_time_mode)",
-    "src/Core/SettingsChangesHistory.cpp:740 (use_legacy_to_time)",
-    "src/Core/SettingsChangesHistory.cpp:741 (allow_experimental_time_time64_type)",
-    "src/Core/SettingsChangesHistory.cpp:742 (enable_time_time64_type)",
-    "src/Core/SettingsChangesHistory.cpp:749 (count_matches_stop_at_empty_match)",
-    "src/Core/SettingsChangesHistory.cpp:750 (enable_parallel_blocks_marshalling)",
-    "src/Core/SettingsChangesHistory.cpp:753 (enable_scopes_for_with_statement)",
-    "src/Core/SettingsChangesHistory.cpp:762 (geotoh3_argument_order)",
-    "src/Core/SettingsChangesHistory.cpp:764 (implicit_table_at_top_level)",
-    "src/Core/SettingsChangesHistory.cpp:766 (parsedatetime_e_requires_space_padding)",
-    "src/Core/SettingsChangesHistory.cpp:767 (formatdatetime_e_with_space_padding)",
-    "src/Core/SettingsChangesHistory.cpp:774 (parallel_hash_join_threshold)",
-    "src/Core/SettingsChangesHistory.cpp:779 (make_distributed_plan)",
-    "src/Core/SettingsChangesHistory.cpp:796 (compile_expressions)",
-    "src/Core/SettingsChangesHistory.cpp:801 (enable_scopes_for_with_statement)",
-    "src/Core/SettingsChangesHistory.cpp:807 (use_query_condition_cache)",
-    "src/Core/SettingsChangesHistory.cpp:814 (allow_experimental_correlated_subqueries)",
-    "src/Core/SettingsChangesHistory.cpp:815 (serialize_query_plan)",
-    "src/Core/SettingsChangesHistory.cpp:817 (allow_special_bool_values_inside_variant)",
-    "src/Core/SettingsChangesHistory.cpp:818 (cast_string_to_variant_use_inference)",
-    "src/Core/SettingsChangesHistory.cpp:830 (parallel_hash_join_threshold)",
-    "src/Core/SettingsChangesHistory.cpp:831 (function_date_trunc_return_type_behavior)",
-    "src/Core/SettingsChangesHistory.cpp:832 (enable_scopes_for_with_statement)",
-    "src/Core/SettingsChangesHistory.cpp:847 (use_query_condition_cache)",
-    "src/Core/SettingsChangesHistory.cpp:848 (parallel_replicas_for_cluster_engines)",
-    "src/Core/SettingsChangesHistory.cpp:849 (parallel_hash_join_threshold)",
-    "src/Core/SettingsChangesHistory.cpp:855 (schema_inference_make_json_columns_nullable)",
-    "src/Core/SettingsChangesHistory.cpp:861 (optimize_and_compare_chain)",
-    "src/Core/SettingsChangesHistory.cpp:866 (output_format_pretty_max_rows)",
-    "src/Core/SettingsChangesHistory.cpp:878 (formatdatetime_f_prints_scale_number_of_digits)",
-    "src/Core/SettingsChangesHistory.cpp:883 (max_bytes_ratio_before_external_group_by)",
-    "src/Core/SettingsChangesHistory.cpp:890 (short_circuit_function_evaluation_for_nulls)",
-    "src/Core/SettingsChangesHistory.cpp:891 (short_circuit_function_evaluation_for_nulls_threshold)",
-    "src/Core/SettingsChangesHistory.cpp:906 (max_autoincrement_series)",
-    "src/Core/SettingsChangesHistory.cpp:907 (validate_enum_literals_in_operators)",
-    "src/Core/SettingsChangesHistory.cpp:910 (h3togeo_lon_lat_result_order)",
-    "src/Core/SettingsChangesHistory.cpp:911 (max_parallel_replicas)",
-    "src/Core/SettingsChangesHistory.cpp:912 (allow_general_join_planning)",
-    "src/Core/SettingsChangesHistory.cpp:913 (optimize_extract_common_expressions)",
-    "src/Core/SettingsChangesHistory.cpp:922 (max_size_to_preallocate_for_aggregation)",
-    "src/Core/SettingsChangesHistory.cpp:923 (max_size_to_preallocate_for_joins)",
-    "src/Core/SettingsChangesHistory.cpp:924 (max_bytes_ratio_before_external_group_by)",
-    "src/Core/SettingsChangesHistory.cpp:925 (optimize_extract_common_expressions)",
-    "src/Core/SettingsChangesHistory.cpp:931 (skip_redundant_aliases_in_udf)",
-    "src/Core/SettingsChangesHistory.cpp:933 (least_greatest_legacy_null_behavior)",
-    "src/Core/SettingsChangesHistory.cpp:934 (use_concurrency_control)",
-    "src/Core/SettingsChangesHistory.cpp:935 (join_algorithm)",
-    "src/Core/SettingsChangesHistory.cpp:942 (allow_suspicious_types_in_group_by)",
-    "src/Core/SettingsChangesHistory.cpp:943 (allow_suspicious_types_in_order_by)",
-    "src/Core/SettingsChangesHistory.cpp:954 (parallel_replicas_local_plan)",
-    "src/Core/SettingsChangesHistory.cpp:974 (enable_parallel_replicas)",
-    "src/Core/SettingsChangesHistory.cpp:975 (parallel_replicas_mode)",
-    "src/Core/SettingsChangesHistory.cpp:983 (implicit_select)",
-    "src/Core/SettingsChangesHistory.cpp:984 (output_format_native_write_json_as_string)",
-    "src/Core/SettingsChangesHistory.cpp:985 (output_format_binary_write_json_as_string)",
-    "src/Core/SettingsChangesHistory.cpp:986 (input_format_binary_read_json_as_string)",
-    "src/Core/SettingsChangesHistory.cpp:989 (parallel_replicas_local_plan)",
-    "src/Core/SettingsChangesHistory.cpp:990 (enable_named_columns_in_function_tuple)",
-    "src/Core/SettingsChangesHistory.cpp:1014 (date_time_64_output_format_cut_trailing_zeros_align_to_groups_of_thousands)",
-    "src/Core/SettingsChangesHistory.cpp:1027 (input_format_json_empty_as_default)",
-    "src/Core/SettingsChangesHistory.cpp:1028 (input_format_try_infer_variants)",
-    "src/Core/SettingsChangesHistory.cpp:1035 (parallel_replicas_local_plan)",
-    "src/Core/SettingsChangesHistory.cpp:1048 (input_format_json_max_depth)",
-    "src/Core/SettingsChangesHistory.cpp:1055 (enable_analyzer)",
-    "src/Core/SettingsChangesHistory.cpp:1056 (optimize_functions_to_subcolumns)",
-    "src/Core/SettingsChangesHistory.cpp:1059 (type_json_skip_duplicated_paths)",
-    "src/Core/SettingsChangesHistory.cpp:1061 (input_format_try_infer_datetimes_only_datetime64)",
-    "src/Core/SettingsChangesHistory.cpp:1066 (output_format_binary_encode_types_in_binary_format)",
-    "src/Core/SettingsChangesHistory.cpp:1067 (input_format_binary_decode_types_in_binary_format)",
-    "src/Core/SettingsChangesHistory.cpp:1068 (output_format_native_encode_types_in_binary_format)",
-    "src/Core/SettingsChangesHistory.cpp:1069 (input_format_native_decode_types_in_binary_format)",
-    "src/Core/SettingsChangesHistory.cpp:1071 (enable_named_columns_in_function_tuple)",
-    "src/Core/SettingsChangesHistory.cpp:1074 (collect_hash_table_stats_during_joins)",
-    "src/Core/SettingsChangesHistory.cpp:1075 (max_size_to_preallocate_for_joins)",
-    "src/Core/SettingsChangesHistory.cpp:1102 (input_format_parquet_max_block_size)",
-    "src/Core/SettingsChangesHistory.cpp:1111 (parallel_replicas_custom_key_range_lower)",
-    "src/Core/SettingsChangesHistory.cpp:1112 (parallel_replicas_custom_key_range_upper)",
-    "src/Core/SettingsChangesHistory.cpp:1115 (output_format_csv_serialize_tuple_into_separate_columns)",
-    "src/Core/SettingsChangesHistory.cpp:1116 (input_format_csv_deserialize_separate_columns_into_tuple)",
-    "src/Core/SettingsChangesHistory.cpp:1117 (input_format_csv_try_infer_strings_from_quoted_tuples)",
-    "src/Core/SettingsChangesHistory.cpp:1121 (allow_deprecated_error_prone_window_functions)",
-    "src/Core/SettingsChangesHistory.cpp:1123 (input_format_tsv_crlf_end_of_line)",
-    "src/Core/SettingsChangesHistory.cpp:1130 (cast_string_to_dynamic_use_inference)",
-    "src/Core/SettingsChangesHistory.cpp:1137 (input_format_json_throw_on_bad_escape_sequence)",
-    "src/Core/SettingsChangesHistory.cpp:1146 (optimize_rewrite_sum_if_to_count_if)",
-    "src/Core/SettingsChangesHistory.cpp:1159 (input_format_json_use_string_type_for_ambiguous_paths_in_named_tuples_inference_from_objects)",
-    "src/Core/SettingsChangesHistory.cpp:1162 (parallel_replicas_allow_in_with_subquery)",
-    "src/Core/SettingsChangesHistory.cpp:1164 (function_locate_has_mysql_compatible_argument_order)",
-    "src/Core/SettingsChangesHistory.cpp:1167 (max_parser_backtracks)",
-    "src/Core/SettingsChangesHistory.cpp:1168 (analyzer_compatibility_join_using_top_level_identifier)",
-    "src/Core/SettingsChangesHistory.cpp:1174 (allow_experimental_analyzer)",
-    "src/Core/SettingsChangesHistory.cpp:1176 (allow_get_client_http_header)",
-    "src/Core/SettingsChangesHistory.cpp:1177 (output_format_pretty_row_numbers)",
-    "src/Core/SettingsChangesHistory.cpp:1185 (geo_distance_returns_float64_on_float64_arguments)",
-    "src/Core/SettingsChangesHistory.cpp:1192 (output_format_csv_serialize_tuple_into_separate_columns)",
-    "src/Core/SettingsChangesHistory.cpp:1193 (input_format_csv_deserialize_separate_columns_into_tuple)",
-    "src/Core/SettingsChangesHistory.cpp:1194 (input_format_csv_try_infer_strings_from_quoted_tuples)",
-    "src/Core/SettingsChangesHistory.cpp:1198 (allow_suspicious_variant_types)",
-    "src/Core/SettingsChangesHistory.cpp:1199 (validate_experimental_and_suspicious_types_inside_nested_types)",
-    "src/Core/SettingsChangesHistory.cpp:1200 (output_format_values_escape_quote_with_quote)",
-    "src/Core/SettingsChangesHistory.cpp:1202 (input_format_try_infer_exponent_floats)",
-    "src/Core/SettingsChangesHistory.cpp:1219 (optimize_time_filter_with_preimage)",
-    "src/Core/SettingsChangesHistory.cpp:1220 (extract_key_value_pairs_max_pairs_per_row)",
-    "src/Core/SettingsChangesHistory.cpp:1229 (print_pretty_type_names)",
-    "src/Core/SettingsChangesHistory.cpp:1230 (input_format_json_read_bools_as_strings)",
-    "src/Core/SettingsChangesHistory.cpp:1233 (use_variant_as_common_type)",
-    "src/Core/SettingsChangesHistory.cpp:1244 (function_visible_width_behavior)",
-    "src/Core/SettingsChangesHistory.cpp:1245 (max_estimated_execution_time)",
-    "src/Core/SettingsChangesHistory.cpp:1247 (optimize_injective_functions_in_group_by)",
-    "src/Core/SettingsChangesHistory.cpp:1262 (parsedatetime_parse_without_leading_zeros)",
-    "src/Core/SettingsChangesHistory.cpp:1266 (optimize_group_by_constant_keys)",
-    "src/Core/SettingsChangesHistory.cpp:1267 (input_format_json_try_infer_named_tuples_from_objects)",
-    "src/Core/SettingsChangesHistory.cpp:1268 (input_format_json_read_numbers_as_strings)",
-    "src/Core/SettingsChangesHistory.cpp:1269 (input_format_json_read_arrays_as_strings)",
-    "src/Core/SettingsChangesHistory.cpp:1270 (input_format_json_infer_incomplete_types_as_strings)",
-    "src/Core/SettingsChangesHistory.cpp:1271 (input_format_json_try_infer_numbers_from_strings)",
-    "src/Core/SettingsChangesHistory.cpp:1276 (rewrite_count_distinct_if_with_count_distinct_implementation)",
-    "src/Core/SettingsChangesHistory.cpp:1280 (function_sleep_max_microseconds_per_block)",
-    "src/Core/SettingsChangesHistory.cpp:1291 (use_with_fill_by_sorting_prefix)",
-    "src/Core/SettingsChangesHistory.cpp:1297 (allow_nonconst_timezone_arguments)",
-    "src/Core/SettingsChangesHistory.cpp:1301 (formatdatetime_f_prints_single_zero)",
-    "src/Core/SettingsChangesHistory.cpp:1302 (formatdatetime_parsedatetime_m_is_month_name)",
-    "src/Core/SettingsChangesHistory.cpp:1307 (input_format_json_ignore_unknown_keys_in_named_tuple)",
-    "src/Core/SettingsChangesHistory.cpp:1324 (input_format_json_read_objects_as_strings)",
-    "src/Core/SettingsChangesHistory.cpp:1325 (input_format_json_defaults_for_missing_elements_in_named_tuple)",
-    "src/Core/SettingsChangesHistory.cpp:1333 (max_size_to_preallocate_for_aggregation)",
-    "src/Core/SettingsChangesHistory.cpp:1334 (query_plan_aggregation_in_order)",
-    "src/Core/SettingsChangesHistory.cpp:1335 (format_binary_max_string_size)",
-    "src/Core/SettingsChangesHistory.cpp:1339 (use_structure_from_insertion_table_in_table_functions)",
-    "src/Core/SettingsChangesHistory.cpp:1343 (force_grouping_standard_compatibility)",
-    "src/Core/SettingsChangesHistory.cpp:1347 (enable_positional_arguments)",
-    "src/Core/SettingsChangesHistory.cpp:1348 (format_csv_allow_single_quotes)",
-    "src/Core/SettingsChangesHistory.cpp:1352 (output_format_json_named_tuples_as_objects)",
-    "src/Core/SettingsChangesHistory.cpp:1362 (allow_settings_after_format_in_insert)",
-    "src/Core/SettingsChangesHistory.cpp:1366 (cast_ipv4_ipv6_default_on_conversion_error)",
-    "src/Core/SettingsChangesHistory.cpp:1374 (output_format_decimal_trailing_zeros)",
-    "src/Core/SettingsChangesHistory.cpp:1379 (legacy_column_name_of_tuple_literal)",
-    "src/Core/SettingsChangesHistory.cpp:1383 (async_socket_for_remote)",
-    "src/Core/SettingsChangesHistory.cpp:1387 (async_socket_for_remote)",
-    "src/Core/SettingsChangesHistory.cpp:1388 (optimize_normalize_count_variants)",
-    "src/Core/SettingsChangesHistory.cpp:1389 (normalize_function_names)",
-    "src/Core/SettingsChangesHistory.cpp:1393 (enable_global_with_statement)",
-    "src/Core/SettingsChangesHistory.cpp:1398 (input_format_null_as_default)",
-    "src/Core/SettingsChangesHistory.cpp:1417 (validate_polygons)",
-    "src/Core/SettingsChangesHistory.cpp:1421 (enable_scalar_subquery_optimization)",
-    "src/Core/SettingsChangesHistory.cpp:1425 (any_join_distinct_right_table_keys)",
-    "src/Core/SettingsChangesHistory.cpp:1437 (enable_optimize_predicate_expression)"
+    "src/Core/SettingsChangesHistory.cpp:52 (use_aggregation_memory_tracker)",
+    "src/Core/SettingsChangesHistory.cpp:54 (analyzer_compatibility_allow_cte_redefinition)",
+    "src/Core/SettingsChangesHistory.cpp:55 (validate_group_by_all_key_types)",
+    "src/Core/SettingsChangesHistory.cpp:58 (ai_function_max_retries)",
+    "src/Core/SettingsChangesHistory.cpp:59 (adaptive_aggregator_freeze_threshold_bytes)",
+    "src/Core/SettingsChangesHistory.cpp:61 (enable_group_by_top_k_optimization)",
+    "src/Core/SettingsChangesHistory.cpp:62 (group_by_top_k_optimization_observation_rows)",
+    "src/Core/SettingsChangesHistory.cpp:81 (input_format_json_max_string_column_growth_step)",
+    "src/Core/SettingsChangesHistory.cpp:83 (join_algorithm)",
+    "src/Core/SettingsChangesHistory.cpp:86 (enable_adaptive_aggregator)",
+    "src/Core/SettingsChangesHistory.cpp:87 (adaptive_aggregator_freeze_threshold)",
+    "src/Core/SettingsChangesHistory.cpp:90 (use_query_condition_cache_for_top_k)",
+    "src/Core/SettingsChangesHistory.cpp:100 (allow_lossy_numeric_supertype)",
+    "src/Core/SettingsChangesHistory.cpp:108 (analyzer_compatibility_apply_final_to_all_joined_tables)",
+    "src/Core/SettingsChangesHistory.cpp:109 (enable_parallel_single_level_merge)",
+    "src/Core/SettingsChangesHistory.cpp:110 (ai_function_text_default_credentials)",
+    "src/Core/SettingsChangesHistory.cpp:111 (ai_function_embedding_default_credentials)",
+    "src/Core/SettingsChangesHistory.cpp:114 (ai_function_allow_insecure_endpoint)",
+    "src/Core/SettingsChangesHistory.cpp:119 (page)",
+    "src/Core/SettingsChangesHistory.cpp:120 (limit)",
+    "src/Core/SettingsChangesHistory.cpp:121 (offset)",
+    "src/Core/SettingsChangesHistory.cpp:122 (select)",
+    "src/Core/SettingsChangesHistory.cpp:123 (order)",
+    "src/Core/SettingsChangesHistory.cpp:124 (sort)",
+    "src/Core/SettingsChangesHistory.cpp:125 (filter)",
+    "src/Core/SettingsChangesHistory.cpp:126 (database)",
+    "src/Core/SettingsChangesHistory.cpp:139 (input_format_json_max_object_size)",
+    "src/Core/SettingsChangesHistory.cpp:142 (optimize_trivial_count_with_sparsity_filter)",
+    "src/Core/SettingsChangesHistory.cpp:144 (input_format_read_datetime_number_as_raw_value)",
+    "src/Core/SettingsChangesHistory.cpp:149 (enable_packed_string_keys_in_aggregation)",
+    "src/Core/SettingsChangesHistory.cpp:157 (run_query_in_background)",
+    "src/Core/SettingsChangesHistory.cpp:158 (enable_cascades_optimizer)",
+    "src/Core/SettingsChangesHistory.cpp:160 (analyzer_compatibility_multiple_joins_qualify_column_names)",
+    "src/Core/SettingsChangesHistory.cpp:163 (optimize_trivial_view_pushdown_to_distributed)",
+    "src/Core/SettingsChangesHistory.cpp:167 (enable_function_early_short_circuit)",
+    "src/Core/SettingsChangesHistory.cpp:176 (validate_group_by_all_key_types)",
+    "src/Core/SettingsChangesHistory.cpp:177 (analyzer_compatibility_allow_non_aggregate_in_having)",
+    "src/Core/SettingsChangesHistory.cpp:183 (optimize_trivial_count_with_sparsity_filter)",
+    "src/Core/SettingsChangesHistory.cpp:190 (use_legacy_to_time)",
+    "src/Core/SettingsChangesHistory.cpp:192 (parallel_replicas_plan_based)",
+    "src/Core/SettingsChangesHistory.cpp:194 (optimize_or_like_chain)",
+    "src/Core/SettingsChangesHistory.cpp:195 (optimize_or_like_chain_min_patterns)",
+    "src/Core/SettingsChangesHistory.cpp:196 (optimize_or_like_chain_min_substrings)",
+    "src/Core/SettingsChangesHistory.cpp:212 (optimize_redundant_comparisons)",
+    "src/Core/SettingsChangesHistory.cpp:215 (compile_regular_expressions)",
+    "src/Core/SettingsChangesHistory.cpp:216 (min_count_to_compile_regular_expression)",
+    "src/Core/SettingsChangesHistory.cpp:229 (precise_float_parsing)",
+    "src/Core/SettingsChangesHistory.cpp:230 (optimize_and_compare_chain_max_hash_work)",
+    "src/Core/SettingsChangesHistory.cpp:241 (analyzer_compatibility_apply_final_to_all_joined_tables)",
+    "src/Core/SettingsChangesHistory.cpp:248 (ai_function_embedding_max_batch_size)",
+    "src/Core/SettingsChangesHistory.cpp:249 (enable_nullable_tuple_type)",
+    "src/Core/SettingsChangesHistory.cpp:250 (enable_sharding_aggregator)",
+    "src/Core/SettingsChangesHistory.cpp:254 (enable_streaming_queries)",
+    "src/Core/SettingsChangesHistory.cpp:257 (output_format_float_precision)",
+    "src/Core/SettingsChangesHistory.cpp:260 (optimize_limit_by_function_keys)",
+    "src/Core/SettingsChangesHistory.cpp:261 (optimize_injective_functions_in_limit_by)",
+    "src/Core/SettingsChangesHistory.cpp:262 (optimize_rewrite_has_to_in)",
+    "src/Core/SettingsChangesHistory.cpp:266 (enable_identifier_resolve_cache)",
+    "src/Core/SettingsChangesHistory.cpp:268 (analyzer_compatibility_prefer_alias_over_subcolumn)",
+    "src/Core/SettingsChangesHistory.cpp:273 (output_format_always_write_decimal_point_in_float_and_decimal)",
+    "src/Core/SettingsChangesHistory.cpp:277 (function_base58_max_input_size)",
+    "src/Core/SettingsChangesHistory.cpp:278 (format_avro_schema_registry_max_retries)",
+    "src/Core/SettingsChangesHistory.cpp:290 (optimize_trivial_group_by_limit_query)",
+    "src/Core/SettingsChangesHistory.cpp:291 (date_time_input_format)",
+    "src/Core/SettingsChangesHistory.cpp:292 (cast_string_to_date_time_mode)",
+    "src/Core/SettingsChangesHistory.cpp:296 (optimize_dictget_tuple_element)",
+    "src/Core/SettingsChangesHistory.cpp:309 (format_avro_schema_registry_connection_timeout)",
+    "src/Core/SettingsChangesHistory.cpp:310 (format_avro_schema_registry_send_timeout)",
+    "src/Core/SettingsChangesHistory.cpp:311 (format_avro_schema_registry_receive_timeout)",
+    "src/Core/SettingsChangesHistory.cpp:313 (max_bytes_ratio_before_external_join)",
+    "src/Core/SettingsChangesHistory.cpp:318 (recursive_cte_max_steps_in_type_inference)",
+    "src/Core/SettingsChangesHistory.cpp:319 (use_skip_indexes_for_top_k)",
+    "src/Core/SettingsChangesHistory.cpp:320 (use_top_k_dynamic_filtering)",
+    "src/Core/SettingsChangesHistory.cpp:322 (max_threads_min_free_memory_per_thread)",
+    "src/Core/SettingsChangesHistory.cpp:336 (query_cache_for_subqueries)",
+    "src/Core/SettingsChangesHistory.cpp:347 (analyzer_compatibility_apply_final_to_all_joined_tables)",
+    "src/Core/SettingsChangesHistory.cpp:348 (max_bytes_before_external_join)",
+    "src/Core/SettingsChangesHistory.cpp:353 (asterisk_include_virtual_columns)",
+    "src/Core/SettingsChangesHistory.cpp:354 (max_wkb_geometry_elements)",
+    "src/Core/SettingsChangesHistory.cpp:355 (max_rand_distribution_trials)",
+    "src/Core/SettingsChangesHistory.cpp:356 (max_rand_distribution_parameter)",
+    "src/Core/SettingsChangesHistory.cpp:357 (optimize_truncate_order_by_after_group_by_keys)",
+    "src/Core/SettingsChangesHistory.cpp:372 (optimize_rewrite_array_exists_to_has)",
+    "src/Core/SettingsChangesHistory.cpp:373 (parallel_replicas_allow_view_over_mergetree)",
+    "src/Core/SettingsChangesHistory.cpp:379 (analyzer_inline_views)",
+    "src/Core/SettingsChangesHistory.cpp:381 (highlight_max_matches_per_row)",
+    "src/Core/SettingsChangesHistory.cpp:387 (ai_function_request_timeout_sec)",
+    "src/Core/SettingsChangesHistory.cpp:388 (ai_function_max_retries)",
+    "src/Core/SettingsChangesHistory.cpp:389 (ai_function_retry_initial_delay_ms)",
+    "src/Core/SettingsChangesHistory.cpp:390 (ai_function_throw_on_error)",
+    "src/Core/SettingsChangesHistory.cpp:395 (variant_throw_on_type_mismatch)",
+    "src/Core/SettingsChangesHistory.cpp:396 (dynamic_throw_on_type_mismatch)",
+    "src/Core/SettingsChangesHistory.cpp:403 (output_format_trim_fixed_string)",
+    "src/Core/SettingsChangesHistory.cpp:404 (optimize_syntax_fuse_functions)",
+    "src/Core/SettingsChangesHistory.cpp:406 (enable_materialized_cte)",
+    "src/Core/SettingsChangesHistory.cpp:408 (allow_nullable_tuple_in_extracted_subcolumns)",
+    "src/Core/SettingsChangesHistory.cpp:413 (type_json_allow_duplicated_key_with_literal_and_nested_object)",
+    "src/Core/SettingsChangesHistory.cpp:415 (webassembly_udf_max_fuel)",
+    "src/Core/SettingsChangesHistory.cpp:416 (webassembly_udf_max_memory)",
+    "src/Core/SettingsChangesHistory.cpp:417 (webassembly_udf_max_input_block_size)",
+    "src/Core/SettingsChangesHistory.cpp:418 (webassembly_udf_max_instances)",
+    "src/Core/SettingsChangesHistory.cpp:432 (allow_fuzz_query_functions)",
+    "src/Core/SettingsChangesHistory.cpp:463 (functions_h3_default_if_invalid)",
+    "src/Core/SettingsChangesHistory.cpp:469 (input_format_binary_max_type_complexity)",
+    "src/Core/SettingsChangesHistory.cpp:476 (correlated_subqueries_use_in_memory_buffer)",
+    "src/Core/SettingsChangesHistory.cpp:479 (type_json_use_partial_match_to_skip_paths_by_regexp)",
+    "src/Core/SettingsChangesHistory.cpp:486 (check_conversion_from_numbers_to_enum)",
+    "src/Core/SettingsChangesHistory.cpp:487 (allow_experimental_nullable_tuple_type)",
+    "src/Core/SettingsChangesHistory.cpp:490 (type_json_allow_duplicated_key_with_literal_and_nested_object)",
+    "src/Core/SettingsChangesHistory.cpp:495 (use_variant_default_implementation_for_comparisons)",
+    "src/Core/SettingsChangesHistory.cpp:496 (use_variant_as_common_type)",
+    "src/Core/SettingsChangesHistory.cpp:497 (max_dynamic_subcolumns_in_json_type_parsing)",
+    "src/Core/SettingsChangesHistory.cpp:505 (format_binary_max_object_size)",
+    "src/Core/SettingsChangesHistory.cpp:520 (allow_experimental_time_time64_type)",
+    "src/Core/SettingsChangesHistory.cpp:521 (enable_time_time64_type)",
+    "src/Core/SettingsChangesHistory.cpp:522 (use_skip_indexes_for_top_k)",
+    "src/Core/SettingsChangesHistory.cpp:523 (use_top_k_dynamic_filtering)",
+    "src/Core/SettingsChangesHistory.cpp:524 (query_plan_max_limit_for_top_k_optimization)",
+    "src/Core/SettingsChangesHistory.cpp:525 (aggregate_function_input_format)",
+    "src/Core/SettingsChangesHistory.cpp:530 (serialize_string_in_memory_with_zero_byte)",
+    "src/Core/SettingsChangesHistory.cpp:531 (optimize_inverse_dictionary_lookup)",
+    "src/Core/SettingsChangesHistory.cpp:532 (automatic_parallel_replicas_mode)",
+    "src/Core/SettingsChangesHistory.cpp:534 (type_json_skip_invalid_typed_paths)",
+    "src/Core/SettingsChangesHistory.cpp:538 (parallel_replicas_allow_materialized_views)",
+    "src/Core/SettingsChangesHistory.cpp:545 (output_format_pretty_named_tuples_as_json)",
+    "src/Core/SettingsChangesHistory.cpp:558 (correlated_subqueries_default_join_kind)",
+    "src/Core/SettingsChangesHistory.cpp:568 (optimize_const_name_size)",
+    "src/Core/SettingsChangesHistory.cpp:569 (enable_lazy_columns_replication)",
+    "src/Core/SettingsChangesHistory.cpp:583 (enable_lazy_columns_replication)",
+    "src/Core/SettingsChangesHistory.cpp:584 (correlated_subqueries_default_join_kind)",
+    "src/Core/SettingsChangesHistory.cpp:586 (optimize_rewrite_like_perfect_affix)",
+    "src/Core/SettingsChangesHistory.cpp:587 (allow_dynamic_type_in_join_keys)",
+    "src/Core/SettingsChangesHistory.cpp:595 (temporary_files_buffer_size)",
+    "src/Core/SettingsChangesHistory.cpp:596 (rewrite_in_to_join)",
+    "src/Core/SettingsChangesHistory.cpp:600 (optimize_qbit_distance_function_reads)",
+    "src/Core/SettingsChangesHistory.cpp:605 (inject_random_order_for_select_without_order_by)",
+    "src/Core/SettingsChangesHistory.cpp:607 (optimize_empty_string_comparisons)",
+    "src/Core/SettingsChangesHistory.cpp:609 (schema_inference_make_columns_nullable)",
+    "src/Core/SettingsChangesHistory.cpp:627 (query_plan_display_internal_aliases)",
+    "src/Core/SettingsChangesHistory.cpp:633 (enable_producing_buckets_out_of_order_in_aggregation)",
+    "src/Core/SettingsChangesHistory.cpp:645 (output_format_json_quote_64bit_integers)",
+    "src/Core/SettingsChangesHistory.cpp:647 (optimize_rewrite_regexp_functions)",
+    "src/Core/SettingsChangesHistory.cpp:659 (analyzer_compatibility_allow_compound_identifiers_in_unflatten_nested)",
+    "src/Core/SettingsChangesHistory.cpp:672 (json_type_escape_dots_in_keys)",
+    "src/Core/SettingsChangesHistory.cpp:674 (input_format_json_infer_array_of_dynamic_from_array_of_different_types)",
+    "src/Core/SettingsChangesHistory.cpp:677 (execute_exists_as_scalar_subquery)",
+    "src/Core/SettingsChangesHistory.cpp:702 (allow_experimental_correlated_subqueries)",
+    "src/Core/SettingsChangesHistory.cpp:710 (serialize_string_in_memory_with_zero_byte)",
+    "src/Core/SettingsChangesHistory.cpp:715 (correlated_subqueries_substitute_equivalent_expressions)",
+    "src/Core/SettingsChangesHistory.cpp:716 (function_date_trunc_return_type_behavior)",
+    "src/Core/SettingsChangesHistory.cpp:721 (output_format_json_map_as_array_of_tuples)",
+    "src/Core/SettingsChangesHistory.cpp:722 (input_format_json_map_as_array_of_tuples)",
+    "src/Core/SettingsChangesHistory.cpp:728 (enable_scopes_for_with_statement)",
+    "src/Core/SettingsChangesHistory.cpp:737 (output_format_native_use_flattened_dynamic_and_json_serialization)",
+    "src/Core/SettingsChangesHistory.cpp:738 (cast_string_to_date_time_mode)",
+    "src/Core/SettingsChangesHistory.cpp:745 (use_legacy_to_time)",
+    "src/Core/SettingsChangesHistory.cpp:746 (allow_experimental_time_time64_type)",
+    "src/Core/SettingsChangesHistory.cpp:747 (enable_time_time64_type)",
+    "src/Core/SettingsChangesHistory.cpp:754 (count_matches_stop_at_empty_match)",
+    "src/Core/SettingsChangesHistory.cpp:755 (enable_parallel_blocks_marshalling)",
+    "src/Core/SettingsChangesHistory.cpp:758 (enable_scopes_for_with_statement)",
+    "src/Core/SettingsChangesHistory.cpp:767 (geotoh3_argument_order)",
+    "src/Core/SettingsChangesHistory.cpp:769 (implicit_table_at_top_level)",
+    "src/Core/SettingsChangesHistory.cpp:771 (parsedatetime_e_requires_space_padding)",
+    "src/Core/SettingsChangesHistory.cpp:772 (formatdatetime_e_with_space_padding)",
+    "src/Core/SettingsChangesHistory.cpp:779 (parallel_hash_join_threshold)",
+    "src/Core/SettingsChangesHistory.cpp:784 (make_distributed_plan)",
+    "src/Core/SettingsChangesHistory.cpp:801 (compile_expressions)",
+    "src/Core/SettingsChangesHistory.cpp:806 (enable_scopes_for_with_statement)",
+    "src/Core/SettingsChangesHistory.cpp:812 (use_query_condition_cache)",
+    "src/Core/SettingsChangesHistory.cpp:819 (allow_experimental_correlated_subqueries)",
+    "src/Core/SettingsChangesHistory.cpp:820 (serialize_query_plan)",
+    "src/Core/SettingsChangesHistory.cpp:822 (allow_special_bool_values_inside_variant)",
+    "src/Core/SettingsChangesHistory.cpp:823 (cast_string_to_variant_use_inference)",
+    "src/Core/SettingsChangesHistory.cpp:835 (parallel_hash_join_threshold)",
+    "src/Core/SettingsChangesHistory.cpp:836 (function_date_trunc_return_type_behavior)",
+    "src/Core/SettingsChangesHistory.cpp:837 (enable_scopes_for_with_statement)",
+    "src/Core/SettingsChangesHistory.cpp:852 (use_query_condition_cache)",
+    "src/Core/SettingsChangesHistory.cpp:853 (parallel_replicas_for_cluster_engines)",
+    "src/Core/SettingsChangesHistory.cpp:854 (parallel_hash_join_threshold)",
+    "src/Core/SettingsChangesHistory.cpp:860 (schema_inference_make_json_columns_nullable)",
+    "src/Core/SettingsChangesHistory.cpp:866 (optimize_and_compare_chain)",
+    "src/Core/SettingsChangesHistory.cpp:871 (output_format_pretty_max_rows)",
+    "src/Core/SettingsChangesHistory.cpp:883 (formatdatetime_f_prints_scale_number_of_digits)",
+    "src/Core/SettingsChangesHistory.cpp:888 (max_bytes_ratio_before_external_group_by)",
+    "src/Core/SettingsChangesHistory.cpp:895 (short_circuit_function_evaluation_for_nulls)",
+    "src/Core/SettingsChangesHistory.cpp:896 (short_circuit_function_evaluation_for_nulls_threshold)",
+    "src/Core/SettingsChangesHistory.cpp:911 (max_autoincrement_series)",
+    "src/Core/SettingsChangesHistory.cpp:912 (validate_enum_literals_in_operators)",
+    "src/Core/SettingsChangesHistory.cpp:915 (h3togeo_lon_lat_result_order)",
+    "src/Core/SettingsChangesHistory.cpp:916 (max_parallel_replicas)",
+    "src/Core/SettingsChangesHistory.cpp:917 (allow_general_join_planning)",
+    "src/Core/SettingsChangesHistory.cpp:918 (optimize_extract_common_expressions)",
+    "src/Core/SettingsChangesHistory.cpp:927 (max_size_to_preallocate_for_aggregation)",
+    "src/Core/SettingsChangesHistory.cpp:928 (max_size_to_preallocate_for_joins)",
+    "src/Core/SettingsChangesHistory.cpp:929 (max_bytes_ratio_before_external_group_by)",
+    "src/Core/SettingsChangesHistory.cpp:930 (optimize_extract_common_expressions)",
+    "src/Core/SettingsChangesHistory.cpp:936 (skip_redundant_aliases_in_udf)",
+    "src/Core/SettingsChangesHistory.cpp:938 (least_greatest_legacy_null_behavior)",
+    "src/Core/SettingsChangesHistory.cpp:939 (use_concurrency_control)",
+    "src/Core/SettingsChangesHistory.cpp:940 (join_algorithm)",
+    "src/Core/SettingsChangesHistory.cpp:947 (allow_suspicious_types_in_group_by)",
+    "src/Core/SettingsChangesHistory.cpp:948 (allow_suspicious_types_in_order_by)",
+    "src/Core/SettingsChangesHistory.cpp:959 (parallel_replicas_local_plan)",
+    "src/Core/SettingsChangesHistory.cpp:979 (enable_parallel_replicas)",
+    "src/Core/SettingsChangesHistory.cpp:980 (parallel_replicas_mode)",
+    "src/Core/SettingsChangesHistory.cpp:988 (implicit_select)",
+    "src/Core/SettingsChangesHistory.cpp:989 (output_format_native_write_json_as_string)",
+    "src/Core/SettingsChangesHistory.cpp:990 (output_format_binary_write_json_as_string)",
+    "src/Core/SettingsChangesHistory.cpp:991 (input_format_binary_read_json_as_string)",
+    "src/Core/SettingsChangesHistory.cpp:994 (parallel_replicas_local_plan)",
+    "src/Core/SettingsChangesHistory.cpp:995 (enable_named_columns_in_function_tuple)",
+    "src/Core/SettingsChangesHistory.cpp:1019 (date_time_64_output_format_cut_trailing_zeros_align_to_groups_of_thousands)",
+    "src/Core/SettingsChangesHistory.cpp:1032 (input_format_json_empty_as_default)",
+    "src/Core/SettingsChangesHistory.cpp:1033 (input_format_try_infer_variants)",
+    "src/Core/SettingsChangesHistory.cpp:1040 (parallel_replicas_local_plan)",
+    "src/Core/SettingsChangesHistory.cpp:1053 (input_format_json_max_depth)",
+    "src/Core/SettingsChangesHistory.cpp:1060 (enable_analyzer)",
+    "src/Core/SettingsChangesHistory.cpp:1061 (optimize_functions_to_subcolumns)",
+    "src/Core/SettingsChangesHistory.cpp:1064 (type_json_skip_duplicated_paths)",
+    "src/Core/SettingsChangesHistory.cpp:1066 (input_format_try_infer_datetimes_only_datetime64)",
+    "src/Core/SettingsChangesHistory.cpp:1071 (output_format_binary_encode_types_in_binary_format)",
+    "src/Core/SettingsChangesHistory.cpp:1072 (input_format_binary_decode_types_in_binary_format)",
+    "src/Core/SettingsChangesHistory.cpp:1073 (output_format_native_encode_types_in_binary_format)",
+    "src/Core/SettingsChangesHistory.cpp:1074 (input_format_native_decode_types_in_binary_format)",
+    "src/Core/SettingsChangesHistory.cpp:1076 (enable_named_columns_in_function_tuple)",
+    "src/Core/SettingsChangesHistory.cpp:1079 (collect_hash_table_stats_during_joins)",
+    "src/Core/SettingsChangesHistory.cpp:1080 (max_size_to_preallocate_for_joins)",
+    "src/Core/SettingsChangesHistory.cpp:1107 (input_format_parquet_max_block_size)",
+    "src/Core/SettingsChangesHistory.cpp:1116 (parallel_replicas_custom_key_range_lower)",
+    "src/Core/SettingsChangesHistory.cpp:1117 (parallel_replicas_custom_key_range_upper)",
+    "src/Core/SettingsChangesHistory.cpp:1120 (output_format_csv_serialize_tuple_into_separate_columns)",
+    "src/Core/SettingsChangesHistory.cpp:1121 (input_format_csv_deserialize_separate_columns_into_tuple)",
+    "src/Core/SettingsChangesHistory.cpp:1122 (input_format_csv_try_infer_strings_from_quoted_tuples)",
+    "src/Core/SettingsChangesHistory.cpp:1126 (allow_deprecated_error_prone_window_functions)",
+    "src/Core/SettingsChangesHistory.cpp:1128 (input_format_tsv_crlf_end_of_line)",
+    "src/Core/SettingsChangesHistory.cpp:1135 (cast_string_to_dynamic_use_inference)",
+    "src/Core/SettingsChangesHistory.cpp:1142 (input_format_json_throw_on_bad_escape_sequence)",
+    "src/Core/SettingsChangesHistory.cpp:1151 (optimize_rewrite_sum_if_to_count_if)",
+    "src/Core/SettingsChangesHistory.cpp:1164 (input_format_json_use_string_type_for_ambiguous_paths_in_named_tuples_inference_from_objects)",
+    "src/Core/SettingsChangesHistory.cpp:1167 (parallel_replicas_allow_in_with_subquery)",
+    "src/Core/SettingsChangesHistory.cpp:1169 (function_locate_has_mysql_compatible_argument_order)",
+    "src/Core/SettingsChangesHistory.cpp:1172 (max_parser_backtracks)",
+    "src/Core/SettingsChangesHistory.cpp:1173 (analyzer_compatibility_join_using_top_level_identifier)",
+    "src/Core/SettingsChangesHistory.cpp:1179 (allow_experimental_analyzer)",
+    "src/Core/SettingsChangesHistory.cpp:1181 (allow_get_client_http_header)",
+    "src/Core/SettingsChangesHistory.cpp:1182 (output_format_pretty_row_numbers)",
+    "src/Core/SettingsChangesHistory.cpp:1190 (geo_distance_returns_float64_on_float64_arguments)",
+    "src/Core/SettingsChangesHistory.cpp:1197 (output_format_csv_serialize_tuple_into_separate_columns)",
+    "src/Core/SettingsChangesHistory.cpp:1198 (input_format_csv_deserialize_separate_columns_into_tuple)",
+    "src/Core/SettingsChangesHistory.cpp:1199 (input_format_csv_try_infer_strings_from_quoted_tuples)",
+    "src/Core/SettingsChangesHistory.cpp:1203 (allow_suspicious_variant_types)",
+    "src/Core/SettingsChangesHistory.cpp:1204 (validate_experimental_and_suspicious_types_inside_nested_types)",
+    "src/Core/SettingsChangesHistory.cpp:1205 (output_format_values_escape_quote_with_quote)",
+    "src/Core/SettingsChangesHistory.cpp:1207 (input_format_try_infer_exponent_floats)",
+    "src/Core/SettingsChangesHistory.cpp:1224 (optimize_time_filter_with_preimage)",
+    "src/Core/SettingsChangesHistory.cpp:1225 (extract_key_value_pairs_max_pairs_per_row)",
+    "src/Core/SettingsChangesHistory.cpp:1234 (print_pretty_type_names)",
+    "src/Core/SettingsChangesHistory.cpp:1235 (input_format_json_read_bools_as_strings)",
+    "src/Core/SettingsChangesHistory.cpp:1238 (use_variant_as_common_type)",
+    "src/Core/SettingsChangesHistory.cpp:1249 (function_visible_width_behavior)",
+    "src/Core/SettingsChangesHistory.cpp:1250 (max_estimated_execution_time)",
+    "src/Core/SettingsChangesHistory.cpp:1252 (optimize_injective_functions_in_group_by)",
+    "src/Core/SettingsChangesHistory.cpp:1267 (parsedatetime_parse_without_leading_zeros)",
+    "src/Core/SettingsChangesHistory.cpp:1271 (optimize_group_by_constant_keys)",
+    "src/Core/SettingsChangesHistory.cpp:1272 (input_format_json_try_infer_named_tuples_from_objects)",
+    "src/Core/SettingsChangesHistory.cpp:1273 (input_format_json_read_numbers_as_strings)",
+    "src/Core/SettingsChangesHistory.cpp:1274 (input_format_json_read_arrays_as_strings)",
+    "src/Core/SettingsChangesHistory.cpp:1275 (input_format_json_infer_incomplete_types_as_strings)",
+    "src/Core/SettingsChangesHistory.cpp:1276 (input_format_json_try_infer_numbers_from_strings)",
+    "src/Core/SettingsChangesHistory.cpp:1281 (rewrite_count_distinct_if_with_count_distinct_implementation)",
+    "src/Core/SettingsChangesHistory.cpp:1285 (function_sleep_max_microseconds_per_block)",
+    "src/Core/SettingsChangesHistory.cpp:1296 (use_with_fill_by_sorting_prefix)",
+    "src/Core/SettingsChangesHistory.cpp:1302 (allow_nonconst_timezone_arguments)",
+    "src/Core/SettingsChangesHistory.cpp:1306 (formatdatetime_f_prints_single_zero)",
+    "src/Core/SettingsChangesHistory.cpp:1307 (formatdatetime_parsedatetime_m_is_month_name)",
+    "src/Core/SettingsChangesHistory.cpp:1312 (input_format_json_ignore_unknown_keys_in_named_tuple)",
+    "src/Core/SettingsChangesHistory.cpp:1329 (input_format_json_read_objects_as_strings)",
+    "src/Core/SettingsChangesHistory.cpp:1330 (input_format_json_defaults_for_missing_elements_in_named_tuple)",
+    "src/Core/SettingsChangesHistory.cpp:1338 (max_size_to_preallocate_for_aggregation)",
+    "src/Core/SettingsChangesHistory.cpp:1339 (query_plan_aggregation_in_order)",
+    "src/Core/SettingsChangesHistory.cpp:1340 (format_binary_max_string_size)",
+    "src/Core/SettingsChangesHistory.cpp:1344 (use_structure_from_insertion_table_in_table_functions)",
+    "src/Core/SettingsChangesHistory.cpp:1348 (force_grouping_standard_compatibility)",
+    "src/Core/SettingsChangesHistory.cpp:1352 (enable_positional_arguments)",
+    "src/Core/SettingsChangesHistory.cpp:1353 (format_csv_allow_single_quotes)",
+    "src/Core/SettingsChangesHistory.cpp:1357 (output_format_json_named_tuples_as_objects)",
+    "src/Core/SettingsChangesHistory.cpp:1367 (allow_settings_after_format_in_insert)",
+    "src/Core/SettingsChangesHistory.cpp:1371 (cast_ipv4_ipv6_default_on_conversion_error)",
+    "src/Core/SettingsChangesHistory.cpp:1379 (output_format_decimal_trailing_zeros)",
+    "src/Core/SettingsChangesHistory.cpp:1384 (legacy_column_name_of_tuple_literal)",
+    "src/Core/SettingsChangesHistory.cpp:1388 (async_socket_for_remote)",
+    "src/Core/SettingsChangesHistory.cpp:1392 (async_socket_for_remote)",
+    "src/Core/SettingsChangesHistory.cpp:1393 (optimize_normalize_count_variants)",
+    "src/Core/SettingsChangesHistory.cpp:1394 (normalize_function_names)",
+    "src/Core/SettingsChangesHistory.cpp:1398 (enable_global_with_statement)",
+    "src/Core/SettingsChangesHistory.cpp:1403 (input_format_null_as_default)",
+    "src/Core/SettingsChangesHistory.cpp:1422 (validate_polygons)",
+    "src/Core/SettingsChangesHistory.cpp:1426 (enable_scalar_subquery_optimization)",
+    "src/Core/SettingsChangesHistory.cpp:1430 (any_join_distinct_right_table_keys)",
+    "src/Core/SettingsChangesHistory.cpp:1442 (enable_optimize_predicate_expression)"
    ]
   },
   {
@@ -1257,7 +1258,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:692 getAggregatorParams"
+    "src/Planner/Planner.cpp:694 getAggregatorParams"
    ]
   },
   {
@@ -1297,7 +1298,7 @@
     "planner"
    ],
    "sources": [
-    "src/Interpreters/ExpressionAnalyzer.cpp:888 ExpressionAnalyzer::makeWindowDescriptions",
+    "src/Interpreters/ExpressionAnalyzer.cpp:889 ExpressionAnalyzer::makeWindowDescriptions",
     "src/Planner/PlannerSorting.cpp:188 extractSortDescription",
     "src/Planner/PlannerWindowFunctions.cpp:59 extractWindowDescriptionFromWindowNode"
    ]
@@ -1313,7 +1314,7 @@
    ],
    "sources": [
     "src/Analyzer/Passes/ConvertQueryToCNFPass.cpp:808 ConvertLogicalExpressionToCNFPass::run",
-    "src/Interpreters/TreeOptimizer.cpp:668 TreeOptimizer::apply"
+    "src/Interpreters/TreeOptimizer.cpp:675 TreeOptimizer::apply"
    ]
   },
   {
@@ -1405,8 +1406,8 @@
     "analyzer"
    ],
    "sources": [
-    "src/Analyzer/Passes/CrossToInnerJoinPass.cpp:338 <file-scope>",
-    "src/Analyzer/Passes/CrossToInnerJoinPass.cpp:343 forceRewrite"
+    "src/Analyzer/Passes/CrossToInnerJoinPass.cpp:378 <file-scope>",
+    "src/Analyzer/Passes/CrossToInnerJoinPass.cpp:383 forceRewrite"
    ]
   },
   {
@@ -1418,7 +1419,7 @@
     "query-construction"
    ],
    "sources": [
-    "src/Interpreters/executeQuery.cpp:2645 executeQueryImpl"
+    "src/Interpreters/executeQuery.cpp:2666 executeQueryImpl"
    ]
   },
   {
@@ -1496,11 +1497,11 @@
     "pass-switch"
    ],
    "sources": [
-    "src/Interpreters/executeQuery.cpp:2285 executeQueryImpl",
-    "src/Interpreters/executeQuery.cpp:2293 executeQueryImpl",
-    "src/Interpreters/executeQuery.cpp:2300 executeQueryImpl",
-    "src/Interpreters/executeQuery.cpp:2307 executeQueryImpl",
-    "src/Interpreters/executeQuery.cpp:2322 executeQueryImpl"
+    "src/Interpreters/executeQuery.cpp:2306 executeQueryImpl",
+    "src/Interpreters/executeQuery.cpp:2314 executeQueryImpl",
+    "src/Interpreters/executeQuery.cpp:2321 executeQueryImpl",
+    "src/Interpreters/executeQuery.cpp:2328 executeQueryImpl",
+    "src/Interpreters/executeQuery.cpp:2343 executeQueryImpl"
    ]
   },
   {
@@ -1512,21 +1513,21 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:1251 addDistinctStep",
-    "src/Planner/Planner.cpp:2415 Planner::buildPlanForUnionNode"
+    "src/Planner/Planner.cpp:1254 addDistinctStep",
+    "src/Planner/Planner.cpp:2424 Planner::buildPlanForUnionNode"
    ]
   },
   {
    "name": "distributed_aggregation_memory_efficient",
    "tier": "execution",
    "kind": "where",
-   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:507 QueryAnalysisResult",
-    "src/Planner/Planner.cpp:1061 addMergingAggregatedStep"
+    "src/Planner/Planner.cpp:509 QueryAnalysisResult",
+    "src/Planner/Planner.cpp:1064 addMergingAggregatedStep"
    ]
   },
   {
@@ -1539,9 +1540,9 @@
     "planner"
    ],
    "sources": [
-    "src/Interpreters/ExpressionAnalyzer.cpp:180 ExpressionAnalyzer::ExtractedSettings::ExtractedSettings",
-    "src/Planner/PlannerJoinTree.cpp:2026 buildQueryPlanForTableExpression",
-    "src/Planner/PlannerJoinTree.cpp:2108 buildQueryPlanForTableExpression"
+    "src/Interpreters/ExpressionAnalyzer.cpp:181 ExpressionAnalyzer::ExtractedSettings::ExtractedSettings",
+    "src/Planner/PlannerJoinTree.cpp:2048 buildQueryPlanForTableExpression",
+    "src/Planner/PlannerJoinTree.cpp:2130 buildQueryPlanForTableExpression"
    ]
   },
   {
@@ -1553,7 +1554,7 @@
     "result-switch"
    ],
    "sources": [
-    "src/Processors/QueryPlan/ReadFromMergeTree.cpp:2212 ReadFromMergeTree::doNotMergePartsAcrossPartitionsFinal"
+    "src/Processors/QueryPlan/ReadFromMergeTree.cpp:2213 ReadFromMergeTree::doNotMergePartsAcrossPartitionsFinal"
    ]
   },
   {
@@ -1577,7 +1578,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:687 getAggregatorParams"
+    "src/Planner/Planner.cpp:689 getAggregatorParams"
    ]
   },
   {
@@ -1589,21 +1590,21 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:686 getAggregatorParams",
-    "src/Planner/PlannerJoinTree.cpp:538 applyTrivialCountIfPossible",
-    "src/Planner/PlannerJoinTree.cpp:662 applyTrivialCountWithSparsityFilterIfPossible"
+    "src/Planner/Planner.cpp:688 getAggregatorParams",
+    "src/Planner/PlannerJoinTree.cpp:540 applyTrivialCountIfPossible",
+    "src/Planner/PlannerJoinTree.cpp:664 applyTrivialCountWithSparsityFilterIfPossible"
    ]
   },
   {
    "name": "enable_adaptive_aggregator",
    "tier": "execution",
    "kind": "where",
-   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.8, 26.9",
+   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:704 getAggregatorParams"
+    "src/Planner/Planner.cpp:706 getAggregatorParams"
    ]
   },
   {
@@ -1615,7 +1616,7 @@
     "alias"
    ],
    "sources": [
-    "alias of allow_experimental_analyzer (src/Core/Settings.cpp:8310)"
+    "alias of allow_experimental_analyzer (src/Core/Settings.cpp:8336)"
    ]
   },
   {
@@ -1629,8 +1630,8 @@
    ],
    "sources": [
     "src/Analyzer/Passes/InverseDictionaryLookupPass.cpp:501 enterImpl",
-    "src/Planner/PlannerJoinTree.cpp:507 applyTrivialCountIfPossible",
-    "src/Planner/PlannerJoinTree.cpp:634 applyTrivialCountWithSparsityFilterIfPossible"
+    "src/Planner/PlannerJoinTree.cpp:509 applyTrivialCountIfPossible",
+    "src/Planner/PlannerJoinTree.cpp:636 applyTrivialCountWithSparsityFilterIfPossible"
    ]
   },
   {
@@ -1642,7 +1643,7 @@
     "old-analyzer"
    ],
    "sources": [
-    "src/Interpreters/ExpressionAnalyzer.cpp:129 allowEarlyConstantFolding"
+    "src/Interpreters/ExpressionAnalyzer.cpp:130 allowEarlyConstantFolding"
    ]
   },
   {
@@ -1669,7 +1670,7 @@
     "analyzer"
    ],
    "sources": [
-    "src/Analyzer/Resolve/resolveFunction.cpp:1116 QueryAnalyzer::resolveFunction"
+    "src/Analyzer/Resolve/resolveFunction.cpp:1117 QueryAnalyzer::resolveFunction"
    ]
   },
   {
@@ -1681,7 +1682,7 @@
     "analyzer"
    ],
    "sources": [
-    "src/Analyzer/Resolve/QueryAnalyzer.cpp:1409 QueryAnalyzer::tryResolveIdentifierInParentScopes"
+    "src/Analyzer/Resolve/QueryAnalyzer.cpp:1412 QueryAnalyzer::tryResolveIdentifierInParentScopes"
    ]
   },
   {
@@ -1693,7 +1694,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:729 applyTopKPushdownToPartialAggregation"
+    "src/Planner/Planner.cpp:732 applyTopKPushdownToPartialAggregation"
    ]
   },
   {
@@ -1722,7 +1723,7 @@
    "sources": [
     "src/Functions/array/FunctionsMapMiscellaneous.cpp:68 FunctionMapToArrayAdapter",
     "src/Interpreters/ExpressionActionsSettings.cpp:26 ExpressionActionsSettings::ExpressionActionsSettings",
-    "src/Planner/PlannerJoinTree.cpp:3230 buildQueryPlanForArrayJoinNode"
+    "src/Planner/PlannerJoinTree.cpp:3262 buildQueryPlanForArrayJoinNode"
    ]
   },
   {
@@ -1734,21 +1735,21 @@
     "analyzer"
    ],
    "sources": [
-    "src/Analyzer/Resolve/QueryAnalyzer.cpp:1359 QueryAnalyzer::tryResolveIdentifierFromCTE"
+    "src/Analyzer/Resolve/QueryAnalyzer.cpp:1362 QueryAnalyzer::tryResolveIdentifierFromCTE"
    ]
   },
   {
    "name": "enable_memory_bound_merging_of_aggregation_results",
    "tier": "execution",
    "kind": "where",
-   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:507 QueryAnalysisResult",
-    "src/Planner/Planner.cpp:903 addAggregationStep",
-    "src/Planner/Planner.cpp:1067 addMergingAggregatedStep"
+    "src/Planner/Planner.cpp:509 QueryAnalysisResult",
+    "src/Planner/Planner.cpp:906 addAggregationStep",
+    "src/Planner/Planner.cpp:1070 addMergingAggregatedStep"
    ]
   },
   {
@@ -1774,7 +1775,7 @@
     "alias"
    ],
    "sources": [
-    "alias of allow_experimental_nullable_tuple_type (src/Core/Settings.cpp:8716)"
+    "alias of allow_experimental_nullable_tuple_type (src/Core/Settings.cpp:8742)"
    ]
   },
   {
@@ -1811,7 +1812,7 @@
     "old-analyzer"
    ],
    "sources": [
-    "src/Analyzer/QueryTreeBuilder.cpp:323 QueryTreeBuilder::buildSelectExpression",
+    "src/Analyzer/QueryTreeBuilder.cpp:333 QueryTreeBuilder::buildSelectExpression",
     "src/Analyzer/Resolve/QueryAnalyzer.cpp:1008 QueryAnalyzer::expandOrderByAll",
     "src/Interpreters/TreeRewriter.cpp:1454 TreeRewriter::analyzeSelect"
    ]
@@ -1820,13 +1821,13 @@
    "name": "enable_packed_string_keys_in_aggregation",
    "tier": "execution",
    "kind": "where",
-   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.8, 26.9",
+   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:703 getAggregatorParams",
-    "src/Planner/Planner.cpp:1042 addMergingAggregatedStep"
+    "src/Planner/Planner.cpp:705 getAggregatorParams",
+    "src/Planner/Planner.cpp:1045 addMergingAggregatedStep"
    ]
   },
   {
@@ -1838,7 +1839,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:3046 Planner::buildPlanForQueryNode"
+    "src/Planner/Planner.cpp:3058 Planner::buildPlanForQueryNode"
    ]
   },
   {
@@ -1850,19 +1851,19 @@
     "alias"
    ],
    "sources": [
-    "alias of allow_experimental_parallel_reading_from_replicas (src/Core/Settings.cpp:8148)"
+    "alias of allow_experimental_parallel_reading_from_replicas (src/Core/Settings.cpp:8174)"
    ]
   },
   {
    "name": "enable_parallel_single_level_merge",
    "tier": "execution",
    "kind": "where",
-   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.8, 26.9",
+   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:702 getAggregatorParams"
+    "src/Planner/Planner.cpp:704 getAggregatorParams"
    ]
   },
   {
@@ -1876,10 +1877,10 @@
    ],
    "sources": [
     "src/Analyzer/Resolve/QueryAnalyzer.cpp:689 QueryAnalyzer::replaceNodesWithPositionalArguments",
-    "src/Interpreters/ExpressionAnalyzer.cpp:327 ExpressionAnalyzer::analyzeAggregation",
-    "src/Interpreters/ExpressionAnalyzer.cpp:1700 SelectQueryExpressionAnalyzer::appendOrderBy",
-    "src/Interpreters/ExpressionAnalyzer.cpp:1838 SelectQueryExpressionAnalyzer::appendLimitBy",
-    "src/Interpreters/TreeOptimizer.cpp:216 optimizeGroupBy",
+    "src/Interpreters/ExpressionAnalyzer.cpp:328 ExpressionAnalyzer::analyzeAggregation",
+    "src/Interpreters/ExpressionAnalyzer.cpp:1701 SelectQueryExpressionAnalyzer::appendOrderBy",
+    "src/Interpreters/ExpressionAnalyzer.cpp:1839 SelectQueryExpressionAnalyzer::appendLimitBy",
+    "src/Interpreters/TreeOptimizer.cpp:223 optimizeGroupBy",
     "src/Interpreters/TreeRewriter.cpp:1686 TreeRewriter::normalize"
    ]
   },
@@ -1887,24 +1888,24 @@
    "name": "enable_producing_buckets_out_of_order_in_aggregation",
    "tier": "execution",
    "kind": "where",
-   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:700 getAggregatorParams"
+    "src/Planner/Planner.cpp:702 getAggregatorParams"
    ]
   },
   {
    "name": "enable_reads_from_query_cache",
    "tier": "execution",
    "kind": "where",
-   "reason": "caching: tunes the query result cache (sizes, TTL, compression, when an entry is written or read); the cache is used only under use_query_cache; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "caching: tunes the query result cache (sizes, TTL, compression, when an entry is written or read); the cache is used only under use_query_cache; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:2530 Planner::buildPlanForQueryNode"
+    "src/Planner/Planner.cpp:2539 Planner::buildPlanForQueryNode"
    ]
   },
   {
@@ -1917,7 +1918,7 @@
     "old-analyzer"
    ],
    "sources": [
-    "src/Analyzer/Resolve/evaluateScalarSubqueryIfNeeded.cpp:406 QueryAnalyzer::evaluateScalarSubqueryIfNeeded",
+    "src/Analyzer/Resolve/evaluateScalarSubqueryIfNeeded.cpp:408 QueryAnalyzer::evaluateScalarSubqueryIfNeeded",
     "src/Interpreters/ExecuteScalarSubqueriesVisitor.cpp:301 ExecuteScalarSubqueriesMatcher::visit"
    ]
   },
@@ -1930,7 +1931,7 @@
     "analyzer"
    ],
    "sources": [
-    "src/Analyzer/Resolve/QueryAnalyzer.cpp:6467 QueryAnalyzer::resolveQuery"
+    "src/Analyzer/Resolve/QueryAnalyzer.cpp:6470 QueryAnalyzer::resolveQuery"
    ]
   },
   {
@@ -1942,19 +1943,19 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:905 addAggregationStep"
+    "src/Planner/Planner.cpp:908 addAggregationStep"
    ]
   },
   {
    "name": "enable_software_prefetch_in_aggregation",
    "tier": "execution",
    "kind": "where",
-   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:695 getAggregatorParams"
+    "src/Planner/Planner.cpp:697 getAggregatorParams"
    ]
   },
   {
@@ -1992,25 +1993,25 @@
    ],
    "sources": [
     "src/Analyzer/Passes/PruneArrayJoinColumnsPass.cpp:343 PruneArrayJoinColumnsPass::run",
-    "src/Planner/PlannerJoinTree.cpp:3228 buildQueryPlanForArrayJoinNode"
+    "src/Planner/PlannerJoinTree.cpp:3260 buildQueryPlanForArrayJoinNode"
    ]
   },
   {
    "name": "exact_rows_before_limit",
    "tier": "execution",
    "kind": "where",
-   "reason": "statistics: makes LIMIT read to the end to report rows_before_limit exactly; the returned rows are the same; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "statistics: makes LIMIT read to the end to report rows_before_limit exactly; the returned rows are the same; it also keeps the trivial GROUP BY ... LIMIT cap off (getTrivialGroupByLimit), which needs a GROUP BY and a LIMIT, clauses a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:747 applyTopKPushdownToPartialAggregation",
-    "src/Planner/Planner.cpp:1201 limitAlwaysReadsTillEnd",
-    "src/Planner/Planner.cpp:1302 addMergeSortingStep",
-    "src/Planner/Planner.cpp:1523 addPreliminaryLimitStep",
-    "src/Planner/Planner.cpp:1558 addPreliminaryLimitStep",
-    "src/Planner/Planner.cpp:1684 addPreliminarySortOrDistinctOrLimitStepsIfNeeded",
-    "src/Planner/PlannerJoinTree.cpp:1210 pushOrderByIntoView"
+    "src/Planner/Planner.cpp:750 applyTopKPushdownToPartialAggregation",
+    "src/Planner/Planner.cpp:1204 limitAlwaysReadsTillEnd",
+    "src/Planner/Planner.cpp:1305 addMergeSortingStep",
+    "src/Planner/Planner.cpp:1529 addPreliminaryLimitStep",
+    "src/Planner/Planner.cpp:1564 addPreliminaryLimitStep",
+    "src/Planner/Planner.cpp:1690 addPreliminarySortOrDistinctOrLimitStepsIfNeeded",
+    "src/Planner/PlannerJoinTree.cpp:1229 pushOrderByIntoView"
    ]
   },
   {
@@ -2034,7 +2035,7 @@
     "analyzer"
    ],
    "sources": [
-    "src/Analyzer/Resolve/resolveFunction.cpp:1732 QueryAnalyzer::resolveFunction"
+    "src/Analyzer/Resolve/resolveFunction.cpp:1733 QueryAnalyzer::resolveFunction"
    ]
   },
   {
@@ -2058,7 +2059,7 @@
     "alias"
    ],
    "sources": [
-    "alias of extract_key_value_pairs_max_pairs_per_row (src/Core/Settings.cpp:8135)"
+    "alias of extract_key_value_pairs_max_pairs_per_row (src/Core/Settings.cpp:8161)"
    ]
   },
   {
@@ -2073,11 +2074,11 @@
    ],
    "sources": [
     "src/Analyzer/Resolve/evaluateScalarSubqueryIfNeeded.cpp:159 QueryAnalyzer::evaluateScalarSubqueryIfNeeded",
-    "src/Analyzer/Utils.cpp:1173 updateContextForSubqueryExecution",
+    "src/Analyzer/Utils.cpp:1174 updateContextForSubqueryExecution",
     "src/Interpreters/ExecuteScalarSubqueriesVisitor.cpp:99 getQueryInterpreter",
-    "src/Planner/Planner.cpp:1600 addPreliminaryLimitOptimizationStepIfNeeded",
-    "src/Planner/Planner.cpp:1929 addExtremesStepIfNeeded",
-    "src/Planner/PlannerJoinTree.cpp:1200 pushOrderByIntoView"
+    "src/Planner/Planner.cpp:1606 addPreliminaryLimitOptimizationStepIfNeeded",
+    "src/Planner/Planner.cpp:1935 addExtremesStepIfNeeded",
+    "src/Planner/PlannerJoinTree.cpp:1219 pushOrderByIntoView"
    ]
   },
   {
@@ -2089,7 +2090,7 @@
     "query-construction"
    ],
    "sources": [
-    "src/Interpreters/executeQuery.cpp:1936 applyQueryConstructionSettings"
+    "src/Interpreters/executeQuery.cpp:1957 applyQueryConstructionSettings"
    ]
   },
   {
@@ -2113,7 +2114,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:861 addAggregationStep"
+    "src/Planner/Planner.cpp:864 addAggregationStep"
    ]
   },
   {
@@ -2127,11 +2128,11 @@
    ],
    "sources": [
     "src/Analyzer/Passes/GroupingFunctionsResolvePass.cpp:114 enterImpl",
-    "src/Analyzer/Resolve/resolveFunction.cpp:2676 QueryAnalyzer::resolveFunction",
-    "src/Interpreters/ActionsVisitor.cpp:1054 ActionsMatcher::visit",
-    "src/Interpreters/ActionsVisitor.cpp:1058 ActionsMatcher::visit",
-    "src/Interpreters/ActionsVisitor.cpp:1062 ActionsMatcher::visit",
-    "src/Interpreters/ActionsVisitor.cpp:1067 ActionsMatcher::visit"
+    "src/Analyzer/Resolve/resolveFunction.cpp:2678 QueryAnalyzer::resolveFunction",
+    "src/Interpreters/ActionsVisitor.cpp:1055 ActionsMatcher::visit",
+    "src/Interpreters/ActionsVisitor.cpp:1059 ActionsMatcher::visit",
+    "src/Interpreters/ActionsVisitor.cpp:1063 ActionsMatcher::visit",
+    "src/Interpreters/ActionsVisitor.cpp:1068 ActionsMatcher::visit"
    ]
   },
   {
@@ -2143,9 +2144,9 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:2089 buildQueryPlanForTableExpression",
-    "src/Planner/PlannerJoinTree.cpp:2109 buildQueryPlanForTableExpression",
-    "src/Planner/PlannerJoinTree.cpp:2344 buildQueryPlanForTableExpression"
+    "src/Planner/PlannerJoinTree.cpp:2111 buildQueryPlanForTableExpression",
+    "src/Planner/PlannerJoinTree.cpp:2131 buildQueryPlanForTableExpression",
+    "src/Planner/PlannerJoinTree.cpp:2366 buildQueryPlanForTableExpression"
    ]
   },
   {
@@ -2466,7 +2467,7 @@
    "name": "function_sleep_max_microseconds_per_block",
    "tier": "execution",
    "kind": "where",
-   "reason": "a per-call limit of a non-deterministic function (sleep, the random distributions, serial IDs), which the library declines in a filter; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "a per-call limit of a non-deterministic function (sleep, the random distributions, serial IDs), which the library declines in a filter; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "functions"
    ],
@@ -2526,25 +2527,7 @@
    "name": "grace_hash_join_initial_buckets",
    "tier": "execution",
    "kind": "where",
-   "reason": "JOIN resources: spill thresholds, preallocation, bucket counts, block sizes and the hash-table layout; read only where a JOIN is planned, which a single-table WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
-   "scopes": [
-    "old-analyzer",
-    "planner"
-   ],
-   "sources": [
-    "src/Interpreters/ExpressionAnalyzer.cpp:1063 tryCreateJoin",
-    "src/Interpreters/ExpressionAnalyzer.cpp:1073 tryCreateJoin",
-    "src/Interpreters/ExpressionAnalyzer.cpp:1103 tryCreateJoin",
-    "src/Interpreters/ExpressionAnalyzer.cpp:1124 tryCreateJoin",
-    "src/Interpreters/ExpressionAnalyzer.cpp:1134 tryCreateJoin",
-    "src/Planner/PlannerJoins.cpp:1352 JoinAlgorithmParams::JoinAlgorithmParams"
-   ]
-  },
-  {
-   "name": "grace_hash_join_max_buckets",
-   "tier": "execution",
-   "kind": "where",
-   "reason": "JOIN resources: spill thresholds, preallocation, bucket counts, block sizes and the hash-table layout; read only where a JOIN is planned, which a single-table WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "JOIN resources: spill thresholds, preallocation, bucket counts, block sizes and the hash-table layout; read only where a JOIN is planned, which a single-table WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "old-analyzer",
     "planner"
@@ -2555,7 +2538,25 @@
     "src/Interpreters/ExpressionAnalyzer.cpp:1104 tryCreateJoin",
     "src/Interpreters/ExpressionAnalyzer.cpp:1125 tryCreateJoin",
     "src/Interpreters/ExpressionAnalyzer.cpp:1135 tryCreateJoin",
-    "src/Planner/PlannerJoins.cpp:1353 JoinAlgorithmParams::JoinAlgorithmParams"
+    "src/Planner/PlannerJoins.cpp:1354 JoinAlgorithmParams::JoinAlgorithmParams"
+   ]
+  },
+  {
+   "name": "grace_hash_join_max_buckets",
+   "tier": "execution",
+   "kind": "where",
+   "reason": "JOIN resources: spill thresholds, preallocation, bucket counts, block sizes and the hash-table layout; read only where a JOIN is planned, which a single-table WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
+   "scopes": [
+    "old-analyzer",
+    "planner"
+   ],
+   "sources": [
+    "src/Interpreters/ExpressionAnalyzer.cpp:1065 tryCreateJoin",
+    "src/Interpreters/ExpressionAnalyzer.cpp:1075 tryCreateJoin",
+    "src/Interpreters/ExpressionAnalyzer.cpp:1105 tryCreateJoin",
+    "src/Interpreters/ExpressionAnalyzer.cpp:1126 tryCreateJoin",
+    "src/Interpreters/ExpressionAnalyzer.cpp:1136 tryCreateJoin",
+    "src/Planner/PlannerJoins.cpp:1355 JoinAlgorithmParams::JoinAlgorithmParams"
    ]
   },
   {
@@ -2570,8 +2571,8 @@
    "sources": [
     "src/Analyzer/Passes/OptimizeTrivialGroupByLimitPass.cpp:71 OptimizeTrivialGroupByLimitPass::run",
     "src/Analyzer/Passes/OptimizeTrivialGroupByLimitPass.cpp:72 OptimizeTrivialGroupByLimitPass::run",
-    "src/Planner/Planner.cpp:500 QueryAnalysisResult",
-    "src/Planner/Planner.cpp:681 getAggregatorParams"
+    "src/Planner/Planner.cpp:502 QueryAnalysisResult",
+    "src/Planner/Planner.cpp:683 getAggregatorParams"
    ]
   },
   {
@@ -2583,57 +2584,58 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:839 applyTopKPushdownToPartialAggregation"
+    "src/Planner/Planner.cpp:842 applyTopKPushdownToPartialAggregation"
    ]
   },
   {
    "name": "group_by_two_level_threshold",
    "tier": "execution",
    "kind": "where",
-   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:682 getAggregatorParams",
-    "src/Planner/Planner.cpp:976 addMergingAggregatedStep"
+    "src/Planner/Planner.cpp:684 getAggregatorParams",
+    "src/Planner/Planner.cpp:979 addMergingAggregatedStep"
    ]
   },
   {
    "name": "group_by_two_level_threshold_bytes",
    "tier": "execution",
    "kind": "where",
-   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:683 getAggregatorParams",
-    "src/Planner/Planner.cpp:977 addMergingAggregatedStep"
+    "src/Planner/Planner.cpp:685 getAggregatorParams",
+    "src/Planner/Planner.cpp:980 addMergingAggregatedStep"
    ]
   },
   {
    "name": "group_by_use_nulls",
    "tier": "predicate-unflipped",
    "kind": "where",
-   "reason": "not classified: flipped with no verdict change on 26.3, 26.7, 26.8, 26.9, but read where values or the plan are computed (10 site(s), first src/Analyzer/Passes/FunctionToSubcolumnsPass.cpp:enterImpl)",
+   "reason": "not classified: flipped with no verdict change on 26.3, 26.7, 26.8, 26.9, but read where values or the plan are computed (11 site(s), first src/Analyzer/Passes/AggregateFunctionOfGroupByKeysPass.cpp:enterImpl)",
    "scopes": [
     "analyzer",
     "old-analyzer",
     "planner"
    ],
    "sources": [
+    "src/Analyzer/Passes/AggregateFunctionOfGroupByKeysPass.cpp:56 enterImpl",
     "src/Analyzer/Passes/FunctionToSubcolumnsPass.cpp:1019 enterImpl",
     "src/Analyzer/Passes/GroupingFunctionsResolvePass.cpp:220 resolveGroupingFunctions",
     "src/Analyzer/Passes/OptimizeGroupByFunctionKeysPass.cpp:39 enterImpl",
     "src/Analyzer/Passes/OptimizeGroupByInjectiveFunctionsPass.cpp:37 enterImpl",
     "src/Analyzer/Resolve/IdentifierResolveScope.cpp:57 IdentifierResolveScope::IdentifierResolveScope",
-    "src/Interpreters/ExpressionAnalyzer.cpp:316 ExpressionAnalyzer::analyzeAggregation",
-    "src/Interpreters/ExpressionAnalyzer.cpp:2191 ExpressionAnalysisResult::ExpressionAnalysisResult",
-    "src/Interpreters/ExpressionAnalyzer.cpp:2224 ExpressionAnalysisResult::ExpressionAnalysisResult",
-    "src/Planner/Planner.cpp:899 addAggregationStep",
-    "src/Planner/Planner.cpp:1185 addCubeOrRollupStepIfNeeded",
-    "src/Planner/Planner.cpp:1191 addCubeOrRollupStepIfNeeded",
+    "src/Interpreters/ExpressionAnalyzer.cpp:317 ExpressionAnalyzer::analyzeAggregation",
+    "src/Interpreters/ExpressionAnalyzer.cpp:2192 ExpressionAnalysisResult::ExpressionAnalysisResult",
+    "src/Interpreters/ExpressionAnalyzer.cpp:2225 ExpressionAnalysisResult::ExpressionAnalysisResult",
+    "src/Planner/Planner.cpp:902 addAggregationStep",
+    "src/Planner/Planner.cpp:1188 addCubeOrRollupStepIfNeeded",
+    "src/Planner/Planner.cpp:1194 addCubeOrRollupStepIfNeeded",
     "src/Planner/PlannerExpressionAnalysis.cpp:164 analyzeAggregation"
    ]
   },
@@ -2687,8 +2689,8 @@
     "old-analyzer"
    ],
    "sources": [
-    "src/Analyzer/QueryTreeBuilder.cpp:888 QueryTreeBuilder::buildJoinTree",
-    "src/Analyzer/Resolve/QueryAnalyzer.cpp:3479 QueryAnalyzer::resolveExpressionNode",
+    "src/Analyzer/QueryTreeBuilder.cpp:907 QueryTreeBuilder::buildJoinTree",
+    "src/Analyzer/Resolve/QueryAnalyzer.cpp:3482 QueryAnalyzer::resolveExpressionNode",
     "src/Analyzer/Resolve/evaluateScalarSubqueryIfNeeded.cpp:160 QueryAnalyzer::evaluateScalarSubqueryIfNeeded",
     "src/Interpreters/ExecuteScalarSubqueriesVisitor.cpp:100 getQueryInterpreter"
    ]
@@ -3353,17 +3355,17 @@
    "name": "interactive_delay",
    "tier": "execution",
    "kind": "where",
-   "reason": "logging and progress: records what ran or reports progress; no value or row depends on it; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "logging and progress: records what ran or reports progress; no value or row depends on it; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "analyzer",
     "expressions",
     "old-analyzer"
    ],
    "sources": [
-    "src/Analyzer/Resolve/evaluateScalarSubqueryIfNeeded.cpp:309 QueryAnalyzer::evaluateScalarSubqueryIfNeeded",
+    "src/Analyzer/Resolve/evaluateScalarSubqueryIfNeeded.cpp:311 QueryAnalyzer::evaluateScalarSubqueryIfNeeded",
     "src/Interpreters/ExecuteScalarSubqueriesVisitor.cpp:219 ExecuteScalarSubqueriesMatcher::visit",
     "src/Interpreters/PreparedSets.cpp:493 FutureSetFromSubquery::buildSetInplace",
-    "src/Interpreters/PreparedSets.cpp:689 FutureSetFromSubquery::buildOrderedSetInplace"
+    "src/Interpreters/PreparedSets.cpp:685 FutureSetFromSubquery::buildOrderedSetInplace"
    ]
   },
   {
@@ -3399,9 +3401,9 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:3040 tryMakeDirectJoinWithMergeTree",
-    "src/Planner/PlannerJoins.cpp:682 buildAllJoinClauses",
-    "src/Planner/PlannerJoinsLogical.cpp:510 buildJoinStepLogical"
+    "src/Planner/PlannerJoinTree.cpp:3062 tryMakeDirectJoinWithMergeTree",
+    "src/Planner/PlannerJoins.cpp:683 buildAllJoinClauses",
+    "src/Planner/PlannerJoinsLogical.cpp:511 buildJoinStepLogical"
    ]
   },
   {
@@ -3413,7 +3415,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoins.cpp:1345 JoinAlgorithmParams::JoinAlgorithmParams"
+    "src/Planner/PlannerJoins.cpp:1347 JoinAlgorithmParams::JoinAlgorithmParams"
    ]
   },
   {
@@ -3426,7 +3428,7 @@
     "old-analyzer"
    ],
    "sources": [
-    "src/Analyzer/QueryTreeBuilder.cpp:1080 QueryTreeBuilder::buildJoinTree",
+    "src/Analyzer/QueryTreeBuilder.cpp:1100 QueryTreeBuilder::buildJoinTree",
     "src/Interpreters/TreeRewriter.cpp:1525 TreeRewriter::analyzeSelect"
    ]
   },
@@ -3444,12 +3446,12 @@
     "src/Analyzer/Passes/FunctionToSubcolumnsPass.cpp:1012 enterImpl",
     "src/Analyzer/Resolve/IdentifierResolveScope.cpp:63 IdentifierResolveScope::IdentifierResolveScope",
     "src/Planner/PlannerCorrelatedSubqueries.cpp:305 decorrelateQueryPlan",
-    "src/Planner/PlannerJoinTree.cpp:3012 buildQueryPlanForCrossJoinNode",
-    "src/Planner/PlannerJoinTree.cpp:3093 tryMakeDirectJoinWithMergeTree",
-    "src/Planner/PlannerJoinTree.cpp:3132 buildQueryPlanForJoinNode",
-    "src/Planner/PlannerJoins.cpp:383 buildJoinClauseImpl",
-    "src/Planner/PlannerJoins.cpp:415 buildJoinClauseImpl",
-    "src/Planner/PlannerJoinsLogical.cpp:563 buildJoinStepLogical"
+    "src/Planner/PlannerJoinTree.cpp:3034 buildQueryPlanForCrossJoinNode",
+    "src/Planner/PlannerJoinTree.cpp:3115 tryMakeDirectJoinWithMergeTree",
+    "src/Planner/PlannerJoinTree.cpp:3164 buildQueryPlanForJoinNode",
+    "src/Planner/PlannerJoins.cpp:384 buildJoinClauseImpl",
+    "src/Planner/PlannerJoins.cpp:416 buildJoinClauseImpl",
+    "src/Planner/PlannerJoinsLogical.cpp:564 buildJoinStepLogical"
    ]
   },
   {
@@ -3462,7 +3464,7 @@
    ],
    "sources": [
     "src/Analyzer/Resolve/QueryAnalyzer.cpp:906 QueryAnalyzer::validateJoinTableExpressionWithoutAlias",
-    "src/Analyzer/Resolve/QueryAnalyzer.cpp:5237 QueryAnalyzer::checkDuplicateTableNamesOrAliasForPasteJoin"
+    "src/Analyzer/Resolve/QueryAnalyzer.cpp:5240 QueryAnalyzer::checkDuplicateTableNamesOrAliasForPasteJoin"
    ]
   },
   {
@@ -3512,14 +3514,14 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:1411 pushOrderByIntoView"
+    "src/Planner/PlannerJoinTree.cpp:1430 pushOrderByIntoView"
    ]
   },
   {
    "name": "lock_acquire_timeout",
    "tier": "execution",
    "kind": "where",
-   "reason": "a lock wait timeout: throws when a table lock is not acquired in time; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "a lock wait timeout: throws when a table lock is not acquired in time; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "analyzer",
     "functions",
@@ -3529,15 +3531,15 @@
     "src/Analyzer/Resolve/IdentifierResolver.cpp:364 IdentifierResolver::tryResolveTableIdentifier",
     "src/Analyzer/TableNode.cpp:91 TableNode::TableNode",
     "src/Analyzer/TableNode.cpp:136 TableNode::updateStorage",
-    "src/Functions/FunctionJoinGet.cpp:206 JoinGetOverloadResolver::buildImpl",
-    "src/Planner/PlannerJoins.cpp:1363 JoinAlgorithmParams::JoinAlgorithmParams"
+    "src/Functions/FunctionJoinGet.cpp:217 JoinGetOverloadResolver::buildImpl",
+    "src/Planner/PlannerJoins.cpp:1365 JoinAlgorithmParams::JoinAlgorithmParams"
    ]
   },
   {
    "name": "log_queries",
    "tier": "execution",
    "kind": "where",
-   "reason": "logging and progress: records what ran or reports progress; no value or row depends on it; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "logging and progress: records what ran or reports progress; no value or row depends on it; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "functions",
     "types"
@@ -3567,9 +3569,9 @@
     "src/Interpreters/PreparedSets.cpp:474 FutureSetFromSubquery::buildSetInplace",
     "src/Interpreters/PreparedSets.cpp:593 FutureSetFromSubquery::buildOrderedSetInplace",
     "src/Interpreters/PreparedSets.cpp:612 FutureSetFromSubquery::buildOrderedSetInplace",
-    "src/Planner/Planner.cpp:734 applyTopKPushdownToPartialAggregation",
-    "src/Planner/PlannerJoinTree.cpp:507 applyTrivialCountIfPossible",
-    "src/Planner/PlannerJoinTree.cpp:634 applyTrivialCountWithSparsityFilterIfPossible"
+    "src/Planner/Planner.cpp:737 applyTopKPushdownToPartialAggregation",
+    "src/Planner/PlannerJoinTree.cpp:509 applyTrivialCountIfPossible",
+    "src/Planner/PlannerJoinTree.cpp:636 applyTrivialCountWithSparsityFilterIfPossible"
    ]
   },
   {
@@ -3599,14 +3601,14 @@
    "sources": [
     "src/Functions/formatQueryFromJSON.cpp:256 FunctionFormatQueryFromJSON",
     "src/Functions/parseQueryToJSON.cpp:51 FunctionParseQueryToJSON",
-    "src/Interpreters/ActionsVisitor.cpp:910 ActionsMatcher::doUntuple"
+    "src/Interpreters/ActionsVisitor.cpp:911 ActionsMatcher::doUntuple"
    ]
   },
   {
    "name": "max_autoincrement_series",
    "tier": "execution",
    "kind": "where",
-   "reason": "a per-call limit of a non-deterministic function (sleep, the random distributions, serial IDs), which the library declines in a filter; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "a per-call limit of a non-deterministic function (sleep, the random distributions, serial IDs), which the library declines in a filter; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "functions"
    ],
@@ -3618,7 +3620,7 @@
    "name": "max_block_size",
    "tier": "execution",
    "kind": "where",
-   "reason": "block size: the only functions whose value depends on block boundaries (blockSize, rowNumberInBlock, rowNumberInAllBlocks, blockNumber, runningDifference, neighbor, runningAccumulate) are non-deterministic or unresolvable in the registry, so the library declines them in a filter; everywhere else it sizes batches; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "block size: the only functions whose value depends on block boundaries (blockSize, rowNumberInBlock, rowNumberInAllBlocks, blockNumber, runningDifference, neighbor, runningAccumulate) are non-deterministic or unresolvable in the registry, so the library declines them in a filter; everywhere else it sizes batches; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "functions",
     "planner"
@@ -3626,37 +3628,37 @@
    "sources": [
     "src/Functions/FunctionDictGetKeys.cpp:369 executeConstPath",
     "src/Functions/FunctionDictGetKeys.cpp:700 fillMissingBucketsFromDict",
-    "src/Planner/Planner.cpp:694 getAggregatorParams",
-    "src/Planner/Planner.cpp:894 addAggregationStep",
-    "src/Planner/Planner.cpp:1039 addMergingAggregatedStep",
-    "src/Planner/Planner.cpp:1065 addMergingAggregatedStep",
-    "src/Planner/Planner.cpp:3094 Planner::buildPlanForQueryNode",
-    "src/Planner/PlannerJoinTree.cpp:1667 buildQueryPlanForTableExpression",
-    "src/Planner/PlannerJoinTree.cpp:3229 buildQueryPlanForArrayJoinNode"
+    "src/Planner/Planner.cpp:696 getAggregatorParams",
+    "src/Planner/Planner.cpp:897 addAggregationStep",
+    "src/Planner/Planner.cpp:1042 addMergingAggregatedStep",
+    "src/Planner/Planner.cpp:1068 addMergingAggregatedStep",
+    "src/Planner/Planner.cpp:3106 Planner::buildPlanForQueryNode",
+    "src/Planner/PlannerJoinTree.cpp:1689 buildQueryPlanForTableExpression",
+    "src/Planner/PlannerJoinTree.cpp:3261 buildQueryPlanForArrayJoinNode"
    ]
   },
   {
    "name": "max_bytes_before_external_group_by",
    "tier": "execution",
    "kind": "where",
-   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:685 getAggregatorParams"
+    "src/Planner/Planner.cpp:687 getAggregatorParams"
    ]
   },
   {
    "name": "max_bytes_before_external_join",
    "tier": "execution",
    "kind": "where",
-   "reason": "JOIN resources: spill thresholds, preallocation, bucket counts, block sizes and the hash-table layout; read only where a JOIN is planned, which a single-table WHERE does not have; flip: no change on 26.7, 26.8, 26.9",
+   "reason": "JOIN resources: spill thresholds, preallocation, bucket counts, block sizes and the hash-table layout; read only where a JOIN is planned, which a single-table WHERE does not have; flip: no change on 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoins.cpp:1359 JoinAlgorithmParams::JoinAlgorithmParams"
+    "src/Planner/PlannerJoins.cpp:1361 JoinAlgorithmParams::JoinAlgorithmParams"
    ]
   },
   {
@@ -3668,8 +3670,8 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:1251 addDistinctStep",
-    "src/Planner/Planner.cpp:2415 Planner::buildPlanForUnionNode"
+    "src/Planner/Planner.cpp:1254 addDistinctStep",
+    "src/Planner/Planner.cpp:2424 Planner::buildPlanForUnionNode"
    ]
   },
   {
@@ -3684,9 +3686,9 @@
    ],
    "sources": [
     "src/Analyzer/Passes/InverseDictionaryLookupPass.cpp:508 enterImpl",
-    "src/Analyzer/Resolve/resolveFunction.cpp:3031 QueryAnalyzer::resolveFunction",
-    "src/Interpreters/ExpressionAnalyzer.cpp:174 ExpressionAnalyzer::ExtractedSettings::ExtractedSettings",
-    "src/Interpreters/ExpressionAnalyzer.cpp:179 ExpressionAnalyzer::ExtractedSettings::ExtractedSettings",
+    "src/Analyzer/Resolve/resolveFunction.cpp:3033 QueryAnalyzer::resolveFunction",
+    "src/Interpreters/ExpressionAnalyzer.cpp:175 ExpressionAnalyzer::ExtractedSettings::ExtractedSettings",
+    "src/Interpreters/ExpressionAnalyzer.cpp:180 ExpressionAnalyzer::ExtractedSettings::ExtractedSettings",
     "src/Interpreters/PreparedSets.cpp:86 PreparedSets::getSizeLimitsForSet"
    ]
   },
@@ -3694,24 +3696,24 @@
    "name": "max_bytes_ratio_before_external_group_by",
    "tier": "execution",
    "kind": "where",
-   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:685 getAggregatorParams"
+    "src/Planner/Planner.cpp:687 getAggregatorParams"
    ]
   },
   {
    "name": "max_bytes_ratio_before_external_join",
    "tier": "execution",
    "kind": "where",
-   "reason": "JOIN resources: spill thresholds, preallocation, bucket counts, block sizes and the hash-table layout; read only where a JOIN is planned, which a single-table WHERE does not have; flip: no change on 26.7, 26.8, 26.9",
+   "reason": "JOIN resources: spill thresholds, preallocation, bucket counts, block sizes and the hash-table layout; read only where a JOIN is planned, which a single-table WHERE does not have; flip: no change on 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoins.cpp:1360 JoinAlgorithmParams::JoinAlgorithmParams"
+    "src/Planner/PlannerJoins.cpp:1362 JoinAlgorithmParams::JoinAlgorithmParams"
    ]
   },
   {
@@ -3723,7 +3725,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Utils.cpp:299 getLimitsForStorage"
+    "src/Planner/Utils.cpp:300 getLimitsForStorage"
    ]
   },
   {
@@ -3735,14 +3737,14 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Utils.cpp:339 buildStorageLimits"
+    "src/Planner/Utils.cpp:340 buildStorageLimits"
    ]
   },
   {
    "name": "max_bytes_to_transfer",
    "tier": "execution",
    "kind": "where",
-   "reason": "a size limit on a set sent between servers; it throws when exceeded. Its `break` switch, transfer_overflow_mode, truncates the set and is listed on its own; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "a size limit on a set sent between servers; it throws when exceeded. Its `break` switch, transfer_overflow_mode, truncates the set and is listed on its own; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "expressions",
     "old-analyzer",
@@ -3751,33 +3753,33 @@
    "sources": [
     "src/Interpreters/PreparedSets.cpp:471 FutureSetFromSubquery::buildSetInplace",
     "src/Interpreters/PreparedSets.cpp:538 FutureSetFromSubquery::buildOrderedSetInplace",
-    "src/Planner/Planner.cpp:2023 addBuildSubqueriesForSetsStepIfNeeded"
+    "src/Planner/Planner.cpp:2029 addBuildSubqueriesForSetsStepIfNeeded"
    ]
   },
   {
    "name": "max_columns_to_read",
    "tier": "execution",
    "kind": "where",
-   "reason": "a resource limit that only throws when exceeded; its reads raise an error and change no value; flip: errors only on 26.3, 26.7, 26.8, 26.9",
+   "reason": "a resource limit that only throws when exceeded; its reads raise an error and change no value; flip: errors only on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:810 prepareBuildQueryPlanForTableExpression",
-    "src/Planner/PlannerJoinTree.cpp:815 prepareBuildQueryPlanForTableExpression"
+    "src/Planner/PlannerJoinTree.cpp:829 prepareBuildQueryPlanForTableExpression",
+    "src/Planner/PlannerJoinTree.cpp:834 prepareBuildQueryPlanForTableExpression"
    ]
   },
   {
    "name": "max_distributed_connections",
    "tier": "execution",
    "kind": "where",
-   "reason": "parallelism: thread, stream and connection counts and the concurrency control; read where the planner sizes the pipeline, never where a value is computed; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "parallelism: thread, stream and connection counts and the concurrency control; read where the planner sizes the pipeline, never where a value is computed; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:1663 buildQueryPlanForTableExpression",
-    "src/Planner/PlannerJoinTree.cpp:1664 buildQueryPlanForTableExpression"
+    "src/Planner/PlannerJoinTree.cpp:1685 buildQueryPlanForTableExpression",
+    "src/Planner/PlannerJoinTree.cpp:1686 buildQueryPlanForTableExpression"
    ]
   },
   {
@@ -3801,7 +3803,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Utils.cpp:321 getLimitsForStorage"
+    "src/Planner/Utils.cpp:322 getLimitsForStorage"
    ]
   },
   {
@@ -3813,7 +3815,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Utils.cpp:318 getLimitsForStorage"
+    "src/Planner/Utils.cpp:319 getLimitsForStorage"
    ]
   },
   {
@@ -3825,7 +3827,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Utils.cpp:319 getLimitsForStorage"
+    "src/Planner/Utils.cpp:320 getLimitsForStorage"
    ]
   },
   {
@@ -3839,20 +3841,20 @@
    ],
    "sources": [
     "src/Functions/UserDefined/ExternalUserDefinedExecutableFunctionsLoader.cpp:249 ExternalUserDefinedExecutableFunctionsLoader::createObject",
-    "src/Planner/Utils.cpp:300 getLimitsForStorage"
+    "src/Planner/Utils.cpp:301 getLimitsForStorage"
    ]
   },
   {
    "name": "max_expanded_ast_elements",
    "tier": "execution",
    "kind": "where",
-   "reason": "a resource limit that only throws when exceeded; its reads raise an error and change no value; flip: errors only on 26.3, 26.7, 26.8, 26.9",
+   "reason": "a resource limit that only throws when exceeded; its reads raise an error and change no value; flip: errors only on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "analyzer",
     "old-analyzer"
    ],
    "sources": [
-    "src/Analyzer/Resolve/QueryAnalyzer.cpp:3650 QueryAnalyzer::resolveExpressionNode",
+    "src/Analyzer/Resolve/QueryAnalyzer.cpp:3653 QueryAnalyzer::resolveExpressionNode",
     "src/Interpreters/QueryNormalizer.cpp:37 QueryNormalizer::ExtractedSettings::ExtractedSettings"
    ]
   },
@@ -3890,14 +3892,14 @@
    "name": "max_parallel_replicas",
    "tier": "execution",
    "kind": "where",
-   "reason": "parallelism: the replica count; it acts only together with parallel replicas being enabled (allow_experimental_parallel_reading_from_replicas / enable_parallel_replicas, listed); flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "parallelism: the replica count; it acts only together with parallel replicas being enabled (allow_experimental_parallel_reading_from_replicas / enable_parallel_replicas, listed); flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:567 applyTrivialCountIfPossible",
-    "src/Planner/PlannerJoinTree.cpp:690 applyTrivialCountWithSparsityFilterIfPossible",
-    "src/Planner/PlannerJoinTree.cpp:2625 buildQueryPlanForTableExpression"
+    "src/Planner/PlannerJoinTree.cpp:569 applyTrivialCountIfPossible",
+    "src/Planner/PlannerJoinTree.cpp:692 applyTrivialCountWithSparsityFilterIfPossible",
+    "src/Planner/PlannerJoinTree.cpp:2647 buildQueryPlanForTableExpression"
    ]
   },
   {
@@ -3912,7 +3914,7 @@
     "planner"
    ],
    "sources": [
-    "src/Analyzer/QueryTreeBuilder.cpp:901 QueryTreeBuilder::buildJoinTree",
+    "src/Analyzer/QueryTreeBuilder.cpp:920 QueryTreeBuilder::buildJoinTree",
     "src/Functions/FunctionSQLJSON.h:481 create",
     "src/Functions/QueryTokenizationImpl.h:72 FunctionQueryTokenization",
     "src/Functions/UserDefined/UserDefinedSQLObjectsBackup.cpp:137 restoreUserDefinedSQLObjects",
@@ -3924,8 +3926,8 @@
     "src/Functions/parseQueryToJSON.cpp:49 FunctionParseQueryToJSON",
     "src/Interpreters/parseColumnsListForTableFunction.cpp:174 parseColumnsListFromString",
     "src/Interpreters/parseColumnsListForTableFunction.cpp:204 tryParseColumnsListFromString",
-    "src/Planner/PlannerJoinTree.cpp:984 parseAdditionalFilterAstIfNeeded",
-    "src/Planner/Utils.cpp:788 parseAdditionalResultFilter"
+    "src/Planner/PlannerJoinTree.cpp:1003 parseAdditionalFilterAstIfNeeded",
+    "src/Planner/Utils.cpp:799 parseAdditionalResultFilter"
    ]
   },
   {
@@ -3941,7 +3943,7 @@
     "planner"
    ],
    "sources": [
-    "src/Analyzer/QueryTreeBuilder.cpp:901 QueryTreeBuilder::buildJoinTree",
+    "src/Analyzer/QueryTreeBuilder.cpp:920 QueryTreeBuilder::buildJoinTree",
     "src/Formats/FormatFactory.cpp:412",
     "src/Functions/FunctionSQLJSON.h:480 create",
     "src/Functions/QueryTokenizationImpl.h:71 FunctionQueryTokenization",
@@ -3954,8 +3956,8 @@
     "src/Functions/parseQueryToJSON.cpp:48 FunctionParseQueryToJSON",
     "src/Interpreters/parseColumnsListForTableFunction.cpp:173 parseColumnsListFromString",
     "src/Interpreters/parseColumnsListForTableFunction.cpp:203 tryParseColumnsListFromString",
-    "src/Planner/PlannerJoinTree.cpp:983 parseAdditionalFilterAstIfNeeded",
-    "src/Planner/Utils.cpp:787 parseAdditionalResultFilter"
+    "src/Planner/PlannerJoinTree.cpp:1002 parseAdditionalFilterAstIfNeeded",
+    "src/Planner/Utils.cpp:798 parseAdditionalResultFilter"
    ]
   },
   {
@@ -3970,22 +3972,22 @@
     "planner"
    ],
    "sources": [
-    "src/Analyzer/QueryTreeBuilder.cpp:901 QueryTreeBuilder::buildJoinTree",
+    "src/Analyzer/QueryTreeBuilder.cpp:920 QueryTreeBuilder::buildJoinTree",
     "src/Functions/formatQuery.cpp:52 FunctionFormatQuery",
     "src/Functions/formatQueryFromJSON.cpp:257 FunctionFormatQueryFromJSON",
     "src/Functions/fuzzQuery.cpp:47 FunctionFuzzQuery",
     "src/Functions/parseQueryToJSON.cpp:47 FunctionParseQueryToJSON",
     "src/Interpreters/parseColumnsListForTableFunction.cpp:172 parseColumnsListFromString",
     "src/Interpreters/parseColumnsListForTableFunction.cpp:202 tryParseColumnsListFromString",
-    "src/Planner/PlannerJoinTree.cpp:982 parseAdditionalFilterAstIfNeeded",
-    "src/Planner/Utils.cpp:786 parseAdditionalResultFilter"
+    "src/Planner/PlannerJoinTree.cpp:1001 parseAdditionalFilterAstIfNeeded",
+    "src/Planner/Utils.cpp:797 parseAdditionalResultFilter"
    ]
   },
   {
    "name": "max_rand_distribution_parameter",
    "tier": "execution",
    "kind": "where",
-   "reason": "a per-call limit of a non-deterministic function (sleep, the random distributions, serial IDs), which the library declines in a filter; flip: no change on 26.7, 26.8, 26.9",
+   "reason": "a per-call limit of a non-deterministic function (sleep, the random distributions, serial IDs), which the library declines in a filter; flip: no change on 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "functions"
    ],
@@ -3997,7 +3999,7 @@
    "name": "max_rand_distribution_trials",
    "tier": "execution",
    "kind": "where",
-   "reason": "a per-call limit of a non-deterministic function (sleep, the random distributions, serial IDs), which the library declines in a filter; flip: no change on 26.7, 26.8, 26.9",
+   "reason": "a per-call limit of a non-deterministic function (sleep, the random distributions, serial IDs), which the library declines in a filter; flip: no change on 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "functions"
    ],
@@ -4014,7 +4016,7 @@
     "analyzer"
    ],
    "sources": [
-    "src/Analyzer/Utils.cpp:1171 updateContextForSubqueryExecution"
+    "src/Analyzer/Utils.cpp:1172 updateContextForSubqueryExecution"
    ]
   },
   {
@@ -4028,7 +4030,7 @@
    ],
    "sources": [
     "src/Analyzer/Resolve/evaluateScalarSubqueryIfNeeded.cpp:158 QueryAnalyzer::evaluateScalarSubqueryIfNeeded",
-    "src/Analyzer/Utils.cpp:1170 updateContextForSubqueryExecution",
+    "src/Analyzer/Utils.cpp:1171 updateContextForSubqueryExecution",
     "src/Interpreters/ExecuteScalarSubqueriesVisitor.cpp:98 getQueryInterpreter"
    ]
   },
@@ -4041,8 +4043,8 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:1251 addDistinctStep",
-    "src/Planner/Planner.cpp:2415 Planner::buildPlanForUnionNode"
+    "src/Planner/Planner.cpp:1254 addDistinctStep",
+    "src/Planner/Planner.cpp:2424 Planner::buildPlanForUnionNode"
    ]
   },
   {
@@ -4057,9 +4059,9 @@
    ],
    "sources": [
     "src/Analyzer/Passes/InverseDictionaryLookupPass.cpp:508 enterImpl",
-    "src/Analyzer/Resolve/resolveFunction.cpp:3031 QueryAnalyzer::resolveFunction",
-    "src/Interpreters/ExpressionAnalyzer.cpp:174 ExpressionAnalyzer::ExtractedSettings::ExtractedSettings",
-    "src/Interpreters/ExpressionAnalyzer.cpp:177 ExpressionAnalyzer::ExtractedSettings::ExtractedSettings",
+    "src/Analyzer/Resolve/resolveFunction.cpp:3033 QueryAnalyzer::resolveFunction",
+    "src/Interpreters/ExpressionAnalyzer.cpp:175 ExpressionAnalyzer::ExtractedSettings::ExtractedSettings",
+    "src/Interpreters/ExpressionAnalyzer.cpp:178 ExpressionAnalyzer::ExtractedSettings::ExtractedSettings",
     "src/Interpreters/PreparedSets.cpp:86 PreparedSets::getSizeLimitsForSet"
    ]
   },
@@ -4074,9 +4076,9 @@
    ],
    "sources": [
     "src/Analyzer/Passes/OptimizeTrivialGroupByLimitPass.cpp:101 OptimizeTrivialGroupByLimitPass::run",
-    "src/Planner/Planner.cpp:499 QueryAnalysisResult",
-    "src/Planner/Planner.cpp:680 getAggregatorParams",
-    "src/Planner/PlannerJoinTree.cpp:2122 buildQueryPlanForTableExpression"
+    "src/Planner/Planner.cpp:501 QueryAnalysisResult",
+    "src/Planner/Planner.cpp:682 getAggregatorParams",
+    "src/Planner/PlannerJoinTree.cpp:2144 buildQueryPlanForTableExpression"
    ]
   },
   {
@@ -4088,7 +4090,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Utils.cpp:299 getLimitsForStorage"
+    "src/Planner/Utils.cpp:300 getLimitsForStorage"
    ]
   },
   {
@@ -4100,14 +4102,14 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Utils.cpp:339 buildStorageLimits"
+    "src/Planner/Utils.cpp:340 buildStorageLimits"
    ]
   },
   {
    "name": "max_rows_to_transfer",
    "tier": "execution",
    "kind": "where",
-   "reason": "a size limit on a set sent between servers; it throws when exceeded. Its `break` switch, transfer_overflow_mode, truncates the set and is listed on its own; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "a size limit on a set sent between servers; it throws when exceeded. Its `break` switch, transfer_overflow_mode, truncates the set and is listed on its own; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "expressions",
     "old-analyzer",
@@ -4116,65 +4118,65 @@
    "sources": [
     "src/Interpreters/PreparedSets.cpp:471 FutureSetFromSubquery::buildSetInplace",
     "src/Interpreters/PreparedSets.cpp:538 FutureSetFromSubquery::buildOrderedSetInplace",
-    "src/Planner/Planner.cpp:2023 addBuildSubqueriesForSetsStepIfNeeded"
+    "src/Planner/Planner.cpp:2029 addBuildSubqueriesForSetsStepIfNeeded"
    ]
   },
   {
    "name": "max_size_to_preallocate_for_aggregation",
    "tier": "execution",
    "kind": "where",
-   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:664 getAggregatorParams"
+    "src/Planner/Planner.cpp:666 getAggregatorParams"
    ]
   },
   {
    "name": "max_size_to_preallocate_for_joins",
    "tier": "execution",
    "kind": "where",
-   "reason": "JOIN resources: spill thresholds, preallocation, bucket counts, block sizes and the hash-table layout; read only where a JOIN is planned, which a single-table WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "JOIN resources: spill thresholds, preallocation, bucket counts, block sizes and the hash-table layout; read only where a JOIN is planned, which a single-table WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoins.cpp:1355 JoinAlgorithmParams::JoinAlgorithmParams"
+    "src/Planner/PlannerJoins.cpp:1357 JoinAlgorithmParams::JoinAlgorithmParams"
    ]
   },
   {
    "name": "max_streams_to_max_threads_ratio",
    "tier": "execution",
    "kind": "where",
-   "reason": "parallelism: thread, stream and connection counts and the concurrency control; read where the planner sizes the pipeline, never where a value is computed; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "parallelism: thread, stream and connection counts and the concurrency control; read where the planner sizes the pipeline, never where a value is computed; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:1738 buildQueryPlanForTableExpression"
+    "src/Planner/PlannerJoinTree.cpp:1760 buildQueryPlanForTableExpression"
    ]
   },
   {
    "name": "max_subquery_depth",
    "tier": "execution",
    "kind": "where",
-   "reason": "a resource limit that only throws when exceeded; its reads raise an error and change no value; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "a resource limit that only throws when exceeded; its reads raise an error and change no value; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "analyzer",
     "planner"
    ],
    "sources": [
-    "src/Analyzer/Resolve/QueryAnalyzer.cpp:1535 QueryAnalyzer::tryResolveIdentifier",
-    "src/Analyzer/Resolve/QueryAnalyzer.cpp:6426 QueryAnalyzer::resolveQuery",
-    "src/Planner/Planner.cpp:2247 buildPlannerContext"
+    "src/Analyzer/Resolve/QueryAnalyzer.cpp:1538 QueryAnalyzer::tryResolveIdentifier",
+    "src/Analyzer/Resolve/QueryAnalyzer.cpp:6429 QueryAnalyzer::resolveQuery",
+    "src/Planner/Planner.cpp:2256 buildPlannerContext"
    ]
   },
   {
    "name": "max_temporary_columns",
    "tier": "execution",
    "kind": "where",
-   "reason": "a resource limit that only throws when exceeded; its reads raise an error and change no value; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "a resource limit that only throws when exceeded; its reads raise an error and change no value; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "expressions"
    ],
@@ -4186,7 +4188,7 @@
    "name": "max_temporary_non_const_columns",
    "tier": "execution",
    "kind": "where",
-   "reason": "a resource limit that only throws when exceeded; its reads raise an error and change no value; flip: errors only on 26.3, 26.7, 26.8, 26.9",
+   "reason": "a resource limit that only throws when exceeded; its reads raise an error and change no value; flip: errors only on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "expressions"
    ],
@@ -4198,7 +4200,7 @@
    "name": "max_threads",
    "tier": "execution",
    "kind": "where",
-   "reason": "parallelism: thread, stream and connection counts and the concurrency control; read where the planner sizes the pipeline, never where a value is computed; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "parallelism: thread, stream and connection counts and the concurrency control; read where the planner sizes the pipeline, never where a value is computed; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "functions",
     "old-analyzer",
@@ -4206,16 +4208,16 @@
    ],
    "sources": [
     "src/Functions/FunctionDictGetKeys.cpp:360 executeConstPath",
-    "src/Interpreters/ExpressionAnalyzer.cpp:1065 tryCreateJoin",
-    "src/Interpreters/ExpressionAnalyzer.cpp:1080 tryCreateJoin",
-    "src/Interpreters/ExpressionAnalyzer.cpp:1126 tryCreateJoin",
-    "src/Planner/Planner.cpp:690 getAggregatorParams",
-    "src/Planner/Planner.cpp:870 addAggregationStep",
-    "src/Planner/Planner.cpp:1028 addMergingAggregatedStep",
-    "src/Planner/Planner.cpp:1737 addWindowSteps",
-    "src/Planner/Planner.cpp:2383 Planner::buildPlanForUnionNode",
-    "src/Planner/PlannerJoinTree.cpp:1644 buildQueryPlanForTableExpression",
-    "src/Planner/PlannerJoins.cpp:1356 JoinAlgorithmParams::JoinAlgorithmParams"
+    "src/Interpreters/ExpressionAnalyzer.cpp:1066 tryCreateJoin",
+    "src/Interpreters/ExpressionAnalyzer.cpp:1081 tryCreateJoin",
+    "src/Interpreters/ExpressionAnalyzer.cpp:1127 tryCreateJoin",
+    "src/Planner/Planner.cpp:692 getAggregatorParams",
+    "src/Planner/Planner.cpp:873 addAggregationStep",
+    "src/Planner/Planner.cpp:1031 addMergingAggregatedStep",
+    "src/Planner/Planner.cpp:1743 addWindowSteps",
+    "src/Planner/Planner.cpp:2392 Planner::buildPlanForUnionNode",
+    "src/Planner/PlannerJoinTree.cpp:1666 buildQueryPlanForTableExpression",
+    "src/Planner/PlannerJoins.cpp:1358 JoinAlgorithmParams::JoinAlgorithmParams"
    ]
   },
   {
@@ -4227,12 +4229,12 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:690 getAggregatorParams",
-    "src/Planner/Planner.cpp:870 addAggregationStep",
-    "src/Planner/Planner.cpp:1028 addMergingAggregatedStep",
-    "src/Planner/Planner.cpp:1737 addWindowSteps",
-    "src/Planner/Planner.cpp:2383 Planner::buildPlanForUnionNode",
-    "src/Planner/PlannerJoinTree.cpp:1644 buildQueryPlanForTableExpression"
+    "src/Planner/Planner.cpp:692 getAggregatorParams",
+    "src/Planner/Planner.cpp:873 addAggregationStep",
+    "src/Planner/Planner.cpp:1031 addMergingAggregatedStep",
+    "src/Planner/Planner.cpp:1743 addWindowSteps",
+    "src/Planner/Planner.cpp:2392 Planner::buildPlanForUnionNode",
+    "src/Planner/PlannerJoinTree.cpp:1666 buildQueryPlanForTableExpression"
    ]
   },
   {
@@ -4257,7 +4259,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:693 getAggregatorParams"
+    "src/Planner/Planner.cpp:695 getAggregatorParams"
    ]
   },
   {
@@ -4297,7 +4299,7 @@
     "planner"
    ],
    "sources": [
-    "src/Interpreters/ExpressionAnalyzer.cpp:889 ExpressionAnalyzer::makeWindowDescriptions",
+    "src/Interpreters/ExpressionAnalyzer.cpp:890 ExpressionAnalyzer::makeWindowDescriptions",
     "src/Planner/PlannerSorting.cpp:189 extractSortDescription",
     "src/Planner/PlannerWindowFunctions.cpp:60 extractWindowDescriptionFromWindowNode"
    ]
@@ -4311,7 +4313,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Utils.cpp:314 getLimitsForStorage"
+    "src/Planner/Utils.cpp:315 getLimitsForStorage"
    ]
   },
   {
@@ -4323,32 +4325,32 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Utils.cpp:315 getLimitsForStorage"
+    "src/Planner/Utils.cpp:316 getLimitsForStorage"
    ]
   },
   {
    "name": "min_free_disk_space_for_temporary_data",
    "tier": "execution",
    "kind": "where",
-   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:691 getAggregatorParams"
+    "src/Planner/Planner.cpp:693 getAggregatorParams"
    ]
   },
   {
    "name": "min_hit_rate_to_use_consecutive_keys_optimization",
    "tier": "execution",
    "kind": "where",
-   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:698 getAggregatorParams",
-    "src/Planner/Planner.cpp:1040 addMergingAggregatedStep"
+    "src/Planner/Planner.cpp:700 getAggregatorParams",
+    "src/Planner/Planner.cpp:1043 addMergingAggregatedStep"
    ]
   },
   {
@@ -4374,7 +4376,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:1411 pushOrderByIntoView"
+    "src/Planner/PlannerJoinTree.cpp:1430 pushOrderByIntoView"
    ]
   },
   {
@@ -4386,7 +4388,7 @@
     "old-analyzer"
    ],
    "sources": [
-    "src/Interpreters/ExpressionAnalyzer.cpp:2184 ExpressionAnalysisResult::ExpressionAnalysisResult"
+    "src/Interpreters/ExpressionAnalyzer.cpp:2185 ExpressionAnalysisResult::ExpressionAnalysisResult"
    ]
   },
   {
@@ -4399,9 +4401,9 @@
     "old-analyzer"
    ],
    "sources": [
-    "src/Analyzer/Passes/AggregateFunctionOfGroupByKeysPass.cpp:38 enterImpl",
-    "src/Analyzer/Passes/AggregateFunctionOfGroupByKeysPass.cpp:93 leaveImpl",
-    "src/Interpreters/TreeOptimizer.cpp:714 TreeOptimizer::apply"
+    "src/Analyzer/Passes/AggregateFunctionOfGroupByKeysPass.cpp:39 enterImpl",
+    "src/Analyzer/Passes/AggregateFunctionOfGroupByKeysPass.cpp:100 leaveImpl",
+    "src/Interpreters/TreeOptimizer.cpp:721 TreeOptimizer::apply"
    ]
   },
   {
@@ -4413,7 +4415,7 @@
     "analyzer"
    ],
    "sources": [
-    "src/Analyzer/Passes/LogicalExpressionOptimizerPass.cpp:1863 enterImpl"
+    "src/Analyzer/Passes/LogicalExpressionOptimizerPass.cpp:1901 enterImpl"
    ]
   },
   {
@@ -4425,7 +4427,7 @@
     "analyzer"
    ],
    "sources": [
-    "src/Analyzer/Passes/LogicalExpressionOptimizerPass.cpp:1778 LogicalExpressionOptimizerVisitor"
+    "src/Analyzer/Passes/LogicalExpressionOptimizerPass.cpp:1791 LogicalExpressionOptimizerVisitor"
    ]
   },
   {
@@ -4439,7 +4441,7 @@
    ],
    "sources": [
     "src/Analyzer/Passes/ConvertQueryToCNFPass.cpp:722 optimizeWithConstraints",
-    "src/Interpreters/TreeOptimizer.cpp:679 TreeOptimizer::apply"
+    "src/Interpreters/TreeOptimizer.cpp:686 TreeOptimizer::apply"
    ]
   },
   {
@@ -4454,8 +4456,8 @@
    "sources": [
     "src/Analyzer/Passes/AggregateFunctionsArithmeticOperationsPass.cpp:67 enterImpl",
     "src/Analyzer/Passes/RewriteSumFunctionWithSumAndCountPass.cpp:30 enterImpl",
-    "src/Interpreters/TreeOptimizer.cpp:664 TreeOptimizer::apply",
-    "src/Interpreters/TreeOptimizer.cpp:687 TreeOptimizer::apply"
+    "src/Interpreters/TreeOptimizer.cpp:671 TreeOptimizer::apply",
+    "src/Interpreters/TreeOptimizer.cpp:694 TreeOptimizer::apply"
    ]
   },
   {
@@ -4510,8 +4512,8 @@
     "analyzer"
    ],
    "sources": [
-    "src/Analyzer/Passes/LogicalExpressionOptimizerPass.cpp:1582 leaveImpl",
-    "src/Analyzer/Passes/LogicalExpressionOptimizerPass.cpp:1878 leaveImpl"
+    "src/Analyzer/Passes/LogicalExpressionOptimizerPass.cpp:1595 leaveImpl",
+    "src/Analyzer/Passes/LogicalExpressionOptimizerPass.cpp:1916 leaveImpl"
    ]
   },
   {
@@ -4538,7 +4540,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:697 getAggregatorParams"
+    "src/Planner/Planner.cpp:699 getAggregatorParams"
    ]
   },
   {
@@ -4552,7 +4554,7 @@
    ],
    "sources": [
     "src/Analyzer/Passes/OptimizeGroupByFunctionKeysPass.cpp:33 enterImpl",
-    "src/Interpreters/TreeOptimizer.cpp:698 TreeOptimizer::apply",
+    "src/Interpreters/TreeOptimizer.cpp:705 TreeOptimizer::apply",
     "src/Interpreters/TreeRewriter.cpp:1566 TreeRewriter::analyzeSelect"
    ]
   },
@@ -4582,7 +4584,7 @@
    ],
    "sources": [
     "src/Analyzer/Passes/IfTransformStringsToEnumPass.cpp:112 enterImpl",
-    "src/Interpreters/TreeOptimizer.cpp:731 TreeOptimizer::apply"
+    "src/Interpreters/TreeOptimizer.cpp:738 TreeOptimizer::apply"
    ]
   },
   {
@@ -4620,7 +4622,7 @@
    ],
    "sources": [
     "src/Analyzer/Passes/UniqInjectiveFunctionsEliminationPass.cpp:45 enterImpl",
-    "src/Interpreters/TreeOptimizer.cpp:705 TreeOptimizer::apply"
+    "src/Interpreters/TreeOptimizer.cpp:712 TreeOptimizer::apply"
    ]
   },
   {
@@ -4657,7 +4659,7 @@
     "old-analyzer"
    ],
    "sources": [
-    "src/Analyzer/Passes/LogicalExpressionOptimizerPass.cpp:2601 tryReplaceOrEqualsChainWithIn",
+    "src/Analyzer/Passes/LogicalExpressionOptimizerPass.cpp:2645 tryReplaceOrEqualsChainWithIn",
     "src/Interpreters/TreeRewriter.cpp:1435 TreeRewriter::analyzeSelect"
    ]
   },
@@ -4670,7 +4672,7 @@
     "analyzer"
    ],
    "sources": [
-    "src/Analyzer/Passes/LogicalExpressionOptimizerPass.cpp:1072 convertNotEqualsChainToNotIn"
+    "src/Analyzer/Passes/LogicalExpressionOptimizerPass.cpp:1085 convertNotEqualsChainToNotIn"
    ]
   },
   {
@@ -4710,7 +4712,7 @@
    ],
    "sources": [
     "src/Analyzer/Passes/NormalizeCountVariantsPass.cpp:32 enterImpl",
-    "src/Interpreters/TreeOptimizer.cpp:701 TreeOptimizer::apply",
+    "src/Interpreters/TreeOptimizer.cpp:708 TreeOptimizer::apply",
     "src/Interpreters/TreeRewriter.cpp:1406 TreeRewriter::analyzeSelect"
    ]
   },
@@ -4771,7 +4773,7 @@
     "old-analyzer"
    ],
    "sources": [
-    "src/Interpreters/ExpressionAnalyzer.cpp:2261 ExpressionAnalysisResult::ExpressionAnalysisResult"
+    "src/Interpreters/ExpressionAnalyzer.cpp:2262 ExpressionAnalysisResult::ExpressionAnalysisResult"
    ]
   },
   {
@@ -4783,7 +4785,7 @@
     "analyzer"
    ],
    "sources": [
-    "src/Analyzer/Passes/LogicalExpressionOptimizerPass.cpp:1938 tryOptimizeAndCompareNotEqualsChain"
+    "src/Analyzer/Passes/LogicalExpressionOptimizerPass.cpp:1976 tryOptimizeAndCompareNotEqualsChain"
    ]
   },
   {
@@ -4797,7 +4799,7 @@
    ],
    "sources": [
     "src/Analyzer/Passes/OptimizeRedundantFunctionsInOrderByPass.cpp:38 enterImpl",
-    "src/Interpreters/TreeOptimizer.cpp:722 TreeOptimizer::apply"
+    "src/Interpreters/TreeOptimizer.cpp:729 TreeOptimizer::apply"
    ]
   },
   {
@@ -4893,7 +4895,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:2344 buildQueryPlanForTableExpression"
+    "src/Planner/PlannerJoinTree.cpp:2366 buildQueryPlanForTableExpression"
    ]
   },
   {
@@ -4907,7 +4909,7 @@
    ],
    "sources": [
     "src/Analyzer/Passes/ConvertQueryToCNFPass.cpp:798 enterImpl",
-    "src/Interpreters/TreeOptimizer.cpp:681 TreeOptimizer::apply"
+    "src/Interpreters/TreeOptimizer.cpp:688 TreeOptimizer::apply"
    ]
   },
   {
@@ -4933,7 +4935,7 @@
    ],
    "sources": [
     "src/Analyzer/Passes/OptimizeDateOrDateTimeConverterWithPreimagePass.cpp:66 enterImpl",
-    "src/Interpreters/TreeOptimizer.cpp:691 TreeOptimizer::apply"
+    "src/Interpreters/TreeOptimizer.cpp:698 TreeOptimizer::apply"
    ]
   },
   {
@@ -4947,8 +4949,8 @@
    ],
    "sources": [
     "src/Interpreters/TreeRewriter.cpp:1586 TreeRewriter::analyzeSelect",
-    "src/Planner/PlannerJoinTree.cpp:502 applyTrivialCountIfPossible",
-    "src/Planner/PlannerJoinTree.cpp:628 applyTrivialCountWithSparsityFilterIfPossible"
+    "src/Planner/PlannerJoinTree.cpp:504 applyTrivialCountIfPossible",
+    "src/Planner/PlannerJoinTree.cpp:630 applyTrivialCountWithSparsityFilterIfPossible"
    ]
   },
   {
@@ -4960,7 +4962,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:629 applyTrivialCountWithSparsityFilterIfPossible"
+    "src/Planner/PlannerJoinTree.cpp:631 applyTrivialCountWithSparsityFilterIfPossible"
    ]
   },
   {
@@ -4984,7 +4986,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:2025 buildQueryPlanForTableExpression"
+    "src/Planner/PlannerJoinTree.cpp:2047 buildQueryPlanForTableExpression"
    ]
   },
   {
@@ -5034,7 +5036,7 @@
    ],
    "sources": [
     "src/Analyzer/Passes/ConvertQueryToCNFPass.cpp:744 optimizeNode",
-    "src/Interpreters/TreeOptimizer.cpp:671 TreeOptimizer::apply"
+    "src/Interpreters/TreeOptimizer.cpp:678 TreeOptimizer::apply"
    ]
   },
   {
@@ -5046,7 +5048,7 @@
     "query-construction"
    ],
    "sources": [
-    "src/Interpreters/executeQuery.cpp:1929 applyQueryConstructionSettings"
+    "src/Interpreters/executeQuery.cpp:1950 applyQueryConstructionSettings"
    ]
   },
   {
@@ -5370,19 +5372,19 @@
     "query-construction"
    ],
    "sources": [
-    "src/Interpreters/executeQuery.cpp:1902 applyQueryConstructionSettings"
+    "src/Interpreters/executeQuery.cpp:1923 applyQueryConstructionSettings"
    ]
   },
   {
    "name": "parallel_hash_join_threshold",
    "tier": "execution",
    "kind": "where",
-   "reason": "JOIN resources: spill thresholds, preallocation, bucket counts, block sizes and the hash-table layout; read only where a JOIN is planned, which a single-table WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "JOIN resources: spill thresholds, preallocation, bucket counts, block sizes and the hash-table layout; read only where a JOIN is planned, which a single-table WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoins.cpp:1350 JoinAlgorithmParams::JoinAlgorithmParams"
+    "src/Planner/PlannerJoins.cpp:1352 JoinAlgorithmParams::JoinAlgorithmParams"
    ]
   },
   {
@@ -5394,7 +5396,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:932 buildCustomKeyFilterIfNeeded"
+    "src/Planner/PlannerJoinTree.cpp:951 buildCustomKeyFilterIfNeeded"
    ]
   },
   {
@@ -5406,7 +5408,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:2575 Planner::buildPlanForQueryNode",
+    "src/Planner/Planner.cpp:2584 Planner::buildPlanForQueryNode",
     "src/Planner/findParallelReplicasQuery.cpp:303 findQueryForParallelReplicas"
    ]
   },
@@ -5419,7 +5421,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:1489 parallelReplicasEnabledForStorage",
+    "src/Planner/PlannerJoinTree.cpp:1508 parallelReplicasEnabledForStorage",
     "src/Planner/findParallelReplicasQuery.cpp:85 canUseTableForParallelReplicas"
    ]
   },
@@ -5432,8 +5434,8 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:1473 parallelReplicasEnabledForStorage",
-    "src/Planner/PlannerJoinTree.cpp:2581 buildQueryPlanForTableExpression",
+    "src/Planner/PlannerJoinTree.cpp:1492 parallelReplicasEnabledForStorage",
+    "src/Planner/PlannerJoinTree.cpp:2603 buildQueryPlanForTableExpression",
     "src/Planner/findParallelReplicasQuery.cpp:67 canUseTableForParallelReplicas",
     "src/Planner/findParallelReplicasQuery.cpp:600 findTableUnionForParallelReplicas"
    ]
@@ -5448,11 +5450,11 @@
     "planner"
    ],
    "sources": [
-    "src/Interpreters/ExpressionAnalyzer.cpp:2078 ExpressionAnalysisResult::ExpressionAnalysisResult",
-    "src/Planner/PlannerJoinTree.cpp:835 updatePrewhereOutputsIfNeeded",
-    "src/Planner/PlannerJoinTree.cpp:916 buildCustomKeyFilterIfNeeded",
-    "src/Planner/PlannerJoinTree.cpp:931 buildCustomKeyFilterIfNeeded",
-    "src/Planner/PlannerJoinTree.cpp:1951 buildQueryPlanForTableExpression"
+    "src/Interpreters/ExpressionAnalyzer.cpp:2079 ExpressionAnalysisResult::ExpressionAnalysisResult",
+    "src/Planner/PlannerJoinTree.cpp:854 updatePrewhereOutputsIfNeeded",
+    "src/Planner/PlannerJoinTree.cpp:935 buildCustomKeyFilterIfNeeded",
+    "src/Planner/PlannerJoinTree.cpp:950 buildCustomKeyFilterIfNeeded",
+    "src/Planner/PlannerJoinTree.cpp:1973 buildQueryPlanForTableExpression"
    ]
   },
   {
@@ -5464,12 +5466,12 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:2652 Planner::buildPlanForQueryNode",
-    "src/Planner/PlannerJoinTree.cpp:923 buildCustomKeyFilterIfNeeded",
-    "src/Planner/PlannerJoinTree.cpp:927 buildCustomKeyFilterIfNeeded",
-    "src/Planner/PlannerJoinTree.cpp:1960 buildQueryPlanForTableExpression",
-    "src/Planner/PlannerJoinTree.cpp:2315 buildQueryPlanForTableExpression",
-    "src/Planner/PlannerJoinTree.cpp:2550 buildQueryPlanForTableExpression"
+    "src/Planner/Planner.cpp:2661 Planner::buildPlanForQueryNode",
+    "src/Planner/PlannerJoinTree.cpp:942 buildCustomKeyFilterIfNeeded",
+    "src/Planner/PlannerJoinTree.cpp:946 buildCustomKeyFilterIfNeeded",
+    "src/Planner/PlannerJoinTree.cpp:1982 buildQueryPlanForTableExpression",
+    "src/Planner/PlannerJoinTree.cpp:2337 buildQueryPlanForTableExpression",
+    "src/Planner/PlannerJoinTree.cpp:2572 buildQueryPlanForTableExpression"
    ]
   },
   {
@@ -5481,7 +5483,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:935 buildCustomKeyFilterIfNeeded"
+    "src/Planner/PlannerJoinTree.cpp:954 buildCustomKeyFilterIfNeeded"
    ]
   },
   {
@@ -5493,7 +5495,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:936 buildCustomKeyFilterIfNeeded"
+    "src/Planner/PlannerJoinTree.cpp:955 buildCustomKeyFilterIfNeeded"
    ]
   },
   {
@@ -5505,8 +5507,8 @@
     "analyzer"
    ],
    "sources": [
-    "src/Analyzer/Resolve/QueryAnalyzer.cpp:5064 QueryAnalyzer::resolveTableFunction",
-    "src/Analyzer/Resolve/QueryAnalyzer.cpp:5070 QueryAnalyzer::resolveTableFunction"
+    "src/Analyzer/Resolve/QueryAnalyzer.cpp:5067 QueryAnalyzer::resolveTableFunction",
+    "src/Analyzer/Resolve/QueryAnalyzer.cpp:5073 QueryAnalyzer::resolveTableFunction"
    ]
   },
   {
@@ -5518,7 +5520,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:1502 parallelReplicasEnabledForStorage",
+    "src/Planner/PlannerJoinTree.cpp:1521 parallelReplicasEnabledForStorage",
     "src/Planner/findParallelReplicasQuery.cpp:52 isTableNodeEligibleForParallelReplicas"
    ]
   },
@@ -5544,9 +5546,9 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:272 collectFiltersForAnalysis",
-    "src/Planner/PlannerJoinTree.cpp:2595 buildQueryPlanForTableExpression",
-    "src/Planner/PlannerJoinTree.cpp:2611 buildQueryPlanForTableExpression"
+    "src/Planner/Planner.cpp:274 collectFiltersForAnalysis",
+    "src/Planner/PlannerJoinTree.cpp:2617 buildQueryPlanForTableExpression",
+    "src/Planner/PlannerJoinTree.cpp:2633 buildQueryPlanForTableExpression"
    ]
   },
   {
@@ -5561,26 +5563,27 @@
    ],
    "sources": [
     "src/Interpreters/InterpreterSelectQueryAnalyzer.cpp:145 buildContext",
-    "src/Planner/PlannerJoinTree.cpp:575 applyTrivialCountIfPossible",
-    "src/Planner/PlannerJoinTree.cpp:576 applyTrivialCountIfPossible",
     "src/Planner/PlannerJoinTree.cpp:577 applyTrivialCountIfPossible",
-    "src/Planner/PlannerJoinTree.cpp:692 applyTrivialCountWithSparsityFilterIfPossible",
-    "src/Planner/PlannerJoinTree.cpp:693 applyTrivialCountWithSparsityFilterIfPossible",
+    "src/Planner/PlannerJoinTree.cpp:578 applyTrivialCountIfPossible",
+    "src/Planner/PlannerJoinTree.cpp:579 applyTrivialCountIfPossible",
     "src/Planner/PlannerJoinTree.cpp:694 applyTrivialCountWithSparsityFilterIfPossible",
-    "src/Planner/PlannerJoinTree.cpp:934 buildCustomKeyFilterIfNeeded"
+    "src/Planner/PlannerJoinTree.cpp:695 applyTrivialCountWithSparsityFilterIfPossible",
+    "src/Planner/PlannerJoinTree.cpp:696 applyTrivialCountWithSparsityFilterIfPossible",
+    "src/Planner/PlannerJoinTree.cpp:953 buildCustomKeyFilterIfNeeded"
    ]
   },
   {
    "name": "parallel_replicas_plan_based",
    "tier": "predicate-unflipped",
    "kind": "where",
-   "reason": "not classified: flipped with no verdict change on 26.7, 26.8, 26.9, but read where values or the plan are computed (2 site(s), first src/Planner/Planner.cpp:Planner::buildPlanForQueryNode)",
+   "reason": "not classified: flipped with no verdict change on 26.7, 26.8, 26.9, but read where values or the plan are computed (3 site(s), first src/Planner/Planner.cpp:Planner::buildPlanForQueryNode)",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:2675 Planner::buildPlanForQueryNode",
-    "src/Planner/PlannerJoinTree.cpp:2635 buildQueryPlanForTableExpression"
+    "src/Planner/Planner.cpp:2686 Planner::buildPlanForQueryNode",
+    "src/Planner/PlannerJoinTree.cpp:1573 allowParallelReplicasForJoinTree",
+    "src/Planner/PlannerJoinTree.cpp:2657 buildQueryPlanForTableExpression"
    ]
   },
   {
@@ -5632,10 +5635,10 @@
     "planner"
    ],
    "sources": [
-    "src/Analyzer/Resolve/QueryAnalyzer.cpp:1550 QueryAnalyzer::tryResolveIdentifier",
+    "src/Analyzer/Resolve/QueryAnalyzer.cpp:1553 QueryAnalyzer::tryResolveIdentifier",
     "src/Interpreters/QueryNormalizer.cpp:38 QueryNormalizer::ExtractedSettings::ExtractedSettings",
-    "src/Planner/PlannerJoinTree.cpp:1223 pushOrderByIntoView",
-    "src/Planner/PlannerJoinTree.cpp:1411 pushOrderByIntoView"
+    "src/Planner/PlannerJoinTree.cpp:1242 pushOrderByIntoView",
+    "src/Planner/PlannerJoinTree.cpp:1430 pushOrderByIntoView"
    ]
   },
   {
@@ -5655,74 +5658,74 @@
    "name": "query_cache_compress_entries",
    "tier": "execution",
    "kind": "where",
-   "reason": "caching: tunes the query result cache (sizes, TTL, compression, when an entry is written or read); the cache is used only under use_query_cache; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "caching: tunes the query result cache (sizes, TTL, compression, when an entry is written or read); the cache is used only under use_query_cache; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:3078 Planner::buildPlanForQueryNode"
+    "src/Planner/Planner.cpp:3090 Planner::buildPlanForQueryNode"
    ]
   },
   {
    "name": "query_cache_for_subqueries",
    "tier": "execution",
    "kind": "where",
-   "reason": "caching: tunes the query result cache (sizes, TTL, compression, when an entry is written or read); the cache is used only under use_query_cache; flip: no change on 26.7, 26.8, 26.9",
+   "reason": "caching: tunes the query result cache (sizes, TTL, compression, when an entry is written or read); the cache is used only under use_query_cache; flip: no change on 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:2476 shouldUseQueryCacheForSubquery"
+    "src/Planner/Planner.cpp:2485 shouldUseQueryCacheForSubquery"
    ]
   },
   {
    "name": "query_cache_max_entries",
    "tier": "execution",
    "kind": "where",
-   "reason": "caching: tunes the query result cache (sizes, TTL, compression, when an entry is written or read); the cache is used only under use_query_cache; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "caching: tunes the query result cache (sizes, TTL, compression, when an entry is written or read); the cache is used only under use_query_cache; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:3096 Planner::buildPlanForQueryNode"
+    "src/Planner/Planner.cpp:3108 Planner::buildPlanForQueryNode"
    ]
   },
   {
    "name": "query_cache_max_size_in_bytes",
    "tier": "execution",
    "kind": "where",
-   "reason": "caching: tunes the query result cache (sizes, TTL, compression, when an entry is written or read); the cache is used only under use_query_cache; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "caching: tunes the query result cache (sizes, TTL, compression, when an entry is written or read); the cache is used only under use_query_cache; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:3095 Planner::buildPlanForQueryNode"
+    "src/Planner/Planner.cpp:3107 Planner::buildPlanForQueryNode"
    ]
   },
   {
    "name": "query_cache_min_query_duration",
    "tier": "execution",
    "kind": "where",
-   "reason": "caching: tunes the query result cache (sizes, TTL, compression, when an entry is written or read); the cache is used only under use_query_cache; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "caching: tunes the query result cache (sizes, TTL, compression, when an entry is written or read); the cache is used only under use_query_cache; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:3092 Planner::buildPlanForQueryNode"
+    "src/Planner/Planner.cpp:3104 Planner::buildPlanForQueryNode"
    ]
   },
   {
    "name": "query_cache_min_query_runs",
    "tier": "execution",
    "kind": "where",
-   "reason": "caching: tunes the query result cache (sizes, TTL, compression, when an entry is written or read); the cache is used only under use_query_cache; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "caching: tunes the query result cache (sizes, TTL, compression, when an entry is written or read); the cache is used only under use_query_cache; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:3081 Planner::buildPlanForQueryNode",
-    "src/Planner/Planner.cpp:3082 Planner::buildPlanForQueryNode",
-    "src/Planner/Planner.cpp:3086 Planner::buildPlanForQueryNode"
+    "src/Planner/Planner.cpp:3093 Planner::buildPlanForQueryNode",
+    "src/Planner/Planner.cpp:3094 Planner::buildPlanForQueryNode",
+    "src/Planner/Planner.cpp:3098 Planner::buildPlanForQueryNode"
    ]
   },
   {
@@ -5734,31 +5737,31 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:3076 Planner::buildPlanForQueryNode"
+    "src/Planner/Planner.cpp:3088 Planner::buildPlanForQueryNode"
    ]
   },
   {
    "name": "query_cache_squash_partial_results",
    "tier": "execution",
    "kind": "where",
-   "reason": "caching: tunes the query result cache (sizes, TTL, compression, when an entry is written or read); the cache is used only under use_query_cache; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "caching: tunes the query result cache (sizes, TTL, compression, when an entry is written or read); the cache is used only under use_query_cache; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:3093 Planner::buildPlanForQueryNode"
+    "src/Planner/Planner.cpp:3105 Planner::buildPlanForQueryNode"
    ]
   },
   {
    "name": "query_cache_ttl",
    "tier": "execution",
    "kind": "where",
-   "reason": "caching: tunes the query result cache (sizes, TTL, compression, when an entry is written or read); the cache is used only under use_query_cache; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "caching: tunes the query result cache (sizes, TTL, compression, when an entry is written or read); the cache is used only under use_query_cache; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:3071 Planner::buildPlanForQueryNode"
+    "src/Planner/Planner.cpp:3083 Planner::buildPlanForQueryNode"
    ]
   },
   {
@@ -5770,7 +5773,7 @@
     "old-analyzer"
    ],
    "sources": [
-    "src/Interpreters/ExpressionAnalyzer.cpp:2185 ExpressionAnalysisResult::ExpressionAnalysisResult"
+    "src/Interpreters/ExpressionAnalyzer.cpp:2186 ExpressionAnalysisResult::ExpressionAnalysisResult"
    ]
   },
   {
@@ -5782,20 +5785,20 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:2993 buildQueryPlanForCrossJoinNode",
-    "src/Planner/PlannerJoinsLogical.cpp:567 buildJoinStepLogical"
+    "src/Planner/PlannerJoinTree.cpp:3015 buildQueryPlanForCrossJoinNode",
+    "src/Planner/PlannerJoinsLogical.cpp:568 buildJoinStepLogical"
    ]
   },
   {
    "name": "query_plan_enable_multithreading_after_window_functions",
    "tier": "execution",
    "kind": "where",
-   "reason": "parallelism: thread, stream and connection counts and the concurrency control; read where the planner sizes the pipeline, never where a value is computed; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "parallelism: thread, stream and connection counts and the concurrency control; read where the planner sizes the pipeline, never where a value is computed; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:1778 addWindowSteps"
+    "src/Planner/Planner.cpp:1784 addWindowSteps"
    ]
   },
   {
@@ -5807,8 +5810,8 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:756 applyTopKPushdownToPartialAggregation",
-    "src/Planner/Planner.cpp:757 applyTopKPushdownToPartialAggregation"
+    "src/Planner/Planner.cpp:759 applyTopKPushdownToPartialAggregation",
+    "src/Planner/Planner.cpp:760 applyTopKPushdownToPartialAggregation"
    ]
   },
   {
@@ -5820,7 +5823,7 @@
     "old-analyzer"
    ],
    "sources": [
-    "src/Interpreters/ExpressionAnalyzer.cpp:2261 ExpressionAnalysisResult::ExpressionAnalysisResult"
+    "src/Interpreters/ExpressionAnalyzer.cpp:2262 ExpressionAnalysisResult::ExpressionAnalysisResult"
    ]
   },
   {
@@ -5832,7 +5835,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Utils.cpp:299 getLimitsForStorage"
+    "src/Planner/Utils.cpp:300 getLimitsForStorage"
    ]
   },
   {
@@ -5844,7 +5847,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Utils.cpp:339 buildStorageLimits"
+    "src/Planner/Utils.cpp:340 buildStorageLimits"
    ]
   },
   {
@@ -5856,7 +5859,7 @@
     "analyzer"
    ],
    "sources": [
-    "src/Analyzer/Resolve/QueryAnalyzer.cpp:6942 QueryAnalyzer::resolveUnion"
+    "src/Analyzer/Resolve/QueryAnalyzer.cpp:6945 QueryAnalyzer::resolveUnion"
    ]
   },
   {
@@ -5895,7 +5898,7 @@
     "result-switch"
    ],
    "sources": [
-    "src/Interpreters/executeQuery.cpp:2978 executeQueryImpl"
+    "src/Interpreters/executeQuery.cpp:2999 executeQueryImpl"
    ]
   },
   {
@@ -5922,7 +5925,7 @@
    ],
    "sources": [
     "src/Analyzer/Passes/InverseDictionaryLookupPass.cpp:500 enterImpl",
-    "src/Analyzer/Resolve/resolveFunction.cpp:1533 QueryAnalyzer::resolveFunction"
+    "src/Analyzer/Resolve/resolveFunction.cpp:1534 QueryAnalyzer::resolveFunction"
    ]
   },
   {
@@ -5934,8 +5937,8 @@
     "result-switch"
    ],
    "sources": [
-    "src/Interpreters/executeQuery.cpp:2625 executeQueryImpl",
-    "src/Interpreters/executeQuery.cpp:2652 executeQueryImpl"
+    "src/Interpreters/executeQuery.cpp:2646 executeQueryImpl",
+    "src/Interpreters/executeQuery.cpp:2673 executeQueryImpl"
    ]
   },
   {
@@ -5983,7 +5986,7 @@
     "query-construction"
    ],
    "sources": [
-    "src/Interpreters/executeQuery.cpp:1928 applyQueryConstructionSettings"
+    "src/Interpreters/executeQuery.cpp:1949 applyQueryConstructionSettings"
    ]
   },
   {
@@ -5995,8 +5998,8 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:743 applyTopKPushdownToPartialAggregation",
-    "src/Planner/Planner.cpp:2594 Planner::buildPlanForQueryNode",
+    "src/Planner/Planner.cpp:746 applyTopKPushdownToPartialAggregation",
+    "src/Planner/Planner.cpp:2603 Planner::buildPlanForQueryNode",
     "src/Planner/findParallelReplicasQuery.cpp:524 findTableForParallelReplicas",
     "src/Planner/findParallelReplicasQuery.cpp:603 findTableUnionForParallelReplicas"
    ]
@@ -6010,8 +6013,8 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:701 getAggregatorParams",
-    "src/Planner/Planner.cpp:1041 addMergingAggregatedStep"
+    "src/Planner/Planner.cpp:703 getAggregatorParams",
+    "src/Planner/Planner.cpp:1044 addMergingAggregatedStep"
    ]
   },
   {
@@ -6042,8 +6045,8 @@
    ],
    "sources": [
     "src/Analyzer/Passes/InverseDictionaryLookupPass.cpp:509 enterImpl",
-    "src/Analyzer/Resolve/resolveFunction.cpp:3031 QueryAnalyzer::resolveFunction",
-    "src/Interpreters/ExpressionAnalyzer.cpp:174 ExpressionAnalyzer::ExtractedSettings::ExtractedSettings",
+    "src/Analyzer/Resolve/resolveFunction.cpp:3033 QueryAnalyzer::resolveFunction",
+    "src/Interpreters/ExpressionAnalyzer.cpp:175 ExpressionAnalyzer::ExtractedSettings::ExtractedSettings",
     "src/Interpreters/PreparedSets.cpp:86 PreparedSets::getSizeLimitsForSet"
    ]
   },
@@ -6057,7 +6060,7 @@
     "expressions"
    ],
    "sources": [
-    "src/Analyzer/Resolve/resolveFunction.cpp:1117 QueryAnalyzer::resolveFunction",
+    "src/Analyzer/Resolve/resolveFunction.cpp:1118 QueryAnalyzer::resolveFunction",
     "src/Interpreters/ExpressionActionsSettings.cpp:25 ExpressionActionsSettings::ExpressionActionsSettings"
    ]
   },
@@ -6070,7 +6073,7 @@
     "functions"
    ],
    "sources": [
-    "src/Functions/IFunction.cpp:458 IExecutableFunction::IExecutableFunction"
+    "src/Functions/IFunction.cpp:474 IExecutableFunction::IExecutableFunction"
    ]
   },
   {
@@ -6082,7 +6085,7 @@
     "functions"
    ],
    "sources": [
-    "src/Functions/IFunction.cpp:461 IExecutableFunction::IExecutableFunction"
+    "src/Functions/IFunction.cpp:477 IExecutableFunction::IExecutableFunction"
    ]
   },
   {
@@ -6094,9 +6097,9 @@
     "analyzer"
    ],
    "sources": [
-    "src/Analyzer/Resolve/IdentifierResolver.cpp:1132 IdentifierResolver::tryResolveIdentifierFromCrossJoin",
-    "src/Analyzer/Resolve/IdentifierResolver.cpp:1671 IdentifierResolver::tryResolveIdentifierFromJoin",
-    "src/Analyzer/Resolve/QueryAnalyzer.cpp:4542 QueryAnalyzer::initializeTableExpressionData"
+    "src/Analyzer/Resolve/IdentifierResolver.cpp:1143 IdentifierResolver::tryResolveIdentifierFromCrossJoin",
+    "src/Analyzer/Resolve/IdentifierResolver.cpp:1682 IdentifierResolver::tryResolveIdentifierFromJoin",
+    "src/Analyzer/Resolve/QueryAnalyzer.cpp:4545 QueryAnalyzer::initializeTableExpressionData"
    ]
   },
   {
@@ -6120,7 +6123,7 @@
     "query-construction"
    ],
    "sources": [
-    "src/Interpreters/executeQuery.cpp:1930 applyQueryConstructionSettings"
+    "src/Interpreters/executeQuery.cpp:1951 applyQueryConstructionSettings"
    ]
   },
   {
@@ -6139,12 +6142,12 @@
    "name": "temporary_files_buffer_size",
    "tier": "execution",
    "kind": "where",
-   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:675 getAggregatorParams"
+    "src/Planner/Planner.cpp:677 getAggregatorParams"
    ]
   },
   {
@@ -6156,7 +6159,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:675 getAggregatorParams"
+    "src/Planner/Planner.cpp:677 getAggregatorParams"
    ]
   },
   {
@@ -6168,7 +6171,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:218 checkStoragesSupportTransactions"
+    "src/Planner/Planner.cpp:220 checkStoragesSupportTransactions"
    ]
   },
   {
@@ -6180,7 +6183,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Utils.cpp:320 getLimitsForStorage"
+    "src/Planner/Utils.cpp:321 getLimitsForStorage"
    ]
   },
   {
@@ -6192,7 +6195,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Utils.cpp:301 getLimitsForStorage"
+    "src/Planner/Utils.cpp:302 getLimitsForStorage"
    ]
   },
   {
@@ -6204,7 +6207,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:1156 addTotalsHavingStep"
+    "src/Planner/Planner.cpp:1159 addTotalsHavingStep"
    ]
   },
   {
@@ -6216,8 +6219,8 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:500 QueryAnalysisResult",
-    "src/Planner/Planner.cpp:1155 addTotalsHavingStep"
+    "src/Planner/Planner.cpp:502 QueryAnalysisResult",
+    "src/Planner/Planner.cpp:1158 addTotalsHavingStep"
    ]
   },
   {
@@ -6233,7 +6236,7 @@
    "sources": [
     "src/Interpreters/PreparedSets.cpp:471 FutureSetFromSubquery::buildSetInplace",
     "src/Interpreters/PreparedSets.cpp:538 FutureSetFromSubquery::buildOrderedSetInplace",
-    "src/Planner/Planner.cpp:2023 addBuildSubqueriesForSetsStepIfNeeded"
+    "src/Planner/Planner.cpp:2029 addBuildSubqueriesForSetsStepIfNeeded"
    ]
   },
   {
@@ -6248,19 +6251,19 @@
     "planner"
    ],
    "sources": [
-    "src/Analyzer/Resolve/resolveFunction.cpp:1534 QueryAnalyzer::resolveFunction",
-    "src/Analyzer/Resolve/resolveFunction.cpp:2046 QueryAnalyzer::resolveFunction",
-    "src/Analyzer/Resolve/resolveFunction.cpp:3026 QueryAnalyzer::resolveFunction",
-    "src/Analyzer/Resolve/resolveFunction.cpp:3035 QueryAnalyzer::resolveFunction",
-    "src/Interpreters/ActionsVisitor.cpp:207 createBlockForSet",
-    "src/Interpreters/ActionsVisitor.cpp:225 createBlockForSet",
-    "src/Interpreters/ActionsVisitor.cpp:555 makeExplicitSet",
-    "src/Interpreters/PreparedSets.cpp:760 PreparedSets::addFromTuple",
-    "src/Interpreters/PreparedSets.cpp:795 PreparedSets::addFromSubquery",
-    "src/Interpreters/PreparedSets.cpp:814 PreparedSets::addFromSubquery",
+    "src/Analyzer/Resolve/resolveFunction.cpp:1535 QueryAnalyzer::resolveFunction",
+    "src/Analyzer/Resolve/resolveFunction.cpp:2047 QueryAnalyzer::resolveFunction",
+    "src/Analyzer/Resolve/resolveFunction.cpp:3028 QueryAnalyzer::resolveFunction",
+    "src/Analyzer/Resolve/resolveFunction.cpp:3037 QueryAnalyzer::resolveFunction",
+    "src/Interpreters/ActionsVisitor.cpp:208 createBlockForSet",
+    "src/Interpreters/ActionsVisitor.cpp:226 createBlockForSet",
+    "src/Interpreters/ActionsVisitor.cpp:556 makeExplicitSet",
+    "src/Interpreters/PreparedSets.cpp:755 PreparedSets::addFromTuple",
+    "src/Interpreters/PreparedSets.cpp:790 PreparedSets::addFromSubquery",
+    "src/Interpreters/PreparedSets.cpp:809 PreparedSets::addFromSubquery",
     "src/Interpreters/TreeRewriter.cpp:1692 TreeRewriter::normalize",
-    "src/Planner/CollectSets.cpp:93 enterImpl",
-    "src/Planner/CollectSets.cpp:112 enterImpl",
+    "src/Planner/CollectSets.cpp:94 enterImpl",
+    "src/Planner/CollectSets.cpp:113 enterImpl",
     "src/Planner/PlannerActionsVisitor.cpp:1122 PlannerActionsVisitorImpl::makeSetForInFunction"
    ]
   },
@@ -6325,10 +6328,22 @@
    ]
   },
   {
+   "name": "use_aggregation_memory_tracker",
+   "tier": "execution",
+   "kind": "where",
+   "reason": "GROUP BY resources: whether the aggregation's state is charged to its own memory tracker; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.8, 26.9, 26.10",
+   "scopes": [
+    "planner"
+   ],
+   "sources": [
+    "src/Planner/Planner.cpp:709 getAggregatorParams"
+   ]
+  },
+  {
    "name": "use_concurrency_control",
    "tier": "execution",
    "kind": "where",
-   "reason": "parallelism: thread, stream and connection counts and the concurrency control; read where the planner sizes the pipeline, never where a value is computed; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "parallelism: thread, stream and connection counts and the concurrency control; read where the planner sizes the pipeline, never where a value is computed; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "analyzer",
     "functions",
@@ -6336,12 +6351,12 @@
     "planner"
    ],
    "sources": [
-    "src/Analyzer/Resolve/evaluateScalarSubqueryIfNeeded.cpp:289 QueryAnalyzer::evaluateScalarSubqueryIfNeeded",
-    "src/Analyzer/Resolve/evaluateScalarSubqueryIfNeeded.cpp:305 QueryAnalyzer::evaluateScalarSubqueryIfNeeded",
+    "src/Analyzer/Resolve/evaluateScalarSubqueryIfNeeded.cpp:291 QueryAnalyzer::evaluateScalarSubqueryIfNeeded",
+    "src/Analyzer/Resolve/evaluateScalarSubqueryIfNeeded.cpp:307 QueryAnalyzer::evaluateScalarSubqueryIfNeeded",
     "src/Functions/FunctionDictGetKeys.cpp:400 executeConstPath",
     "src/Interpreters/ExecuteScalarSubqueriesVisitor.cpp:217 ExecuteScalarSubqueriesMatcher::visit",
-    "src/Interpreters/InterpreterSelectQueryAnalyzer.cpp:421 InterpreterSelectQueryAnalyzer::buildQueryPipeline",
-    "src/Planner/PlannerJoinTree.cpp:2730 buildQueryPlanForTableExpression"
+    "src/Interpreters/InterpreterSelectQueryAnalyzer.cpp:475 InterpreterSelectQueryAnalyzer::buildQueryPipeline",
+    "src/Planner/PlannerJoinTree.cpp:2752 buildQueryPlanForTableExpression"
    ]
   },
   {
@@ -6367,9 +6382,9 @@
     "old-analyzer"
    ],
    "sources": [
-    "src/Interpreters/ExpressionAnalyzer.cpp:176 ExpressionAnalyzer::ExtractedSettings::ExtractedSettings",
     "src/Interpreters/ExpressionAnalyzer.cpp:177 ExpressionAnalyzer::ExtractedSettings::ExtractedSettings",
-    "src/Interpreters/ExpressionAnalyzer.cpp:179 ExpressionAnalyzer::ExtractedSettings::ExtractedSettings",
+    "src/Interpreters/ExpressionAnalyzer.cpp:178 ExpressionAnalyzer::ExtractedSettings::ExtractedSettings",
+    "src/Interpreters/ExpressionAnalyzer.cpp:180 ExpressionAnalyzer::ExtractedSettings::ExtractedSettings",
     "src/Interpreters/PreparedSets.cpp:94 getMaxSizeForIndex",
     "src/Interpreters/PreparedSets.cpp:269 FutureSetFromTuple::buildOrderedSetInplace"
    ]
@@ -6395,7 +6410,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:1076 mustSkipQueryConditionCacheInParallelReplicasEstimate"
+    "src/Planner/PlannerJoinTree.cpp:1095 mustSkipQueryConditionCacheInParallelReplicasEstimate"
    ]
   },
   {
@@ -6407,7 +6422,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:1076 mustSkipQueryConditionCacheInParallelReplicasEstimate"
+    "src/Planner/PlannerJoinTree.cpp:1095 mustSkipQueryConditionCacheInParallelReplicasEstimate"
    ]
   },
   {
@@ -6419,7 +6434,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:1080 mustSkipQueryConditionCacheInParallelReplicasEstimate"
+    "src/Planner/PlannerJoinTree.cpp:1099 mustSkipQueryConditionCacheInParallelReplicasEstimate"
    ]
   },
   {
@@ -6431,7 +6446,7 @@
     "analyzer"
    ],
    "sources": [
-    "src/Analyzer/Resolve/QueryAnalyzer.cpp:4876 QueryAnalyzer::resolveTableFunction",
+    "src/Analyzer/Resolve/QueryAnalyzer.cpp:4879 QueryAnalyzer::resolveTableFunction",
     "src/Analyzer/Resolve/evaluateScalarSubqueryIfNeeded.cpp:163 QueryAnalyzer::evaluateScalarSubqueryIfNeeded"
    ]
   },
@@ -6444,7 +6459,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:1080 mustSkipQueryConditionCacheInParallelReplicasEstimate"
+    "src/Planner/PlannerJoinTree.cpp:1099 mustSkipQueryConditionCacheInParallelReplicasEstimate"
    ]
   },
   {
@@ -6461,7 +6476,7 @@
    "sources": [
     "src/Analyzer/Passes/IfChainToMultiIfPass.cpp:94 IfChainToMultiIfPass::run",
     "src/Analyzer/Passes/MultiIfToIfPass.cpp:68 MultiIfToIfPass::run",
-    "src/Analyzer/QueryTreeBuilder.cpp:637 QueryTreeBuilder::buildExpression",
+    "src/Analyzer/QueryTreeBuilder.cpp:650 QueryTreeBuilder::buildExpression",
     "src/Analyzer/UnionNode.cpp:119 UnionNode::computeProjectionColumns",
     "src/Functions/array/array.cpp:42 create",
     "src/Functions/coalesce.cpp:39 create",
@@ -6469,8 +6484,8 @@
     "src/Functions/ifNull.cpp:45 create",
     "src/Functions/map.cpp:49 FunctionMap",
     "src/Functions/multiIf.cpp:67 create",
-    "src/Interpreters/ActionsVisitor.cpp:1739 ActionsMatcher::visit",
-    "src/Planner/Planner.cpp:2378 Planner::buildPlanForUnionNode",
+    "src/Interpreters/ActionsVisitor.cpp:1740 ActionsMatcher::visit",
+    "src/Planner/Planner.cpp:2387 Planner::buildPlanForUnionNode",
     "src/Planner/PlannerCorrelatedSubqueries.cpp:438 decorrelateQueryPlan"
    ]
   },
@@ -6495,14 +6510,14 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:1425 addWithFillStepIfNeeded"
+    "src/Planner/Planner.cpp:1431 addWithFillStepIfNeeded"
    ]
   },
   {
    "name": "validate_enum_literals_in_operators",
    "tier": "predicate-unflipped",
    "kind": "where",
-   "reason": "not classified: flipped with no verdict change on 26.3, 26.7, 26.8, 26.9, but read where values or the plan are computed (4 site(s), first src/Analyzer/Resolve/resolveFunction.cpp:QueryAnalyzer::resolveFunction)",
+   "reason": "not classified: flipped with no verdict change on 26.3, 26.7, 26.8, 26.9, 26.10, but read where values or the plan are computed (4 site(s), first src/Analyzer/Resolve/resolveFunction.cpp:QueryAnalyzer::resolveFunction)",
    "scopes": [
     "analyzer",
     "functions",
@@ -6510,11 +6525,11 @@
     "planner"
    ],
    "sources": [
-    "src/Analyzer/Resolve/resolveFunction.cpp:3027 QueryAnalyzer::resolveFunction",
+    "src/Analyzer/Resolve/resolveFunction.cpp:3029 QueryAnalyzer::resolveFunction",
     "src/Functions/ComparisonParams.cpp:17 ComparisonParams::ComparisonParams",
-    "src/Interpreters/ActionsVisitor.cpp:208 createBlockForSet",
-    "src/Interpreters/ActionsVisitor.cpp:226 createBlockForSet",
-    "src/Planner/CollectSets.cpp:94 enterImpl"
+    "src/Interpreters/ActionsVisitor.cpp:209 createBlockForSet",
+    "src/Interpreters/ActionsVisitor.cpp:227 createBlockForSet",
+    "src/Planner/CollectSets.cpp:95 enterImpl"
    ]
   },
   {
@@ -6538,8 +6553,8 @@
     "analyzer"
    ],
    "sources": [
-    "src/Analyzer/Resolve/QueryAnalyzer.cpp:6685 QueryAnalyzer::resolveQuery",
-    "src/Analyzer/Resolve/QueryAnalyzer.cpp:6846 QueryAnalyzer::resolveQuery"
+    "src/Analyzer/Resolve/QueryAnalyzer.cpp:6688 QueryAnalyzer::resolveQuery",
+    "src/Analyzer/Resolve/QueryAnalyzer.cpp:6849 QueryAnalyzer::resolveQuery"
    ]
   },
   {
@@ -6570,7 +6585,7 @@
    "name": "webassembly_udf_max_fuel",
    "tier": "execution",
    "kind": "where",
-   "reason": "resources of WebAssembly UDFs (fuel, memory, instances, block size); a UDF is not a registry function, and the library refuses it in a filter; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "resources of WebAssembly UDFs (fuel, memory, instances, block size); a UDF is not a registry function, and the library refuses it in a filter; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "functions"
    ],
@@ -6582,7 +6597,7 @@
    "name": "webassembly_udf_max_input_block_size",
    "tier": "execution",
    "kind": "where",
-   "reason": "resources of WebAssembly UDFs (fuel, memory, instances, block size); a UDF is not a registry function, and the library refuses it in a filter; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "resources of WebAssembly UDFs (fuel, memory, instances, block size); a UDF is not a registry function, and the library refuses it in a filter; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "functions"
    ],
@@ -6594,7 +6609,7 @@
    "name": "webassembly_udf_max_instances",
    "tier": "execution",
    "kind": "where",
-   "reason": "resources of WebAssembly UDFs (fuel, memory, instances, block size); a UDF is not a registry function, and the library refuses it in a filter; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "resources of WebAssembly UDFs (fuel, memory, instances, block size); a UDF is not a registry function, and the library refuses it in a filter; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "functions"
    ],
@@ -6606,7 +6621,7 @@
    "name": "webassembly_udf_max_memory",
    "tier": "execution",
    "kind": "where",
-   "reason": "resources of WebAssembly UDFs (fuel, memory, instances, block size); a UDF is not a registry function, and the library refuses it in a filter; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "resources of WebAssembly UDFs (fuel, memory, instances, block size); a UDF is not a registry function, and the library refuses it in a filter; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "functions"
    ],

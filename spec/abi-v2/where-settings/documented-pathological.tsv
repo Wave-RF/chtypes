@@ -20,13 +20,8 @@
 #            build)
 #   ruling   who signed the row off, and when
 # setting	value	line	layer	server	rule	ruling
-max_expanded_ast_elements	1	26.3	profile	e:36	refuses-by-query-size	the lead, 2026-10-09
 max_expanded_ast_elements	1	26.3	filter	e:36	refuses-by-query-size	the lead, 2026-10-09
-max_expanded_ast_elements	1	26.7	profile	e:36	refuses-by-query-size	the lead, 2026-10-09
-max_expanded_ast_elements	1	26.7	filter	e:36	refuses-by-query-size	the lead, 2026-10-09
-max_expanded_ast_elements	1	26.8	profile	e:36	refuses-by-query-size	the lead, 2026-10-09
 max_expanded_ast_elements	1	26.8	filter	e:36	refuses-by-query-size	the lead, 2026-10-09
-max_expanded_ast_elements	1	26.9	profile	e:36	refuses-by-query-size	the lead, 2026-10-09
 max_expanded_ast_elements	1	26.9	filter	e:36	refuses-by-query-size	the lead, 2026-10-09
 page	1	26.8	profile	e:36	refuses-every-query	the lead, 2026-10-09
 page	1	26.8	schema	e:36	refuses-every-query	the lead, 2026-10-09
@@ -34,3 +29,7 @@ page	1	26.8	filter	e:36	refuses-every-query	the lead, 2026-10-09
 page	1	26.9	profile	e:36	refuses-every-query	the lead, 2026-10-09
 page	1	26.9	schema	e:36	refuses-every-query	the lead, 2026-10-09
 page	1	26.9	filter	e:36	refuses-every-query	the lead, 2026-10-09
+max_expanded_ast_elements	1	26.10	filter	e:36	refuses-by-query-size	the lead, 2026-11-03
+page	1	26.10	profile	e:36	refuses-every-query	the lead, 2026-11-03
+page	1	26.10	schema	e:36	refuses-every-query	the lead, 2026-11-03
+page	1	26.10	filter	e:36	refuses-every-query	the lead, 2026-11-03

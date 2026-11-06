@@ -1,8 +1,8 @@
 {
  "schema": "chtypes.where-settings/1",
  "line": "26.3",
- "tag": "v26.3.38.2-lts",
- "version": "26.3.38.2",
+ "tag": "v26.3.60.2-lts",
+ "version": "26.3.60.2",
  "generator": "chtypes where-settings generator",
  "settings": [
   {
@@ -14,7 +14,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Utils.cpp:671 parseAdditionalResultFilter"
+    "src/Planner/Utils.cpp:682 parseAdditionalResultFilter"
    ]
   },
   {
@@ -26,7 +26,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:614 parseAdditionalFilterAstIfNeeded"
+    "src/Planner/PlannerJoinTree.cpp:633 parseAdditionalFilterAstIfNeeded"
    ]
   },
   {
@@ -61,27 +61,27 @@
    "name": "aggregation_in_order_max_block_bytes",
    "tier": "execution",
    "kind": "where",
-   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:714 addAggregationStep",
-    "src/Planner/Planner.cpp:791 addMergingAggregatedStep"
+    "src/Planner/Planner.cpp:715 addAggregationStep",
+    "src/Planner/Planner.cpp:792 addMergingAggregatedStep"
    ]
   },
   {
    "name": "aggregation_memory_efficient_merge_threads",
    "tier": "execution",
    "kind": "where",
-   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:691 addAggregationStep",
     "src/Planner/Planner.cpp:692 addAggregationStep",
-    "src/Planner/Planner.cpp:788 addMergingAggregatedStep"
+    "src/Planner/Planner.cpp:693 addAggregationStep",
+    "src/Planner/Planner.cpp:789 addMergingAggregatedStep"
    ]
   },
   {
@@ -134,7 +134,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoins.cpp:871 buildJoinClausesAndActions"
+    "src/Planner/PlannerJoins.cpp:872 buildJoinClausesAndActions"
    ]
   },
   {
@@ -166,7 +166,7 @@
     "src/Functions/isNotNull.cpp:40 create",
     "src/Functions/isNull.cpp:23 FunctionIsNull::create",
     "src/Functions/isNullable.cpp:26 create",
-    "src/Interpreters/ActionsVisitor.cpp:1244 ActionsMatcher::makeSet",
+    "src/Interpreters/ActionsVisitor.cpp:1245 ActionsMatcher::makeSet",
     "src/Interpreters/InterpreterFactory.cpp:142 InterpreterFactory::get",
     "src/Interpreters/InterpreterFactory.cpp:153 InterpreterFactory::get",
     "src/Interpreters/evaluateConstantExpression.cpp:104 evaluateConstantExpressionImpl"
@@ -182,7 +182,7 @@
    ],
    "sources": [
     "src/Analyzer/Resolve/QueryAnalyzer.cpp:1297 QueryAnalyzer::tryResolveIdentifierInParentScopes",
-    "src/Analyzer/Resolve/resolveFunction.cpp:525 QueryAnalyzer::resolveFunction"
+    "src/Analyzer/Resolve/resolveFunction.cpp:526 QueryAnalyzer::resolveFunction"
    ]
   },
   {
@@ -230,10 +230,10 @@
     "src/Analyzer/Resolve/evaluateScalarSubqueryIfNeeded.cpp:135 QueryAnalyzer::evaluateScalarSubqueryIfNeeded",
     "src/Interpreters/InterpreterSelectQueryAnalyzer.cpp:134 buildContext",
     "src/Interpreters/InterpreterSelectQueryAnalyzer.cpp:156 buildQueryPlanForAutomaticParallelReplicas",
-    "src/Planner/Planner.cpp:1986 Planner::buildPlanForQueryNode",
-    "src/Planner/Planner.cpp:2026 Planner::buildPlanForQueryNode",
-    "src/Planner/Planner.cpp:2042 Planner::buildPlanForQueryNode",
-    "src/Planner/PlannerJoinTree.cpp:355 applyTrivialCountIfPossible"
+    "src/Planner/Planner.cpp:1990 Planner::buildPlanForQueryNode",
+    "src/Planner/Planner.cpp:2030 Planner::buildPlanForQueryNode",
+    "src/Planner/Planner.cpp:2046 Planner::buildPlanForQueryNode",
+    "src/Planner/PlannerJoinTree.cpp:357 applyTrivialCountIfPossible"
    ]
   },
   {
@@ -245,7 +245,7 @@
     "alias"
    ],
    "sources": [
-    "alias of optimize_use_projections (src/Core/Settings.cpp:5158)"
+    "alias of optimize_use_projections (src/Core/Settings.cpp:5160)"
    ]
   },
   {
@@ -257,7 +257,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:326 applyTrivialCountIfPossible"
+    "src/Planner/PlannerJoinTree.cpp:328 applyTrivialCountIfPossible"
    ]
   },
   {
@@ -293,8 +293,8 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoins.cpp:678 buildAllJoinClauses",
-    "src/Planner/PlannerJoinsLogical.cpp:535 buildJoinStepLogical"
+    "src/Planner/PlannerJoins.cpp:679 buildAllJoinClauses",
+    "src/Planner/PlannerJoinsLogical.cpp:536 buildJoinStepLogical"
    ]
   },
   {
@@ -437,7 +437,7 @@
    "sources": [
     "src/Analyzer/Passes/OptimizeGroupByInjectiveFunctionsPass.cpp:114 isValidGroupByKeyTypes",
     "src/Analyzer/Resolve/QueryAnalyzer.cpp:3482 QueryAnalyzer::validateGroupByKeyType",
-    "src/Interpreters/ExpressionAnalyzer.cpp:1430 SelectQueryExpressionAnalyzer::validateGroupByKeyType"
+    "src/Interpreters/ExpressionAnalyzer.cpp:1431 SelectQueryExpressionAnalyzer::validateGroupByKeyType"
    ]
   },
   {
@@ -451,7 +451,7 @@
    ],
    "sources": [
     "src/Analyzer/Resolve/QueryAnalyzer.cpp:3393 QueryAnalyzer::validateSortingKeyType",
-    "src/Interpreters/ExpressionAnalyzer.cpp:1720 SelectQueryExpressionAnalyzer::validateOrderByKeyType"
+    "src/Interpreters/ExpressionAnalyzer.cpp:1721 SelectQueryExpressionAnalyzer::validateOrderByKeyType"
    ]
   },
   {
@@ -475,7 +475,7 @@
     "analyzer"
    ],
    "sources": [
-    "src/Analyzer/Resolve/IdentifierResolver.cpp:627 IdentifierResolver::tryResolveIdentifierFromStorage"
+    "src/Analyzer/Resolve/IdentifierResolver.cpp:638 IdentifierResolver::tryResolveIdentifierFromStorage"
    ]
   },
   {
@@ -549,12 +549,12 @@
    "name": "async_socket_for_remote",
    "tier": "execution",
    "kind": "where",
-   "reason": "parallelism: thread, stream and connection counts and the concurrency control; read where the planner sizes the pipeline, never where a value is computed; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "parallelism: thread, stream and connection counts and the concurrency control; read where the planner sizes the pipeline, never where a value is computed; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:841 buildQueryPlanForTableExpression"
+    "src/Planner/PlannerJoinTree.cpp:860 buildQueryPlanForTableExpression"
    ]
   },
   {
@@ -689,24 +689,24 @@
    "name": "collect_hash_table_stats_during_aggregation",
    "tier": "execution",
    "kind": "where",
-   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:617 getAggregatorParams"
+    "src/Planner/Planner.cpp:618 getAggregatorParams"
    ]
   },
   {
    "name": "collect_hash_table_stats_during_joins",
    "tier": "execution",
    "kind": "where",
-   "reason": "JOIN resources: spill thresholds, preallocation, bucket counts, block sizes and the hash-table layout; read only where a JOIN is planned, which a single-table WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "JOIN resources: spill thresholds, preallocation, bucket counts, block sizes and the hash-table layout; read only where a JOIN is planned, which a single-table WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoins.cpp:1219 JoinAlgorithmParams::JoinAlgorithmParams"
+    "src/Planner/PlannerJoins.cpp:1221 JoinAlgorithmParams::JoinAlgorithmParams"
    ]
   },
   {
@@ -945,7 +945,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:647 getAggregatorParams"
+    "src/Planner/Planner.cpp:648 getAggregatorParams"
    ]
   },
   {
@@ -970,7 +970,7 @@
     "planner"
    ],
    "sources": [
-    "src/Interpreters/ExpressionAnalyzer.cpp:885 ExpressionAnalyzer::makeWindowDescriptions",
+    "src/Interpreters/ExpressionAnalyzer.cpp:886 ExpressionAnalyzer::makeWindowDescriptions",
     "src/Planner/PlannerSorting.cpp:188 extractSortDescription",
     "src/Planner/PlannerWindowFunctions.cpp:64 extractWindowDescriptionFromWindowNode"
    ]
@@ -1155,10 +1155,10 @@
     "pass-switch"
    ],
    "sources": [
-    "src/Interpreters/executeQuery.cpp:1155 executeQueryImpl",
-    "src/Interpreters/executeQuery.cpp:1163 executeQueryImpl",
-    "src/Interpreters/executeQuery.cpp:1170 executeQueryImpl",
-    "src/Interpreters/executeQuery.cpp:1177 executeQueryImpl"
+    "src/Interpreters/executeQuery.cpp:1176 executeQueryImpl",
+    "src/Interpreters/executeQuery.cpp:1184 executeQueryImpl",
+    "src/Interpreters/executeQuery.cpp:1191 executeQueryImpl",
+    "src/Interpreters/executeQuery.cpp:1198 executeQueryImpl"
    ]
   },
   {
@@ -1170,21 +1170,21 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:894 addDistinctStep",
-    "src/Planner/Planner.cpp:1905 Planner::buildPlanForUnionNode"
+    "src/Planner/Planner.cpp:895 addDistinctStep",
+    "src/Planner/Planner.cpp:1909 Planner::buildPlanForUnionNode"
    ]
   },
   {
    "name": "distributed_aggregation_memory_efficient",
    "tier": "execution",
    "kind": "where",
-   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:457 QueryAnalysisResult",
-    "src/Planner/Planner.cpp:786 addMergingAggregatedStep"
+    "src/Planner/Planner.cpp:458 QueryAnalysisResult",
+    "src/Planner/Planner.cpp:787 addMergingAggregatedStep"
    ]
   },
   {
@@ -1196,7 +1196,7 @@
     "old-analyzer"
    ],
    "sources": [
-    "src/Interpreters/ExpressionAnalyzer.cpp:189 ExpressionAnalyzer::ExtractedSettings::ExtractedSettings"
+    "src/Interpreters/ExpressionAnalyzer.cpp:190 ExpressionAnalyzer::ExtractedSettings::ExtractedSettings"
    ]
   },
   {
@@ -1232,7 +1232,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:642 getAggregatorParams"
+    "src/Planner/Planner.cpp:643 getAggregatorParams"
    ]
   },
   {
@@ -1244,8 +1244,8 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:641 getAggregatorParams",
-    "src/Planner/PlannerJoinTree.cpp:326 applyTrivialCountIfPossible"
+    "src/Planner/Planner.cpp:642 getAggregatorParams",
+    "src/Planner/PlannerJoinTree.cpp:328 applyTrivialCountIfPossible"
    ]
   },
   {
@@ -1257,7 +1257,7 @@
     "alias"
    ],
    "sources": [
-    "alias of allow_experimental_analyzer (src/Core/Settings.cpp:7229)"
+    "alias of allow_experimental_analyzer (src/Core/Settings.cpp:7228)"
    ]
   },
   {
@@ -1269,7 +1269,7 @@
     "old-analyzer"
    ],
    "sources": [
-    "src/Interpreters/ExpressionAnalyzer.cpp:138 allowEarlyConstantFolding"
+    "src/Interpreters/ExpressionAnalyzer.cpp:139 allowEarlyConstantFolding"
    ]
   },
   {
@@ -1310,7 +1310,7 @@
    ],
    "sources": [
     "src/Interpreters/ExpressionActionsSettings.cpp:26 ExpressionActionsSettings::ExpressionActionsSettings",
-    "src/Planner/PlannerJoinTree.cpp:2694 buildQueryPlanForArrayJoinNode"
+    "src/Planner/PlannerJoinTree.cpp:2737 buildQueryPlanForArrayJoinNode"
    ]
   },
   {
@@ -1329,14 +1329,14 @@
    "name": "enable_memory_bound_merging_of_aggregation_results",
    "tier": "execution",
    "kind": "where",
-   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:457 QueryAnalysisResult",
-    "src/Planner/Planner.cpp:722 addAggregationStep",
-    "src/Planner/Planner.cpp:792 addMergingAggregatedStep"
+    "src/Planner/Planner.cpp:458 QueryAnalysisResult",
+    "src/Planner/Planner.cpp:723 addAggregationStep",
+    "src/Planner/Planner.cpp:793 addMergingAggregatedStep"
    ]
   },
   {
@@ -1401,7 +1401,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:2418 Planner::buildPlanForQueryNode"
+    "src/Planner/Planner.cpp:2422 Planner::buildPlanForQueryNode"
    ]
   },
   {
@@ -1413,7 +1413,7 @@
     "alias"
    ],
    "sources": [
-    "alias of allow_experimental_parallel_reading_from_replicas (src/Core/Settings.cpp:7080)"
+    "alias of allow_experimental_parallel_reading_from_replicas (src/Core/Settings.cpp:7079)"
    ]
   },
   {
@@ -1427,9 +1427,9 @@
    ],
    "sources": [
     "src/Analyzer/Resolve/QueryAnalyzer.cpp:603 QueryAnalyzer::replaceNodesWithPositionalArguments",
-    "src/Interpreters/ExpressionAnalyzer.cpp:336 ExpressionAnalyzer::analyzeAggregation",
-    "src/Interpreters/ExpressionAnalyzer.cpp:1625 SelectQueryExpressionAnalyzer::appendOrderBy",
-    "src/Interpreters/ExpressionAnalyzer.cpp:1763 SelectQueryExpressionAnalyzer::appendLimitBy",
+    "src/Interpreters/ExpressionAnalyzer.cpp:337 ExpressionAnalyzer::analyzeAggregation",
+    "src/Interpreters/ExpressionAnalyzer.cpp:1626 SelectQueryExpressionAnalyzer::appendOrderBy",
+    "src/Interpreters/ExpressionAnalyzer.cpp:1764 SelectQueryExpressionAnalyzer::appendLimitBy",
     "src/Interpreters/TreeOptimizer.cpp:203 optimizeGroupBy",
     "src/Interpreters/TreeRewriter.cpp:1625 TreeRewriter::normalize"
    ]
@@ -1438,12 +1438,12 @@
    "name": "enable_producing_buckets_out_of_order_in_aggregation",
    "tier": "execution",
    "kind": "where",
-   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:655 getAggregatorParams"
+    "src/Planner/Planner.cpp:656 getAggregatorParams"
    ]
   },
   {
@@ -1456,7 +1456,7 @@
     "old-analyzer"
    ],
    "sources": [
-    "src/Analyzer/Resolve/evaluateScalarSubqueryIfNeeded.cpp:321 QueryAnalyzer::evaluateScalarSubqueryIfNeeded",
+    "src/Analyzer/Resolve/evaluateScalarSubqueryIfNeeded.cpp:323 QueryAnalyzer::evaluateScalarSubqueryIfNeeded",
     "src/Interpreters/ExecuteScalarSubqueriesVisitor.cpp:293 ExecuteScalarSubqueriesMatcher::visit"
    ]
   },
@@ -1476,12 +1476,12 @@
    "name": "enable_software_prefetch_in_aggregation",
    "tier": "execution",
    "kind": "where",
-   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:650 getAggregatorParams"
+    "src/Planner/Planner.cpp:651 getAggregatorParams"
    ]
   },
   {
@@ -1507,23 +1507,23 @@
    ],
    "sources": [
     "src/Analyzer/Passes/PruneArrayJoinColumnsPass.cpp:304 PruneArrayJoinColumnsPass::run",
-    "src/Planner/PlannerJoinTree.cpp:2692 buildQueryPlanForArrayJoinNode"
+    "src/Planner/PlannerJoinTree.cpp:2735 buildQueryPlanForArrayJoinNode"
    ]
   },
   {
    "name": "exact_rows_before_limit",
    "tier": "execution",
    "kind": "where",
-   "reason": "statistics: makes LIMIT read to the end to report rows_before_limit exactly; the returned rows are the same; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "statistics: makes LIMIT read to the end to report rows_before_limit exactly; the returned rows are the same; it also keeps the trivial GROUP BY ... LIMIT cap off (getTrivialGroupByLimit), which needs a GROUP BY and a LIMIT, clauses a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:943 addMergeSortingStep",
-    "src/Planner/Planner.cpp:1116 addPreliminaryLimitStep",
-    "src/Planner/Planner.cpp:1145 addPreliminaryLimitStep",
-    "src/Planner/Planner.cpp:1258 addPreliminarySortOrDistinctOrLimitStepsIfNeeded",
-    "src/Planner/Planner.cpp:1360 addLimitStep"
+    "src/Planner/Planner.cpp:944 addMergeSortingStep",
+    "src/Planner/Planner.cpp:1120 addPreliminaryLimitStep",
+    "src/Planner/Planner.cpp:1149 addPreliminaryLimitStep",
+    "src/Planner/Planner.cpp:1262 addPreliminarySortOrDistinctOrLimitStepsIfNeeded",
+    "src/Planner/Planner.cpp:1364 addLimitStep"
    ]
   },
   {
@@ -1535,7 +1535,7 @@
     "analyzer"
    ],
    "sources": [
-    "src/Analyzer/Resolve/resolveFunction.cpp:710 QueryAnalyzer::resolveFunction"
+    "src/Analyzer/Resolve/resolveFunction.cpp:711 QueryAnalyzer::resolveFunction"
    ]
   },
   {
@@ -1559,7 +1559,7 @@
     "alias"
    ],
    "sources": [
-    "alias of extract_key_value_pairs_max_pairs_per_row (src/Core/Settings.cpp:7067)"
+    "alias of extract_key_value_pairs_max_pairs_per_row (src/Core/Settings.cpp:7066)"
    ]
   },
   {
@@ -1574,10 +1574,10 @@
    ],
    "sources": [
     "src/Analyzer/Resolve/evaluateScalarSubqueryIfNeeded.cpp:130 QueryAnalyzer::evaluateScalarSubqueryIfNeeded",
-    "src/Analyzer/Utils.cpp:1033 updateContextForSubqueryExecution",
+    "src/Analyzer/Utils.cpp:1034 updateContextForSubqueryExecution",
     "src/Interpreters/ExecuteScalarSubqueriesVisitor.cpp:97 getQueryInterpreter",
-    "src/Planner/Planner.cpp:1184 addPreliminaryLimitOptimizationStepIfNeeded",
-    "src/Planner/Planner.cpp:1491 addExtremesStepIfNeeded"
+    "src/Planner/Planner.cpp:1188 addPreliminaryLimitOptimizationStepIfNeeded",
+    "src/Planner/Planner.cpp:1495 addExtremesStepIfNeeded"
    ]
   },
   {
@@ -1601,8 +1601,8 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:684 addAggregationStep",
-    "src/Planner/Planner.cpp:723 addAggregationStep"
+    "src/Planner/Planner.cpp:685 addAggregationStep",
+    "src/Planner/Planner.cpp:724 addAggregationStep"
    ]
   },
   {
@@ -1616,11 +1616,11 @@
    ],
    "sources": [
     "src/Analyzer/Passes/GroupingFunctionsResolvePass.cpp:110 enterImpl",
-    "src/Analyzer/Resolve/resolveFunction.cpp:1198 QueryAnalyzer::resolveFunction",
-    "src/Interpreters/ActionsVisitor.cpp:761 ActionsMatcher::visit",
-    "src/Interpreters/ActionsVisitor.cpp:765 ActionsMatcher::visit",
-    "src/Interpreters/ActionsVisitor.cpp:769 ActionsMatcher::visit",
-    "src/Interpreters/ActionsVisitor.cpp:774 ActionsMatcher::visit"
+    "src/Analyzer/Resolve/resolveFunction.cpp:1200 QueryAnalyzer::resolveFunction",
+    "src/Interpreters/ActionsVisitor.cpp:762 ActionsMatcher::visit",
+    "src/Interpreters/ActionsVisitor.cpp:766 ActionsMatcher::visit",
+    "src/Interpreters/ActionsVisitor.cpp:770 ActionsMatcher::visit",
+    "src/Interpreters/ActionsVisitor.cpp:775 ActionsMatcher::visit"
    ]
   },
   {
@@ -1881,7 +1881,7 @@
    "name": "function_sleep_max_microseconds_per_block",
    "tier": "execution",
    "kind": "where",
-   "reason": "a per-call limit of a non-deterministic function (sleep, the random distributions, serial IDs), which the library declines in a filter; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "a per-call limit of a non-deterministic function (sleep, the random distributions, serial IDs), which the library declines in a filter; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "functions"
    ],
@@ -1941,28 +1941,28 @@
    "name": "grace_hash_join_initial_buckets",
    "tier": "execution",
    "kind": "where",
-   "reason": "JOIN resources: spill thresholds, preallocation, bucket counts, block sizes and the hash-table layout; read only where a JOIN is planned, which a single-table WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
-   "scopes": [
-    "old-analyzer",
-    "planner"
-   ],
-   "sources": [
-    "src/Interpreters/ExpressionAnalyzer.cpp:1054 tryCreateJoin",
-    "src/Planner/PlannerJoins.cpp:1224 JoinAlgorithmParams::JoinAlgorithmParams"
-   ]
-  },
-  {
-   "name": "grace_hash_join_max_buckets",
-   "tier": "execution",
-   "kind": "where",
-   "reason": "JOIN resources: spill thresholds, preallocation, bucket counts, block sizes and the hash-table layout; read only where a JOIN is planned, which a single-table WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "JOIN resources: spill thresholds, preallocation, bucket counts, block sizes and the hash-table layout; read only where a JOIN is planned, which a single-table WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "old-analyzer",
     "planner"
    ],
    "sources": [
     "src/Interpreters/ExpressionAnalyzer.cpp:1055 tryCreateJoin",
-    "src/Planner/PlannerJoins.cpp:1225 JoinAlgorithmParams::JoinAlgorithmParams"
+    "src/Planner/PlannerJoins.cpp:1226 JoinAlgorithmParams::JoinAlgorithmParams"
+   ]
+  },
+  {
+   "name": "grace_hash_join_max_buckets",
+   "tier": "execution",
+   "kind": "where",
+   "reason": "JOIN resources: spill thresholds, preallocation, bucket counts, block sizes and the hash-table layout; read only where a JOIN is planned, which a single-table WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
+   "scopes": [
+    "old-analyzer",
+    "planner"
+   ],
+   "sources": [
+    "src/Interpreters/ExpressionAnalyzer.cpp:1056 tryCreateJoin",
+    "src/Planner/PlannerJoins.cpp:1227 JoinAlgorithmParams::JoinAlgorithmParams"
    ]
   },
   {
@@ -1974,27 +1974,15 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:450 QueryAnalysisResult",
-    "src/Planner/Planner.cpp:636 getAggregatorParams"
+    "src/Planner/Planner.cpp:451 QueryAnalysisResult",
+    "src/Planner/Planner.cpp:637 getAggregatorParams"
    ]
   },
   {
    "name": "group_by_two_level_threshold",
    "tier": "execution",
    "kind": "where",
-   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
-   "scopes": [
-    "planner"
-   ],
-   "sources": [
-    "src/Planner/Planner.cpp:637 getAggregatorParams"
-   ]
-  },
-  {
-   "name": "group_by_two_level_threshold_bytes",
-   "tier": "execution",
-   "kind": "where",
-   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
@@ -2003,27 +1991,40 @@
    ]
   },
   {
+   "name": "group_by_two_level_threshold_bytes",
+   "tier": "execution",
+   "kind": "where",
+   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
+   "scopes": [
+    "planner"
+   ],
+   "sources": [
+    "src/Planner/Planner.cpp:639 getAggregatorParams"
+   ]
+  },
+  {
    "name": "group_by_use_nulls",
    "tier": "predicate-unflipped",
    "kind": "where",
-   "reason": "not classified: flipped with no verdict change on 26.3, 26.7, 26.8, 26.9, but read where values or the plan are computed (10 site(s), first src/Analyzer/Passes/FunctionToSubcolumnsPass.cpp:enterImpl)",
+   "reason": "not classified: flipped with no verdict change on 26.3, 26.7, 26.8, 26.9, but read where values or the plan are computed (11 site(s), first src/Analyzer/Passes/AggregateFunctionOfGroupByKeysPass.cpp:enterImpl)",
    "scopes": [
     "analyzer",
     "old-analyzer",
     "planner"
    ],
    "sources": [
+    "src/Analyzer/Passes/AggregateFunctionOfGroupByKeysPass.cpp:56 enterImpl",
     "src/Analyzer/Passes/FunctionToSubcolumnsPass.cpp:606 enterImpl",
     "src/Analyzer/Passes/GroupingFunctionsResolvePass.cpp:183 resolveGroupingFunctions",
     "src/Analyzer/Passes/OptimizeGroupByFunctionKeysPass.cpp:43 enterImpl",
     "src/Analyzer/Passes/OptimizeGroupByInjectiveFunctionsPass.cpp:39 enterImpl",
     "src/Analyzer/Resolve/IdentifierResolveScope.cpp:48 IdentifierResolveScope::IdentifierResolveScope",
-    "src/Interpreters/ExpressionAnalyzer.cpp:325 ExpressionAnalyzer::analyzeAggregation",
-    "src/Interpreters/ExpressionAnalyzer.cpp:2118 ExpressionAnalysisResult::ExpressionAnalysisResult",
-    "src/Interpreters/ExpressionAnalyzer.cpp:2151 ExpressionAnalysisResult::ExpressionAnalysisResult",
-    "src/Planner/Planner.cpp:718 addAggregationStep",
-    "src/Planner/Planner.cpp:857 addCubeOrRollupStepIfNeeded",
-    "src/Planner/Planner.cpp:863 addCubeOrRollupStepIfNeeded",
+    "src/Interpreters/ExpressionAnalyzer.cpp:326 ExpressionAnalyzer::analyzeAggregation",
+    "src/Interpreters/ExpressionAnalyzer.cpp:2119 ExpressionAnalysisResult::ExpressionAnalysisResult",
+    "src/Interpreters/ExpressionAnalyzer.cpp:2152 ExpressionAnalysisResult::ExpressionAnalysisResult",
+    "src/Planner/Planner.cpp:719 addAggregationStep",
+    "src/Planner/Planner.cpp:858 addCubeOrRollupStepIfNeeded",
+    "src/Planner/Planner.cpp:864 addCubeOrRollupStepIfNeeded",
     "src/Planner/PlannerExpressionAnalysis.cpp:163 analyzeAggregation"
    ]
   },
@@ -2668,9 +2669,9 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:2497 tryMakeDirectJoinWithMergeTree",
-    "src/Planner/PlannerJoins.cpp:675 buildAllJoinClauses",
-    "src/Planner/PlannerJoinsLogical.cpp:512 buildJoinStepLogical"
+    "src/Planner/PlannerJoinTree.cpp:2530 tryMakeDirectJoinWithMergeTree",
+    "src/Planner/PlannerJoins.cpp:676 buildAllJoinClauses",
+    "src/Planner/PlannerJoinsLogical.cpp:513 buildJoinStepLogical"
    ]
   },
   {
@@ -2682,7 +2683,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoins.cpp:1217 JoinAlgorithmParams::JoinAlgorithmParams"
+    "src/Planner/PlannerJoins.cpp:1219 JoinAlgorithmParams::JoinAlgorithmParams"
    ]
   },
   {
@@ -2713,13 +2714,13 @@
     "src/Analyzer/Passes/FunctionToSubcolumnsPass.cpp:599 enterImpl",
     "src/Analyzer/Resolve/IdentifierResolveScope.cpp:53 IdentifierResolveScope::IdentifierResolveScope",
     "src/Planner/PlannerCorrelatedSubqueries.cpp:299 decorrelateQueryPlan",
-    "src/Planner/PlannerJoinTree.cpp:2065 buildQueryPlanForCrossJoinNode",
-    "src/Planner/PlannerJoinTree.cpp:2280 buildQueryPlanForJoinNodeLegacy",
-    "src/Planner/PlannerJoinTree.cpp:2552 tryMakeDirectJoinWithMergeTree",
-    "src/Planner/PlannerJoinTree.cpp:2596 buildQueryPlanForJoinNode",
-    "src/Planner/PlannerJoins.cpp:376 buildJoinClauseImpl",
-    "src/Planner/PlannerJoins.cpp:408 buildJoinClauseImpl",
-    "src/Planner/PlannerJoinsLogical.cpp:568 buildJoinStepLogical"
+    "src/Planner/PlannerJoinTree.cpp:2096 buildQueryPlanForCrossJoinNode",
+    "src/Planner/PlannerJoinTree.cpp:2312 buildQueryPlanForJoinNodeLegacy",
+    "src/Planner/PlannerJoinTree.cpp:2585 tryMakeDirectJoinWithMergeTree",
+    "src/Planner/PlannerJoinTree.cpp:2639 buildQueryPlanForJoinNode",
+    "src/Planner/PlannerJoins.cpp:377 buildJoinClauseImpl",
+    "src/Planner/PlannerJoins.cpp:409 buildJoinClauseImpl",
+    "src/Planner/PlannerJoinsLogical.cpp:569 buildJoinStepLogical"
    ]
   },
   {
@@ -2791,25 +2792,25 @@
    "name": "lock_acquire_timeout",
    "tier": "execution",
    "kind": "where",
-   "reason": "a lock wait timeout: throws when a table lock is not acquired in time; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "a lock wait timeout: throws when a table lock is not acquired in time; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "analyzer",
     "functions",
     "planner"
    ],
    "sources": [
-    "src/Analyzer/Resolve/IdentifierResolver.cpp:248 IdentifierResolver::tryResolveTableIdentifier",
+    "src/Analyzer/Resolve/IdentifierResolver.cpp:259 IdentifierResolver::tryResolveTableIdentifier",
     "src/Analyzer/TableNode.cpp:59 TableNode::TableNode",
     "src/Analyzer/TableNode.cpp:92 TableNode::updateStorage",
-    "src/Functions/FunctionJoinGet.cpp:206 JoinGetOverloadResolver::buildImpl",
-    "src/Planner/PlannerJoins.cpp:1231 JoinAlgorithmParams::JoinAlgorithmParams"
+    "src/Functions/FunctionJoinGet.cpp:217 JoinGetOverloadResolver::buildImpl",
+    "src/Planner/PlannerJoins.cpp:1233 JoinAlgorithmParams::JoinAlgorithmParams"
    ]
   },
   {
    "name": "log_queries",
    "tier": "execution",
    "kind": "where",
-   "reason": "logging and progress: records what ran or reports progress; no value or row depends on it; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "logging and progress: records what ran or reports progress; no value or row depends on it; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "functions",
     "types"
@@ -2844,14 +2845,14 @@
     "old-analyzer"
    ],
    "sources": [
-    "src/Interpreters/ActionsVisitor.cpp:617 ActionsMatcher::doUntuple"
+    "src/Interpreters/ActionsVisitor.cpp:618 ActionsMatcher::doUntuple"
    ]
   },
   {
    "name": "max_autoincrement_series",
    "tier": "execution",
    "kind": "where",
-   "reason": "a per-call limit of a non-deterministic function (sleep, the random distributions, serial IDs), which the library declines in a filter; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "a per-call limit of a non-deterministic function (sleep, the random distributions, serial IDs), which the library declines in a filter; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "functions"
    ],
@@ -2863,7 +2864,7 @@
    "name": "max_block_size",
    "tier": "execution",
    "kind": "where",
-   "reason": "block size: the only functions whose value depends on block boundaries (blockSize, rowNumberInBlock, rowNumberInAllBlocks, blockNumber, runningDifference, neighbor, runningAccumulate) are non-deterministic or unresolvable in the registry, so the library declines them in a filter; everywhere else it sizes batches; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "block size: the only functions whose value depends on block boundaries (blockSize, rowNumberInBlock, rowNumberInAllBlocks, blockNumber, runningDifference, neighbor, runningAccumulate) are non-deterministic or unresolvable in the registry, so the library declines them in a filter; everywhere else it sizes batches; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "functions",
     "planner"
@@ -2871,27 +2872,27 @@
    "sources": [
     "src/Functions/FunctionDictGetKeys.cpp:197 executeConstPath",
     "src/Functions/FunctionDictGetKeys.cpp:451 fillMissingBucketsFromDict",
-    "src/Planner/Planner.cpp:649 getAggregatorParams",
-    "src/Planner/Planner.cpp:713 addAggregationStep",
-    "src/Planner/Planner.cpp:765 addMergingAggregatedStep",
-    "src/Planner/Planner.cpp:790 addMergingAggregatedStep",
-    "src/Planner/Planner.cpp:941 addMergeSortingStep",
-    "src/Planner/PlannerJoinTree.cpp:848 buildQueryPlanForTableExpression",
-    "src/Planner/PlannerJoinTree.cpp:1824 buildJoinQueryPlan",
-    "src/Planner/PlannerJoinTree.cpp:1927 buildJoinQueryPlan",
-    "src/Planner/PlannerJoinTree.cpp:2693 buildQueryPlanForArrayJoinNode"
+    "src/Planner/Planner.cpp:650 getAggregatorParams",
+    "src/Planner/Planner.cpp:714 addAggregationStep",
+    "src/Planner/Planner.cpp:766 addMergingAggregatedStep",
+    "src/Planner/Planner.cpp:791 addMergingAggregatedStep",
+    "src/Planner/Planner.cpp:942 addMergeSortingStep",
+    "src/Planner/PlannerJoinTree.cpp:867 buildQueryPlanForTableExpression",
+    "src/Planner/PlannerJoinTree.cpp:1855 buildJoinQueryPlan",
+    "src/Planner/PlannerJoinTree.cpp:1958 buildJoinQueryPlan",
+    "src/Planner/PlannerJoinTree.cpp:2736 buildQueryPlanForArrayJoinNode"
    ]
   },
   {
    "name": "max_bytes_before_external_group_by",
    "tier": "execution",
    "kind": "where",
-   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:640 getAggregatorParams"
+    "src/Planner/Planner.cpp:641 getAggregatorParams"
    ]
   },
   {
@@ -2903,8 +2904,8 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:894 addDistinctStep",
-    "src/Planner/Planner.cpp:1905 Planner::buildPlanForUnionNode"
+    "src/Planner/Planner.cpp:895 addDistinctStep",
+    "src/Planner/Planner.cpp:1909 Planner::buildPlanForUnionNode"
    ]
   },
   {
@@ -2919,9 +2920,9 @@
    ],
    "sources": [
     "src/Analyzer/Passes/InverseDictionaryLookupPass.cpp:248 enterImpl",
-    "src/Analyzer/Resolve/resolveFunction.cpp:1505 QueryAnalyzer::resolveFunction",
-    "src/Interpreters/ExpressionAnalyzer.cpp:183 ExpressionAnalyzer::ExtractedSettings::ExtractedSettings",
-    "src/Interpreters/ExpressionAnalyzer.cpp:188 ExpressionAnalyzer::ExtractedSettings::ExtractedSettings",
+    "src/Analyzer/Resolve/resolveFunction.cpp:1507 QueryAnalyzer::resolveFunction",
+    "src/Interpreters/ExpressionAnalyzer.cpp:184 ExpressionAnalyzer::ExtractedSettings::ExtractedSettings",
+    "src/Interpreters/ExpressionAnalyzer.cpp:189 ExpressionAnalyzer::ExtractedSettings::ExtractedSettings",
     "src/Interpreters/PreparedSets.cpp:50 PreparedSets::getSizeLimitsForSet"
    ]
   },
@@ -2929,12 +2930,12 @@
    "name": "max_bytes_ratio_before_external_group_by",
    "tier": "execution",
    "kind": "where",
-   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:640 getAggregatorParams"
+    "src/Planner/Planner.cpp:641 getAggregatorParams"
    ]
   },
   {
@@ -2946,7 +2947,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Utils.cpp:224 getLimitsForStorage"
+    "src/Planner/Utils.cpp:225 getLimitsForStorage"
    ]
   },
   {
@@ -2958,14 +2959,14 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Utils.cpp:264 buildStorageLimits"
+    "src/Planner/Utils.cpp:265 buildStorageLimits"
    ]
   },
   {
    "name": "max_bytes_to_transfer",
    "tier": "execution",
    "kind": "where",
-   "reason": "a size limit on a set sent between servers; it throws when exceeded. Its `break` switch, transfer_overflow_mode, truncates the set and is listed on its own; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "a size limit on a set sent between servers; it throws when exceeded. Its `break` switch, transfer_overflow_mode, truncates the set and is listed on its own; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "expressions",
     "old-analyzer",
@@ -2974,33 +2975,33 @@
    "sources": [
     "src/Interpreters/PreparedSets.cpp:299 FutureSetFromSubquery::buildSetInplace",
     "src/Interpreters/PreparedSets.cpp:339 FutureSetFromSubquery::buildOrderedSetInplace",
-    "src/Planner/Planner.cpp:1584 addBuildSubqueriesForSetsStepIfNeeded"
+    "src/Planner/Planner.cpp:1588 addBuildSubqueriesForSetsStepIfNeeded"
    ]
   },
   {
    "name": "max_columns_to_read",
    "tier": "execution",
    "kind": "where",
-   "reason": "a resource limit that only throws when exceeded; its reads raise an error and change no value; flip: errors only on 26.3, 26.7, 26.8, 26.9",
+   "reason": "a resource limit that only throws when exceeded; its reads raise an error and change no value; flip: errors only on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:472 prepareBuildQueryPlanForTableExpression",
-    "src/Planner/PlannerJoinTree.cpp:477 prepareBuildQueryPlanForTableExpression"
+    "src/Planner/PlannerJoinTree.cpp:491 prepareBuildQueryPlanForTableExpression",
+    "src/Planner/PlannerJoinTree.cpp:496 prepareBuildQueryPlanForTableExpression"
    ]
   },
   {
    "name": "max_distributed_connections",
    "tier": "execution",
    "kind": "where",
-   "reason": "parallelism: thread, stream and connection counts and the concurrency control; read where the planner sizes the pipeline, never where a value is computed; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "parallelism: thread, stream and connection counts and the concurrency control; read where the planner sizes the pipeline, never where a value is computed; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:844 buildQueryPlanForTableExpression",
-    "src/Planner/PlannerJoinTree.cpp:845 buildQueryPlanForTableExpression"
+    "src/Planner/PlannerJoinTree.cpp:863 buildQueryPlanForTableExpression",
+    "src/Planner/PlannerJoinTree.cpp:864 buildQueryPlanForTableExpression"
    ]
   },
   {
@@ -3024,7 +3025,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Utils.cpp:246 getLimitsForStorage"
+    "src/Planner/Utils.cpp:247 getLimitsForStorage"
    ]
   },
   {
@@ -3036,7 +3037,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Utils.cpp:243 getLimitsForStorage"
+    "src/Planner/Utils.cpp:244 getLimitsForStorage"
    ]
   },
   {
@@ -3048,7 +3049,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Utils.cpp:244 getLimitsForStorage"
+    "src/Planner/Utils.cpp:245 getLimitsForStorage"
    ]
   },
   {
@@ -3062,14 +3063,14 @@
    ],
    "sources": [
     "src/Functions/UserDefined/ExternalUserDefinedExecutableFunctionsLoader.cpp:196 ExternalUserDefinedExecutableFunctionsLoader::createObject",
-    "src/Planner/Utils.cpp:225 getLimitsForStorage"
+    "src/Planner/Utils.cpp:226 getLimitsForStorage"
    ]
   },
   {
    "name": "max_expanded_ast_elements",
    "tier": "execution",
    "kind": "where",
-   "reason": "a resource limit that only throws when exceeded; its reads raise an error and change no value; flip: errors only on 26.3, 26.7, 26.8, 26.9",
+   "reason": "a resource limit that only throws when exceeded; its reads raise an error and change no value; flip: errors only on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "analyzer",
     "old-analyzer"
@@ -3119,13 +3120,13 @@
    "name": "max_parallel_replicas",
    "tier": "execution",
    "kind": "where",
-   "reason": "parallelism: the replica count; it acts only together with parallel replicas being enabled (allow_experimental_parallel_reading_from_replicas / enable_parallel_replicas, listed); flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "parallelism: the replica count; it acts only together with parallel replicas being enabled (allow_experimental_parallel_reading_from_replicas / enable_parallel_replicas, listed); flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:355 applyTrivialCountIfPossible",
-    "src/Planner/PlannerJoinTree.cpp:1346 buildQueryPlanForTableExpression"
+    "src/Planner/PlannerJoinTree.cpp:357 applyTrivialCountIfPossible",
+    "src/Planner/PlannerJoinTree.cpp:1365 buildQueryPlanForTableExpression"
    ]
   },
   {
@@ -3147,8 +3148,8 @@
     "src/Functions/fuzzQuery.cpp:49 FunctionFuzzQuery",
     "src/Interpreters/parseColumnsListForTableFunction.cpp:174 parseColumnsListFromString",
     "src/Interpreters/parseColumnsListForTableFunction.cpp:204 tryParseColumnsListFromString",
-    "src/Planner/PlannerJoinTree.cpp:638 parseAdditionalFilterAstIfNeeded",
-    "src/Planner/Utils.cpp:683 parseAdditionalResultFilter"
+    "src/Planner/PlannerJoinTree.cpp:657 parseAdditionalFilterAstIfNeeded",
+    "src/Planner/Utils.cpp:694 parseAdditionalResultFilter"
    ]
   },
   {
@@ -3172,8 +3173,8 @@
     "src/Functions/fuzzQuery.cpp:48 FunctionFuzzQuery",
     "src/Interpreters/parseColumnsListForTableFunction.cpp:173 parseColumnsListFromString",
     "src/Interpreters/parseColumnsListForTableFunction.cpp:203 tryParseColumnsListFromString",
-    "src/Planner/PlannerJoinTree.cpp:637 parseAdditionalFilterAstIfNeeded",
-    "src/Planner/Utils.cpp:682 parseAdditionalResultFilter"
+    "src/Planner/PlannerJoinTree.cpp:656 parseAdditionalFilterAstIfNeeded",
+    "src/Planner/Utils.cpp:693 parseAdditionalResultFilter"
    ]
   },
   {
@@ -3191,8 +3192,8 @@
     "src/Functions/fuzzQuery.cpp:47 FunctionFuzzQuery",
     "src/Interpreters/parseColumnsListForTableFunction.cpp:172 parseColumnsListFromString",
     "src/Interpreters/parseColumnsListForTableFunction.cpp:202 tryParseColumnsListFromString",
-    "src/Planner/PlannerJoinTree.cpp:636 parseAdditionalFilterAstIfNeeded",
-    "src/Planner/Utils.cpp:681 parseAdditionalResultFilter"
+    "src/Planner/PlannerJoinTree.cpp:655 parseAdditionalFilterAstIfNeeded",
+    "src/Planner/Utils.cpp:692 parseAdditionalResultFilter"
    ]
   },
   {
@@ -3204,7 +3205,7 @@
     "analyzer"
    ],
    "sources": [
-    "src/Analyzer/Utils.cpp:1031 updateContextForSubqueryExecution"
+    "src/Analyzer/Utils.cpp:1032 updateContextForSubqueryExecution"
    ]
   },
   {
@@ -3218,7 +3219,7 @@
    ],
    "sources": [
     "src/Analyzer/Resolve/evaluateScalarSubqueryIfNeeded.cpp:129 QueryAnalyzer::evaluateScalarSubqueryIfNeeded",
-    "src/Analyzer/Utils.cpp:1030 updateContextForSubqueryExecution",
+    "src/Analyzer/Utils.cpp:1031 updateContextForSubqueryExecution",
     "src/Interpreters/ExecuteScalarSubqueriesVisitor.cpp:96 getQueryInterpreter"
    ]
   },
@@ -3231,8 +3232,8 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:894 addDistinctStep",
-    "src/Planner/Planner.cpp:1905 Planner::buildPlanForUnionNode"
+    "src/Planner/Planner.cpp:895 addDistinctStep",
+    "src/Planner/Planner.cpp:1909 Planner::buildPlanForUnionNode"
    ]
   },
   {
@@ -3247,9 +3248,9 @@
    ],
    "sources": [
     "src/Analyzer/Passes/InverseDictionaryLookupPass.cpp:248 enterImpl",
-    "src/Analyzer/Resolve/resolveFunction.cpp:1505 QueryAnalyzer::resolveFunction",
-    "src/Interpreters/ExpressionAnalyzer.cpp:183 ExpressionAnalyzer::ExtractedSettings::ExtractedSettings",
-    "src/Interpreters/ExpressionAnalyzer.cpp:186 ExpressionAnalyzer::ExtractedSettings::ExtractedSettings",
+    "src/Analyzer/Resolve/resolveFunction.cpp:1507 QueryAnalyzer::resolveFunction",
+    "src/Interpreters/ExpressionAnalyzer.cpp:184 ExpressionAnalyzer::ExtractedSettings::ExtractedSettings",
+    "src/Interpreters/ExpressionAnalyzer.cpp:187 ExpressionAnalyzer::ExtractedSettings::ExtractedSettings",
     "src/Interpreters/PreparedSets.cpp:50 PreparedSets::getSizeLimitsForSet"
    ]
   },
@@ -3262,8 +3263,8 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:1852 buildJoinQueryPlan",
-    "src/Planner/PlannerJoinTree.cpp:1886 buildJoinQueryPlan"
+    "src/Planner/PlannerJoinTree.cpp:1883 buildJoinQueryPlan",
+    "src/Planner/PlannerJoinTree.cpp:1917 buildJoinQueryPlan"
    ]
   },
   {
@@ -3275,8 +3276,8 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:449 QueryAnalysisResult",
-    "src/Planner/Planner.cpp:635 getAggregatorParams"
+    "src/Planner/Planner.cpp:450 QueryAnalysisResult",
+    "src/Planner/Planner.cpp:636 getAggregatorParams"
    ]
   },
   {
@@ -3288,7 +3289,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Utils.cpp:224 getLimitsForStorage"
+    "src/Planner/Utils.cpp:225 getLimitsForStorage"
    ]
   },
   {
@@ -3300,14 +3301,14 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Utils.cpp:264 buildStorageLimits"
+    "src/Planner/Utils.cpp:265 buildStorageLimits"
    ]
   },
   {
    "name": "max_rows_to_transfer",
    "tier": "execution",
    "kind": "where",
-   "reason": "a size limit on a set sent between servers; it throws when exceeded. Its `break` switch, transfer_overflow_mode, truncates the set and is listed on its own; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "a size limit on a set sent between servers; it throws when exceeded. Its `break` switch, transfer_overflow_mode, truncates the set and is listed on its own; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "expressions",
     "old-analyzer",
@@ -3316,64 +3317,64 @@
    "sources": [
     "src/Interpreters/PreparedSets.cpp:299 FutureSetFromSubquery::buildSetInplace",
     "src/Interpreters/PreparedSets.cpp:339 FutureSetFromSubquery::buildOrderedSetInplace",
-    "src/Planner/Planner.cpp:1584 addBuildSubqueriesForSetsStepIfNeeded"
+    "src/Planner/Planner.cpp:1588 addBuildSubqueriesForSetsStepIfNeeded"
    ]
   },
   {
    "name": "max_size_to_preallocate_for_aggregation",
    "tier": "execution",
    "kind": "where",
-   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:619 getAggregatorParams"
+    "src/Planner/Planner.cpp:620 getAggregatorParams"
    ]
   },
   {
    "name": "max_size_to_preallocate_for_joins",
    "tier": "execution",
    "kind": "where",
-   "reason": "JOIN resources: spill thresholds, preallocation, bucket counts, block sizes and the hash-table layout; read only where a JOIN is planned, which a single-table WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "JOIN resources: spill thresholds, preallocation, bucket counts, block sizes and the hash-table layout; read only where a JOIN is planned, which a single-table WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoins.cpp:1227 JoinAlgorithmParams::JoinAlgorithmParams"
+    "src/Planner/PlannerJoins.cpp:1229 JoinAlgorithmParams::JoinAlgorithmParams"
    ]
   },
   {
    "name": "max_streams_to_max_threads_ratio",
    "tier": "execution",
    "kind": "where",
-   "reason": "parallelism: thread, stream and connection counts and the concurrency control; read where the planner sizes the pipeline, never where a value is computed; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "parallelism: thread, stream and connection counts and the concurrency control; read where the planner sizes the pipeline, never where a value is computed; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:895 buildQueryPlanForTableExpression"
+    "src/Planner/PlannerJoinTree.cpp:914 buildQueryPlanForTableExpression"
    ]
   },
   {
    "name": "max_subquery_depth",
    "tier": "execution",
    "kind": "where",
-   "reason": "a resource limit that only throws when exceeded; its reads raise an error and change no value; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "a resource limit that only throws when exceeded; its reads raise an error and change no value; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "analyzer",
     "planner"
    ],
    "sources": [
     "src/Analyzer/Resolve/QueryAnalyzer.cpp:4985 QueryAnalyzer::resolveQuery",
-    "src/Planner/Planner.cpp:1748 buildPlannerContext"
+    "src/Planner/Planner.cpp:1752 buildPlannerContext"
    ]
   },
   {
    "name": "max_temporary_columns",
    "tier": "execution",
    "kind": "where",
-   "reason": "a resource limit that only throws when exceeded; its reads raise an error and change no value; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "a resource limit that only throws when exceeded; its reads raise an error and change no value; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "expressions"
    ],
@@ -3385,7 +3386,7 @@
    "name": "max_temporary_non_const_columns",
    "tier": "execution",
    "kind": "where",
-   "reason": "a resource limit that only throws when exceeded; its reads raise an error and change no value; flip: errors only on 26.3, 26.7, 26.8, 26.9",
+   "reason": "a resource limit that only throws when exceeded; its reads raise an error and change no value; flip: errors only on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "expressions"
    ],
@@ -3397,23 +3398,23 @@
    "name": "max_threads",
    "tier": "execution",
    "kind": "where",
-   "reason": "parallelism: thread, stream and connection counts and the concurrency control; read where the planner sizes the pipeline, never where a value is computed; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "parallelism: thread, stream and connection counts and the concurrency control; read where the planner sizes the pipeline, never where a value is computed; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "old-analyzer",
     "planner"
    ],
    "sources": [
-    "src/Interpreters/ExpressionAnalyzer.cpp:1038 tryCreateJoin",
-    "src/Planner/Planner.cpp:645 getAggregatorParams",
-    "src/Planner/Planner.cpp:690 addAggregationStep",
-    "src/Planner/Planner.cpp:693 addAggregationStep",
-    "src/Planner/Planner.cpp:754 addMergingAggregatedStep",
-    "src/Planner/Planner.cpp:1304 addWindowSteps",
-    "src/Planner/Planner.cpp:1873 Planner::buildPlanForUnionNode",
-    "src/Planner/PlannerJoinTree.cpp:826 buildQueryPlanForTableExpression",
-    "src/Planner/PlannerJoinTree.cpp:827 buildQueryPlanForTableExpression",
-    "src/Planner/PlannerJoinTree.cpp:1930 buildJoinQueryPlan",
-    "src/Planner/PlannerJoins.cpp:1228 JoinAlgorithmParams::JoinAlgorithmParams"
+    "src/Interpreters/ExpressionAnalyzer.cpp:1039 tryCreateJoin",
+    "src/Planner/Planner.cpp:646 getAggregatorParams",
+    "src/Planner/Planner.cpp:691 addAggregationStep",
+    "src/Planner/Planner.cpp:694 addAggregationStep",
+    "src/Planner/Planner.cpp:755 addMergingAggregatedStep",
+    "src/Planner/Planner.cpp:1308 addWindowSteps",
+    "src/Planner/Planner.cpp:1877 Planner::buildPlanForUnionNode",
+    "src/Planner/PlannerJoinTree.cpp:845 buildQueryPlanForTableExpression",
+    "src/Planner/PlannerJoinTree.cpp:846 buildQueryPlanForTableExpression",
+    "src/Planner/PlannerJoinTree.cpp:1961 buildJoinQueryPlan",
+    "src/Planner/PlannerJoins.cpp:1230 JoinAlgorithmParams::JoinAlgorithmParams"
    ]
   },
   {
@@ -3425,7 +3426,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:648 getAggregatorParams"
+    "src/Planner/Planner.cpp:649 getAggregatorParams"
    ]
   },
   {
@@ -3450,7 +3451,7 @@
     "planner"
    ],
    "sources": [
-    "src/Interpreters/ExpressionAnalyzer.cpp:886 ExpressionAnalyzer::makeWindowDescriptions",
+    "src/Interpreters/ExpressionAnalyzer.cpp:887 ExpressionAnalyzer::makeWindowDescriptions",
     "src/Planner/PlannerSorting.cpp:189 extractSortDescription",
     "src/Planner/PlannerWindowFunctions.cpp:65 extractWindowDescriptionFromWindowNode"
    ]
@@ -3464,7 +3465,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Utils.cpp:239 getLimitsForStorage"
+    "src/Planner/Utils.cpp:240 getLimitsForStorage"
    ]
   },
   {
@@ -3476,32 +3477,32 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Utils.cpp:240 getLimitsForStorage"
+    "src/Planner/Utils.cpp:241 getLimitsForStorage"
    ]
   },
   {
    "name": "min_free_disk_space_for_temporary_data",
    "tier": "execution",
    "kind": "where",
-   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:646 getAggregatorParams"
+    "src/Planner/Planner.cpp:647 getAggregatorParams"
    ]
   },
   {
    "name": "min_hit_rate_to_use_consecutive_keys_optimization",
    "tier": "execution",
    "kind": "where",
-   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:653 getAggregatorParams",
-    "src/Planner/Planner.cpp:766 addMergingAggregatedStep"
+    "src/Planner/Planner.cpp:654 getAggregatorParams",
+    "src/Planner/Planner.cpp:767 addMergingAggregatedStep"
    ]
   },
   {
@@ -3513,7 +3514,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:1929 buildJoinQueryPlan"
+    "src/Planner/PlannerJoinTree.cpp:1960 buildJoinQueryPlan"
    ]
   },
   {
@@ -3525,7 +3526,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:1928 buildJoinQueryPlan"
+    "src/Planner/PlannerJoinTree.cpp:1959 buildJoinQueryPlan"
    ]
   },
   {
@@ -3565,7 +3566,7 @@
     "old-analyzer"
    ],
    "sources": [
-    "src/Interpreters/ExpressionAnalyzer.cpp:2111 ExpressionAnalysisResult::ExpressionAnalysisResult"
+    "src/Interpreters/ExpressionAnalyzer.cpp:2112 ExpressionAnalysisResult::ExpressionAnalysisResult"
    ]
   },
   {
@@ -3578,8 +3579,8 @@
     "old-analyzer"
    ],
    "sources": [
-    "src/Analyzer/Passes/AggregateFunctionOfGroupByKeysPass.cpp:38 enterImpl",
-    "src/Analyzer/Passes/AggregateFunctionOfGroupByKeysPass.cpp:93 leaveImpl",
+    "src/Analyzer/Passes/AggregateFunctionOfGroupByKeysPass.cpp:39 enterImpl",
+    "src/Analyzer/Passes/AggregateFunctionOfGroupByKeysPass.cpp:100 leaveImpl",
     "src/Interpreters/TreeOptimizer.cpp:701 TreeOptimizer::apply"
    ]
   },
@@ -3693,7 +3694,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:652 getAggregatorParams"
+    "src/Planner/Planner.cpp:653 getAggregatorParams"
    ]
   },
   {
@@ -3880,7 +3881,7 @@
     "old-analyzer"
    ],
    "sources": [
-    "src/Interpreters/ExpressionAnalyzer.cpp:2188 ExpressionAnalysisResult::ExpressionAnalysisResult"
+    "src/Interpreters/ExpressionAnalyzer.cpp:2189 ExpressionAnalysisResult::ExpressionAnalysisResult"
    ]
   },
   {
@@ -4022,7 +4023,7 @@
    ],
    "sources": [
     "src/Interpreters/TreeRewriter.cpp:1525 TreeRewriter::analyzeSelect",
-    "src/Planner/PlannerJoinTree.cpp:287 applyTrivialCountIfPossible"
+    "src/Planner/PlannerJoinTree.cpp:289 applyTrivialCountIfPossible"
    ]
   },
   {
@@ -4355,12 +4356,12 @@
    "name": "parallel_hash_join_threshold",
    "tier": "execution",
    "kind": "where",
-   "reason": "JOIN resources: spill thresholds, preallocation, bucket counts, block sizes and the hash-table layout; read only where a JOIN is planned, which a single-table WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "JOIN resources: spill thresholds, preallocation, bucket counts, block sizes and the hash-table layout; read only where a JOIN is planned, which a single-table WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoins.cpp:1222 JoinAlgorithmParams::JoinAlgorithmParams"
+    "src/Planner/PlannerJoins.cpp:1224 JoinAlgorithmParams::JoinAlgorithmParams"
    ]
   },
   {
@@ -4372,7 +4373,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:586 buildCustomKeyFilterIfNeeded"
+    "src/Planner/PlannerJoinTree.cpp:605 buildCustomKeyFilterIfNeeded"
    ]
   },
   {
@@ -4384,7 +4385,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:1984 Planner::buildPlanForQueryNode",
+    "src/Planner/Planner.cpp:1988 Planner::buildPlanForQueryNode",
     "src/Planner/findParallelReplicasQuery.cpp:273 findQueryForParallelReplicas"
    ]
   },
@@ -4397,7 +4398,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:1160 buildQueryPlanForTableExpression",
+    "src/Planner/PlannerJoinTree.cpp:1179 buildQueryPlanForTableExpression",
     "src/Planner/findParallelReplicasQuery.cpp:47 canUseTableForParallelReplicas"
    ]
   },
@@ -4411,11 +4412,11 @@
     "planner"
    ],
    "sources": [
-    "src/Interpreters/ExpressionAnalyzer.cpp:2003 ExpressionAnalysisResult::ExpressionAnalysisResult",
-    "src/Planner/PlannerJoinTree.cpp:497 updatePrewhereOutputsIfNeeded",
-    "src/Planner/PlannerJoinTree.cpp:571 buildCustomKeyFilterIfNeeded",
-    "src/Planner/PlannerJoinTree.cpp:585 buildCustomKeyFilterIfNeeded",
-    "src/Planner/PlannerJoinTree.cpp:1035 buildQueryPlanForTableExpression"
+    "src/Interpreters/ExpressionAnalyzer.cpp:2004 ExpressionAnalysisResult::ExpressionAnalysisResult",
+    "src/Planner/PlannerJoinTree.cpp:516 updatePrewhereOutputsIfNeeded",
+    "src/Planner/PlannerJoinTree.cpp:590 buildCustomKeyFilterIfNeeded",
+    "src/Planner/PlannerJoinTree.cpp:604 buildCustomKeyFilterIfNeeded",
+    "src/Planner/PlannerJoinTree.cpp:1054 buildQueryPlanForTableExpression"
    ]
   },
   {
@@ -4427,12 +4428,12 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:2037 Planner::buildPlanForQueryNode",
-    "src/Planner/PlannerJoinTree.cpp:571 buildCustomKeyFilterIfNeeded",
-    "src/Planner/PlannerJoinTree.cpp:574 buildCustomKeyFilterIfNeeded",
-    "src/Planner/PlannerJoinTree.cpp:582 buildCustomKeyFilterIfNeeded",
-    "src/Planner/PlannerJoinTree.cpp:1044 buildQueryPlanForTableExpression",
-    "src/Planner/PlannerJoinTree.cpp:1265 buildQueryPlanForTableExpression"
+    "src/Planner/Planner.cpp:2041 Planner::buildPlanForQueryNode",
+    "src/Planner/PlannerJoinTree.cpp:590 buildCustomKeyFilterIfNeeded",
+    "src/Planner/PlannerJoinTree.cpp:593 buildCustomKeyFilterIfNeeded",
+    "src/Planner/PlannerJoinTree.cpp:601 buildCustomKeyFilterIfNeeded",
+    "src/Planner/PlannerJoinTree.cpp:1063 buildQueryPlanForTableExpression",
+    "src/Planner/PlannerJoinTree.cpp:1284 buildQueryPlanForTableExpression"
    ]
   },
   {
@@ -4444,7 +4445,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:589 buildCustomKeyFilterIfNeeded"
+    "src/Planner/PlannerJoinTree.cpp:608 buildCustomKeyFilterIfNeeded"
    ]
   },
   {
@@ -4456,7 +4457,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:590 buildCustomKeyFilterIfNeeded"
+    "src/Planner/PlannerJoinTree.cpp:609 buildCustomKeyFilterIfNeeded"
    ]
   },
   {
@@ -4481,7 +4482,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:1173 buildQueryPlanForTableExpression",
+    "src/Planner/PlannerJoinTree.cpp:1192 buildQueryPlanForTableExpression",
     "src/Planner/findParallelReplicasQuery.cpp:60 canUseTableForParallelReplicas"
    ]
   },
@@ -4507,9 +4508,9 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:222 collectFiltersForAnalysis",
-    "src/Planner/PlannerJoinTree.cpp:1320 buildQueryPlanForTableExpression",
-    "src/Planner/PlannerJoinTree.cpp:1332 buildQueryPlanForTableExpression"
+    "src/Planner/Planner.cpp:223 collectFiltersForAnalysis",
+    "src/Planner/PlannerJoinTree.cpp:1339 buildQueryPlanForTableExpression",
+    "src/Planner/PlannerJoinTree.cpp:1351 buildQueryPlanForTableExpression"
    ]
   },
   {
@@ -4524,10 +4525,10 @@
    ],
    "sources": [
     "src/Interpreters/InterpreterSelectQueryAnalyzer.cpp:135 buildContext",
-    "src/Planner/PlannerJoinTree.cpp:363 applyTrivialCountIfPossible",
-    "src/Planner/PlannerJoinTree.cpp:364 applyTrivialCountIfPossible",
     "src/Planner/PlannerJoinTree.cpp:365 applyTrivialCountIfPossible",
-    "src/Planner/PlannerJoinTree.cpp:588 buildCustomKeyFilterIfNeeded"
+    "src/Planner/PlannerJoinTree.cpp:366 applyTrivialCountIfPossible",
+    "src/Planner/PlannerJoinTree.cpp:367 applyTrivialCountIfPossible",
+    "src/Planner/PlannerJoinTree.cpp:607 buildCustomKeyFilterIfNeeded"
    ]
   },
   {
@@ -4602,7 +4603,7 @@
     "old-analyzer"
    ],
    "sources": [
-    "src/Interpreters/ExpressionAnalyzer.cpp:2112 ExpressionAnalysisResult::ExpressionAnalysisResult"
+    "src/Interpreters/ExpressionAnalyzer.cpp:2113 ExpressionAnalysisResult::ExpressionAnalysisResult"
    ]
   },
   {
@@ -4614,20 +4615,20 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:2044 buildQueryPlanForCrossJoinNode",
-    "src/Planner/PlannerJoinsLogical.cpp:572 buildJoinStepLogical"
+    "src/Planner/PlannerJoinTree.cpp:2075 buildQueryPlanForCrossJoinNode",
+    "src/Planner/PlannerJoinsLogical.cpp:573 buildJoinStepLogical"
    ]
   },
   {
    "name": "query_plan_enable_multithreading_after_window_functions",
    "tier": "execution",
    "kind": "where",
-   "reason": "parallelism: thread, stream and connection counts and the concurrency control; read where the planner sizes the pipeline, never where a value is computed; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "parallelism: thread, stream and connection counts and the concurrency control; read where the planner sizes the pipeline, never where a value is computed; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:1343 addWindowSteps"
+    "src/Planner/Planner.cpp:1347 addWindowSteps"
    ]
   },
   {
@@ -4639,7 +4640,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:1936 buildJoinQueryPlan"
+    "src/Planner/PlannerJoinTree.cpp:1967 buildJoinQueryPlan"
    ]
   },
   {
@@ -4651,7 +4652,7 @@
     "old-analyzer"
    ],
    "sources": [
-    "src/Interpreters/ExpressionAnalyzer.cpp:2188 ExpressionAnalysisResult::ExpressionAnalysisResult"
+    "src/Interpreters/ExpressionAnalyzer.cpp:2189 ExpressionAnalysisResult::ExpressionAnalysisResult"
    ]
   },
   {
@@ -4663,7 +4664,7 @@
     "alias"
    ],
    "sources": [
-    "alias of query_plan_use_new_logical_join_step (src/Core/Settings.cpp:6000)"
+    "alias of query_plan_use_new_logical_join_step (src/Core/Settings.cpp:6002)"
    ]
   },
   {
@@ -4675,8 +4676,8 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:2053 buildQueryPlanForCrossJoinNode",
-    "src/Planner/PlannerJoinTree.cpp:2577 buildQueryPlanForJoinNode"
+    "src/Planner/PlannerJoinTree.cpp:2084 buildQueryPlanForCrossJoinNode",
+    "src/Planner/PlannerJoinTree.cpp:2610 buildQueryPlanForJoinNode"
    ]
   },
   {
@@ -4688,7 +4689,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Utils.cpp:224 getLimitsForStorage"
+    "src/Planner/Utils.cpp:225 getLimitsForStorage"
    ]
   },
   {
@@ -4700,7 +4701,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Utils.cpp:264 buildStorageLimits"
+    "src/Planner/Utils.cpp:265 buildStorageLimits"
    ]
   },
   {
@@ -4739,8 +4740,8 @@
     "result-switch"
    ],
    "sources": [
-    "src/Interpreters/executeQuery.cpp:1663 executeQueryImpl",
-    "src/Interpreters/executeQuery.cpp:1776 executeQueryImpl"
+    "src/Interpreters/executeQuery.cpp:1684 executeQueryImpl",
+    "src/Interpreters/executeQuery.cpp:1797 executeQueryImpl"
    ]
   },
   {
@@ -4767,7 +4768,7 @@
    ],
    "sources": [
     "src/Analyzer/Passes/InverseDictionaryLookupPass.cpp:241 enterImpl",
-    "src/Analyzer/Resolve/resolveFunction.cpp:523 QueryAnalyzer::resolveFunction"
+    "src/Analyzer/Resolve/resolveFunction.cpp:524 QueryAnalyzer::resolveFunction"
    ]
   },
   {
@@ -4827,8 +4828,8 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:656 getAggregatorParams",
-    "src/Planner/Planner.cpp:767 addMergingAggregatedStep"
+    "src/Planner/Planner.cpp:657 getAggregatorParams",
+    "src/Planner/Planner.cpp:768 addMergingAggregatedStep"
    ]
   },
   {
@@ -4856,8 +4857,8 @@
    ],
    "sources": [
     "src/Analyzer/Passes/InverseDictionaryLookupPass.cpp:249 enterImpl",
-    "src/Analyzer/Resolve/resolveFunction.cpp:1505 QueryAnalyzer::resolveFunction",
-    "src/Interpreters/ExpressionAnalyzer.cpp:183 ExpressionAnalyzer::ExtractedSettings::ExtractedSettings",
+    "src/Analyzer/Resolve/resolveFunction.cpp:1507 QueryAnalyzer::resolveFunction",
+    "src/Interpreters/ExpressionAnalyzer.cpp:184 ExpressionAnalyzer::ExtractedSettings::ExtractedSettings",
     "src/Interpreters/PreparedSets.cpp:50 PreparedSets::getSizeLimitsForSet"
    ]
   },
@@ -4906,8 +4907,8 @@
     "analyzer"
    ],
    "sources": [
-    "src/Analyzer/Resolve/IdentifierResolver.cpp:913 IdentifierResolver::tryResolveIdentifierFromCrossJoin",
-    "src/Analyzer/Resolve/IdentifierResolver.cpp:1254 IdentifierResolver::tryResolveIdentifierFromJoin",
+    "src/Analyzer/Resolve/IdentifierResolver.cpp:924 IdentifierResolver::tryResolveIdentifierFromCrossJoin",
+    "src/Analyzer/Resolve/IdentifierResolver.cpp:1265 IdentifierResolver::tryResolveIdentifierFromJoin",
     "src/Analyzer/Resolve/QueryAnalyzer.cpp:3871 QueryAnalyzer::initializeTableExpressionData"
    ]
   },
@@ -4939,12 +4940,12 @@
    "name": "temporary_files_buffer_size",
    "tier": "execution",
    "kind": "where",
-   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "GROUP BY resources: memory and spill thresholds, preallocation, two-level and parallel merging, hash-table statistics; read only where the planner sets up an aggregation, which a WHERE does not have; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:630 getAggregatorParams"
+    "src/Planner/Planner.cpp:631 getAggregatorParams"
    ]
   },
   {
@@ -4956,7 +4957,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:630 getAggregatorParams"
+    "src/Planner/Planner.cpp:631 getAggregatorParams"
    ]
   },
   {
@@ -4968,7 +4969,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:177 checkStoragesSupportTransactions"
+    "src/Planner/Planner.cpp:178 checkStoragesSupportTransactions"
    ]
   },
   {
@@ -4980,7 +4981,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Utils.cpp:245 getLimitsForStorage"
+    "src/Planner/Utils.cpp:246 getLimitsForStorage"
    ]
   },
   {
@@ -4992,7 +4993,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Utils.cpp:226 getLimitsForStorage"
+    "src/Planner/Utils.cpp:227 getLimitsForStorage"
    ]
   },
   {
@@ -5004,7 +5005,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:826 addTotalsHavingStep"
+    "src/Planner/Planner.cpp:827 addTotalsHavingStep"
    ]
   },
   {
@@ -5016,8 +5017,8 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:450 QueryAnalysisResult",
-    "src/Planner/Planner.cpp:825 addTotalsHavingStep"
+    "src/Planner/Planner.cpp:451 QueryAnalysisResult",
+    "src/Planner/Planner.cpp:826 addTotalsHavingStep"
    ]
   },
   {
@@ -5033,7 +5034,7 @@
    "sources": [
     "src/Interpreters/PreparedSets.cpp:299 FutureSetFromSubquery::buildSetInplace",
     "src/Interpreters/PreparedSets.cpp:339 FutureSetFromSubquery::buildOrderedSetInplace",
-    "src/Planner/Planner.cpp:1584 addBuildSubqueriesForSetsStepIfNeeded"
+    "src/Planner/Planner.cpp:1588 addBuildSubqueriesForSetsStepIfNeeded"
    ]
   },
   {
@@ -5048,20 +5049,20 @@
     "planner"
    ],
    "sources": [
-    "src/Analyzer/Resolve/resolveFunction.cpp:241 QueryAnalyzer::convertTupleToArray",
-    "src/Analyzer/Resolve/resolveFunction.cpp:804 QueryAnalyzer::resolveFunction",
-    "src/Analyzer/Resolve/resolveFunction.cpp:915 QueryAnalyzer::resolveFunction",
-    "src/Analyzer/Resolve/resolveFunction.cpp:1500 QueryAnalyzer::resolveFunction",
-    "src/Analyzer/Resolve/resolveFunction.cpp:1509 QueryAnalyzer::resolveFunction",
-    "src/Interpreters/ActionsVisitor.cpp:198 createBlockForSet",
-    "src/Interpreters/ActionsVisitor.cpp:216 createBlockForSet",
-    "src/Interpreters/ActionsVisitor.cpp:262 makeExplicitSet",
+    "src/Analyzer/Resolve/resolveFunction.cpp:242 QueryAnalyzer::convertTupleToArray",
+    "src/Analyzer/Resolve/resolveFunction.cpp:805 QueryAnalyzer::resolveFunction",
+    "src/Analyzer/Resolve/resolveFunction.cpp:917 QueryAnalyzer::resolveFunction",
+    "src/Analyzer/Resolve/resolveFunction.cpp:1502 QueryAnalyzer::resolveFunction",
+    "src/Analyzer/Resolve/resolveFunction.cpp:1511 QueryAnalyzer::resolveFunction",
+    "src/Interpreters/ActionsVisitor.cpp:199 createBlockForSet",
+    "src/Interpreters/ActionsVisitor.cpp:217 createBlockForSet",
+    "src/Interpreters/ActionsVisitor.cpp:263 makeExplicitSet",
     "src/Interpreters/PreparedSets.cpp:391 PreparedSets::addFromTuple",
     "src/Interpreters/PreparedSets.cpp:426 PreparedSets::addFromSubquery",
     "src/Interpreters/PreparedSets.cpp:445 PreparedSets::addFromSubquery",
     "src/Interpreters/TreeRewriter.cpp:1631 TreeRewriter::normalize",
-    "src/Planner/CollectSets.cpp:106 visitImpl",
-    "src/Planner/CollectSets.cpp:125 visitImpl",
+    "src/Planner/CollectSets.cpp:107 visitImpl",
+    "src/Planner/CollectSets.cpp:126 visitImpl",
     "src/Planner/PlannerActionsVisitor.cpp:1012 PlannerActionsVisitorImpl::makeSetForInFunction"
    ]
   },
@@ -5129,18 +5130,18 @@
    "name": "use_concurrency_control",
    "tier": "execution",
    "kind": "where",
-   "reason": "parallelism: thread, stream and connection counts and the concurrency control; read where the planner sizes the pipeline, never where a value is computed; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "parallelism: thread, stream and connection counts and the concurrency control; read where the planner sizes the pipeline, never where a value is computed; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "analyzer",
     "old-analyzer",
     "planner"
    ],
    "sources": [
-    "src/Analyzer/Resolve/evaluateScalarSubqueryIfNeeded.cpp:223 QueryAnalyzer::evaluateScalarSubqueryIfNeeded",
-    "src/Analyzer/Resolve/evaluateScalarSubqueryIfNeeded.cpp:238 QueryAnalyzer::evaluateScalarSubqueryIfNeeded",
+    "src/Analyzer/Resolve/evaluateScalarSubqueryIfNeeded.cpp:225 QueryAnalyzer::evaluateScalarSubqueryIfNeeded",
+    "src/Analyzer/Resolve/evaluateScalarSubqueryIfNeeded.cpp:240 QueryAnalyzer::evaluateScalarSubqueryIfNeeded",
     "src/Interpreters/ExecuteScalarSubqueriesVisitor.cpp:215 ExecuteScalarSubqueriesMatcher::visit",
-    "src/Interpreters/InterpreterSelectQueryAnalyzer.cpp:379 InterpreterSelectQueryAnalyzer::buildQueryPipeline",
-    "src/Planner/PlannerJoinTree.cpp:1451 buildQueryPlanForTableExpression"
+    "src/Interpreters/InterpreterSelectQueryAnalyzer.cpp:414 InterpreterSelectQueryAnalyzer::buildQueryPipeline",
+    "src/Planner/PlannerJoinTree.cpp:1470 buildQueryPlanForTableExpression"
    ]
   },
   {
@@ -5166,9 +5167,9 @@
     "old-analyzer"
    ],
    "sources": [
-    "src/Interpreters/ExpressionAnalyzer.cpp:185 ExpressionAnalyzer::ExtractedSettings::ExtractedSettings",
     "src/Interpreters/ExpressionAnalyzer.cpp:186 ExpressionAnalyzer::ExtractedSettings::ExtractedSettings",
-    "src/Interpreters/ExpressionAnalyzer.cpp:188 ExpressionAnalyzer::ExtractedSettings::ExtractedSettings",
+    "src/Interpreters/ExpressionAnalyzer.cpp:187 ExpressionAnalyzer::ExtractedSettings::ExtractedSettings",
+    "src/Interpreters/ExpressionAnalyzer.cpp:189 ExpressionAnalyzer::ExtractedSettings::ExtractedSettings",
     "src/Interpreters/PreparedSets.cpp:135 FutureSetFromTuple::buildOrderedSetInplace",
     "src/Interpreters/PreparedSets.cpp:426 PreparedSets::addFromSubquery",
     "src/Interpreters/PreparedSets.cpp:445 PreparedSets::addFromSubquery"
@@ -5183,7 +5184,7 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/PlannerJoinTree.cpp:1934 buildJoinQueryPlan"
+    "src/Planner/PlannerJoinTree.cpp:1965 buildJoinQueryPlan"
    ]
   },
   {
@@ -5233,8 +5234,8 @@
     "src/Functions/ifNull.cpp:39 create",
     "src/Functions/map.cpp:48 FunctionMap",
     "src/Functions/multiIf.cpp:63 create",
-    "src/Interpreters/ActionsVisitor.cpp:1171 ActionsMatcher::visit",
-    "src/Planner/Planner.cpp:1869 Planner::buildPlanForUnionNode",
+    "src/Interpreters/ActionsVisitor.cpp:1172 ActionsMatcher::visit",
+    "src/Planner/Planner.cpp:1873 Planner::buildPlanForUnionNode",
     "src/Planner/PlannerCorrelatedSubqueries.cpp:412 decorrelateQueryPlan"
    ]
   },
@@ -5259,14 +5260,14 @@
     "planner"
    ],
    "sources": [
-    "src/Planner/Planner.cpp:1057 addWithFillStepIfNeeded"
+    "src/Planner/Planner.cpp:1061 addWithFillStepIfNeeded"
    ]
   },
   {
    "name": "validate_enum_literals_in_operators",
    "tier": "predicate-unflipped",
    "kind": "where",
-   "reason": "not classified: flipped with no verdict change on 26.3, 26.7, 26.8, 26.9, but read where values or the plan are computed (4 site(s), first src/Analyzer/Resolve/resolveFunction.cpp:QueryAnalyzer::resolveFunction)",
+   "reason": "not classified: flipped with no verdict change on 26.3, 26.7, 26.8, 26.9, 26.10, but read where values or the plan are computed (4 site(s), first src/Analyzer/Resolve/resolveFunction.cpp:QueryAnalyzer::resolveFunction)",
    "scopes": [
     "analyzer",
     "functions",
@@ -5274,11 +5275,11 @@
     "planner"
    ],
    "sources": [
-    "src/Analyzer/Resolve/resolveFunction.cpp:1501 QueryAnalyzer::resolveFunction",
+    "src/Analyzer/Resolve/resolveFunction.cpp:1503 QueryAnalyzer::resolveFunction",
     "src/Functions/FunctionsComparison.h:706 ComparisonParams",
-    "src/Interpreters/ActionsVisitor.cpp:199 createBlockForSet",
-    "src/Interpreters/ActionsVisitor.cpp:217 createBlockForSet",
-    "src/Planner/CollectSets.cpp:107 visitImpl"
+    "src/Interpreters/ActionsVisitor.cpp:200 createBlockForSet",
+    "src/Interpreters/ActionsVisitor.cpp:218 createBlockForSet",
+    "src/Planner/CollectSets.cpp:108 visitImpl"
    ]
   },
   {
@@ -5322,7 +5323,7 @@
    "name": "webassembly_udf_max_fuel",
    "tier": "execution",
    "kind": "where",
-   "reason": "resources of WebAssembly UDFs (fuel, memory, instances, block size); a UDF is not a registry function, and the library refuses it in a filter; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "resources of WebAssembly UDFs (fuel, memory, instances, block size); a UDF is not a registry function, and the library refuses it in a filter; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "functions"
    ],
@@ -5334,7 +5335,7 @@
    "name": "webassembly_udf_max_input_block_size",
    "tier": "execution",
    "kind": "where",
-   "reason": "resources of WebAssembly UDFs (fuel, memory, instances, block size); a UDF is not a registry function, and the library refuses it in a filter; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "resources of WebAssembly UDFs (fuel, memory, instances, block size); a UDF is not a registry function, and the library refuses it in a filter; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "functions"
    ],
@@ -5346,7 +5347,7 @@
    "name": "webassembly_udf_max_instances",
    "tier": "execution",
    "kind": "where",
-   "reason": "resources of WebAssembly UDFs (fuel, memory, instances, block size); a UDF is not a registry function, and the library refuses it in a filter; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "resources of WebAssembly UDFs (fuel, memory, instances, block size); a UDF is not a registry function, and the library refuses it in a filter; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "functions"
    ],
@@ -5358,7 +5359,7 @@
    "name": "webassembly_udf_max_memory",
    "tier": "execution",
    "kind": "where",
-   "reason": "resources of WebAssembly UDFs (fuel, memory, instances, block size); a UDF is not a registry function, and the library refuses it in a filter; flip: no change on 26.3, 26.7, 26.8, 26.9",
+   "reason": "resources of WebAssembly UDFs (fuel, memory, instances, block size); a UDF is not a registry function, and the library refuses it in a filter; flip: no change on 26.3, 26.7, 26.8, 26.9, 26.10",
    "scopes": [
     "functions"
    ],
