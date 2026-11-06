@@ -1060,11 +1060,12 @@ CHS_API chs_buf *chs_error_ch_name(const chs_error *error);
  * before the server's row-position suffix (`chs_preview_insert` carries the server's message
  * whole), inside a reader diagnostic that quotes a nested exception, that exception's `(version …)`
  * label, which names the library's vendored source version rather than the server's official build,
- * and a CHECK refusal's row number past the server's first insert block. In a CHECK refusal (469)
- * whose failing row lies past the server's first insert block, the number in `violated at row N`
- * equals the server's only when the server inserts with `max_insert_threads` 1. With more threads
- * it depends on the server's thread count and scheduling, and the library numbers the rows as one
- * thread does. Only that number can differ.
+ * and a CHECK refusal's text when the server inserts with more than one thread. In a CHECK refusal
+ * (469) when the server inserts with `max_insert_threads` greater than 1 and the body spans more
+ * than one insert block, which constraint and row the message names, and the row's number and
+ * values, depend on the server's thread count and scheduling. The code and the outcome are the
+ * same, and the library reports the first violating row in body order as one thread does. With
+ * `max_insert_threads` 1 the message equals the server's.
  *
  * Class: api. Thread: shared. Init: any. Returns a new chs_buf the caller owns and frees with
  * chs_buf_free; its content is a ClickHouse message: may quote input bytes, so may carry any byte;
