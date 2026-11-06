@@ -1697,7 +1697,12 @@ CHS_API chs_status chs_preview_batch(
  * text exactly, and is otherwise declined the same way. The counts are present whenever a filter is
  * attached, so a caller whose rule is all-or-nothing refuses on `rows_cut` greater than 0 itself.
  * `filter` must have been compiled on `schema`: a filter from another schema handle is
- * `CHS_INVALID_ARGUMENT`.
+ * `CHS_INVALID_ARGUMENT`. With a filter attached, the call models `INSERT … SELECT … WHERE`. Up to
+ * 26.9 the server runs it synchronously whatever `async_insert` says. On 26.10,
+ * `async_insert_select_as_async_insert` (on by default) sends it through the asynchronous queue,
+ * and with `wait_for_async_insert` 1 (the default) its answer is the synchronous statement's. With
+ * `wait_for_async_insert` 0 the server acknowledges before the flush, and the call answers what the
+ * flush of this body will do.
  *
  * Refusals are ClickHouse's own. A reader refusal and a whole-body refusal carry ClickHouse's code,
  * and its message verbatim in `err`, exactly as the server's error carries it, `(at row N)`
