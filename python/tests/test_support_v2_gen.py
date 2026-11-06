@@ -65,9 +65,10 @@ def test_support_v2_generator_derives_its_channel_from_active_dev(
     options = gen.channel_options(str(tmp_path))
     assert options.resolved_bases() == (_channel.DEV_CHANNEL_BASE,)
     assert [k.keyid for k in options.resolved_trusted_keys()] == [_channel.DEV_KEY_ID]
-    page = gen.render(ctx, gen.Collected())
+    page = gen.render(ctx)
     assert "development channel" in page and "chtypes/v2-dev" in page
-    assert "generated from the production registry" not in page
+    assert f"{_channel.DEV_CHANNEL_BASE}/support-matrix.md" in page
+    assert f"{C.PROD_V2_BASES[0]}/support-matrix.md" not in page
 
 
 def test_support_v2_generator_derives_its_channel_from_active_production(
@@ -85,6 +86,7 @@ def test_support_v2_generator_derives_its_channel_from_active_production(
     assert options.resolved_bases() == C.PROD_V2_BASES
     assert tuple(k.keyid for k in options.resolved_trusted_keys()) == release
     assert _channel.DEV_KEY_ID not in release
-    page = gen.render(ctx, gen.Collected())
-    assert "generated from the production registry" in page
-    assert "generated from the development channel" not in page
+    page = gen.render(ctx)
+    assert f"{C.PROD_V2_BASES[0]}/support-matrix.md" in page
+    assert "development channel" not in page
+    assert _channel.DEV_CHANNEL_BASE not in page

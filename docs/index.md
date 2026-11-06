@@ -57,7 +57,7 @@ chtypes derives that report and it is not optional: every accepted row carries a
 | [`install.md`](install.md)                       | both steps, in all four languages                                                                        |
 | [`quickstart.md`](quickstart.md)                 | the same first program, four times                                                                       |
 | [`../examples/README.md`](../examples/README.md) | a longer runnable tour, section for section in all four — a diff between two of them shows only spelling |
-| [`support-v2.md`](support-v2.md)                 | which languages, platforms and ClickHouse lines, generated from the registry's verified statements       |
+| [`support-v2.md`](support-v2.md)                 | which languages and platforms, and the link to the per-line page published with the builds               |
 
 ### Guides
 

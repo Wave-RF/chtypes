@@ -806,7 +806,7 @@ async function section12(registry: Registry, lines: readonly string[]): Promise<
   if (lines.length < 2) {
     kv('lines installed', lines.join('  '));
     note('only one line is installed, so there is nothing to sweep; this section needs two.');
-    note('Fetch another (`chtypes fetch 26.7`) and re-run to see the answers diverge.');
+    note('Fetch another (`chtypes fetch 26.8`) and re-run to see the answers diverge.');
     return;
   }
 

@@ -4,7 +4,7 @@ Every item here is a deliberate decline or a stated boundary, not a bug queue. T
 
 When you get one, fall back to the server: validate cautiously, forward the row unpreviewed, and never tell a user they are wrong on the strength of a decline.
 
-This page describes the libraries SDK 2.0.0 ships: build `20261104.061020`, on the four supported lines 26.3, 26.8, 26.9 and 26.10 (the exact patches are in [`support-v2.md`](support-v2.md)). 26.7 is served but unsupported. Each entry says what holds on that build and how it was measured.
+This page describes the libraries SDK 2.0.0 ships: build `20261104.061020`, on the four supported lines 26.3, 26.8, 26.9 and 26.10 (the exact patches are [below](#another-patch-of-the-same-line-can-answer-differently)). 26.7 is retired: served but unsupported. Each entry says what holds on that build and how it was measured.
 
 <a id="macos-is-a-development-floor-not-an-oracle"></a>
 
@@ -14,7 +14,7 @@ This page describes the libraries SDK 2.0.0 ships: build `20261104.061020`, on t
 
 The darwin artifacts give exactly the answers ClickHouse itself gives on macOS, on every supported line, with one exception on 26.3 (deep nesting, below). The artifact producer measured this against official macOS ClickHouse binaries.
 
-**On 26.8, 26.9 and 26.10 (and on 26.7, which is served but unsupported),** ClickHouse agrees on every platform (macOS, Linux amd64, Linux arm64), float text included. On these lines, a mismatch of platform changes nothing.
+**On 26.7 and later,** ClickHouse agrees on every platform (macOS, Linux amd64, Linux arm64), float text included. On these lines, a mismatch of platform changes nothing.
 
 **On 26.3,** ClickHouse's own parse of Float values from text input formats differs across platforms (macOS, Linux amd64, Linux arm64; mostly 1 ULP), and none is correctly rounded. So stored Float values, and comparisons involving them, can differ across architectures, and a verdict computed on another platform can differ from the server's.
 
@@ -98,7 +98,7 @@ The rules genuinely differ: `256` into a `UInt8` column stores `0`, while `x = 2
 
 **What the guarantee does not cover.**
 
-- **A server configured so that it refuses every query.** For example `max_expanded_ast_elements=1` refuses everything with code 36, and so does `page=1` on 26.8 and 26.9. The library answers the rows such a server would refuse. The committed list is [`spec/abi-v2/where-settings/documented-pathological.tsv`](../spec/abi-v2/where-settings/documented-pathological.tsv), explained in the README section [Settings the server may refuse outright](../spec/abi-v2/where-settings/README.md#settings-the-server-may-refuse-outright). A consumer refuses such a profile or call; the list grows only by sign-off.
+- **A server configured so that it refuses every query.** For example `max_expanded_ast_elements=1` refuses everything with code 36, and so does `page=1` on 26.8, 26.9 and 26.10. The library answers the rows such a server would refuse. The committed list is [`spec/abi-v2/where-settings/documented-pathological.tsv`](../spec/abi-v2/where-settings/documented-pathological.tsv), explained in the README section [Settings the server may refuse outright](../spec/abi-v2/where-settings/README.md#settings-the-server-may-refuse-outright). A consumer refuses such a profile or call; the list grows only by sign-off.
 - **The 26.3 float platform requirement.** On 26.3, ClickHouse's own float text parse depends on the platform, so run the library on the server's operating system and architecture. See [macOS artifacts match ClickHouse on macOS; on 26.3, match the server's platform](#macos-artifacts-match-clickhouse-on-macos-on-263-match-the-servers-platform), which this page states as a requirement.
 
 The parse-once block twin sits under the same guarantee. For the rule a filter's own result type must follow, see [`guides/filters.md` → Writing a filter's result type](guides/filters.md#writing-a-filters-result-type).
@@ -135,7 +135,7 @@ This is by design, because the server does too: on every supported line, compili
 
 ## Another patch of the same line can answer differently
 
-chtypes models one exact ClickHouse patch per line, and the patch is named in [`support-v2.md`](support-v2.md): `26.3.60.2`, `26.8.34.13`, `26.9.25.15` and `26.10.2.103` are the four supported lines, and `26.7` is served but unsupported, frozen on `26.7.19.5`. A server on another patch of the same line can answer differently, so compare the patch your server runs with the one chtypes models.
+chtypes models one exact ClickHouse patch per line. On the build this page describes, `26.3.60.2`, `26.8.34.13`, `26.9.25.15` and `26.10.2.103` are the four supported lines, and `26.7` is retired, served but unsupported, frozen on `26.7.19.5`. The current lines are on the per-line page that [`support-v2.md`](support-v2.md) links. A server on another patch of the same line can answer differently, so compare the patch your server runs with the one chtypes models.
 
 The previous patches of two lines were measured against the current ones, on a server only, for filter verdicts: the `26.8` bump (`26.8.15.10` to `26.8.34.13`) and the `26.9` bump (`26.9.8.3` to `26.9.25.15`). Only the comparison of an enum column with a literal moved, at the default `validate_enum_literals_in_operators = 0`, and it moved in both directions (`measured`):
 

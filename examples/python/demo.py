@@ -922,7 +922,7 @@ def section12(registry: Registry) -> None:
     if len(versions) < 2:
         kv("builds installed", "  ".join(versions))
         note("only one build is installed, so there is nothing to sweep - the point of")
-        note("this section needs at least two. `chtypes fetch 26.7` and re-run")
+        note("this section needs at least two. `chtypes fetch 26.8` and re-run")
         return
 
     libs: list[chtypes.Library] = []
