@@ -13,7 +13,7 @@
 //! back for a refusal, read the raw document and the raw bytes. Both documents
 //! of every case go through this crate's real decoders (`decode::batch` and
 //! `decode::insert_result`), so a case proves the decoders as well as the
-//! rule. Each case carries its expected result; the fixture's 26 planted reds
+//! rule. Each case carries its expected result; the fixture's 34 planted reds
 //! and its exception keep the gate honest: a rule that cannot fire fails here.
 //!
 //! This is a unit test of the crate (src/lib.rs declares it with `#[path]`)
@@ -44,6 +44,11 @@ enum Projection {
 /// A batch carries a filter's counts exactly where a filter was attached.
 fn batch_filtered(batch: &BatchResult) -> bool {
     batch.rows.iter().any(|r| r.verdict.is_some()) || batch.rows_passed != 0 || batch.rows_cut != 0
+}
+
+/// A present, empty map (the document's `{}`), never `None`.
+fn is_empty_map(m: &Option<std::collections::BTreeMap<String, u64>>) -> bool {
+    m.as_ref().is_some_and(|m| m.is_empty())
 }
 
 /// `: (at row N)` and a line feed: ClickHouse's own suffix, nothing else.
@@ -110,6 +115,7 @@ fn evaluate(
             && ins.rows_passed == Some(0)
             && ins.rows_cut == Some(0)
             && ins.rows_undecided == Some(0)
+            && is_empty_map(&ins.rows_undecided_reasons)
             && ins.rows_read == batch.rows_read
             && out.is_none();
         return if ok {
@@ -134,7 +140,8 @@ fn evaluate(
             && (!filtered
                 || (ins.rows_passed == Some(0)
                     && ins.rows_cut == Some(0)
-                    && ins.rows_undecided == Some(0)));
+                    && ins.rows_undecided == Some(0)
+                    && is_empty_map(&ins.rows_undecided_reasons)));
         if !ok {
             return Projection::Violates("export_decline_is_call_decline");
         }
@@ -171,10 +178,18 @@ fn evaluate(
 
     // counts
     let count = |v: Verdict| verdicts.iter().filter(|x| **x == Some(&v)).count() as u64;
+    // The d rows are the accepted rows whose verdict is d, counted by
+    // verdict_reason (a record skipped under the error allowance is in
+    // rows_skipped only).
+    let d_rows: Vec<_> = batch
+        .rows
+        .iter()
+        .filter(|r| r.verdict == Some(Verdict::Decline) && r.outcome == Outcome::Accepted)
+        .collect();
     let (t, f, d) = (
         count(Verdict::True),
         count(Verdict::False),
-        count(Verdict::Decline),
+        d_rows.len() as u64,
     );
     if filtered {
         let good = if batch.outcome == Outcome::Accepted {
@@ -187,10 +202,25 @@ fn evaluate(
         } else {
             (Some(0), Some(0), Some(0))
         };
-        if !(good && (ins.rows_passed, ins.rows_cut, ins.rows_undecided) == want) {
+        let mut want_reasons = std::collections::BTreeMap::<String, u64>::new();
+        if ins.outcome == Outcome::Accepted {
+            for r in &d_rows {
+                *want_reasons
+                    .entry(r.verdict_reason.clone().unwrap_or_default())
+                    .or_insert(0) += 1;
+            }
+        }
+        let reasons_ok = ins.rows_undecided_reasons.as_ref().is_some_and(|got| {
+            *got == want_reasons && Some(got.values().sum::<u64>()) == ins.rows_undecided
+        });
+        if !(good && (ins.rows_passed, ins.rows_cut, ins.rows_undecided) == want && reasons_ok) {
             return Projection::Violates("counts");
         }
-    } else if ins.rows_passed.is_some() || ins.rows_cut.is_some() || ins.rows_undecided.is_some() {
+    } else if ins.rows_passed.is_some()
+        || ins.rows_cut.is_some()
+        || ins.rows_undecided.is_some()
+        || ins.rows_undecided_reasons.is_some()
+    {
         return Projection::Violates("counts");
     }
 
@@ -357,6 +387,25 @@ fn every_case_of_the_shared_fixture_gives_its_expected_projection_result() {
             b64(case, "insert_rows_b64").as_deref(),
             format_of(case["output_format"].as_str().unwrap()),
         );
+        // The cross-binding check: this binding's decoder reads the map the
+        // fixture writes, exactly, an absent member as `None` and `{}` as an
+        // empty map, so all four bindings read the same document the same way.
+        match case["insert"].get("rows_undecided_reasons") {
+            None => assert!(
+                ins.rows_undecided_reasons.is_none(),
+                "{id}: an absent rows_undecided_reasons decoded as {:?}",
+                ins.rows_undecided_reasons
+            ),
+            Some(raw) => {
+                let want: std::collections::BTreeMap<String, u64> = raw
+                    .as_object()
+                    .expect("an object")
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.as_u64().expect("a count")))
+                    .collect();
+                assert_eq!(ins.rows_undecided_reasons, Some(want), "{id}");
+            }
+        }
         let want = expected(case);
         eprintln!("projection case {id}: {got:?} (expected {want:?})");
         if got != want {
