@@ -58,10 +58,10 @@
  * other negative or library-private number is ever written. Every decline and library-side refusal
  * also names its reason, the catalog id, in the error and in the document (`reason`,
  * `verdict_reason`), and ids and the sentinel are stable once published (rule r4). The one
- * exception is a library below its CPU floor (Loading, in this Preamble): its entries name the
- * reason `cpu-unsupported`, a load-time refusal that a loader answers as `cpu_floor`, and not a
- * catalog id. A message is informative: once a reason is structured no message text is normative,
- * the pinned texts of generation 2's earlier drafts included.
+ * exception is a library opened on a CPU below its floor (see Loading): every entry then returns
+ * the reason `cpu-unsupported`, a load-time refusal rather than a catalog id, which a loader
+ * reports as `cpu_floor`. A message is informative: once a reason is structured no message text is
+ * normative, the pinned texts of generation 2's earlier drafts included.
  *
  * Conditional members. A document's schema states the members it always carries (`required`). These
  * members are present under a condition the schema cannot see, and each condition is a MUST on the
