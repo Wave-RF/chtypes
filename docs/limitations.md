@@ -12,7 +12,7 @@ When you get one, fall back to the server: validate cautiously, forward the row 
 
 The darwin artifacts give exactly the answers ClickHouse itself gives on macOS, on every supported line, with one exception on 26.3 (deep nesting, below). The artifact producer measured this against official macOS ClickHouse binaries.
 
-**On 26.7, 26.8 and 26.9,** ClickHouse agrees on every platform (macOS, Linux amd64, Linux arm64), float text included. On these lines, a mismatch of platform changes nothing.
+**On 26.7 and later,** ClickHouse agrees on every platform (macOS, Linux amd64, Linux arm64), float text included. On these lines, a mismatch of platform changes nothing.
 
 **On 26.3,** ClickHouse's own parse of Float values from text input formats differs across platforms (macOS, Linux amd64, Linux arm64; mostly 1 ULP), and none is correctly rounded. So stored Float values, and comparisons involving them, can differ across architectures, and a verdict computed on another platform can differ from the server's.
 
@@ -126,7 +126,7 @@ The `darwin-arm64` lifts are measured: the producer's differential ran those pai
 
 **What the guarantee does not cover.**
 
-- **A server configured so that it refuses every query.** For example `max_expanded_ast_elements=1` refuses everything with code 36, and so does `page=1` on 26.8 and 26.9. The library answers the rows such a server would refuse. The committed list is [`spec/abi-v2/where-settings/documented-pathological.tsv`](../spec/abi-v2/where-settings/documented-pathological.tsv), explained in the README section [Settings the server may refuse outright](../spec/abi-v2/where-settings/README.md#settings-the-server-may-refuse-outright). A consumer refuses such a profile or call; the list grows only by sign-off.
+- **A server configured so that it refuses every query.** For example `max_expanded_ast_elements=1` refuses everything with code 36, and so does `page=1` on 26.8, 26.9 and 26.10. The library answers the rows such a server would refuse. The committed list is [`spec/abi-v2/where-settings/documented-pathological.tsv`](../spec/abi-v2/where-settings/documented-pathological.tsv), explained in the README section [Settings the server may refuse outright](../spec/abi-v2/where-settings/README.md#settings-the-server-may-refuse-outright). A consumer refuses such a profile or call; the list grows only by sign-off.
 - **The 26.3 float platform requirement.** On 26.3, ClickHouse's own float text parse depends on the platform, so run the library on the server's operating system and architecture. See [macOS artifacts match ClickHouse on macOS; on 26.3, match the server's platform](#macos-artifacts-match-clickhouse-on-macos-on-263-match-the-servers-platform), which this page states as a requirement.
 
 The parse-once block twin sits under the same guarantee. For the rule a filter's own result type must follow, see [`guides/filters.md` → Writing a filter's result type](guides/filters.md#writing-a-filters-result-type).
@@ -187,7 +187,7 @@ Every entry here has a machine-checkable twin in [`docs/divergences.json`](diver
 
 The batch preview (`chs_preview_batch`) of the same row answers correctly, with 117, so it agrees with the server.
 
-**Measured**: by the artifact producer, against the production library build `20261004.052404` on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64; the server half against the server's single-row INSERT. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
+**Measured**: by the artifact producer, against the production library build `20261004.052404` on the four lines supported at the time (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64; the server half against the server's single-row INSERT. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
 
 Until then, use the batch preview, even for one row, on `CollapsingMergeTree`, `VersionedCollapsingMergeTree` and `ReplacingMergeTree` with an `is_deleted` column.
 
@@ -205,7 +205,7 @@ Until then, use the batch preview, even for one row, on `CollapsingMergeTree`, `
 
 For every other case in the list, the server refuses the CREATE.
 
-**Measured**: by the artifact producer, against the production library build `20261004.052404` on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
+**Measured**: by the artifact producer, against the production library build `20261004.052404` on the four lines supported at the time (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
 
 Until then, do not treat a successful schema creation on these engines as proof that the server will accept the CREATE.
 
@@ -222,7 +222,7 @@ A batch in which every row supplies the column, and a single row, agree with the
 
 The reverse is an over-reject, and needs a non-default setting, so it is a line here and not an entry of its own. With `b Int32 DEFAULT intDiv(10, a)` and a column `m … MATERIALIZED b + 1`, in `JSONEachRow` with `input_format_defaults_for_omitted_fields=0`, a row that omits `b` with `a = 0` is accepted by a server (`b` takes its type's default) and refused by this library with error 153.
 
-**Measured**: by the artifact producer, against the production library build `20261004.052404` and its successor `20261006.170903`, on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 only, with identical results. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
+**Measured**: by the artifact producer, against the production library build `20261004.052404` and its successor `20261006.170903`, on the four lines supported at the time (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 only, with identical results. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
 
 Until then, do not trust an accepted batch that mixes rows omitting and rows supplying a DEFAULT column whose expression can throw.
 
@@ -232,7 +232,7 @@ Until then, do not trust an accepted batch that mixes rows omitting and rows sup
 
 `allow_nullable_key = 1`, and `ifNull` or `assumeNotNull` keys, are declined (`unsupported`) rather than accepted: an over-decline, not an entry here.
 
-**Measured**: by the artifact producer, against the production library build `20261004.052404` and its successor `20261006.170903`, on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 only. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
+**Measured**: by the artifact producer, against the production library build `20261004.052404` and its successor `20261006.170903`, on the four lines supported at the time (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 only. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
 
 Until then, do not treat a successful schema creation with a Nullable sorting key as proof that the server will accept the CREATE.
 
@@ -242,7 +242,7 @@ Until then, do not treat a successful schema creation with a Nullable sorting ke
 
 With a pinned clock (`chtypes_now_epoch_nanos`) plus `chtypes_clock_offset_nanos`, an omitted DEFAULT applies the offset, but a `MATERIALIZED` expression ignores it. The row preview is not yet measured.
 
-**Measured**: by the artifact producer, against the production library build `20261004.052404` and its successor `20261006.170903`, on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 only, with identical results. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
+**Measured**: by the artifact producer, against the production library build `20261004.052404` and its successor `20261006.170903`, on the four lines supported at the time (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 only, with identical results. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
 
 Until then, do not trust `computed` clock values from a batch preview unless at least one row omits a Volatile DEFAULT column, or the clock is pinned with no offset.
 
@@ -250,7 +250,7 @@ Until then, do not trust `computed` clock values from a batch preview unless at 
 
 **Over-accept, on every supported line, at schema creation, linux-amd64 only.** A table whose `PROJECTION` has no `ORDER BY` is accepted by `chs_schema_create`, and a preview then accepts rows for it. A real server refuses the CREATE with error **36** (`ORDER BY cannot be empty`).
 
-**Measured**: by the artifact producer, against the production library build `20261006.170903` and its predecessor `20261004.052404`, on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 only. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
+**Measured**: by the artifact producer, against the production library build `20261006.170903` and its predecessor `20261004.052404`, on the four lines supported at the time (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 only. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
 
 Until then, do not treat a successful schema creation as proof that the server will accept a CREATE whose projections have no `ORDER BY`.
 
@@ -260,7 +260,7 @@ Until then, do not treat a successful schema creation as proof that the server w
 
 The decline catalog (`spec/abi-v2/declines/declines.json`) gives two reasons, and this entry claims nothing beyond their entries:
 
-- **`string-reading`** (`26.3`, `26.7`, `26.8`, `26.9`): a comparison of a non-String expression with a `String` constant or `{p:String}` parameter whose text the server's own index or analyzer reading reads differently from the comparison. A comparison reads a `String` constant once, with `cast_string_to_date_time_mode`; the server reads the same text again with the default text format in its index analysis, `IN` sets and analyzer, and drops rows the comparison keeps or refuses a query over a key column. The create is declined, naming the column and both readings. Typed parameters and canonical text are answered.
+- **`string-reading`** (`26.3`, `26.8`, `26.9`, `26.10`): a comparison of a non-String expression with a `String` constant or `{p:String}` parameter whose text the server's own index or analyzer reading reads differently from the comparison. A comparison reads a `String` constant once, with `cast_string_to_date_time_mode`; the server reads the same text again with the default text format in its index analysis, `IN` sets and analyzer, and drops rows the comparison keeps or refuses a query over a key column. The create is declined, naming the column and both readings. Typed parameters and canonical text are answered.
 - **`equals-fold`** (`26.3` only; retires when `26.3` leaves the supported set): an `AND` of two equals comparisons of one expression with different constants that the comparison matches with one value, such as `dt = '2024-06-01 12:00:00' AND dt = '1717243200'`. On the lines whose analyzer folds an `AND` of two equals over different constants to false whatever the comparison reads, the server returns no row where the comparison keeps one; the create is declined. Constants the server's own constant test calls equal are answered.
 
 **Measured** by the artifact producer: direct server `SELECT`s against the library at artifact build `20261009.074908` for the divergence, and the producer's differential on build `20261010.180314` as published for the decline (zero over-accepts, zero over-rejects on every pair). **Safe forms**, which answer on every line: a typed `{p:DateTime}` parameter, and canonical `YYYY-MM-DD hh:mm:ss` text. On a build before `20261010.180314`, RFC 3339 spellings (`…T00:00:00Z`, or with an offset), compact forms and unix timestamps are not safe. The filter enforcement gate for the eleven covered pairs is lifted from build `20261010.180314`; on earlier builds the gate stays on.

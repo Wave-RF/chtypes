@@ -145,13 +145,19 @@ done
 
 The manifests must say `2.0.0` (and Go's `bindingVersion`) for the version agreement to pass, as for every release.
 
-**The support page after a publish.** [`docs/support-v2.md`](docs/support-v2.md) is generated from the registry the Python binding's active generation-2 channel names (the staging dev repository today, production `chtypes/v2` with the release key after the lock's one-line `active()` switch), every signed statement verified before a fact is read from it, no layer downloaded. Nothing regenerates it automatically and no check turns red when the delivery side publishes: when a production publish notice arrives, open the regeneration pull request with
+**The support page after a publish.** Nothing to do: a publish opens no pull request here. [`docs/support-v2.md`](docs/support-v2.md) holds only what the SDK owns (languages, SDK to ABI, platforms, the rule for a line's support), so no publish can make it stale. The per-line page is the artifact producer's: its publish job renders it and serves it at `<channel base>/support-matrix.md` (dev: <https://registry-staging.wavehouse.dev/chtypes/v2-dev/support-matrix.md>; production at the lock: <https://registry.wavehouse.dev/chtypes/v2/support-matrix.md>).
+
+A line is supported exactly while upstream's `SECURITY.md` lists it, and the only source of per-line state is the channel's signed document in the repository `<channel>/channel`, whose contract is in `scripts/support-v2/gen.py`'s header. What this repository commits from it is [`spec/abi-v2/where-settings/lines.json`](spec/abi-v2/where-settings/lines.json). On a pull request that touches the page, the generator or `spec/abi-v2/where-settings/`, `checks` runs `gen.py --check`, which fails if the page differs from the output, a supported line has no verifiable build, or `lines.json` disagrees with the newest document; every other pull request skips it, so a publish can never redden one. Until the first document is published that check prints `live check off` and the per-line comparison is NOT JUDGED; it turns on by itself with the first publication.
+
+**When a line is added or retired.** Take the supported lines from the verified document, then copy the artifact producer's lists (`<dir>` holds its `<line>.json` files and its `documented-pathological.tsv`; the first command also names the tag to use as the source):
 
 ```sh
+uv run scripts/support-v2/gen.py --print-document > document.json
+python3 scripts/abi-v2/regen-where-settings.py --lines-document document.json --lines-source <tag> --from <dir>
 uv run scripts/support-v2/gen.py --write
 ```
 
-Exit status 0 means the page is complete, 3 means it was written with some rows omitted (each is named on stderr: read them before committing), and 4 means nothing was written. A pull request that touches only `docs/support-v2.md` is enqueued by the policy merge once `checks` passes; on a pull request that touches the page or the generator, `checks` reruns `gen.py --check` against the registry and fails unless the page equals the output byte for byte.
+`regen-where-settings.py` copies each list byte for byte, deletes a list `lines.json` does not name, drops the TSV rows on such a line, derives `union.json` and rewrites the README's sha256 list; it never takes a list by hand. The exit statuses of `gen.py` are in its header: 0 is fine (or NOT JUDGED, named), 1 is a committed file that differs, 3 is a line that failed (named on stderr: read them before committing), 4 is a channel whose lines could not be read, and 5 is a channel document that was refused. No older document is ever read in place of a refused one.
 
 ## Before the first tag of each package
 

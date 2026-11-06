@@ -99,8 +99,8 @@ jobs:
     steps:
       # fetch-depth 2: the support-v2 steps below diff HEAD against its first
       # parent (the base of a pull request's merge ref, the previous entry of
-      # a merge queue's) to learn whether the PR touches the page or its
-      # generator.
+      # a merge queue's) to learn whether the PR touches the page, its
+      # generator or the committed supported lines.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 2
@@ -237,29 +237,32 @@ jobs:
         run: scripts/check-selftests-wired.py --selftest
       - name: every scripts/* --selftest mode is actually invoked by CI, directly or through a verified caller
         run: scripts/check-selftests-wired.py
-      # docs/support-v2.md is GENERATED from the registry's signed statements
-      # (public issue #438), and kept current by a pull request someone opens
-      # when a production publish lands (RELEASING.md), not by a check that
-      # goes red when the delivery side publishes. So the generator's own
-      # selftest runs on every pull request (loopback only), while the page's
-      # byte-for-byte check, which does reach the registry, runs ONLY when the
-      # pull request touches the page or the generator. On every other pull
+      # docs/support-v2.md is GENERATED (public issue #438) and holds only what
+      # the SDK owns, so no publish can make it stale and none opens a pull
+      # request here: the per-line page is the artifact producer's, served with
+      # the builds (RELEASING.md). The generator also judges the channel's lines
+      # against its signed per-line document and compares that document's
+      # supported lines with spec/abi-v2/where-settings/lines.json. So its own
+      # selftest runs on every pull request (loopback only), while --check, which
+      # does reach the registry, runs ONLY when the pull request touches the page,
+      # the generator or spec/abi-v2/where-settings/. On every other pull
       # request these steps are skipped, which is success, and a publish can
       # never redden an unrelated one. These are steps of this required job on
       # purpose: a separate job would be a new required context, and a
       # non-required one could not stop a stale page from being enqueued by
       # scripts/policy-merge-check.py (the page is deliberately not a
       # protected path; the scripts and workflow beside it are).
-      - name: selftest — the support-v2 generator omits what does not verify, refuses a private name, and takes its channel from the binding
+      - name: selftest — the support-v2 generator refuses a channel document on every rule with no fallback, classifies every line, refuses a private name, and takes its channel from the binding
         run: uv run scripts/support-v2/gen.py --selftest
-      - name: does this pull request touch docs/support-v2.md or its generator?
+      - name: does this pull request touch docs/support-v2.md, its generator or spec/abi-v2/where-settings/?
         id: support-v2
         run: |
           if changed="$(git diff --name-only HEAD^1 HEAD 2>/dev/null)"; then
-            # Only the page and its generator: a fetch-layer change is checked by
-            # the generator's selftest above, and gating it on the live page
-            # would redden it whenever the delivery side publishes a line.
-            if grep -qE '^(docs/support-v2\.md|scripts/support-v2/)' <<<"$changed"; then
+            # Only the page, its generator and the committed lines: a fetch-layer
+            # change is checked by the generator's selftest above, and gating it
+            # on the live registry would redden it whenever the delivery side
+            # publishes.
+            if grep -qE '^(docs/support-v2\.md|scripts/support-v2/|spec/abi-v2/where-settings/)' <<<"$changed"; then
               echo "touched=true" >> "$GITHUB_OUTPUT"
             else
               echo "touched=false" >> "$GITHUB_OUTPUT"
@@ -268,7 +271,7 @@ jobs:
             echo "the diff against the first parent is unavailable; running the page check" >&2
             echo "touched=true" >> "$GITHUB_OUTPUT"
           fi
-      - name: support-v2 — docs/support-v2.md equals the generator's output from the active channel's registry
+      - name: support-v2 — docs/support-v2.md equals the generator's output, and lines.json the active channel's newest signed document
         if: steps.support-v2.outputs.touched == 'true'
         run: uv run scripts/support-v2/gen.py --check
 
