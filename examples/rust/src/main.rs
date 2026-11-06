@@ -1117,7 +1117,7 @@ fn section12(registry: &Registry) {
     kv("lines installed", &minors.join("  "));
     if minors.len() < 2 {
         note("only one line is installed, so there is nothing to sweep; fetch another");
-        note("(`chtypes fetch 26.7`) and re-run to see the answers diverge");
+        note("(`chtypes fetch 26.8`) and re-run to see the answers diverge");
         return;
     }
     kv(
