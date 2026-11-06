@@ -230,6 +230,9 @@
  * `chs_shutdown` has run. The handshake, `chs_abi_revision`, `chs_shutdown`, the buffer and error
  * accessors and the frees answer at any time.
  *
+ * Unloading. The library cannot be unloaded: `dlclose` leaves it mapped for the life of the process
+ * (it is linked with `-z nodelete`). Loading the same library file again returns the same image.
+ *
  * Images. (Pending the confirmation runs with the time budget at 0, and the remaining arm64 cells
  * at the default budget and at 0.) Any number of library images, one per ClickHouse line, may be
  * loaded and used concurrently in one process, from any number of threads, each initialized once
