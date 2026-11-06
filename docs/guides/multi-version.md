@@ -18,14 +18,14 @@ The cost, measured on 0.x artifacts: **about 120 MB resident per loaded version*
 
 ### Opening a pinned set up front: `preload`
 
-A deployment that knows which versions it serves can open them at construction, and find out at construction if one is missing. It is a registry option in all four, it takes a **list of requests** rather than "everything installed" — a cache is whatever fetches left behind — and an entry no installed build answers raises the ordinary artifact-missing error, earlier than it otherwise would. It never fetches, even with autofetch on: fetch first (`chtypes fetch 26.8 26.7`), then preload.
+A deployment that knows which versions it serves can open them at construction, and find out at construction if one is missing. It is a registry option in all four, it takes a **list of requests** rather than "everything installed" — a cache is whatever fetches left behind — and an entry no installed build answers raises the ordinary artifact-missing error, earlier than it otherwise would. It never fetches, even with autofetch on: fetch first (`chtypes fetch 26.8 26.9`), then preload.
 
 | SDK        | spelling                                                                                               |
 | ---------- | ------------------------------------------------------------------------------------------------------ |
-| Go         | `chtypes.NewRegistry(chtypes.WithPreload("26.8", "26.7"))`                                             |
-| Python     | `Registry(preload=["26.8", "26.7"])`                                                                   |
-| TypeScript | `await Registry.open({ preload: ['26.8', '26.7'] })`                                                   |
-| Rust       | `Registry::new(RegistryOptions { preload: vec!["26.8".into(), "26.7".into()], ..Default::default() })` |
+| Go         | `chtypes.NewRegistry(chtypes.WithPreload("26.8", "26.9"))`                                             |
+| Python     | `Registry(preload=["26.8", "26.9"])`                                                                   |
+| TypeScript | `await Registry.open({ preload: ['26.8', '26.9'] })`                                                   |
+| Rust       | `Registry::new(RegistryOptions { preload: vec!["26.8".into(), "26.9".into()], ..Default::default() })` |
 
 The per-library checksum option of 0.x is gone: the fetch layer guarantees on return that the library file's digest equals the signed statement's, and the loader checks the open library against the same statement ([`artifacts.md`](artifacts.md#what-is-checked)). There is no `WithVerifyChecksums` or `verify_hashes` to set.
 
@@ -36,7 +36,7 @@ The per-library checksum option of 0.x is gone: the fetch layer guarantees on re
 ```go
 reg, _ := chtypes.NewRegistry()   // nothing dlopen'd yet
 old, _ := reg.For("24.8")         // loads 24.8
-recent, _ := reg.For("26.7")      // loads 26.7, beside it
+recent, _ := reg.For("26.9")      // loads 26.9, beside it
 installed, _ := reg.Installed()   // every build in the cache
 open := reg.Libraries()           // the two above
 ```
@@ -48,12 +48,12 @@ open := reg.Libraries()           // the two above
 ```python
 registry = Registry()                   # nothing dlopen'd yet
 old = registry.for_version("24.8")      # loads 24.8
-recent = registry.for_version("26.7")   # loads 26.7, beside it
+recent = registry.for_version("26.9")   # loads 26.9, beside it
 print(registry.installed())             # every build in the cache
 print(registry.libraries())             # the two above
 ```
 
-`registry["26.7"]` is gone: a convenience that existed in one binding only was deleted, so the four stay one shape.
+`registry["26.9"]` is gone: a convenience that existed in one binding only was deleted, so the four stay one shape.
 
 </details>
 
@@ -62,7 +62,7 @@ print(registry.libraries())             # the two above
 ```ts
 const registry = await Registry.open();
 const old = await registry.for('24.8');
-const recent = await registry.for('26.7');
+const recent = await registry.for('26.9');
 console.log(await registry.installed(), registry.libraries());
 ```
 
@@ -75,7 +75,7 @@ console.log(await registry.installed(), registry.libraries());
 ```rust
 let registry = Registry::new(RegistryOptions::default())?;  // opens nothing
 let old = registry.for_version("24.8")?;                    // Arc<Library>
-let recent = registry.for_version("26.7")?;
+let recent = registry.for_version("26.9")?;
 println!("{:?} {}", registry.installed()?, registry.libraries().len());
 ```
 

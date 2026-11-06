@@ -25,7 +25,7 @@ toInt128(x) != 0          not: x            (x Int128)
 e8 = 'a'                  not: e8           (e8 an Enum)
 ```
 
-1.0 enforces this the way a real server does, on every supported line (`26.3`, `26.7`, `26.8`, `26.9`). 0.x answered such a result with a C-style truthiness instead; 0.x is retired, and 1.0 ships only the supported lines.
+1.0 enforces this the way a real server does, on every supported line. 0.x answered such a result with a C-style truthiness instead; 0.x is retired, and 1.0 ships only the supported lines.
 
 **Each row is decided with a real server's own truthiness.** `0.5`, `-0.5` and `NaN` keep a row, as a server's `static_cast<bool>` does, and `NULL` does not. Prefer an explicit comparison anyway — `x != 0` rather than a bare `x` — so the intent is visible.
 
@@ -300,7 +300,7 @@ Three consequences follow, and a consumer meets each of them:
 
 - **A batch whose own `outcome` is not `accepted` exports nothing, filter or no filter — and, as of the artifact producer's relink served at `chtypes_build` 1790845279, reports `rows_passed` and `rows_cut` as both `0`.** Measured by the artifact producer: a `CONSTRAINT … CHECK` violator anywhere in the batch rejects the whole batch with code **469**, and the table stores nothing, so no passing row's bytes flow either, whatever its own verdict would have been. There is no path by which such a batch exports its admitted rows; attaching a filter does not create one. The same rejection used to still count an earlier row's own `accepted` outcome and `t` verdict toward `rows_passed` — a strict (no `input_format_allow_errors_*`) batch aborted by a later bad row measured `rows_passed: 1` despite an overall `outcome` of `rejected` — so a caller keying "exported" off `rows_passed > 0` could publish from a batch that stored and exported nothing. By design, since that relink: both counts are gated on the BATCH's own `outcome`, not only on each row's.
 
-This `verdict_code`/`verdict_err` and `rows_passed`/`rows_cut` fix applies only to builds at `chtypes_build` 1790845279 or later, on the supported lines (`26.3`, `26.7`, `26.8`, `26.9`). A served, unsupported (retired) line never gets a new build or a new ABI revision, so it keeps the pre-relink behavior permanently — `26.6`'s newest build, `1790767905`, predates this relink and was never republished.
+This `verdict_code`/`verdict_err` and `rows_passed`/`rows_cut` fix applies only to builds at `chtypes_build` 1790845279 or later, on the lines supported at that relink (`26.3`, `26.7`, `26.8`, `26.9`). A served, unsupported (retired) line never gets a new build or a new ABI revision, so it keeps the pre-relink behavior permanently — `26.6`'s newest build, `1790767905`, predates this relink and was never republished.
 
 > ⚠️ **Verdicts index THIS call's rows — never another call's.** Measured by the artifact producer: a filtered export call and a plain `chs_filter_rows` / block-parse call reading the identical body can come back with a **different number of verdicts**, because the filtered export call stops at whichever row aborts its own parse, while the other reads the whole body regardless. Zipping one call's verdicts against another call's rows is exactly the mistake that costs a caller its own withhold-on-mismatch check — index verdicts only against the rows of the SAME call that produced them.
 

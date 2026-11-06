@@ -1075,7 +1075,7 @@ func section12(reg *chtypes.Registry) {
 		kv("lines installed", strings.Join(lines, "  "))
 		note("only one line is installed, so there is nothing to sweep: the")
 		note("point of this section needs at least two. Fetch another")
-		note("(`chtypes fetch 26.7`) and re-run to see the answers diverge.")
+		note("(`chtypes fetch 26.8`) and re-run to see the answers diverge.")
 		return
 	}
 
