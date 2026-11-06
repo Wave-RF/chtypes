@@ -34,7 +34,7 @@ Take the code or reason a call returned, find the entry whose `class`, `paths` a
 
 ## Provenance and changes
 
-Produced by the artifact producer at its commit `4e122ef3`, generator `chtypes filter-declines generator`. The file has 55 entries over the lines 26.3, 26.7, 26.8 and 26.9.
+Produced by the artifact producer at its commit `4e122ef3`, generator `chtypes filter-declines generator`. The file has 168 entries over the lines 26.3, 26.8, 26.9 and 26.10.
 
 The sha256 of the file, computed by `scripts/abi-v2/check-declines.py --print-table` and checked by `--check`:
 

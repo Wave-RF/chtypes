@@ -145,13 +145,38 @@ done
 
 The manifests must say `2.0.0` (and Go's `bindingVersion`) for the version agreement to pass, as for every release.
 
-**The support page after a publish.** [`docs/support-v2.md`](docs/support-v2.md) is generated from the registry the Python binding's active generation-2 channel names (the staging dev repository today, production `chtypes/v2` with the release key after the lock's one-line `active()` switch), every signed statement verified before a fact is read from it, no layer downloaded. Nothing regenerates it automatically and no check turns red when the delivery side publishes: when a production publish notice arrives, open the regeneration pull request with
+**The support page after a publish.** Nothing to do: a publish opens no pull request here. [`docs/support-v2.md`](docs/support-v2.md) holds only what the SDK owns (languages, SDK to ABI, platforms, the rule for a line's support), so no publish can make it stale. The per-line page is the artifact producer's: its publish job renders it and serves it at `<channel base>/support-matrix.md` (dev: <https://registry-staging.wavehouse.dev/chtypes/v2-dev/support-matrix.md>; production at the lock: <https://registry.wavehouse.dev/chtypes/v2/support-matrix.md>).
+
+A line is supported exactly while upstream's `SECURITY.md` lists it, and the only source of per-line state is the channel's signed document in the repository `<channel>/channel`, whose contract is in `scripts/support-v2/gen.py`'s header. What this repository commits from it is [`spec/abi-v2/where-settings/lines.json`](spec/abi-v2/where-settings/lines.json), whose `source` is the dry-run fixture's path until the first publication and that publication's tag after it. On every pull request `checks` runs `gen.py --check-page`, which reads no registry and fails if the page differs from the output, because a pull request that bumps a binding's manifest changes the page. On a pull request that touches the page, the generator, `spec/abi-v2/where-settings/`, its fixture under `tests/fixtures/support-v2/` or `scripts/abi-v2/check-where-settings.py` and `regen-where-settings.py`, `checks` also runs `gen.py --check`, which fails if a supported line has no verifiable build or `lines.json` disagrees with the newest document; every other pull request skips it, so a publish can never redden one. Until the first document is published that check prints `live check off`, with a warning annotation, and the per-line comparison is NOT JUDGED; `lines.json` is then held to the fixture's lines instead.
+
+**After the first publication.** The comparison turns on by itself, and the next pull request that touches those paths fails until `lines.json` names the publication, because that is what stops the channel's listing from turning the comparison off again: once `source` is a tag, a listing that names no publication, or only older ones, or not that tag, is a refusal, not "nothing yet". `regen-where-settings.py` refuses to move `source` backward, from a tag to the fixture marker or to an older tag. If the supported lines are the same as the fixture's, no list moves. `--print-document` says the tag on stderr (`printing the channel statement <tag>`), and that tag is the `--lines-source`:
 
 ```sh
+uv run scripts/support-v2/gen.py --print-document > document.json
+python3 scripts/abi-v2/regen-where-settings.py --lines-document document.json --lines-source <tag>
+uv run scripts/support-v2/gen.py --check
+python3 scripts/abi-v2/check-where-settings.py --selftest
+```
+
+Commit `lines.json` and the README's changed row, not `document.json`. The last two commands are the ones CI runs on that pull request; `gen.py --selftest` runs the same steps on a copy of the tree against a fixture registry. If the supported lines differ, it is the case below.
+
+**When a line is added or retired.** Take the supported lines from the verified document, then copy the artifact producer's lists (`<dir>` holds its `<line>.json` files and its `documented-pathological.tsv`; the first command also names the tag to use as the source):
+
+```sh
+uv run scripts/support-v2/gen.py --print-document > document.json
+python3 scripts/abi-v2/regen-where-settings.py --lines-document document.json --lines-source <tag> --from <dir>
 uv run scripts/support-v2/gen.py --write
 ```
 
-Exit status 0 means the page is complete, 3 means it was written with some rows omitted (each is named on stderr: read them before committing), and 4 means nothing was written. A pull request that touches only `docs/support-v2.md` is enqueued by the policy merge once `checks` passes; on a pull request that touches the page or the generator, `checks` reruns `gen.py --check` against the registry and fails unless the page equals the output byte for byte.
+`regen-where-settings.py` copies each list byte for byte, deletes a list `lines.json` does not name, drops the TSV rows on such a line, derives `union.json` and rewrites the README's sha256 list; it never takes a list by hand, and it judges the whole tree before it writes a byte. The exit statuses of `gen.py` are in its header: 0 is fine (or NOT JUDGED, named), 1 is a committed file that differs, 3 is a line that failed (named on stderr: read them before committing), 4 is a channel whose lines could not be read, and 5 is a channel document that was refused. No older document is ever read in place of a refused one.
+
+**What these checks don't cover.** They guard a descriptive page and a generated list, and these limits are accepted on that basis. If the page or `lines.json` ever feeds a binding or an enforcement step, a real evaluator of the workflow's steps comes first.
+
+- The workflow's steps are guarded by `.github/**` being a protected path. `gen.py --selftest` checks that the steps are present, not what they do, so a weakened step (`|| true`, `continue-on-error`, a swapped gate) passes it.
+- A hand edit of `lines.json` from a published tag back to the fixture marker, while the listing is empty, can't be seen offline. The writer refuses that move, and the file is on a protected path.
+- A hand edit of a per-tag where-settings list can't be judged offline, because its sha table is computed from the file it certifies. `regen-where-settings.py --control` compares against the producer's files by hand.
+- Before the first publication the live comparison is NOT JUDGED, and the registry answers an empty listing for any repository name, so a first publication under the wrong name stays NOT JUDGED until someone checks. Once `lines.json` names a published tag, an empty listing is a hard refusal.
+- The channel listing is unsigned and cached (60 s on staging, 300 s in production), so a new publication can stay invisible for that long, and a silent server cap on the listing can't be detected.
 
 ## Before the first tag of each package
 
