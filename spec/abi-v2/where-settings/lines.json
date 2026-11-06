@@ -1,6 +1,6 @@
 {
  "schema": "chtypes.where-settings-lines/1",
- "source": "the artifact producer's dry-run channel document (tests/fixtures/support-v2/channel-statement.json), until the first publication",
+ "source": "tests/fixtures/support-v2/channel-statement.json",
  "lines": [
   "26.3",
   "26.8",
