@@ -149,14 +149,16 @@ The manifests must say `2.0.0` (and Go's `bindingVersion`) for the version agree
 
 A line is supported exactly while upstream's `SECURITY.md` lists it, and the only source of per-line state is the channel's signed document in the repository `<channel>/channel`, whose contract is in `scripts/support-v2/gen.py`'s header. What this repository commits from it is [`spec/abi-v2/where-settings/lines.json`](spec/abi-v2/where-settings/lines.json), whose `source` is the dry-run fixture's path until the first publication and that publication's tag after it. On every pull request `checks` runs `gen.py --check-page`, which reads no registry and fails if the page differs from the output, because a pull request that bumps a binding's manifest changes the page. On a pull request that touches the page, the generator, `spec/abi-v2/where-settings/`, its fixture under `tests/fixtures/support-v2/` or `scripts/abi-v2/check-where-settings.py` and `regen-where-settings.py`, `checks` also runs `gen.py --check`, which fails if a supported line has no verifiable build or `lines.json` disagrees with the newest document; every other pull request skips it, so a publish can never redden one. Until the first document is published that check prints `live check off`, with a warning annotation, and the per-line comparison is NOT JUDGED; `lines.json` is then held to the fixture's lines instead.
 
-**After the first publication.** The comparison turns on by itself, and the next pull request that touches those paths fails until `lines.json` names the publication, because that is what stops the channel's listing from turning the comparison off again: once `source` is a tag, a listing that names no publication, or only older ones, is a refusal, not "nothing yet". If the supported lines are the same as the fixture's, no list moves:
+**After the first publication.** The comparison turns on by itself, and the next pull request that touches those paths fails until `lines.json` names the publication, because that is what stops the channel's listing from turning the comparison off again: once `source` is a tag, a listing that names no publication, or only older ones, or not that tag, is a refusal, not "nothing yet". `regen-where-settings.py` refuses to move `source` backward, from a tag to the fixture marker or to an older tag. If the supported lines are the same as the fixture's, no list moves. `--print-document` says the tag on stderr (`printing the channel statement <tag>`), and that tag is the `--lines-source`:
 
 ```sh
 uv run scripts/support-v2/gen.py --print-document > document.json
 python3 scripts/abi-v2/regen-where-settings.py --lines-document document.json --lines-source <tag>
+uv run scripts/support-v2/gen.py --check
+python3 scripts/abi-v2/check-where-settings.py --selftest
 ```
 
-If they differ, it is the case below.
+Commit `lines.json` and the README's changed row, not `document.json`. The last two commands are the ones CI runs on that pull request; `gen.py --selftest` runs the same steps on a copy of the tree against a fixture registry. If the supported lines differ, it is the case below.
 
 **When a line is added or retired.** Take the supported lines from the verified document, then copy the artifact producer's lists (`<dir>` holds its `<line>.json` files and its `documented-pathological.tsv`; the first command also names the tag to use as the source):
 
