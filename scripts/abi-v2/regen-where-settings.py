@@ -624,9 +624,11 @@ def cli_selftest(fails: list[str], tag: str, tag2: str, lists, document, header:
         unchanged("--lines-document, a repeated member", root, ["--lines-document", repeated, "--lines-source", tag2], "could not be read")
         unchanged("--lines-document, no such file", root, ["--lines-document", str(base / "absent.json"), "--lines-source", tag2], "could not be read")
         unchanged("--lines-source outside the closed form", root, ["--lines-document", same, "--lines-source", "a note"], "is neither")
+        # A source lines.json does not already name: writing it would change the tree.
+        first = file("first.json", document({"1.2": "supported", "1.3": "retired", "1.10": "supported"}))
         stray = root / DIR.relative_to(ROOT) / "extra.txt"
         stray.write_bytes(b"x\n")
-        unchanged("--lines-document, a tree that would fail a rule", root, ["--lines-document", same, "--lines-source", tag2], "(stray)")
+        unchanged("--lines-document, a tree that would fail a rule", root, ["--lines-document", first, "--lines-source", tag], "(stray)")
         stray.unlink()
         run("--lines-document needs --lines-source", root, ["--lines-document", same], 2)
 
