@@ -146,7 +146,7 @@ EXIT STATUSES
     0  the page was written or printed, which reads no registry; or it is current:
        every line fine, or NOT JUDGED (named)
     1  --check or --check-page: the committed page or lines.json differs (named)
-    2  usage error, or --print-document with nothing published
+    2  usage error, or --print-document on a channel with lines and no document
     3  --check or --print-document: a line failed by the table above (named); --check
        does not compare, and fails
     4  --check or --print-document, nothing judged: the channel's tag listing was
@@ -243,7 +243,7 @@ VERDICTS = {
     EXIT_DIFF: "a committed file differs",
     EXIT_USAGE: "nothing to print",
     EXIT_PARTIAL: "a line failed",
-    EXIT_NOTHING: "nothing judged, the channel's lines were not readable",
+    EXIT_NOTHING: "nothing judged, the channel gave no line to judge",
     EXIT_CHANNEL: "nothing judged, the channel document was refused",
     EXIT_CRASH: "crashed, this is not a verdict",
 }
@@ -1013,7 +1013,7 @@ def render(ctx: Context) -> str:
 @dataclass(frozen=True)
 class Outcome:
     """One run's judgment. `document` is None until a publication exists, and on a
-    refusal; `page` is empty when nothing may be written."""
+    refusal; `page` is empty when nothing was judged."""
 
     status: int
     page: str = ""
@@ -1164,7 +1164,9 @@ def _lines_problem(lines_json: Path, document: ChannelDocument) -> str:
 
 
 def _finish(mode: str, out: Path, lines_json: Path, outcome: Outcome, say) -> int:
-    """Act on a judgment: `mode` is "document" or "check"."""
+    """Act on a judgment. Only --check and --print-document make one."""
+    if mode not in ("check", "document"):
+        raise ValueError(f"no judgment to finish for the mode {mode!r}")
     status, page, document = outcome.status, outcome.page, outcome.document
     if status in (EXIT_NOTHING, EXIT_CHANNEL):
         return status
@@ -1194,7 +1196,7 @@ def _finish(mode: str, out: Path, lines_json: Path, outcome: Outcome, say) -> in
     return EXIT_DIFF if differs else EXIT_OK
 
 
-def produce_page(out: Path | None, say, selection: str = "") -> int:
+def produce_page(out: Path | None, say) -> int:
     """--write (a path) and no mode (None): the page from this tree. Neither reads a
     registry, so nothing a channel says can stop them or change a byte."""
     page = render(channel_context())
@@ -1203,7 +1205,8 @@ def produce_page(out: Path | None, say, selection: str = "") -> int:
         sys.stdout.flush()
     else:
         out.write_bytes(page.encode("utf-8"))
-    say(verdict_line(EXIT_OK, True, selection, "ok, the page from this tree, no registry read"))
+        say(f"support-v2: wrote {out}")
+    say(verdict_line(EXIT_OK, True, "", "ok, the page from this tree, no registry read"))
     return EXIT_OK
 
 
@@ -2262,10 +2265,15 @@ def _selftest() -> int:
     # active channel is: its listing and its document say that repository.
     cli_case_ids: list[str] = []
 
-    def cli_case(name: str, doc: dict | None, plant: Callable[[ChannelRepo], None] | None = None) -> None:
+    def cli_case(
+        name: str,
+        doc: dict | None,
+        plant: Callable[[ChannelRepo], None] | None = None,
+        tags: tuple[str, ...] = TREE_LINES,
+    ) -> None:
         repository = f"s-{name}/chtypes/v1"
         t = Tree(tmp / "base" / TREE, tmp / "trees" / name / TREE, repository)
-        t.set_tags(list(TREE_LINES))
+        t.set_tags(list(tags))
         ch = ChannelRepo(t.root, signer, {**fixture, "repository": repository}, repository=repository)
         if doc is not None:
             ch.publish({**doc, "repository": repository})
@@ -2276,6 +2284,7 @@ def _selftest() -> int:
 
     cli_case("cli-published", copy.deepcopy(fixture))
     cli_case("cli-unpublished", None)
+    cli_case("cli-empty", None, tags=())
     cli_case("cli-refused", None, lambda ch: ch.publish(manifest=lambda m: m.update(artifactType=C.ARTIFACT_TYPE)))
     cli_case("cli-line-failed", calls_26_7_supported)
 
@@ -2718,6 +2727,12 @@ def _selftest() -> int:
           "--check: a failed line fails (3), not compared")  # fmt: skip
     check(concluded("check", out_page, agreed, Outcome(EXIT_NOTHING))[0] == EXIT_NOTHING, "--check: nothing readable fails (4)")
     check(concluded("check", out_page, agreed, Outcome(EXIT_CHANNEL))[0] == EXIT_CHANNEL, "--check: a refused document fails (5)")
+    try:
+        concluded("write", tmp / "no-page.md", agreed, published)
+        finished_a_write = True
+    except ValueError:
+        finished_a_write = False
+    check(not finished_a_write and not (tmp / "no-page.md").exists(), "a judgment does not finish a mode that makes none")
     check(concluded("document", tmp / "no-page.md", agreed, unpublished)[0] == EXIT_USAGE,
           "--print-document with nothing published: nothing to print (2)")  # fmt: skip
 
@@ -2874,17 +2889,28 @@ def _cli_selftest(check, tmp: Path, port: int, lines_doc, supported, fixture, pa
         channel = replace(_channel.FETCH_V1_CHANNEL, name="selftest", bases=(base or f"http://127.0.0.1:{port}/s-{case}/chtypes/v1",))
         return render(channel_context(channel))
 
+    def requests_to(case: str) -> list:
+        """The fixture registry's log of this case's requests, the record of a read."""
+        return json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/_log/s-{case}").read())  # noqa: S310
+
     def from_this_tree(what: str, case: str, *, base: str = "", crash: bool = False) -> None:
-        """--write and no mode: the page and status 0 from a channel in this state. The
-        offline check takes what they gave, under the same channel."""
+        """--write and no mode: the page and status 0 from a channel in this state, with
+        lines.json at the fixture marker and at a publication, and no request logged. The
+        offline check takes what they gave, under the same channel. A `base` nothing
+        listens on logs nothing, and its control is --check being unable to read it."""
         text = page_of(case, base)
         words = ("no registry read",)
-        written = tmp / f"from-this-tree-{case}{'-crash' if crash else ''}.md"
-        cli(f"--write, {what}", ["--write", *selected(str(written), at_fixture)], EXIT_OK, case=case, base=base, crash=crash, said=words)
-        check(written.is_file() and written.read_bytes() == text.encode("utf-8"), f"command line, --write, {what}: the file is the page")
-        r = cli(f"no mode, {what}", selected(str(written), at_fixture), EXIT_OK, case=case, base=base, crash=crash, said=words)
-        check(r.stdout == text, f"command line, no mode, {what}: stdout is the page")
-        cli(f"--check-page on what --write gave, {what}", ["--check-page", *selected(str(written), at_fixture)], EXIT_OK, case=case, base=base, crash=crash, said=words)
+        before = None if base else requests_to(case)
+        written = ""
+        for n, (state, lines) in enumerate((("lines.json at the marker", at_fixture), ("lines.json at a tag", agreed))):
+            written = str(tmp / f"from-this-tree-{case}-{'crash-' if crash else ''}{n}.md")
+            cli(f"--write, {what}, {state}", ["--write", *selected(written, lines)], EXIT_OK, case=case, base=base, crash=crash, said=(*words, "wrote"), unsaid=("judged",))
+            check(Path(written).is_file() and Path(written).read_bytes() == text.encode("utf-8"), f"command line, --write, {what}, {state}: the file is the page")
+            r = cli(f"no mode, {what}, {state}", selected(written, lines), EXIT_OK, case=case, base=base, crash=crash, said=words, unsaid=("judged",))
+            check(r.stdout == text, f"command line, no mode, {what}, {state}: stdout is the page")
+        cli(f"--check-page on what --write gave, {what}", ["--check-page", *selected(written, at_fixture)], EXIT_OK, case=case, base=base, crash=crash, said=words)
+        if before is not None:
+            check(requests_to(case) == before, f"command line, {what}: no request reached the registry")
 
     def selected(page_path: str, lines_path: str) -> list[str]:
         return ["--out", page_path, "--lines", lines_path]
@@ -2892,7 +2918,7 @@ def _cli_selftest(check, tmp: Path, port: int, lines_doc, supported, fixture, pa
     def release_flow(document_text: str, document_tag: str) -> None:
         """RELEASING.md's steps after the first publication, end to end, on a copy of
         the tree: print the verified document, write lines.json from it, regenerate the
-        page, then every judge of the result. A step that works alone and leaves a judge
+        page for the fixture registry's address, then every judge of the result. A step that works alone and leaves a judge
         failing (a selftest that assumed the committed lines.json) fails here, where CI
         would have found it after the merge."""
         flow = tmp / "flow"
@@ -2940,7 +2966,7 @@ def _cli_selftest(check, tmp: Path, port: int, lines_doc, supported, fixture, pa
         runs_clean("check-documented-platform --selftest on the result", stdlib["check-documented-platform"], "--selftest")
         runs_clean("check-documented-platform --check on the result", stdlib["check-documented-platform"], "--check")
 
-    check(set(cases) == {"cli-published", "cli-unpublished", "cli-refused", "cli-line-failed"}, "the command-line registries are the ones used below")
+    check(set(cases) == {"cli-published", "cli-unpublished", "cli-empty", "cli-refused", "cli-line-failed"}, "the command-line registries are the ones used below")
 
     # A document published, every supported line built.
     case = "cli-published"
@@ -2965,12 +2991,22 @@ def _cli_selftest(check, tmp: Path, port: int, lines_doc, supported, fixture, pa
         env={C.ENV_BASES_NAME: "http://127.0.0.1:1/chtypes/v2-dev", C.ENV_TRUSTED_KEYS_NAME: other},
     )
     from_this_tree("a document published", case)
+    before = requests_to(case)
+    cli("--check, the request log's control", ["--check", *selected(good, agreed)], EXIT_OK, case=case)
+    check(len(requests_to(case)) > len(before), "command line, --check: the request log sees a read")
     r = cli("--print-document", ["--print-document", *selected(good, agreed)], EXIT_OK, case=case, said=("printing the channel statement",))
     document_text = r.stdout
     found_tag = re.search(r"printing the channel statement ([0-9T]+Z)", r.stderr)
     document_tag = found_tag.group(1) if found_tag else ""
     document = {**fixture, "repository": f"s-{case}/chtypes/v1"}
     check(json.loads(r.stdout or "null") == document, "command line, --print-document: stdout is the signed document")
+    # The lock's second step starts here: with lines.json at the marker the first
+    # publication prints, and at a tag this channel never published, which is a dev tag
+    # on production, nothing does.
+    r = cli("--print-document, lines.json at the marker", ["--print-document", *selected(good, at_fixture)], EXIT_OK, case=case)
+    check(json.loads(r.stdout or "null") == document, "command line, --print-document at the marker: stdout is the signed document")
+    r = cli("--print-document, lines.json names a tag the listing does not", ["--print-document", *selected(good, made_up)], EXIT_CHANNEL, case=case, said=("refused [lines-source]",))
+    check(r.stdout == "", "command line, --print-document at a tag the listing does not name: stdout is empty")
 
     # Nothing published.
     case = "cli-unpublished"
@@ -2991,6 +3027,16 @@ def _cli_selftest(check, tmp: Path, port: int, lines_doc, supported, fixture, pa
     from_this_tree("nothing published", case)
     cli("--check, every statement bad", ["--check", *selected(good, at_fixture)], EXIT_NOTHING, case=case, keys_hex=other, said=("no platform of any line verified",))
     cli("--check, a crash", ["--check", *selected(good, at_fixture)], EXIT_CRASH, case=case, crash=True, said=("RuntimeError escaped",))
+
+    # A listing that names no line: production before its first publication, as
+    # RELEASING.md's order for the lock says. `agreed` stands for a tag from another channel.
+    case = "cli-empty"
+    good = write("good-empty.md", page_of(case))
+    cli("--check, an empty channel", ["--check", *selected(good, at_fixture)], EXIT_NOTHING, case=case, said=("nothing judged: the registry's tag listing names no line",))
+    cli("--check, an empty channel, lines.json at another channel's tag", ["--check", *selected(good, agreed)], EXIT_CHANNEL, case=case, said=("refused [no-document]",))
+    r = cli("--print-document, an empty channel", ["--print-document", *selected(good, at_fixture)], EXIT_NOTHING, case=case)
+    check(r.stdout == "", "command line, --print-document on an empty channel: stdout is empty")
+    from_this_tree("an empty channel", case)
 
     # The document refused.
     case = "cli-refused"
@@ -3076,7 +3122,7 @@ def main(argv: list[str] | None = None) -> int:
         mode = "check" if args.check else "document"
         return _guarded(lambda: run(mode, args.out, args.lines, say, selection), say, selection)
     target = args.out if args.write else None
-    return _guarded(lambda: produce_page(target, say, selection), say, selection)
+    return _guarded(lambda: produce_page(target, say), say, selection)
 
 
 if __name__ == "__main__":
