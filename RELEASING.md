@@ -170,6 +170,14 @@ uv run scripts/support-v2/gen.py --write
 
 `regen-where-settings.py` copies each list byte for byte, deletes a list `lines.json` does not name, drops the TSV rows on such a line, derives `union.json` and rewrites the README's sha256 list; it never takes a list by hand, and it judges the whole tree before it writes a byte. The exit statuses of `gen.py` are in its header: 0 is fine (or NOT JUDGED, named), 1 is a committed file that differs, 3 is a line that failed (named on stderr: read them before committing), 4 is a channel whose lines could not be read, and 5 is a channel document that was refused. No older document is ever read in place of a refused one.
 
+**What these checks don't cover.** They guard a descriptive page and a generated list, and these limits are accepted on that basis. If the page or `lines.json` ever feeds a binding or an enforcement step, a real evaluator of the workflow's steps comes first.
+
+- The workflow's steps are guarded by `.github/**` being a protected path. `gen.py --selftest` checks that the steps are present, not what they do, so a weakened step (`|| true`, `continue-on-error`, a swapped gate) passes it.
+- A hand edit of `lines.json` from a published tag back to the fixture marker, while the listing is empty, can't be seen offline. The writer refuses that move, and the file is on a protected path.
+- A hand edit of a per-tag where-settings list can't be judged offline, because its sha table is computed from the file it certifies. `regen-where-settings.py --control` compares against the producer's files by hand.
+- Before the first publication the live comparison is NOT JUDGED, and the registry answers an empty listing for any repository name, so a first publication under the wrong name stays NOT JUDGED until someone checks. Once `lines.json` names a published tag, an empty listing is a hard refusal.
+- The channel listing is unsigned and cached (60 s on staging, 300 s in production), so a new publication can stay invisible for that long, and a silent server cap on the listing can't be detected.
+
 ## Before the first tag of each package
 
 1. Bump the manifest version (`python/pyproject.toml`, `ts/package.json`, `rust/Cargo.toml`; Go has none — the tag is the version — so bump `bindingVersion` in `go/internal/ocifetch/useragent.go` instead; it is the version in the fetch layer's `User-Agent`).

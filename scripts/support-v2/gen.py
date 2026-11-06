@@ -858,7 +858,8 @@ def judge(data: Collected, document: ChannelDocument | None, say) -> int:
         elif document is not None:
             say(
                 f"support-v2: {line}: support unknown, and no platform of the line verified; "
-                f"the channel statement {document.tag} does not name it"
+                f"the channel statement {document.tag} does not name it, and the producer's "
+                "document must list every line the channel publishes"
             )
             failed = True
         elif facts.failed:
@@ -2513,7 +2514,7 @@ def _selftest() -> int:
     exit_3("supported-no-build", "supported with no build", "26.7: supported, and no platform of the line verified")
     exit_3("supported-not-listed", "supported, not on the listing at all", "26.9: supported, and no platform of the line verified")
     exit_3("supported-one-platform-bad", "supported, one platform's statement bad", "26.8 linux-amd64: omitted")
-    exit_3("unknown-no-build-published", "unknown with no build, once published", "26.7: support unknown, and no platform of the line verified")
+    exit_3("unknown-no-build-published", "unknown with no build, once published", "26.7: support unknown, and no platform of the line verified", "the producer's document must list every line the channel publishes")
     exit_3("unknown-all-bad-unpublished", "a statement that does not verify is not excused before publication", "26.9 linux-amd64: omitted", "26.9: support unknown, and a read failed")
     exit_3("unknown-read-fails-unpublished", "a read that fails is not no build", "26.7: omitted, the line could not be resolved", "26.7: support unknown, and a read failed")
     exit_3("unknown-read-fails-published", "a read that fails, once published", "26.7: omitted, the line could not be resolved")
