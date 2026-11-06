@@ -259,7 +259,7 @@ export interface InsertResult {
   readonly errMsg: Buffer;
   /** The catalog id of a declined insert (`errCode` is -2), from `reason`; `undefined` when the document carries none. */
   readonly reason: string | undefined;
-  /** Where a refusal or decline sits, from `refused_at`; `undefined` for an accepted insert. */
+  /** Where a refusal or decline sits, from `refused_at`; `undefined` for an accepted insert. An `e` row, one the INSERT's WHERE threw on, fails the call at `where`, a site no other result carries: the code alone cannot tell it from a parse error. */
   readonly refusedAt: RefusalSite | undefined;
   readonly rowsRead: number;
   readonly rowsSkipped: number;

@@ -90,7 +90,7 @@ export function projectionVerdict(
         ins.outcome === 'rejected' &&
         ins.errCode === first.verdictCode &&
         ins.errMsg.equals(first.verdictErr) &&
-        ins.refusedAt === 'row' &&
+        ins.refusedAt === 'where' &&
         ins.rowsPassed === 0 &&
         ins.rowsCut === 0 &&
         ins.rowsUndecided === 0 &&

@@ -23,6 +23,7 @@ from chtypes._decode import (
     decode_discovery,
     decode_error_codes,
     decode_filter_result,
+    decode_insert_result,
     decode_live_handles,
     decode_row_document,
     decode_schema_description,
@@ -525,6 +526,36 @@ def test_a_filter_result_carries_the_batchs_refusal_members_and_error_reasons() 
     assert res.err_code == -2 and res.reason == "filter-zone"
     assert res.refused_at is RefusalSite.CALL and res.refused_row is None
     assert [(e.code, e.reason) for e in res.errors] == [(-2, "drawn-value"), (386, None)]
+
+
+def _where_refusal(site: str) -> bytes:
+    return dumps(
+        {
+            "outcome": "rejected",
+            "code": 72,
+            "err": "Cannot parse number",
+            "refused_at": site,
+            "rows_read": 3,
+            "rows_skipped": 0,
+            "rows_passed": 0,
+            "rows_cut": 0,
+            "rows_undecided": 0,
+            "unsupported_settings": [],
+            "framing": {"bom_skipped": False, "container": None, "header": None},
+        }
+    )
+
+
+def test_an_insert_whose_where_threw_is_refused_at_where() -> None:
+    # An e row, one the INSERT's WHERE threw on, fails the call at `where`: a listed
+    # site, never `row`, and a site nobody lists yet still decodes as unknown(n).
+    res = decode_insert_result(_where_refusal("where"), None)
+    assert res.refused_at is RefusalSite.WHERE and res.refused_at.known
+    assert res.refused_at is not RefusalSite.ROW
+    assert res.outcome is Outcome.REJECTED and res.err_code == 72
+    assert res.err_msg == b"Cannot parse number" and res.output is None
+    future = decode_insert_result(_where_refusal("a_site_nobody_listed"), None)
+    assert future.refused_at == "a_site_nobody_listed" and not future.refused_at.known
 
 
 def test_the_export_members_and_the_null_row_span() -> None:

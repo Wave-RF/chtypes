@@ -42,6 +42,7 @@ The four bindings in this repository are released together and give one answer, 
 
 ### Changed
 
+- **Breaking (ABI v2 dev; moves the dev fingerprint):** an `InsertResult` whose INSERT's WHERE threw on a row (an `e` row) has `refused_at` `RefusalSite.WHERE`, the new `refusal_site` value `where`, where it was `RefusalSite.ROW`. The code and the message are unchanged, ClickHouse's own and verbatim. One code can come from the body's parse and from the filter alike, so the site is how a caller tells its own filter failing from a malformed body (`BODY_READ` or `ROW`). No other result carries `where`, and a site the description does not list still decodes as the vocabulary's unknown(n) (`.known` false).
 - **Breaking (vs the 2.0.0-dev releases):** the batch preview's default `doc_flags` is now 0 (the lean result): `Schema.rows` without `doc_flags=` returns no per-value documents. Pass `doc_flags=DocFlags.ALL` explicitly to get every column's per-value documents.
 - **Breaking (ABI v2 dev): `BatchResult.spans` is a tuple of `Span | None`**, one entry per `rows` entry and index-aligned with it: `row_spans` carries `null` for a row the export did not carry (a skipped row, or a row a filter cut), which reads as `None`. It was the exported rows' spans only. Code that reads `span.off` from every entry raises `AttributeError` on a `None` entry: check each entry before reading it.
 - **Breaking (ABI v2 dev): `AtMergeEntry.row` is `AtMergeEntry.part_row`**, the document's `part_row`.

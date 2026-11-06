@@ -65,7 +65,7 @@ func projectionVerdict(outFormat string, batch BatchResult, batchExport []byte, 
 	if batch.Outcome == Accepted && count("e") > 0 {
 		first := batch.Rows[slices.Index(verdicts, "e")]
 		if !(ins.Outcome == Rejected && ins.ErrCode == first.VerdictCode && ins.ErrMsg == first.VerdictErr &&
-			ins.RefusedAt == RefusedAtRow && isZero(ins.RowsPassed) && isZero(ins.RowsCut) && isZero(ins.RowsUndecided) &&
+			ins.RefusedAt == RefusedAtWhere && isZero(ins.RowsPassed) && isZero(ins.RowsCut) && isZero(ins.RowsUndecided) &&
 			ins.RowsRead == batch.RowsRead && output == nil) {
 			return "violates", "e_row_rejects"
 		}
@@ -264,8 +264,8 @@ func loadProjectionFixture(t *testing.T) []projectionCase {
 
 func TestInsertProjectionFixture(t *testing.T) {
 	cases := loadProjectionFixture(t)
-	if len(cases) != 44 {
-		t.Fatalf("the fixture holds %d cases, want 44", len(cases))
+	if len(cases) != 45 {
+		t.Fatalf("the fixture holds %d cases, want 45", len(cases))
 	}
 	reds := map[string]int{}
 	var equal, exceptions int
@@ -314,7 +314,7 @@ func TestInsertProjectionFixture(t *testing.T) {
 			t.Errorf("no planted red for rule %s", r)
 		}
 	}
-	wantReds := map[string]int{"e_row_rejects": 8, "export_decline_is_call_decline": 3, "shared_members": 3, "counts": 2,
+	wantReds := map[string]int{"e_row_rejects": 9, "export_decline_is_call_decline": 3, "shared_members": 3, "counts": 2,
 		"line_output": 2, "non_t_row": 2, "output_presence": 2, "err_prefix": 1, "err_suffix": 2, "native_output": 1}
 	if !reflect.DeepEqual(reds, wantReds) {
 		t.Errorf("planted reds per rule = %v, want %v", reds, wantReds)

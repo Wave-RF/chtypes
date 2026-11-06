@@ -1856,9 +1856,10 @@ def render_vocab_v2(model) -> str:
         "RefusalSite",
         variant=_words,
         doc=(
-            "Where a batch or filter document's refusal sits: the call, the body outside any row (a header, the\n"
-            "framing), one row (`refused_row`) or a whole-body step. A site the description does not list is\n"
-            "`Unknown`, and the document decodes on (rule r3)."
+            "Where a document's refusal sits: the call, the body outside any row (a header, the framing), one\n"
+            "row (`refused_row`), a whole-body step or, on an insert result only, the INSERT's WHERE, which threw\n"
+            "on a row (`where`). A site the description does not list is `Unknown`, and the document decodes on\n"
+            "(rule r3)."
         ),
     )
 

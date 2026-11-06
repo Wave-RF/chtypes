@@ -287,7 +287,9 @@ class InsertResult:
     attached and None without one: `rows_passed` the `t` rows (the output's rows),
     `rows_cut` the `f` and `d` rows, and `rows_undecided` the `d` rows (counted
     inside `rows_cut`). An `e` row fails the call: it is in no count, and the
-    outcome is `rejected` with that row's code and message. There is no per-row
+    outcome is `rejected` with that row's code and message, `refused_at`
+    `RefusalSite.WHERE` (the INSERT's WHERE threw on a row), a site no other result
+    carries: the code alone cannot tell it from a parse error. There is no per-row
     document and no `refused_row`: a reader refusal's row is inside `err_msg`.
     `export_columns` is the output's one column list (None unless the call is
     accepted and an output was asked for)."""

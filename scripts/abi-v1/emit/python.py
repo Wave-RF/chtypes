@@ -1405,9 +1405,10 @@ def render_vocab_v2(model: Model) -> str:
             model,
             "RefusalSite",
             "refusal_site",
-            "Where a batch or filter document's refusal sits: `call` (the call, its settings or its\n"
-            "    column list), `body_read` (the body outside any row: a header, the framing), `row` (one\n"
-            "    row, `refused_row`) or `body_step` (a whole-body step).",
+            "Where a document's refusal sits: `call` (the call, its settings or its column list),\n"
+            "    `body_read` (the body outside any row: a header, the framing), `row` (one row,\n"
+            "    `refused_row`), `body_step` (a whole-body step) or, on an insert result only, `where`\n"
+            "    (the INSERT's WHERE threw on a row).",
         )
     )
     parts.append("")
