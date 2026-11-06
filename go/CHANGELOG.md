@@ -75,6 +75,10 @@ SDK 2.0.0 speaks ABI v2, locked, and fetches from the production `chtypes/v2` re
 - `fetch --frozen` no longer re-downloads the layer on a warm cache (#487): the frozen path checked no installed record, so every run made three requests and fetched about 42.5 MB (measured on the published 1.0.2 package). It now looks the pin up in the cache first, as Python does. `--frozen` with a warm, verified cache requests no manifest and no layer (one revocation listing aside, under Added), and `--frozen --offline` verifies the installed build against the lock with zero network (#414). An installed build whose `verified.json` is for the platform and records exactly the lock's pinned manifest, layer and bundle digests is used as it is. `--frozen --offline` is `CHTYPES_ARTIFACT_MISSING` when the pinned build is not installed, and `CHTYPES_ARTIFACT_PINNED` when there is no lock entry or the installed record does not match the pin; `--offline` without `--frozen` is unchanged. The `frozen-warm-cache-zero-requests`, `frozen-offline-lock-match`, `frozen-offline-lock-mismatch` and `frozen-offline-lock-not-installed` conformance cases hold all four bindings to it, under both corpora. The CLI no longer refuses `--frozen --offline` as a usage error.
 - Opening a line no longer waits for another line's fetch: the registry never holds its lock across network I/O, and concurrent opens of one request share one fetch (#491). `ForContext` returns `ctx.Err()` when its context is done before the open has an answer; the fetch goes on for any other open of the same request, and is canceled once no open waits on it.
 
+### Security
+
+- `github.com/klauspost/compress` is bumped from v1.20.1 to v1.20.3, past GO-2026-6865 (a panic on two-block frames), which govulncheck reports as reachable through the decoder's pooled buffers. The binding's own code is unchanged.
+
 ## [1.1.0] — 2026-10-06
 
 ### Added
