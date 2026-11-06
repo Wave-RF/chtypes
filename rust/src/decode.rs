@@ -273,6 +273,26 @@ impl<'a> Obj<'a> {
             .map(Some)
     }
 
+    /// An object of counts keyed by decline catalog id, each value an integer
+    /// of at least 1: `None` when absent, `Some`, even of an empty map, when
+    /// present, so absent and `{}` stay apart. Keys are kept verbatim; like
+    /// every other id member they are not checked against the catalog pattern
+    /// here.
+    fn reason_counts(&self, key: &str) -> Result<Option<BTreeMap<String, u64>>> {
+        let Some(o) = self.object(key)? else {
+            return Ok(None);
+        };
+        let mut out = BTreeMap::new();
+        for (k, v) in o.map {
+            let n = o.uint64_of(k, v)?;
+            if n < 1 {
+                return Err(o.fail(k, "an integer of at least 1"));
+            }
+            out.insert(k.clone(), n);
+        }
+        Ok(Some(out))
+    }
+
     /// An object whose values are byte values (`json_object_byte_values`): a
     /// JSON string, or the object `{"b64": "<standard base64>"}` for bytes that
     /// are not valid UTF-8. `None` when absent, `Some`, even of an empty map,
@@ -676,6 +696,7 @@ pub(crate) fn insert_result(bytes: &[u8], output: Option<Vec<u8>>) -> Result<Ins
         rows_passed: o.opt_uint64("rows_passed")?,
         rows_cut: o.opt_uint64("rows_cut")?,
         rows_undecided: o.opt_uint64("rows_undecided")?,
+        rows_undecided_reasons: o.reason_counts("rows_undecided_reasons")?,
         unsupported_settings: o.name_objects("unsupported_settings")?,
         framing,
         partition_count: o.opt_uint64("partition_count")?,
@@ -1296,6 +1317,54 @@ mod tests {
             let err = doc(extra).unwrap_err();
             assert!(
                 matches!(err, Error::Internal(_)) && err.to_string().contains("schema_description"),
+                "{name}: {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_insert_result_reads_rows_undecided_reasons_one_to_one() {
+        let doc = |extra: &str| {
+            insert_result(
+                format!(r#"{{"outcome":"accepted","rows_read":3{extra}}}"#).as_bytes(),
+                None,
+            )
+        };
+        // Two reasons, keys verbatim.
+        let r = doc(
+            r#","rows_undecided":3,"rows_undecided_reasons":{"admission-memory-budget":1,"drawn-value":2}"#,
+        )
+        .unwrap();
+        let want: BTreeMap<String, u64> = [("admission-memory-budget", 1), ("drawn-value", 2)]
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect();
+        assert_eq!(r.rows_undecided_reasons, Some(want));
+        // `{}` (a filter and nothing undecided) is not absent.
+        let r = doc(r#","rows_undecided":0,"rows_undecided_reasons":{}"#).unwrap();
+        assert_eq!(r.rows_undecided_reasons, Some(BTreeMap::new()));
+        // Absent (no filter).
+        assert_eq!(doc("").unwrap().rows_undecided_reasons, None);
+        // A wrong type, a wrong value type and a count below 1 are decode errors.
+        for (name, extra) in [
+            ("not an object", r#","rows_undecided_reasons":[1]"#),
+            (
+                "a string count",
+                r#","rows_undecided_reasons":{"drawn-value":"x"}"#,
+            ),
+            (
+                "a float count",
+                r#","rows_undecided_reasons":{"drawn-value":1.5}"#,
+            ),
+            ("zero", r#","rows_undecided_reasons":{"drawn-value":0}"#),
+            (
+                "negative",
+                r#","rows_undecided_reasons":{"drawn-value":-1}"#,
+            ),
+        ] {
+            let err = doc(extra).unwrap_err();
+            assert!(
+                matches!(err, Error::Internal(_)) && err.to_string().contains("insert_result"),
                 "{name}: {err:?}"
             );
         }

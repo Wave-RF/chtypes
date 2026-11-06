@@ -255,3 +255,44 @@ func TestDecodeInsertResultEveryMember(t *testing.T) {
 		t.Errorf("a duplicate key decoded")
 	}
 }
+
+func TestDecodeInsertResultRowsUndecidedReasons(t *testing.T) {
+	doc := func(extra string) string {
+		return `{"outcome":"accepted","code":0,"rows_read":3` + extra + `}`
+	}
+	// Two reasons, keys verbatim.
+	res, err := decodeInsertResult([]byte(doc(`,"rows_undecided":3,"rows_undecided_reasons":{"admission-memory-budget":1,"drawn-value":2}`)), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.RowsUndecidedReasons) != 2 || res.RowsUndecidedReasons["admission-memory-budget"] != 1 || res.RowsUndecidedReasons["drawn-value"] != 2 {
+		t.Errorf("two reasons = %v", res.RowsUndecidedReasons)
+	}
+	// {} is a non-nil empty map; absent is nil.
+	res, err = decodeInsertResult([]byte(doc(`,"rows_undecided":0,"rows_undecided_reasons":{}`)), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.RowsUndecidedReasons == nil || len(res.RowsUndecidedReasons) != 0 {
+		t.Errorf("{} = %#v, want a non-nil empty map", res.RowsUndecidedReasons)
+	}
+	res, err = decodeInsertResult([]byte(doc("")), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.RowsUndecidedReasons != nil {
+		t.Errorf("absent = %#v, want nil", res.RowsUndecidedReasons)
+	}
+	// A wrong type, a wrong value type and a count below 1 are decode errors.
+	for name, extra := range map[string]string{
+		"not an object": `,"rows_undecided_reasons":[1]`,
+		"string count":  `,"rows_undecided_reasons":{"drawn-value":"x"}`,
+		"float count":   `,"rows_undecided_reasons":{"drawn-value":1.5}`,
+		"zero":          `,"rows_undecided_reasons":{"drawn-value":0}`,
+		"negative":      `,"rows_undecided_reasons":{"drawn-value":-1}`,
+	} {
+		if _, err := decodeInsertResult([]byte(doc(extra)), nil); err == nil {
+			t.Errorf("%s: decoded", name)
+		}
+	}
+}

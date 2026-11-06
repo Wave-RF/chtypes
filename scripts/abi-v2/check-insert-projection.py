@@ -18,15 +18,17 @@ A case: id, output_format (a chs_format name, or NONE), batch, batch_export_b64
 Rules, checked in this order (the first that fails is the answer):
   e_row_rejects    a batch with an `e` verdict (outcome accepted): the insert is
                    rejected with the FIRST e row's code and err, refused_at row,
-                   rows_passed, rows_cut and rows_undecided 0, rows_read the
-                   batch's, and no output
+                   rows_passed, rows_cut and rows_undecided 0,
+                   rows_undecided_reasons {}, rows_read the batch's, and no
+                   output
   export_decline_is_call_decline
                    a batch that is accepted with `export_declined` R (reason id
                    I): the insert is `unsupported`, reason I, code -2, refused_at
                    `body_step`, err the batch's export_declined text, no
                    export_columns, no output, and rows_passed, rows_cut and
-                   rows_undecided 0 under a filter (those members, and err,
-                   are then not compared with the batch's)
+                   rows_undecided 0 and rows_undecided_reasons {} under a
+                   filter (those members, and err, are then not compared with
+                   the batch's)
   shared_members   every member both documents may carry is equal, absent where
                    absent (outcome, code, reason, refused_at, export_columns,
                    rows_passed and rows_cut are skipped under a declined output); an insert never carries
@@ -34,7 +36,15 @@ Rules, checked in this order (the first that fails is the answer):
   counts           rows_passed = #t, rows_cut = #f + #d, rows_undecided = #d
                    when the insert is accepted, and all three 0 on any other
                    outcome (the batch's rows_passed and rows_cut are 0 and 0 on
-                   a batch that is not accepted); all three absent with no filter
+                   a batch that is not accepted); all three absent with no filter.
+                   #d counts the accepted rows whose verdict is d (a record
+                   skipped under the error allowance has no verdict_reason and
+                   is in rows_skipped only). rows_undecided_reasons is
+                   {verdict_reason: number of those d rows with it} on an
+                   accepted insert, {} on any other outcome, absent with no
+                   filter, and its values sum to rows_undecided (the key order is
+                   not compared: two of the four bindings read the document
+                   into an ordered map)
   err_prefix       the batch's err is a prefix of the insert's
   err_suffix       the remainder is empty or exactly ClickHouse's row-reader
                    suffix, `: (at row N)` and a line feed
@@ -84,6 +94,7 @@ SHARED = ("outcome", "code", "reason", "refused_at", "rows_read", "rows_skipped"
 # Members a declined output replaces: the insert's own values, by export_decline_is_call_decline.
 DECLINE_REPLACES = ("outcome", "code", "reason", "refused_at", "export_columns", "rows_passed", "rows_cut")
 COUNTS = ("rows_passed", "rows_cut", "rows_undecided")
+REASONS = "rows_undecided_reasons"
 INSERT_NEVER = ("export_declined", "export_declined_b64", "export_declined_reason")
 SUFFIX = re.compile(rb"^: \(at row [0-9]+\)\n$")
 _ABSENT = object()
@@ -207,6 +218,7 @@ def evaluate(case: dict):
         if not (ins["outcome"] == "rejected" and ins["code"] == first["verdict_code"]
                 and _bytes(ins, "err") == want_err and ins.get("refused_at") == "row"
                 and ins.get("rows_passed") == 0 and ins.get("rows_cut") == 0 and ins.get("rows_undecided") == 0
+                and ins.get("rows_undecided_reasons") == {}
                 and ins["rows_read"] == batch["rows_read"] and out is None):
             return "violates", "e_row_rejects"
         return "equal", None
@@ -218,7 +230,7 @@ def evaluate(case: dict):
                 and ins["code"] == -2 and ins.get("refused_at") == "body_step"
                 and "export_columns" not in ins and out is None
                 and _bytes(ins, "err") == _bytes(batch, "export_declined")
-                and (not filtered or all(ins.get(k) == 0 for k in COUNTS))):
+                and (not filtered or (all(ins.get(k) == 0 for k in COUNTS) and ins.get(REASONS) == {}))):
             return "violates", "export_decline_is_call_decline"
 
     # shared_members
@@ -231,16 +243,25 @@ def evaluate(case: dict):
             return "violates", "shared_members"
 
     # counts: #t, #f + #d and #d on an accepted call, 0 on any other outcome
-    t, f, d = verdicts.count("t"), verdicts.count("f"), verdicts.count("d")
+    t, f = verdicts.count("t"), verdicts.count("f")
+    d_rows = [r for r in rows if r.get("verdict") == "d" and r.get("outcome") == "accepted"]
+    d = len(d_rows)
     if filtered:
         if batch["outcome"] == "accepted":
             good = batch["rows_passed"] == t and batch["rows_cut"] == f + d
         else:
             good = batch["rows_passed"] == 0 and batch["rows_cut"] == 0
-        want = (t, f + d, d) if ins["outcome"] == "accepted" else (0, 0, 0)
-        if not (good and tuple(ins.get(k) for k in COUNTS) == want):
+        accepted = ins["outcome"] == "accepted"
+        want = (t, f + d, d) if accepted else (0, 0, 0)
+        want_reasons: dict = {}
+        if accepted:
+            for r in d_rows:
+                want_reasons[r.get("verdict_reason")] = want_reasons.get(r.get("verdict_reason"), 0) + 1
+        got = ins.get(REASONS, _ABSENT)
+        if not (good and tuple(ins.get(k) for k in COUNTS) == want and got == want_reasons
+                and sum(got.values()) == ins["rows_undecided"]):
             return "violates", "counts"
-    elif any(k in ins for k in COUNTS):
+    elif any(k in ins for k in COUNTS) or REASONS in ins:
         return "violates", "counts"
 
     # err: the batch's, plus a remainder that is empty or ClickHouse's row-reader suffix

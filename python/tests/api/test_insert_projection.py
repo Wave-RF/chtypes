@@ -53,6 +53,11 @@ def _b64(case: dict, key: str) -> bytes | None:
     return None if value is None else base64.b64decode(value)
 
 
+def _is_empty_map(value) -> bool:
+    """A present, empty mapping (the document's `{}`), never None."""
+    return value is not None and len(value) == 0
+
+
 def first_violation(
     batch: BatchResult,
     ins: InsertResult,
@@ -83,6 +88,7 @@ def first_violation(
             and ins.rows_passed == 0
             and ins.rows_cut == 0
             and ins.rows_undecided == 0
+            and _is_empty_map(ins.rows_undecided_reasons)
             and ins.rows_read == batch.rows_read
             and out is None
         ):
@@ -100,7 +106,13 @@ def first_violation(
         and "export_columns" not in raw_insert
         and out is None
         and ins.err_msg == batch.export_declined
-        and (not filtered or (ins.rows_passed, ins.rows_cut, ins.rows_undecided) == (0, 0, 0))
+        and (
+            not filtered
+            or (
+                (ins.rows_passed, ins.rows_cut, ins.rows_undecided) == (0, 0, 0)
+                and _is_empty_map(ins.rows_undecided_reasons)
+            )
+        )
     ):
         return "violates", "export_decline_is_call_decline"
 
@@ -144,16 +156,35 @@ def first_violation(
 
     t = verdicts.count(Verdict.TRUE)
     f = verdicts.count(Verdict.FALSE)
-    d = verdicts.count(Verdict.DECLINE)
+    # The d rows are the accepted rows whose verdict is d, counted by verdict_reason (a
+    # record skipped under the error allowance is in rows_skipped only).
+    d_rows = [r for r in rows if r.verdict == Verdict.DECLINE and r.outcome == Outcome.ACCEPTED]
+    d = len(d_rows)
     if filtered:
         if batch.outcome == Outcome.ACCEPTED:
             good = batch.rows_passed == t and batch.rows_cut == f + d
         else:
             good = batch.rows_passed == 0 and batch.rows_cut == 0
         want = (t, f + d, d) if ins.outcome == Outcome.ACCEPTED else (0, 0, 0)
-        if not (good and (ins.rows_passed, ins.rows_cut, ins.rows_undecided) == want):
+        want_reasons: dict[str, int | None] = {}
+        if ins.outcome == Outcome.ACCEPTED:
+            for r in d_rows:
+                want_reasons[r.verdict_reason] = want_reasons.get(r.verdict_reason, 0) + 1
+        got = ins.rows_undecided_reasons
+        if not (
+            good
+            and (ins.rows_passed, ins.rows_cut, ins.rows_undecided) == want
+            and got is not None
+            and dict(got) == want_reasons
+            and sum(got.values()) == ins.rows_undecided
+        ):
             return "violates", "counts"
-    elif ins.rows_passed is not None or ins.rows_cut is not None or ins.rows_undecided is not None:
+    elif (
+        ins.rows_passed is not None
+        or ins.rows_cut is not None
+        or ins.rows_undecided is not None
+        or ins.rows_undecided_reasons is not None
+    ):
         return "violates", "counts"
 
     # A declined output's err is the decline text, checked above.
@@ -206,12 +237,12 @@ def verdict(case: dict):
 
 @needs_fixture
 def test_the_fixture_is_the_shape_this_gate_expects() -> None:
-    assert sum(c["expect"] == "equal" for c in CASES) == 17
+    assert sum(c["expect"] == "equal" for c in CASES) == 21
     assert sum(isinstance(c["expect"], dict) and "exception" in c["expect"] for c in CASES) == 1
     for rule in RULES:
         assert any(c["expect"] == {"violates": rule} for c in CASES), rule
     assert any(c["expect"] == {"exception": "generator_draw"} for c in CASES)
-    assert sum(isinstance(c["expect"], dict) and "violates" in c["expect"] for c in CASES) == 26
+    assert sum(isinstance(c["expect"], dict) and "violates" in c["expect"] for c in CASES) == 34
 
 
 @needs_fixture
@@ -246,6 +277,21 @@ def test_decoded_insert_members_one_to_one() -> None:
 
 
 @needs_fixture
+def test_every_case_decodes_the_fixtures_reasons_map_exactly() -> None:
+    """The cross-binding check: this binding's decoder reads the map the fixture writes,
+    exactly, with an absent member as None and `{}` as an empty mapping, so all four
+    bindings read the same document the same way."""
+    for case in CASES:
+        _, ins = decode_case(case)
+        raw = case["insert"]
+        if "rows_undecided_reasons" not in raw:
+            assert ins.rows_undecided_reasons is None, case["id"]
+        else:
+            assert ins.rows_undecided_reasons is not None, case["id"]
+            assert dict(ins.rows_undecided_reasons) == raw["rows_undecided_reasons"], case["id"]
+
+
+@needs_fixture
 def test_insert_output_absent_unless_accepted() -> None:
     """A declined output is the call's decline: `unsupported`, no public output,
     even when the library handed bytes back. An accepted call keeps its bytes."""
@@ -270,4 +316,44 @@ def test_the_fixture_gate_ran_cases() -> None:
                 f"CHTYPES_REQUIRE_FIXTURES=1 and the insert-projection fixture is absent: {FIXTURE}"
             )
         pytest.skip(f"insert-projection fixture absent ({FIXTURE}): not a full-repository tree")
-    assert len(CASES) == 44
+    assert len(CASES) == 56
+
+
+def _decode_reasons(extra: str):
+    raw = ('{"outcome":"accepted","code":0,"rows_read":3' + extra + "}").encode()
+    return decode_insert_result(raw, None).rows_undecided_reasons
+
+
+def test_rows_undecided_reasons_decodes_one_to_one() -> None:
+    two = _decode_reasons(
+        ',"rows_undecided":3,"rows_undecided_reasons":{"admission-memory-budget":1,"drawn-value":2}'
+    )
+    assert two is not None
+    assert dict(two) == {"admission-memory-budget": 1, "drawn-value": 2}
+    assert list(two) == ["admission-memory-budget", "drawn-value"]
+    # Read-only.
+    with pytest.raises(TypeError):
+        two["drawn-value"] = 5  # type: ignore[index]
+    # `{}` is a filter with nothing undecided, kept apart from absent (no filter).
+    empty = _decode_reasons(',"rows_undecided":0,"rows_undecided_reasons":{}')
+    assert empty is not None and len(empty) == 0
+    assert _decode_reasons("") is None
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        ',"rows_undecided_reasons":[1]',
+        ',"rows_undecided_reasons":"x"',
+        ',"rows_undecided_reasons":{"drawn-value":"x"}',
+        ',"rows_undecided_reasons":{"drawn-value":1.5}',
+        ',"rows_undecided_reasons":{"drawn-value":true}',
+        ',"rows_undecided_reasons":{"drawn-value":0}',
+        ',"rows_undecided_reasons":{"drawn-value":-1}',
+    ],
+)
+def test_rows_undecided_reasons_wrong_shapes_are_decode_errors(extra: str) -> None:
+    from chtypes import InternalError
+
+    with pytest.raises(InternalError):
+        _decode_reasons(extra)
