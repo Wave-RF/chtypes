@@ -1,0 +1,10 @@
+{
+ "schema": "chtypes.where-settings-lines/1",
+ "source": "tests/fixtures/support-v2/channel-statement.json",
+ "lines": [
+  "26.3",
+  "26.8",
+  "26.9",
+  "26.10"
+ ]
+}
