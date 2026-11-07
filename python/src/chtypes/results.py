@@ -286,9 +286,13 @@ class InsertResult:
     `rows_passed`, `rows_cut` and `rows_undecided` are present with a filter
     attached and None without one: `rows_passed` the `t` rows (the output's rows),
     `rows_cut` the `f` and `d` rows, and `rows_undecided` the `d` rows (counted
-    inside `rows_cut`). An `e` row fails the call: it is in no count, and the
-    outcome is `rejected` with that row's code and message. There is no per-row
-    document and no `refused_row`: a reader refusal's row is inside `err_msg`.
+    inside `rows_cut`). `rows_undecided_reasons` counts those `d` rows by the
+    catalog id of each row's reason (a read-only mapping, each count at least 1,
+    summing to `rows_undecided`; empty when none, and None without a filter), so
+    a caller of this call alone can tell why rows were withheld. An `e` row fails
+    the call: it is in no count, and the outcome is `rejected` with that row's code
+    and message. There is no per-row document and no `refused_row`: a reader
+    refusal's row is inside `err_msg`.
     `export_columns` is the output's one column list (None unless the call is
     accepted and an output was asked for)."""
 
@@ -302,6 +306,7 @@ class InsertResult:
     rows_passed: int | None
     rows_cut: int | None
     rows_undecided: int | None
+    rows_undecided_reasons: Mapping[str, int] | None
     partition_count: int | None
     unsupported_settings: tuple[bytes, ...]
     framing: Framing | None

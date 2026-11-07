@@ -258,6 +258,11 @@ insert-projection.test.ts :: the insert projection gate over the shared fixture 
 insert-projection.test.ts :: the insert projection gate over the shared fixture equal-native-no-filter: "equal"
 insert-projection.test.ts :: the insert projection gate over the shared fixture equal-not-accepted-batch-with-d-rows-counts-zero: "equal"
 insert-projection.test.ts :: the insert projection gate over the shared fixture equal-refused-err-suffix: "equal"
+insert-projection.test.ts :: the insert projection gate over the shared fixture equal-undecided-reasons-filter-none-undecided-is-empty: "equal"
+insert-projection.test.ts :: the insert projection gate over the shared fixture equal-undecided-reasons-no-filter-member-absent: "equal"
+insert-projection.test.ts :: the insert projection gate over the shared fixture equal-undecided-reasons-single-reason: "equal"
+insert-projection.test.ts :: the insert projection gate over the shared fixture equal-undecided-reasons-two-reasons-in-key-order: "equal"
+insert-projection.test.ts :: the insert projection gate over the shared fixture every case decodes the fixture's rows_undecided_reasons map exactly (the cross-binding check)
 insert-projection.test.ts :: the insert projection gate over the shared fixture exception-generator-draw-bytes-differ: {"exception":"generator_draw"}
 insert-projection.test.ts :: the insert projection gate over the shared fixture output is absent unless accepted
 insert-projection.test.ts :: the insert projection gate over the shared fixture plants a red for every rule and a case for every exception
@@ -268,6 +273,7 @@ insert-projection.test.ts :: the insert projection gate over the shared fixture 
 insert-projection.test.ts :: the insert projection gate over the shared fixture red-declined-output-counts-carried-from-the-batch: {"violates":"export_decline_is_call_decline"}
 insert-projection.test.ts :: the insert projection gate over the shared fixture red-declined-output-insert-stays-accepted: {"violates":"export_decline_is_call_decline"}
 insert-projection.test.ts :: the insert projection gate over the shared fixture red-declined-output-reason-differs: {"violates":"export_decline_is_call_decline"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-declined-output-undecided-reasons-not-empty: {"violates":"export_decline_is_call_decline"}
 insert-projection.test.ts :: the insert projection gate over the shared fixture red-e-row-code-from-a-later-e-row: {"violates":"e_row_rejects"}
 insert-projection.test.ts :: the insert projection gate over the shared fixture red-e-row-counts-not-zero: {"violates":"e_row_rejects"}
 insert-projection.test.ts :: the insert projection gate over the shared fixture red-e-row-insert-accepted: {"violates":"e_row_rejects"}
@@ -276,6 +282,7 @@ insert-projection.test.ts :: the insert projection gate over the shared fixture 
 insert-projection.test.ts :: the insert projection gate over the shared fixture red-e-row-refused-at-not-row: {"violates":"e_row_rejects"}
 insert-projection.test.ts :: the insert projection gate over the shared fixture red-e-row-rows-read-differs: {"violates":"e_row_rejects"}
 insert-projection.test.ts :: the insert projection gate over the shared fixture red-e-row-undecided-not-zero: {"violates":"e_row_rejects"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-e-row-undecided-reasons-not-empty: {"violates":"e_row_rejects"}
 insert-projection.test.ts :: the insert projection gate over the shared fixture red-err-not-a-prefix: {"violates":"err_prefix"}
 insert-projection.test.ts :: the insert projection gate over the shared fixture red-err-suffix-doubled-line-feed: {"violates":"err_suffix"}
 insert-projection.test.ts :: the insert projection gate over the shared fixture red-err-suffix-not-clickhouses: {"violates":"err_suffix"}
@@ -288,6 +295,12 @@ insert-projection.test.ts :: the insert projection gate over the shared fixture 
 insert-projection.test.ts :: the insert projection gate over the shared fixture red-output-missing-for-accepted: {"violates":"output_presence"}
 insert-projection.test.ts :: the insert projection gate over the shared fixture red-shared-member-missing-export-columns: {"violates":"shared_members"}
 insert-projection.test.ts :: the insert projection gate over the shared fixture red-shared-member-rows-read: {"violates":"shared_members"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-undecided-reasons-absent-with-a-filter: {"violates":"counts"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-undecided-reasons-extra-key: {"violates":"counts"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-undecided-reasons-missing-key: {"violates":"counts"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-undecided-reasons-not-empty-on-a-not-accepted-outcome: {"violates":"counts"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-undecided-reasons-present-with-no-filter: {"violates":"counts"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-undecided-reasons-wrong-count: {"violates":"counts"}
 insert.test.ts :: Schema.insert over the stub library a filter reaches the ABI as a handle, settings, columns and memory_limit_bytes as documents
 insert.test.ts :: Schema.insert over the stub library hands the output to the result only for an accepted call, and EXPORT_NONE validates only
 insert.test.ts :: Schema.insert over the stub library memory_limit_bytes reaches every insert-options call: row, rows, parseBlock and the filter rows

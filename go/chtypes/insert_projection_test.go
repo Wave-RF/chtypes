@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -51,6 +52,17 @@ func projectionVerdict(outFormat string, batch BatchResult, batchExport []byte, 
 		}
 		return n
 	}
+	// The d rows are the accepted rows whose verdict is d, counted by their
+	// verdict_reason (a record skipped under the error allowance is in
+	// rows_skipped only).
+	dReasons := map[string]uint64{}
+	var dRows uint64
+	for i, r := range batch.Rows {
+		if verdicts[i] == "d" && r.Outcome == Accepted {
+			dRows++
+			dReasons[r.VerdictReason]++
+		}
+	}
 	// BatchResult models rows_passed and rows_cut as plain numbers, so the batch
 	// carries a filter's counts exactly when a row has a verdict or a count is
 	// nonzero (a filtered batch of no rows reads as unfiltered).
@@ -66,7 +78,7 @@ func projectionVerdict(outFormat string, batch BatchResult, batchExport []byte, 
 		first := batch.Rows[slices.Index(verdicts, "e")]
 		if !(ins.Outcome == Rejected && ins.ErrCode == first.VerdictCode && ins.ErrMsg == first.VerdictErr &&
 			ins.RefusedAt == RefusedAtRow && isZero(ins.RowsPassed) && isZero(ins.RowsCut) && isZero(ins.RowsUndecided) &&
-			ins.RowsRead == batch.RowsRead && output == nil) {
+			isEmptyReasons(ins.RowsUndecidedReasons) && ins.RowsRead == batch.RowsRead && output == nil) {
 			return "violates", "e_row_rejects"
 		}
 		return "equal", ""
@@ -78,7 +90,7 @@ func projectionVerdict(outFormat string, batch BatchResult, batchExport []byte, 
 		if !(ins.Outcome == Unsupported && ins.Reason == batch.ExportDeclinedReason && ins.ErrCode == CodeDeclined &&
 			ins.RefusedAt == RefusedAtBodyStep && insRaw["export_columns"] == nil && output == nil &&
 			ins.ErrMsg == batch.ExportDeclined &&
-			(!filtered || (isZero(ins.RowsPassed) && isZero(ins.RowsCut) && isZero(ins.RowsUndecided)))) {
+			(!filtered || (isZero(ins.RowsPassed) && isZero(ins.RowsCut) && isZero(ins.RowsUndecided) && isEmptyReasons(ins.RowsUndecidedReasons)))) {
 			return "violates", "export_decline_is_call_decline"
 		}
 	}
@@ -111,7 +123,7 @@ func projectionVerdict(outFormat string, batch BatchResult, batchExport []byte, 
 	}
 
 	// counts
-	t, f, d := count("t"), count("f"), count("d")
+	t, f, d := count("t"), count("f"), dRows
 	if filtered {
 		var good bool
 		if batch.Outcome == Accepted {
@@ -121,13 +133,19 @@ func projectionVerdict(outFormat string, batch BatchResult, batchExport []byte, 
 		}
 		// #t, #f + #d and #d on an accepted call, 0 on any other outcome.
 		wantPassed, wantCut, wantUndecided := uint64(0), uint64(0), uint64(0)
+		wantReasons := map[string]uint64{}
 		if ins.Outcome == Accepted {
-			wantPassed, wantCut, wantUndecided = t, f+d, d
+			wantPassed, wantCut, wantUndecided, wantReasons = t, f+d, d, dReasons
 		}
-		if !(good && isCount(ins.RowsPassed, wantPassed) && isCount(ins.RowsCut, wantCut) && isCount(ins.RowsUndecided, wantUndecided)) {
+		var sum uint64
+		for _, n := range ins.RowsUndecidedReasons {
+			sum += n
+		}
+		if !(good && isCount(ins.RowsPassed, wantPassed) && isCount(ins.RowsCut, wantCut) && isCount(ins.RowsUndecided, wantUndecided) &&
+			ins.RowsUndecidedReasons != nil && maps.Equal(ins.RowsUndecidedReasons, wantReasons) && sum == *ins.RowsUndecided) {
 			return "violates", "counts"
 		}
-	} else if ins.RowsPassed != nil || ins.RowsCut != nil || ins.RowsUndecided != nil {
+	} else if ins.RowsPassed != nil || ins.RowsCut != nil || ins.RowsUndecided != nil || ins.RowsUndecidedReasons != nil {
 		return "violates", "counts"
 	}
 
@@ -185,6 +203,9 @@ func projectionVerdict(outFormat string, batch BatchResult, batchExport []byte, 
 func isCount(p *uint64, want uint64) bool { return p != nil && *p == want }
 
 func isZero(p *uint64) bool { return isCount(p, 0) }
+
+// isEmptyReasons: a present, empty map (the document's `{}`), never nil.
+func isEmptyReasons(m map[string]uint64) bool { return m != nil && len(m) == 0 }
 
 // countLines counts lines as Python's bytes.splitlines does: \n, \r and \r\n end one.
 func countLines(b []byte) int {
@@ -264,8 +285,8 @@ func loadProjectionFixture(t *testing.T) []projectionCase {
 
 func TestInsertProjectionFixture(t *testing.T) {
 	cases := loadProjectionFixture(t)
-	if len(cases) != 44 {
-		t.Fatalf("the fixture holds %d cases, want 44", len(cases))
+	if len(cases) != 56 {
+		t.Fatalf("the fixture holds %d cases, want 56", len(cases))
 	}
 	reds := map[string]int{}
 	var equal, exceptions int
@@ -283,6 +304,22 @@ func TestInsertProjectionFixture(t *testing.T) {
 			var insRaw map[string]json.RawMessage
 			if err := json.Unmarshal(c.Insert, &insRaw); err != nil {
 				t.Fatal(err)
+			}
+			// The cross-binding check: this binding's decoder reads the map the fixture
+			// writes, exactly, with the absent member as nil and `{}` as a non-nil
+			// empty map, so all four bindings read the same document the same way.
+			if rawReasons, present := insRaw["rows_undecided_reasons"]; !present {
+				if ins.RowsUndecidedReasons != nil {
+					t.Errorf("rows_undecided_reasons is absent in the document and decoded as %v, want nil", ins.RowsUndecidedReasons)
+				}
+			} else {
+				var want map[string]uint64
+				if err := json.Unmarshal(rawReasons, &want); err != nil {
+					t.Fatal(err)
+				}
+				if ins.RowsUndecidedReasons == nil || !maps.Equal(ins.RowsUndecidedReasons, want) {
+					t.Errorf("rows_undecided_reasons decoded as %#v, the document has %s", ins.RowsUndecidedReasons, rawReasons)
+				}
 			}
 			kind, name := projectionVerdict(c.OutputFormat, batch, export, ins, insRaw, output)
 			var want struct {
@@ -314,13 +351,13 @@ func TestInsertProjectionFixture(t *testing.T) {
 			t.Errorf("no planted red for rule %s", r)
 		}
 	}
-	wantReds := map[string]int{"e_row_rejects": 8, "export_decline_is_call_decline": 3, "shared_members": 3, "counts": 2,
+	wantReds := map[string]int{"e_row_rejects": 9, "export_decline_is_call_decline": 4, "shared_members": 3, "counts": 8,
 		"line_output": 2, "non_t_row": 2, "output_presence": 2, "err_prefix": 1, "err_suffix": 2, "native_output": 1}
 	if !reflect.DeepEqual(reds, wantReds) {
 		t.Errorf("planted reds per rule = %v, want %v", reds, wantReds)
 	}
-	if exceptions != 1 || equal != 17 {
-		t.Errorf("equal=%d exceptions=%d, want 17 and 1", equal, exceptions)
+	if exceptions != 1 || equal != 21 {
+		t.Errorf("equal=%d exceptions=%d, want 21 and 1", equal, exceptions)
 	}
 }
 

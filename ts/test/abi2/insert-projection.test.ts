@@ -60,24 +60,39 @@ describe.skipIf(!present)('the insert projection gate over the shared fixture', 
   it('reads the fixture it was written for, and refuses a zero-run', () => {
     expect(doc.schema).toBe('chtypes.abi-v2.insert-projection-fixture/1');
     const reds = doc.cases.filter((c) => typeof c.expect === 'object' && 'violates' in c.expect);
-    expect(doc.cases).toHaveLength(44);
-    expect(doc.cases.filter((c) => c.expect === 'equal')).toHaveLength(17);
+    expect(doc.cases).toHaveLength(56);
+    expect(doc.cases.filter((c) => c.expect === 'equal')).toHaveLength(21);
     expect(doc.cases.filter((c) => typeof c.expect === 'object' && 'exception' in c.expect)).toHaveLength(1);
-    expect(reds).toHaveLength(26);
+    expect(reds).toHaveLength(34);
     const byRule: Record<string, number> = {};
     for (const c of reds) byRule[(c.expect as { violates: string }).violates] = (byRule[(c.expect as { violates: string }).violates] ?? 0) + 1;
     expect(byRule).toEqual({
-      e_row_rejects: 8,
+      e_row_rejects: 9,
       shared_members: 3,
-      counts: 2,
+      counts: 8,
       line_output: 2,
       non_t_row: 2,
       output_presence: 2,
-      export_decline_is_call_decline: 3,
+      export_decline_is_call_decline: 4,
       err_prefix: 1,
       err_suffix: 2,
       native_output: 1,
     });
+  });
+
+  it('every case decodes the fixture\'s rows_undecided_reasons map exactly (the cross-binding check)', () => {
+    // This binding's decoder reads the map the fixture writes, exactly: an absent member as undefined and
+    // {} as an empty Map, so all four bindings read the same document the same way.
+    for (const c of doc.cases) {
+      const raw = c.insert as Record<string, unknown>;
+      const got = decodeInsert(Buffer.from(JSON.stringify(c.insert)), undefined).rowsUndecidedReasons;
+      if (!('rows_undecided_reasons' in raw)) {
+        expect(got, c.id).toBeUndefined();
+      } else {
+        expect(got, c.id).toBeInstanceOf(Map);
+        expect(Object.fromEntries(got ?? []), c.id).toEqual(raw.rows_undecided_reasons);
+      }
+    }
   });
 
   it('output is absent unless accepted', () => {
