@@ -190,7 +190,7 @@ The tier of a setting a settings layer sets and this build's filters do not hono
 
 ### declined_layer
 
-The settings layer a `schema_description` `filter_declined_settings` entry comes from, the highest one that sets the name: `defaults` (the defaults `chs_set_defaults` set, as `chs_schema_create` captured them), `server` (the server profile's `settings`, `chs_server_create`) or `schema` (`chs_schema_create`'s own `settings`, of which only the parse class reaches a filter's WHERE). The values are in layer order, lowest first, which is the list's order. A layer added later is a new value, which a reader reads as its `unknown(n)` (rule r3).
+The settings layer a `schema_description` `filter_declined_settings` entry comes from, the highest one that sets the name: `defaults` (the defaults `chs_set_defaults` set, as `chs_schema_create` captured them), `server` (the server profile's `settings`, `chs_server_create`) or `schema` (`chs_schema_create`'s own `settings`, of which only the parse class, never a type gate, reaches a filter's WHERE (`session_timezone` keeps the zone path)). The values are in layer order, lowest first, which is the list's order. A layer added later is a new value, which a reader reads as its `unknown(n)` (rule r3).
 
 ### posture
 
@@ -567,7 +567,7 @@ A table whose engine this build does not model (a `Distributed` or `Buffer` tabl
 
 `timezone()` (and its alias `timeZone()`) in a DEFAULT, MATERIALIZED or CHECK expression is admitted on a schema created on a server whose profile names a `timezone`. On a server schema, `timezone()` answers the server's zone when no session zone is in force; a session zone that would change the answer is declined (named in `unsupported_settings`). That applies equally to a profile whose `settings` carry `session_timezone`. On a schema with no server, or a server whose profile names no `timezone`, it stays refused as a server constant. `serverTimezone()` is refused on every schema.
 
-A setting this build's filters do not honor in a WHERE, from the `chs_set_defaults` snapshot this call captures, the server profile or this call's own `settings` (only a parse-class one: no other setting of this call's reaches a filter's WHERE), is no decline here: the call succeeds and lists it in the schema's `filter_declined_settings` (`schema_description`), and `chs_filter_create` on the schema declines.
+A setting this build's filters do not honor in a WHERE, from the `chs_set_defaults` snapshot this call captures, the server profile or this call's own `settings` (only a parse-class one that is not a type gate: of this call's other settings, only `session_timezone` reaches a filter's WHERE, on the zone path), is no decline here: the call succeeds and lists it in the schema's `filter_declined_settings` (`schema_description`), and `chs_filter_create` on the schema declines.
 
 `options` (`input:schema_options`) sets the `posture` the statement compiles in: `create`, the default, or `load` for a server's own stored definition (see `input:schema_options`, and the caller's obligation there). A `posture` this build does not know, or any other key, is `CHS_INVALID_ARGUMENT`, naming it. An `ATTACH TABLE` statement is a stored definition, never a statement of another kind: under `create` it is `CHS_DECLINED`, ch_code 0, with exactly the message `chs_schema_create: an ATTACH TABLE statement is a stored definition; compile it with schema_options {"posture":"load"}; declined rather than answered`, and under `load` it compiles as the same definition spelled `CREATE TABLE`.
 

@@ -1462,10 +1462,11 @@ CHS_API void chs_server_free(chs_server *server);
  * on every schema.
  *
  * A setting this build's filters do not honor in a WHERE, from the `chs_set_defaults` snapshot this
- * call captures, the server profile or this call's own `settings` (only a parse-class one: no other
- * setting of this call's reaches a filter's WHERE), is no decline here: the call succeeds and lists
- * it in the schema's `filter_declined_settings` (`schema_description`), and `chs_filter_create` on
- * the schema declines.
+ * call captures, the server profile or this call's own `settings` (only a parse-class one that is
+ * not a type gate: of this call's other settings, only `session_timezone` reaches a filter's WHERE,
+ * on the zone path), is no decline here: the call succeeds and lists it in the schema's
+ * `filter_declined_settings` (`schema_description`), and `chs_filter_create` on the schema
+ * declines.
  *
  * `options` (`input:schema_options`) sets the `posture` the statement compiles in: `create`, the
  * default, or `load` for a server's own stored definition (see `input:schema_options`, and the
