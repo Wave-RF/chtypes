@@ -210,9 +210,39 @@ func buildTrustCases(fs *FileSet) []Case {
 	attachGoldens(tree, art17.ManifestDesc, "trust-goldens-17", C.PredicateTypes.Goldens)
 	cases = append(cases, addCase("referrers-goldens-alongside-signature", art17, "t-goldens-alongside", true, ""))
 
+	// predicate-unknown-member-tolerated / config-unknown-member-allow-unsigned:
+	// the predicate carries a member no binding names, in the signed
+	// statement and in the config blob (manifest.json) alike. A reader
+	// ignores a member it does not know (§4.1), so the signed fetch is ok,
+	// and so is the allow-unsigned one, the one path that reads the config
+	// blob itself.
+	unknownMember := map[string]any{unknownPredicateMember: fakeHex("unknown-future-member", 64)}
+	art18 := buildPlatformArtifact(tree, testKey, "linux-arm64", "26.8.1.18", "20260801.0000180", "lts",
+		ArtifactOptions{LibraryContentSeed: "trust-18", ExtraPredicateMembers: unknownMember})
+	cases = append(cases, addCase("predicate-unknown-member-tolerated", art18, "t-predicate-unknown-member", true, ""))
+
+	art19 := buildPlatformArtifact(tree, testKey, "linux-arm64", "26.8.1.19", "20260801.0000190", "lts",
+		ArtifactOptions{SkipSigning: true, LibraryContentSeed: "trust-19", ExtraPredicateMembers: unknownMember})
+	tree.PutManifest("t-config-unknown-member", ociManifestMediaType, artifactIndexBytes(tree, art19))
+	configUnknown := newCase("config-unknown-member-allow-unsigned", "trust", "file", "http")
+	configUnknown.Request.Spelling = "t-config-unknown-member"
+	configUnknown.Request.AllowUnsigned = true
+	configUnknown.Expect.OK = true
+	configUnknown.Expect.Version = strp(art19.Predicate.ClickHouseVersion)
+	configUnknown.Expect.Build = strp(art19.Predicate.Build)
+	configUnknown.Expect.Manifest = strp(art19.ManifestDesc.Digest)
+	configUnknown.Expect.LibrarySHA256 = strp(art19.Predicate.LibrarySHA256)
+	configUnknown.Expect.Warnings = []string{"unsigned"}
+	cases = append(cases, configUnknown)
+
 	flushTrees(fs, tree)
 	return cases
 }
+
+// unknownPredicateMember is a predicate member no binding names: the
+// generator's selftest and the case ids above depend on no binding source
+// ever spelling it.
+const unknownPredicateMember = "unknown_future_member"
 
 // mustCompareTwoRealVersions is genfixtures' own self-check for the exact
 // defect predicate-wrong-version shipped with (measured, the Go and Python

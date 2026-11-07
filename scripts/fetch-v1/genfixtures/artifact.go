@@ -63,6 +63,10 @@ type PlatformArtifact struct {
 	LayerDesc    Descriptor
 	ConfigDesc   Descriptor
 	Predicate    Predicate
+	// PredicateDoc is the predicate as the config blob and the signed
+	// statement carry it: Predicate itself, or Predicate with
+	// ArtifactOptions.ExtraPredicateMembers added.
+	PredicateDoc any
 	BundleDigest string // the signature bundle's own blob digest (for lock fixtures)
 }
 
@@ -83,6 +87,12 @@ type ArtifactOptions struct {
 	// cases (aliascases.go) build each build under the fingerprint its
 	// alias tag names. The fetch layer passes the field through opaque.
 	ABIFingerprint string
+	// ExtraPredicateMembers adds members no binding reads to the predicate,
+	// in the config blob and the signed statement alike, as the artifact
+	// producer may add one: every reader ignores a member it does not know
+	// (docs/guides/fetch-v1.md §4.1, "core's firm predicate"). The typed
+	// Predicate, which the expectations read, stays without them.
+	ExtraPredicateMembers map[string]any
 }
 
 // buildPlatformArtifact builds one platform's manifest, layer and config,
@@ -146,7 +156,19 @@ func buildPlatformArtifact(tree *Tree, key SigningKey, platformKey, version, bui
 		predicate.ABIFingerprint = opts.ABIFingerprint
 	}
 
-	configBytes := canonicalJSON(predicate)
+	var predicateDoc any = predicate
+	if len(opts.ExtraPredicateMembers) > 0 {
+		doc := predicateAsMap(predicate)
+		for name, value := range opts.ExtraPredicateMembers {
+			if _, named := doc[name]; named {
+				panic("genfixtures: ExtraPredicateMembers names " + name + ", which the predicate already has")
+			}
+			doc[name] = value
+		}
+		predicateDoc = doc
+	}
+
+	configBytes := canonicalJSON(predicateDoc)
 	configDesc := tree.PutBlob(C.MediaTypes.Config, configBytes)
 
 	manifest := ImageManifest{
@@ -166,11 +188,12 @@ func buildPlatformArtifact(tree *Tree, key SigningKey, platformKey, version, bui
 		LayerDesc:    layerDesc,
 		ConfigDesc:   configDesc,
 		Predicate:    predicate,
+		PredicateDoc: predicateDoc,
 	}
 
 	if !opts.SkipSigning {
 		subjectName := libName + "-" + platformKey + ".tar.zst"
-		statement := buildStatement(subjectName, digestHexPart(layerDesc.Digest), C.PredicateTypes.Artifact, predicate)
+		statement := buildStatement(subjectName, digestHexPart(layerDesc.Digest), C.PredicateTypes.Artifact, predicateDoc)
 		bundle := signBundle(key.KeyID, key.Private, statement)
 		result.BundleDigest = attachSignatureReferrer(tree, manifestDesc, bundle)
 	}

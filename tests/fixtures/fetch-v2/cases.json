@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "source": {
-    "generator_commit": "d66b28749e3c8cd825b9ed89ddb200ae208c844d",
+    "generator_commit": "19aab079f31813441713eb01b6f935f420b8e576",
     "go_sum_sha256": "e998462ee1660f7d0b42c45fd0e16ddef8c688e81aaa22c466ada3c69565eec9"
   },
   "cases": [
@@ -1821,6 +1821,126 @@
         "code": null,
         "sleeps": [],
         "warnings": [],
+        "requests": {
+          "max": null,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
+      }
+    },
+    {
+      "id": "predicate-unknown-member-tolerated",
+      "tree": "trust",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "t-predicate-unknown-member",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
+      },
+      "env": {},
+      "expect": {
+        "ok": true,
+        "version": "26.8.1.18",
+        "build": "20260801.0000180",
+        "manifest": "sha256:d351fdd40d4b4991ff6da91fafcb1045648a006b7787c1b016d4b70bd00ff31f",
+        "library_sha256": "996b7382f943d8bd0c4c37a0990a06efc6c8e72c9ed081330690c4d37f886801",
+        "code": null,
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": null,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
+      }
+    },
+    {
+      "id": "config-unknown-member-allow-unsigned",
+      "tree": "trust",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "t-config-unknown-member",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": true,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
+      },
+      "env": {},
+      "expect": {
+        "ok": true,
+        "version": "26.8.1.19",
+        "build": "20260801.0000190",
+        "manifest": "sha256:2d421da65739abb87c069d96bc18d7fd7559797b8c3cc833fbd5c64848eef3c5",
+        "library_sha256": "b6398f727445dbf312169e5846b54c11f5aca94d2e82efb9dc7b14f6e6a26d30",
+        "code": null,
+        "sleeps": [],
+        "warnings": [
+          "unsigned"
+        ],
         "requests": {
           "max": null,
           "none_matching": [],
@@ -4837,6 +4957,124 @@
         "build": "20260203.000004",
         "manifest": null,
         "library_sha256": "33e8e429e8e21586e445d779fc5520cc5d6a254e0f67853f14757f3844b8d5f6",
+        "code": null,
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": 0,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
+      }
+    },
+    {
+      "id": "cache-record-canonical-predicate-unknown-member-offline",
+      "tree": "cache-record",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "cache-record-canonical-predicate-unknown-member",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "26.2",
+        "platform": "linux-arm64",
+        "offline": true,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
+      },
+      "env": {},
+      "expect": {
+        "ok": true,
+        "version": "26.2.7.8",
+        "build": "20260207.000008",
+        "manifest": null,
+        "library_sha256": "931af4f777a0df409d8095a69bfa0d3a611c4e12926a53f3d88f4e246c79a981",
+        "code": null,
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": 0,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null,
+        "tags": null,
+        "records_intact": [],
+        "message_contains": null,
+        "message_excludes": [],
+        "resolutions": null,
+        "prune": null,
+        "warnings_max": null,
+        "stored_revocations": []
+      }
+    },
+    {
+      "id": "resolve-installed-cache-record-canonical-predicate-unknown-member",
+      "tree": "cache-record",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "cache-record-canonical-predicate-unknown-member",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null,
+        "held": []
+      },
+      "request": {
+        "spelling": "26.2",
+        "platform": "linux-arm64",
+        "offline": true,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ],
+        "own_fingerprint": null,
+        "prune": null,
+        "allow_revoked": false,
+        "require_revocation_check": false,
+        "opens": null
+      },
+      "env": {},
+      "expect": {
+        "ok": true,
+        "version": "26.2.7.8",
+        "build": "20260207.000008",
+        "manifest": null,
+        "library_sha256": "931af4f777a0df409d8095a69bfa0d3a611c4e12926a53f3d88f4e246c79a981",
         "code": null,
         "sleeps": [],
         "warnings": [],
