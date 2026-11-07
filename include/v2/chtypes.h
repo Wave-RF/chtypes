@@ -125,19 +125,19 @@
  * for bytes (Input values, below), and a binding never rewrites one. A call's settings are layered,
  * highest first: the call's own `settings`; the schema's own (`chs_schema_create`); its server's
  * `settings` (`chs_server_create`); the defaults set by `chs_set_defaults`; the build's own. A
- * filter's WHERE takes the same layers, lowest first: the build's own, `chs_set_defaults`, the
- * server profile, the schema's own, and the filter's own (`chs_filter_create`), with
- * `session_timezone` at every layer staying on the zone path (Time zones, above). One exception: a
- * type gate in the schema's own settings binds the CREATE only, and a WHERE's CAST validates under
- * the session layers, every layer but the schema's own. At the INSERT, the schema's own settings
- * reach only the parse, as a server's CREATE-time settings never reach its INSERT: the settings
- * ClickHouse's own `FormatFactory::getFormatSettings` reads, which shape how a body is read, keep
- * all five layers, except a type gate among them (`Nullable(Tuple)`'s, for one), which binds the
- * CREATE only. Everything else the INSERT does runs under the call's own settings, its server's
- * `settings` and `chs_set_defaults` only, over the build's own, with every type gate at the build's
- * default unless one of those three sets it. That covers every expression it evaluates (a `DEFAULT`
- * or `MATERIALIZED` fill, a `CHECK`, a TTL, a partition key the server rebuilds at INSERT, one with
- * a modulo, a projection, an expression a `Values` body evaluates while it is read, and the creator
+ * filter is its INSERT statement's WHERE, so its WHERE takes that INSERT's layers, lowest first:
+ * the build's own, `chs_set_defaults`, the server profile, the schema's own as they reach the
+ * INSERT (below: the parse class only, never a type gate), and the filter's own
+ * (`chs_filter_create`, the statement's own SETTINGS), with `session_timezone` at every layer
+ * staying on the zone path (Time zones, above). At the INSERT, the schema's own settings reach only
+ * the parse, as a server's CREATE-time settings never reach its INSERT: the settings ClickHouse's
+ * own `FormatFactory::getFormatSettings` reads, which shape how a body is read, keep all five
+ * layers, except a type gate among them (`Nullable(Tuple)`'s, for one), which binds the CREATE
+ * only. Everything else the INSERT does runs under the call's own settings, its server's `settings`
+ * and `chs_set_defaults` only, over the build's own, with every type gate at the build's default
+ * unless one of those three sets it. That covers every expression it evaluates (a `DEFAULT` or
+ * `MATERIALIZED` fill, a `CHECK`, a TTL, a partition key the server rebuilds at INSERT, one with a
+ * modulo, a projection, an expression a `Values` body evaluates while it is read, and the creator
  * of any aggregate function in them) and its limits, `max_partitions_per_insert_block` and
  * `throw_on_max_partitions_per_insert_block` among them. The sorting key and the skip indices,
  * which a server builds under its global context, run under its server's `settings` and
@@ -146,9 +146,13 @@
  * body's included, with its gate only in the schema's own settings, is refused as the server
  * refuses it (455, 44 or 63), and a partition limit in the schema's own settings does not reach the
  * INSERT; a caller whose real INSERT session carries such a setting passes it in the call's
- * settings or the server profile, as that INSERT does. `session_timezone` keeps the zone path. Each
- * setting that reaches a WHERE is honored (applied to it), passed through (accepted and ignored),
- * or declined (`chs_filter_create` says how). A server resource limit (an `execution`-tier setting,
+ * settings or the server profile, as that INSERT does. The same holds for a filter, its WHERE, the
+ * plan of its statement and every check on it (a server's own checks, a session limit such as
+ * `max_temporary_columns`, `run_query_in_background`, `limit` and `offset`): a schema-level setting
+ * outside the parse class reaches none of them, and is neither applied, listed in
+ * `filter_declined_settings` nor declined. `session_timezone` keeps the zone path. Each setting
+ * that reaches a WHERE is honored (applied to it), passed through (accepted and ignored), or
+ * declined (`chs_filter_create` says how). A server resource limit (an `execution`-tier setting,
  * e.g. a small `max_columns_to_read`) can make the server refuse a query the library answers; that
  * is resource policy, not row access, and the library does not model it. A server's settings are
  * the ones its profile applies to every query. At posture `create`, they are layered under the
@@ -1458,9 +1462,11 @@ CHS_API void chs_server_free(chs_server *server);
  * on every schema.
  *
  * A setting this build's filters do not honor in a WHERE, from the `chs_set_defaults` snapshot this
- * call captures, the server profile or this call's own `settings`, is no decline here: the call
- * succeeds and lists it in the schema's `filter_declined_settings` (`schema_description`), and
- * `chs_filter_create` on the schema declines.
+ * call captures, the server profile or this call's own `settings` (only a parse-class one that is
+ * not a type gate: of this call's other settings, only `session_timezone` reaches a filter's WHERE,
+ * on the zone path), is no decline here: the call succeeds and lists it in the schema's
+ * `filter_declined_settings` (`schema_description`), and `chs_filter_create` on the schema
+ * declines.
  *
  * `options` (`input:schema_options`) sets the `posture` the statement compiles in: `create`, the
  * default, or `load` for a server's own stored definition (see `input:schema_options`, and the
@@ -1825,9 +1831,10 @@ CHS_API chs_status chs_preview_insert(
  * `session_timezone` there is the zone of its literals. Non-deterministic expressions are declined.
  *
  * The WHERE's settings are layered, lowest first: the build's own, `chs_set_defaults`, the schema's
- * server profile, the schema's own settings, and then this call's `settings`; `session_timezone` at
- * every layer stays on the zone path. A type gate in the schema's own settings binds the CREATE
- * only, so a WHERE's CAST validates under the session layers, every layer but the schema's own.
+ * server profile, the schema's own settings as they reach the INSERT (the parse class, never a type
+ * gate: a filter is that INSERT's WHERE), and then this call's `settings`; `session_timezone` at
+ * every layer stays on the zone path. Every other setting in the schema's own settings binds the
+ * CREATE only: it is not applied to the WHERE and declines nothing.
  *
  * On a schema whose `filter_declined_settings` is not empty (`chs_schema_describe`), from any
  * layer, the call is `CHS_DECLINED` with ch_code 0. It is checked after the argument checks and
@@ -1855,14 +1862,14 @@ CHS_API chs_status chs_preview_insert(
  * set is applied to the WHERE; a key passed through is accepted and ignored; and a key this build's
  * filters do not honor is reported at evaluation (`filter_result`'s `unsupported_settings`, every
  * verdict `d`, and `chs_preview_batch`'s). The WHERE runs under this call's layers only (the
- * defaults, the server profile, the schema's own settings and this call's), as a subscriber's
- * SELECT in its own session would. An evaluation's `settings` (`chs_filter_eval_body`,
- * `chs_preview_batch` with a filter, `chs_block_create`) are the INSERT session's: they govern
- * parsing the body and the expressions the INSERT itself evaluates (Settings, above), and never
- * reach the WHERE, so they are never named as WHERE settings. So a filter evaluated in the INSERT's
- * own session, a materialized view's WHERE for example, is created with that session's WHERE-tier
- * settings in its own `settings`. Every key still meets the server's own SET check first, so a name
- * the server does not know is `CHS_REJECTED` with ch_code 115.
+ * defaults, the server profile, the schema's own settings as they reach the INSERT, and this
+ * call's), as the filtered INSERT's own WHERE does. An evaluation's `settings`
+ * (`chs_filter_eval_body`, `chs_preview_batch` with a filter, `chs_block_create`) are the INSERT
+ * session's: they govern parsing the body and the expressions the INSERT itself evaluates
+ * (Settings, above), and never reach the WHERE, so they are never named as WHERE settings. So a
+ * filter evaluated in the INSERT's own session, a materialized view's WHERE for example, is created
+ * with that session's WHERE-tier settings in its own `settings`. Every key still meets the server's
+ * own SET check first, so a name the server does not know is `CHS_REJECTED` with ch_code 115.
  *
  * A filter under a per-call `session_timezone` answers as the artifact producer has measured
  * against live servers, including how the zone in an evaluation's settings combines with the zone
