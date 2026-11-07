@@ -129,6 +129,26 @@ func buildRecordCases(fs *FileSet) []Case {
 	layouts = append(layouts, layoutCanon)
 	offlinePair("cache-record-canonical", "cache-record-canonical", "26.2", &artCanon)
 
+	// --- cache-record-canonical-predicate-unknown-member ---------------------
+	// The canonical shape, no blobs and no index, with the stored predicate
+	// carrying a member no binding names, as an installer copies a predicate
+	// that has one: the record is read and trusted, the member ignored. Its
+	// name starts cache-record-canonical, so schema_check.py also holds the
+	// record to verified.schema.json.
+	artUnknown := buildPlatformArtifact(tree, testKey, "linux-arm64", "26.2.7.8", "20260207.000008", "lts",
+		ArtifactOptions{LibraryContentSeed: "record-unknown-member",
+			ExtraPredicateMembers: map[string]any{unknownPredicateMember: fakeHex("unknown-future-member", 64)}})
+	recordUnknown := map[string]any{}
+	if err := unmarshalJSON(canonicalJSON(canonicalRecordFor(tree, artUnknown)), &recordUnknown); err != nil {
+		panic(err)
+	}
+	recordUnknown["predicate"] = artUnknown.PredicateDoc
+	layoutUnknown := NewLayout("cache-record-canonical-predicate-unknown-member")
+	layoutUnknown.AddFile(unpackedPath(artUnknown, artUnknown.Predicate.Library), fakeLibraryContent("record-unknown-member"))
+	layoutUnknown.AddFile(unpackedPath(artUnknown, "verified.json"), canonicalJSON(recordUnknown))
+	layouts = append(layouts, layoutUnknown)
+	offlinePair("cache-record-canonical-predicate-unknown-member", "cache-record-canonical-predicate-unknown-member", "26.2", &artUnknown)
+
 	// --- cache-record-foreign-*: three kinds of record no binding may trust ---
 	artForeign, seedForeign := newArtifact("26.2.5.6", "20260205.000006", "record-foreign")
 	canon := canonicalRecordFor(tree, artForeign)
