@@ -11,6 +11,10 @@ version: 2
 # .github/workflows/ but does NOT descend into .github/actions/*/action.yml,
 # so adding one means adding its directory to the github-actions job below.
 
+# Every job targets v2: main is the 1.x line and takes no dependency updates.
+# Dependabot reads this file only from the default branch, which is why it
+# lives here and not on v2.
+
 updates:
   # Go — the module (go/go.mod requires klauspost/compress) and the examples'
   # tour, which replaces the module with ../../go and so carries the same
@@ -19,6 +23,7 @@ updates:
   # dependency-name` puts one dependency's bump in both directories into ONE
   # pull request; without it Dependabot opens one per directory.
   - package-ecosystem: gomod
+    target-branch: "v2"
     directories: ["/go", "/examples/go"]
     schedule:
       interval: weekly
@@ -31,6 +36,7 @@ updates:
       prefix: deps
 
   - package-ecosystem: uv
+    target-branch: "v2"
     directory: /python
     schedule:
       interval: weekly
@@ -42,6 +48,7 @@ updates:
       prefix: deps
 
   - package-ecosystem: npm
+    target-branch: "v2"
     directory: /ts
     schedule:
       interval: weekly
@@ -53,6 +60,7 @@ updates:
       prefix: deps
 
   - package-ecosystem: cargo
+    target-branch: "v2"
     directory: /rust
     schedule:
       interval: weekly
@@ -67,6 +75,7 @@ updates:
   # registries over OIDC, so an action bump here is a supply-chain change and
   # is reviewed as one.
   - package-ecosystem: github-actions
+    target-branch: "v2"
     directory: /
     schedule:
       interval: weekly
