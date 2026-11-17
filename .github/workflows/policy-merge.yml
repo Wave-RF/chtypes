@@ -6,6 +6,15 @@
 # It does not open pull requests: see WHAT IT RESPECTS, below, for why
 # nothing here may.
 #
+# DORMANT ON v2, ON PURPOSE. Everything below is built around main's merge
+# queue: the jobs check out main, the judge accepts only a pull request
+# against main, and the enqueue goes into the queue only main has. Since
+# 2026-11-17 the default branch is v2, so this file now runs from v2 on every
+# `workflow_run`. But v2 has no merge queue and its pull requests are merged
+# by a maintainer, so each run leaves the pull request for a human and the
+# enqueue job never runs. A self-enqueue on v2 would bypass the review each of
+# its merges gets, so this is not ported.
+#
 # THE CONDITIONS. A pull request enqueues only when ALL of these hold (the
 # numbers are the checker's own names for them; 6 is retired):
 #   1. the head is a branch of THIS repository, never a fork;
