@@ -9,7 +9,6 @@ edition = "2024"
 rust-version = "1.87"
 license = "Apache-2.0"
 repository = "https://github.com/wave-rf/chtypes"
-homepage = "https://github.com/wave-rf/chtypes"
 documentation = "https://docs.rs/chtypes"
 keywords = ["clickhouse", "types", "schema", "validation", "ffi"]
 categories = ["database", "api-bindings"]
