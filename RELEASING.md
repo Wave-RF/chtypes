@@ -21,7 +21,7 @@ It fetches anonymously on purpose. A registry can show a maintainer a version th
 
 ## The 1.x releases
 
-Releases are tagged **from `main`**. `v1` was merged into `main` on 2026-10-06 (#475), so `main` is the 1.0 tree and the default branch. 1.0.0 and 1.0.2 were tagged from `v1` before that merge; 1.0.3 and later come from `main`. The release workflows live on `main`, so a tag pushed at a `main` commit runs `main`'s copy of the workflow against `main`'s tree.
+1.x releases are tagged **from `main`**. `v1` was merged into `main` on 2026-10-06 (#475), so `main` is the 1.0 tree; since 2026-11-17 the default branch is `v2`, which 2.x releases are tagged from. 1.0.0 and 1.0.2 were tagged from `v1` before that merge; 1.0.3 and later come from `main`. The release workflows live on `main`, so a tag pushed at a `main` commit runs `main`'s copy of the workflow against `main`'s tree.
 
 The order is the one below: **`rust/v1.0.3` → `ts/v1.0.3` → `python/v1.0.3` → `go/v1.0.3`** (for 1.0.3), one at a time, each green before the next. Nobody tags before every dry run is green.
 

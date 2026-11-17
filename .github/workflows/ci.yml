@@ -64,7 +64,7 @@ on:
   merge_group:
     types: [checks_requested]
   push:
-    branches: [main]
+    branches: [v2]
   workflow_dispatch:
 
 permissions:
@@ -575,8 +575,8 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
         run: scripts/api-surface.py run --base "$BASE_SHA" --head "$HEAD_SHA" --tools "$HOME/.cache/chtypes/api-surface"
-      - name: save the tool cache (push to main only, and only on an exact miss)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.api-tools.outputs.cache-hit != 'true'
+      - name: save the tool cache (push to v2 only, and only on an exact miss)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/v2' && steps.api-tools.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/chtypes/api-surface
