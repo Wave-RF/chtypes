@@ -1,4 +1,4 @@
-# close-linked-issues — after a pull request merges into main, close every
+# close-linked-issues — after a pull request merges into v2, close every
 # issue its own `closingIssuesReferences` names, with a comment naming the
 # merge. scripts/close-linked-issues.py does the work; this file is the
 # wiring (chtypes#362).
@@ -15,7 +15,7 @@
 # `metadata:read`, `pull_requests:write`, `workflows:write` (measured) — no
 # `issues` permission at all, so an App token from it could not close
 # anything here even before asking whether it should. This workflow instead
-# runs on `push` to main with the workflow's own BUILT-IN `GITHUB_TOKEN`,
+# runs on `push` to v2 with the workflow's own BUILT-IN `GITHUB_TOKEN`,
 # scoped at job level to exactly `issues: write` (close + comment) and
 # `pull-requests: read` (the GraphQL closingIssuesReferences read below). No
 # App, no secret, nothing minted.
@@ -28,8 +28,9 @@
 # no-op here, not a special case this workflow detects. It never reopens
 # anything and never touches an issue already closed.
 #
-# TRIGGER. `push` to main. This repository's branch protection
-# (enforce_admins on) means every commit reaching main does so by way of a
+# TRIGGER. `push` to v2, the default branch since 2026-11-17 (main, the 1.x
+# line, was before). This repository's branch protection (enforce_admins on)
+# means every commit reaching v2 does so by way of a
 # pull request — a merge-queue merge or a maintainer's manual one — so every
 # push here is, in practice, one merge. The script itself resolves each
 # pushed commit to its merged pull request through
@@ -38,7 +39,7 @@
 # tests/fixtures/close-linked-issues/README.md) and does nothing, quietly,
 # for a commit that is not one. `workflow_dispatch` re-checks one already-
 # merged commit by hand; a push-triggered workflow cannot run before it is
-# on main, so there is no way to watch this judge a real merge before it
+# on v2, so there is no way to watch this judge a real merge before it
 # merges — the first proof is the first App-enqueued pull request that
 # closes an issue after this lands.
 #
@@ -50,11 +51,11 @@ name: close-linked-issues
 
 on:
   push:
-    branches: [main]
+    branches: [v2]
   workflow_dispatch:
     inputs:
       sha:
-        description: "An already-merged commit on main to re-check (e.g. after a failed run)"
+        description: "An already-merged commit on v2 to re-check (e.g. after a failed run)"
         required: true
         type: string
 

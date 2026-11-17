@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Wave-RF/chtypes/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/Wave-RF/chtypes/ci.yml?branch=main&label=CI&color=%2306B0BF"></a>
+  <a href="https://github.com/Wave-RF/chtypes/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/Wave-RF/chtypes/ci.yml?branch=v2&label=CI&color=%2306B0BF"></a>
   <a href="LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/License-Apache_2.0-%23086D77"></a>
   <a href="https://pkg.go.dev/github.com/wave-rf/chtypes/go"><img alt="Go" src="https://img.shields.io/badge/Go-pkg.go.dev-%2306B0BF?logo=go&logoColor=white"></a>
   <a href="https://pypi.org/project/chtypes/"><img alt="PyPI" src="https://img.shields.io/pypi/v/chtypes?label=PyPI&color=%2306B0BF&logo=pypi&logoColor=white"></a>
