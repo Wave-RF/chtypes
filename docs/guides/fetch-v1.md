@@ -172,6 +172,7 @@ Verifying one bundle:
    - the predicate's `os` and `arch` must equal the requested platform;
    - the predicate's `clickhouse_version` must **equal** an exact four-part request, or **lie within** a floating one (a component prefix: `26.8.15.10` is within both `26.8` and `26.8.15`).
    - A duplicate key anywhere in the statement's JSON is `CHTYPES_ARTIFACT_CORRUPT` — every binding's JSON parse refuses one rather than silently taking the last value.
+   - A predicate member none of the checks above names is ignored, in the signed statement, in the config blob read under allow-unsigned, and in the predicate a `verified.json` record stores: the artifact producer may add one, and no binding refuses an artifact or a record for it. The `predicate-unknown-member-tolerated`, `config-unknown-member-allow-unsigned` and `cache-record-canonical-predicate-unknown-member` cases pin it in every binding.
 
 Any of the above failing is `CHTYPES_ARTIFACT_CORRUPT`; no referrer of the signature artifactType verifying under a trusted key at all is `CHTYPES_ARTIFACT_UNTRUSTED`. `CHTYPES_ALLOW_UNSIGNED=1` skips verification with one loud warning, exactly as in v0 — never silently.
 

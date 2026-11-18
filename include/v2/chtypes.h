@@ -106,20 +106,22 @@
  * handshake always run on the calling thread.
  *
  * Time zones. A library image has one zone of its own, set once by `chs_initialize`: the image
- * zone. A schema has a home zone, its server's `timezone` (`chs_server_create`), or else the image
- * zone. The schema's types bind its home zone, as a server's table binds the server's zone after a
- * restart, and so do the functions its DEFAULT, MATERIALIZED, ALIAS and CHECK expressions apply to
- * its columns, its PARTITION BY expressions, and a Date-valued TTL under a merge. Each call runs in
- * a zone too, the first of these that is set: the call's own `session_timezone` (a key in its
- * settings, which ClickHouse applies through its own query context); the `session_timezone` in the
- * schema's own settings; the one in its server's `settings`; the one set by `chs_set_defaults`; its
- * server's `timezone`; the image zone. An empty `session_timezone` at any of these means the
- * server's zone, the last two. The call's zone governs parsing and rendering a zone-less `DateTime`
- * or `DateTime64`, export, a DEFAULT literal's fold, `toDateTimeOrZero` and a filter's literals. A
- * `Date` partition id is the civil date in every zone. Every zone name is validated by ClickHouse's
- * own `DateLUT`, which reads the library host's time zone database, on every platform. On darwin
- * the file system is case-insensitive, so `DateLUT` there accepts a spelling such as `utc` that a
- * Linux server refuses; that difference is documented, not patched.
+ * zone. A schema has a home zone: on a server (`chs_server_create`), the non-empty
+ * `session_timezone` in the server's `settings`, else the server's `timezone`; with neither, or
+ * with no server, the image zone. The schema's types bind its home zone, as a real server binds a
+ * table's zone-less columns for the sessions its profile governs, and so do the functions its
+ * DEFAULT, MATERIALIZED, ALIAS and CHECK expressions apply to its columns, its PARTITION BY
+ * expressions, and a Date-valued TTL under a merge. Each call runs in a zone too, the first of
+ * these that is set: the call's own `session_timezone` (a key in its settings, which ClickHouse
+ * applies through its own query context); the `session_timezone` in the schema's own settings; the
+ * one in its server's `settings`; the one set by `chs_set_defaults`; its server's `timezone`; the
+ * image zone. An empty `session_timezone` at any of these means the server's zone, the last two.
+ * The call's zone governs parsing and rendering a zone-less `DateTime` or `DateTime64`, export, a
+ * DEFAULT literal's fold, `toDateTimeOrZero` and a filter's literals. A `Date` partition id is the
+ * civil date in every zone. Every zone name is validated by ClickHouse's own `DateLUT`, which reads
+ * the library host's time zone database, on every platform. On darwin the file system is
+ * case-insensitive, so `DateLUT` there accepts a spelling such as `utc` that a Linux server
+ * refuses; that difference is documented, not patched.
  *
  * Settings. Every settings input is a JSON object whose values are JSON strings, or the object form
  * for bytes (Input values, below), and a binding never rewrites one. A call's settings are layered,
@@ -229,6 +231,10 @@
  * NULL. After `chs_shutdown` has run, every such call refuses the same way, its message saying that
  * `chs_shutdown` has run. The handshake, `chs_abi_revision`, `chs_shutdown`, the buffer and error
  * accessors and the frees answer at any time.
+ *
+ * Unloading. The library cannot be unloaded: `dlclose` leaves it mapped for the life of the process
+ * (the linux libraries are linked with `-z nodelete`, and the darwin loader does not unload it).
+ * Loading the same library file again returns the same image.
  *
  * Images. (Pending the confirmation runs with the time budget at 0, and the remaining arm64 cells
  * at the default budget and at 0.) Any number of library images, one per ClickHouse line, may be
@@ -744,11 +750,14 @@ typedef struct chs_block chs_block;
  * that were given its id. `chs_cancel_create` returns the token and its id (`c` and 16 lowercase
  * hexadecimal digits); a call names the id in its options document (`insert_options.cancel`,
  * `schema_options.cancel`). The token holds nothing. The library keeps a registry from id to token:
- * a call resolves the id at entry and holds a reference until it returns, so `chs_cancel_free`
- * while a call runs is safe (the one exception to `handle_serial`), and an id that names no live
- * token is `CHS_INVALID_ARGUMENT`, never a silent no-cancel. A token is one-shot: there is no
- * reset, a caller makes a new one. One token may cover many calls, which is how a request's calls
- * are canceled together.
+ * a call resolves the id when it reads its options, and holds a reference from then until it
+ * returns. Free a token only after every call that names it has returned. A `chs_cancel_free` that
+ * races a call's start is the caller's race, with a defined outcome (the one exception to
+ * `handle_serial`): the call either runs with the token, and is canceled or completes, or answers
+ * `CHS_INVALID_ARGUMENT` because the id names no live token. It is never undefined behavior or a
+ * wrong answer. An id that names no live token is always `CHS_INVALID_ARGUMENT`, never a silent
+ * no-cancel. A token is one-shot: there is no reset, a caller makes a new one. One token may cover
+ * many calls, which is how a request's calls are canceled together.
  *
  * What a cancel does:
  *
@@ -1436,14 +1445,15 @@ CHS_API void chs_server_free(chs_server *server);
  * reason.
  *
  * `server` is the server the table is on (`chs_server_create`), or NULL. On a server, the schema's
- * home zone is the server's `timezone`: its zone-less `DateTime` and `DateTime64` columns bind it,
- * as a restarted server binds its own, and every call on the schema that names no
- * `session_timezone` runs in it. The server's `settings` layer under the schema's own, and a
- * Replicated engine's ZooKeeper path and replica name expand the server's `macros`. With `server`
- * NULL the schema is on the image's own server, exactly as before servers existed: the image zone,
- * no server settings layer, and macros unknown. A freed server, a handle of another kind or a
- * server from another library image is `CHS_INVALID_ARGUMENT`. The schema holds a counted reference
- * to its server, so the caller may free the server at any time.
+ * home zone is the non-empty `session_timezone` in the server's `settings`, else the server's
+ * `timezone`: its zone-less `DateTime` and `DateTime64` columns bind it, as a real server whose
+ * profile carries that `session_timezone` binds them to it rather than to its `timezone`, and every
+ * call on the schema that names no `session_timezone` runs in it. The server's `settings` layer
+ * under the schema's own, and a Replicated engine's ZooKeeper path and replica name expand the
+ * server's `macros`. With `server` NULL the schema is on the image's own server, exactly as before
+ * servers existed: the image zone, no server settings layer, and macros unknown. A freed server, a
+ * handle of another kind or a server from another library image is `CHS_INVALID_ARGUMENT`. The
+ * schema holds a counted reference to its server, so the caller may free the server at any time.
  *
  * `timezone()` (and its alias `timeZone()`) in a DEFAULT, MATERIALIZED or CHECK expression is
  * admitted on a schema created on a server whose profile names a `timezone`. On a server schema,
@@ -2111,9 +2121,11 @@ CHS_API void chs_cancel_fire(const chs_cancel *token);
 CHS_API int32_t chs_cancel_fired(const chs_cancel *token);
 
 /*
- * chs_cancel_free: Releases the caller's reference to a token. Freeing NULL does nothing. Safe
- * while calls that resolved the token's id are running: each holds its own reference until it
- * returns.
+ * chs_cancel_free: Releases the caller's reference to a token. Freeing NULL does nothing. Free a
+ * token only after every call that names it has returned. A call that already resolved the id keeps
+ * its own reference until it returns; a free that races a call's start leaves that call either
+ * running with the token or answering `CHS_INVALID_ARGUMENT`, never undefined behavior
+ * (`chs_cancel`).
  *
  * Class: api. Thread: handle_serial. Init: any.
  *

@@ -91,7 +91,7 @@
   {
    "id": "option-not-implemented",
    "class": "call-decline",
-   "trigger": "an input document (insert_options, filter_options, schema_options) sets a member this build reserves to a value other than its default; also a call this dev build does not implement (an interim v2-dev build at an SDK spec change's head)",
+   "trigger": "an input document (insert_options, filter_options, schema_options) sets a member this build reserves to a value other than its default",
    "code": {
     "chs": "-2",
     "ch": []
@@ -133,7 +133,8 @@
     "chs_preview_row",
     "chs_preview_batch",
     "chs_filter_eval_body",
-    "chs_block_create"
+    "chs_block_create",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "The whole call is declined, never answered from a run the limit cut short; a decline is never a wrong answer."
@@ -161,29 +162,6 @@
    ],
    "retirement": "none",
    "description": "The call stops at its next check point and answers CHS_CANCELED with every output NULL; a fire after its last check point is a no-op, and the call answers in full."
-  },
-  {
-   "id": "native-data-after-end-block",
-   "class": "call-decline",
-   "trigger": "a Native body with bytes after its end-of-stream block (a block of zero columns)",
-   "code": {
-    "chs": "-2",
-    "ch": []
-   },
-   "lines": [
-    "26.3",
-    "26.8",
-    "26.9",
-    "26.10"
-   ],
-   "paths": [
-    "chs_preview_row",
-    "chs_preview_batch",
-    "chs_block_create",
-    "chs_filter_eval_body"
-   ],
-   "retirement": "none",
-   "description": "A server's INSERT ends a Native stream at a block of zero columns and silently ignores every byte after it, rows included, so the library declines such a body rather than answer for data the server would drop; the message names the offset and length of the bytes left unread, and the batch document's unconsumed reports the same range. Send only the blocks, or end the body at the empty block."
   },
   {
    "id": "reference-type-unpaired",
@@ -1660,7 +1638,8 @@
    "paths": [
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "The whole call is unsupported with the setting named, so every row of an attached filter is declined; the rows were read in a context the call did not ask for."
@@ -1682,7 +1661,8 @@
    "paths": [
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "The evaluation-budget and custom-prefix keys are set for the process, not per call; passing one with a call declines the whole call and names it."
@@ -1704,7 +1684,8 @@
    "paths": [
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "The clock keys take an integer of nanoseconds; any other value declines the whole call and names the key."
@@ -1726,7 +1707,8 @@
    "paths": [
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "A server admits a MATERIALIZED column in the list only under insert_allow_materialized_columns, which this build does not model; the whole call is unsupported and the setting is named."
@@ -1748,7 +1730,8 @@
    "paths": [
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "A server parses the INSERT statement under these settings before reading the body, and this build sees the body only, so it cannot tell whether a stricter limit or a switched parser refuses that statement: the call is unsupported with the setting named and every filter row is declined. A limit at or above its default is answered, under the call's value."
@@ -1770,7 +1753,8 @@
    "paths": [
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "A setting that passed the checks at the time it was set but fails to apply when a call resolves its settings is recorded as unsupported instead of being dropped; the whole call is declined."
@@ -1790,7 +1774,8 @@
     "26.10"
    ],
    "paths": [
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "One parse evaluates the attached filter in the batch's zone only, so a pairing with a different create zone is declined; parse the body with chs_block_create and evaluate with chs_filter_eval_block instead."
@@ -1840,7 +1825,7 @@
   {
    "id": "export-json-validate-utf8",
    "class": "export-decline",
-   "trigger": "chs_preview_batch with an export asked for, under output_format_json_validate_utf8",
+   "trigger": "chs_preview_batch with an export asked for, under output_format_json_validate_utf8, where a row's bytes end inside an unfinished UTF-8 sequence the validating writer holds back (no JSON value is known to end so)",
    "code": {
     "chs": "ch",
     "ch": []
@@ -1852,10 +1837,11 @@
     "26.10"
    ],
    "paths": [
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
-   "description": "The setting re-shapes the writer's byte stream outside the frame the export reproduces, so the export is declined and the batch answered."
+   "description": "The export runs through the server's own UTF-8 validating writer under this setting. Its row spans are cut over the validated bytes, so a row whose bytes end inside an unfinished sequence cannot be cut. That export is declined and the batch answered."
   },
   {
    "id": "export-listed-materialized",
@@ -1872,7 +1858,8 @@
     "26.10"
    ],
    "paths": [
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "The export carries the stored columns only, and a re-insert of it would recompute the supplied MATERIALIZED value, so the export is declined and the batch answered."
@@ -1892,7 +1879,8 @@
     "26.10"
    ],
    "paths": [
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "The export never emits a row with a column silently absent, so the export is declined and the batch answered."
@@ -1900,7 +1888,7 @@
   {
    "id": "export-format-not-serializable",
    "class": "call-decline",
-   "trigger": "chs_preview_batch with an export asked for in a format this build cannot write (only JSONCompactEachRow)",
+   "trigger": "chs_preview_batch with an export asked for in a format this build cannot write (JSONCompactEachRow, and Native in the ABI v2 image, are the ones it writes)",
    "code": {
     "chs": "-2",
     "ch": []
@@ -1912,10 +1900,11 @@
     "26.10"
    ],
    "paths": [
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
-   "description": "The export writer serializes one format; asking for another declines the whole call before any byte is read, answers the batch document with outcome unsupported, code -2 and this reason, and exports nothing."
+   "description": "The export writers serialize JSONCompactEachRow and, in the ABI v2 image, Native; asking for another declines the whole call before any byte is read, answers the batch document with outcome unsupported, code -2 and this reason, and exports nothing."
   },
   {
    "id": "export-computed-value-not-carried",
@@ -1932,7 +1921,8 @@
     "26.10"
    ],
    "paths": [
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "The export carries no EPHEMERAL column, so a re-insert of it would compute the MATERIALIZED value from the EPHEMERAL column's own expression: the export is declined and the batch answered."
@@ -1952,7 +1942,8 @@
     "26.10"
    ],
    "paths": [
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "ClickHouse's own writer refused a value (its code is in export_declined), so the export is declined and the batch answered."
@@ -1974,7 +1965,8 @@
    "paths": [
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "A server checks a body's MATERIALIZED and CHECK expressions over the blocks its squashing step forms, which drop a skipped row's LowCardinality key when its chunk joins a block, so its answer depends on how the body is cut into chunks; the batch is unsupported and every filter verdict over it is declined."
@@ -1996,7 +1988,8 @@
    "paths": [
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "The server's JSON segmentation engine refuses an object over the limit with 117 whenever it parses the body in parallel, which its settings or its CPU count decide; the body is declined unless the server's settings make it read the body serially, where the limit is not read."
@@ -2018,7 +2011,8 @@
    "paths": [
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "A row that cannot exist in the table has no WHERE truth, and a poisoned value is unreadable by the server itself; the row is declined with its own reason."
@@ -2062,6 +2056,7 @@
    "paths": [
     "chs_preview_row",
     "chs_preview_batch",
+    "chs_preview_insert",
     "chs_filter_eval_body",
     "chs_filter_eval_block"
    ],
@@ -2127,6 +2122,7 @@
     "chs_schema_create",
     "chs_preview_row",
     "chs_preview_batch",
+    "chs_preview_insert",
     "chs_filter_eval_body",
     "chs_filter_eval_block"
    ],
@@ -2152,6 +2148,7 @@
     "chs_schema_create",
     "chs_preview_row",
     "chs_preview_batch",
+    "chs_preview_insert",
     "chs_filter_eval_body",
     "chs_filter_eval_block"
    ],
@@ -2279,6 +2276,7 @@
    ],
    "paths": [
     "chs_preview_batch",
+    "chs_preview_insert",
     "chs_filter_eval_body"
    ],
    "retirement": "none",
@@ -2798,10 +2796,35 @@
    "paths": [
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "The Buffers reader needs at least one column on the wire, so the call is declined."
+  },
+  {
+   "id": "native-data-after-end-block",
+   "class": "call-decline",
+   "trigger": "a Native body with bytes after its end-of-stream block (a block of zero columns)",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_preview_row",
+    "chs_preview_batch",
+    "chs_preview_insert",
+    "chs_block_create",
+    "chs_filter_eval_body"
+   ],
+   "retirement": "none",
+   "description": "A server's INSERT ends a Native stream at a block of zero columns and silently ignores every byte after it, rows included, so the library declines such a body rather than answer for data the server would drop; the message names the offset and length of the bytes left unread, and the batch document's unconsumed reports the same range. Send only the blocks, or end the body at the empty block."
   },
   {
    "id": "clock-skew-exceeded",
@@ -2820,7 +2843,8 @@
    "paths": [
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "Substituting a clock value past the budget would store a timestamp the server would not have written, so the batch is declined."
@@ -2842,7 +2866,8 @@
    "paths": [
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "The list cannot be read as names, so the call is declined."
@@ -2864,7 +2889,8 @@
    "paths": [
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "The value the server stores depends on the settings the call carries, and the DEFAULT cannot be evaluated under them, so the call is declined."
@@ -2886,7 +2912,8 @@
    "paths": [
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "A server refuses the statement before it reads the body, with an empty-column-list error; this build cannot run that step, so the call is declined."
@@ -2930,7 +2957,8 @@
    "paths": [
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "A server's answer depends on its own thread's stack, which this process cannot reproduce, so the row is declined."
@@ -2952,7 +2980,8 @@
    "paths": [
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "Evaluating it would run a query in the gateway process, so the row is declined."
@@ -2974,7 +3003,8 @@
    "paths": [
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "Evaluating it would read storage, a file or the network in the gateway process, so the row is declined."
@@ -2996,7 +3026,8 @@
    "paths": [
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "Only the server can substitute the parameter, so the row is declined."
@@ -3018,7 +3049,8 @@
    "paths": [
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "An expression the scan never walked must not be evaluated, so the row is declined."
@@ -3040,7 +3072,8 @@
    "paths": [
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "The engine's insert-time merge runs before the TTL and this build cannot carry a listed EPHEMERAL value through that merge, so the batch is declined."
@@ -3062,7 +3095,8 @@
    "paths": [
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "The merge, not the INSERT, meets the error, so what the part holds is declined."
@@ -3084,7 +3118,8 @@
    "paths": [
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "The value's stored type depends on earlier rows, so an answer over the row alone would be a guess and is declined."
@@ -3106,7 +3141,8 @@
    "paths": [
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "The server evaluates the DEFAULT expressions over each chunk its reader forms; the chunks could not be read here, so the batch is declined rather than answered per row."
@@ -3130,8 +3166,8 @@
     "chs_filter_eval_block",
     "chs_preview_batch"
    ],
-   "retirement": "none",
-   "description": "The server's chunk-wise evaluation fails where a per-row one would not, so the batch is declined."
+   "retirement": "retired: replaced by parallel-segment-cut",
+   "description": "Retired and never emitted. It declined a DEFAULT expression throwing over a chunk in a body the server parses in parallel-parsing segments; the block steps now read the server's own segments, and key on parallel-segment-cut where the two reads disagree."
   },
   {
    "id": "chunks-unreadable-again",
@@ -3150,7 +3186,8 @@
    "paths": [
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "The block steps re-read the chunks the server forms; when that fails the batch is declined."
@@ -3172,7 +3209,8 @@
    "paths": [
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "The stored value depends on the whole block, so a mismatch is declined rather than attributed."
@@ -3194,7 +3232,8 @@
    "paths": [
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "Each block is its own part and the server commits earlier parts before a later one fails, so the batch is declined."
@@ -3216,7 +3255,8 @@
    "paths": [
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "The disagreement is not explained here, so the batch is declined."
@@ -3238,7 +3278,8 @@
    "paths": [
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "The answer depends on a grouping this build cannot pin, so the batch is declined."
@@ -3262,8 +3303,8 @@
     "chs_filter_eval_block",
     "chs_preview_batch"
    ],
-   "retirement": "none",
-   "description": "The block throws on no single row, so the error is not attributed and the batch is declined."
+   "retirement": "retired: replaced by parallel-segment-cut",
+   "description": "Retired and never emitted. It declined a whole-block step throwing in a body the server parses in parallel-parsing segments; the block steps now read the server's own segments, and key on parallel-segment-cut where the two reads disagree."
   },
   {
    "id": "block-step-unevaluated",
@@ -3282,7 +3323,8 @@
    "paths": [
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "The steps could not be evaluated here, so the batch is declined."
@@ -3304,7 +3346,8 @@
    "paths": [
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "Without them the writer step has no answer, so the batch is declined."
@@ -3326,7 +3369,8 @@
    "paths": [
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "The error is not attributable to a row, so the batch is declined."
@@ -3348,7 +3392,8 @@
    "paths": [
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "The writer step could not be evaluated here, so the batch is declined."
@@ -3370,10 +3415,34 @@
    "paths": [
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "The server's segment block boundaries are not modeled, so the batch is declined rather than answered over blocks that might differ."
+  },
+  {
+   "id": "partitions-block-grouping",
+   "class": "batch-precedence",
+   "trigger": "a body that spans more partitions than the limit, read in more than one chunk of max_insert_block_size rows, no chunk of which exceeds the limit alone",
+   "code": {
+    "chs": "-2",
+    "ch": []
+   },
+   "lines": [
+    "26.3",
+    "26.8",
+    "26.9",
+    "26.10"
+   ],
+   "paths": [
+    "chs_filter_eval_body",
+    "chs_filter_eval_block",
+    "chs_preview_batch",
+    "chs_preview_insert"
+   ],
+   "retirement": "none",
+   "description": "Whether an INSERT block exceeds the limit then depends on how the server squashes chunks into blocks, and the server caps that by its memory limit (measured: a server with a 1 GiB memory limit stored a body a larger server refused), so the body is declined rather than answered over one grouping; a chunk that alone exceeds the limit is refused (252) on every server."
   },
   {
    "id": "error-budget-reread",
@@ -3392,7 +3461,8 @@
    "paths": [
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "The result differs between the two readings, so the batch is declined."
@@ -3400,7 +3470,7 @@
   {
    "id": "parallel-segment-cut",
    "class": "batch-precedence",
-   "trigger": "a body one of whose parallel-parsing segments ends where the library cannot reproduce",
+   "trigger": "a body the server reads with one reader or in parallel-parsing segments by its CPU count, whose two reads answer it differently",
    "code": {
     "chs": "-2",
     "ch": []
@@ -3414,10 +3484,11 @@
    "paths": [
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
-   "description": "The server's segmentation is decided by its settings and CPU count, so the batch is declined."
+   "description": "max_parsing_threads is unset, so the server's CPU count decides whether it reads the body in segments, and the two reads answer differently (measured: a DEFAULT that throws for some rows is refused by the one-reader read and stored by the segmented one), so the batch is declined; a named max_parsing_threads decides it."
   },
   {
    "id": "parallel-segments-unformed",
@@ -3436,7 +3507,8 @@
    "paths": [
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "The server counts its error budget over those segments, so the batch is declined."
@@ -3459,7 +3531,8 @@
     "chs_schema_create",
     "chs_filter_eval_body",
     "chs_filter_eval_block",
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "The library declines rather than answer from a result it cannot explain; route the input to the server."
@@ -3501,6 +3574,7 @@
    "paths": [
     "chs_preview_row",
     "chs_preview_batch",
+    "chs_preview_insert",
     "chs_block_create",
     "chs_filter_eval_body",
     "chs_filter_eval_block"
@@ -3523,7 +3597,8 @@
     "26.10"
    ],
    "paths": [
-    "chs_preview_batch"
+    "chs_preview_batch",
+    "chs_preview_insert"
    ],
    "retirement": "none",
    "description": "The export has one column list, so a body that supplies a deferred column in some rows and leaves it to the server in others is declined; a body whose rows all supply it, or all leave it, exports."

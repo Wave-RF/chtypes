@@ -34,10 +34,10 @@ Take the code or reason a call returned, find the entry whose `class`, `paths` a
 
 ## Provenance and changes
 
-Produced by the artifact producer at its commit `4e122ef3`, generator `chtypes filter-declines generator`. The file has 168 entries over the lines 26.3, 26.8, 26.9 and 26.10.
+Produced by the artifact producer at its commit `37244d73`, generator `chtypes filter-declines generator`, the same bytes as at the source commit of the published dev build `20261106.162458`. The file has 169 entries over the lines 26.3, 26.8, 26.9 and 26.10.
 
 The sha256 of the file, computed by `scripts/abi-v2/check-declines.py --print-table` and checked by `--check`:
 
-- `declines.json`: `aa67e2a621d010898a91c86f89b13b494eb54df82948c608eeb4be2c6e0648a2`
+- `declines.json`: `ef8edf4e083eeba7170fd3f2f39a41067f1977bbf54629f56807e61cd78aae3e`
 
-The producer regenerates the catalog. A changed set of entries is a new copy here, with this hash updated in the same change.
+The producer regenerates the catalog. A changed set of entries is a new copy here, with this hash updated in the same change. When the producer publishes a build, this copy's sha256 is compared with the catalog at that build's source commit, and a difference is a new copy here. Until the producer records the catalog's sha256 in the build's signed metadata, the comparison is made by hand; then `check-declines.py` makes it.

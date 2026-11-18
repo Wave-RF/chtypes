@@ -64,7 +64,7 @@ on:
   merge_group:
     types: [checks_requested]
   push:
-    branches: [main]
+    branches: [v2]
   workflow_dispatch:
 
 permissions:
@@ -104,7 +104,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 2
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       # Every binding used to carry its own copy of ClickHouse's identifier
       # quoting, and all four were wrong the same way (#52). The copies are
       # deleted; chs_back_quote, chs_back_quote_if_needed and chs_quote_string
@@ -337,7 +337,7 @@ jobs:
       # `artifacts` both go red for a reason that has nothing to do with the
       # SDK, and no pull request can land until storage frees days later.
       # A genuine upload failure is still visible: the step itself shows red.
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         continue-on-error: true
         with:
@@ -352,7 +352,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       # The release workflow's PEP 440 mapping (python/v2.0.0-dev.N is
       # 2.0.0.devN), here so a pull request runs it; it needs `packaging`, so
       # it runs where uv is, not in `checks`.
@@ -391,13 +391,13 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           # No version here on purpose: pnpm/action-setup reads packageManager
           # from ts/package.json, so the pin lives in exactly one place. It used
           # to be pinned twice and the two had already drifted.
           package_json_file: ts/package.json
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
@@ -481,11 +481,11 @@ jobs:
         run: |
           go -C examples/go vet ./...
           go -C examples/go build ./...
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           package_json_file: ts/package.json
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
@@ -544,13 +544,13 @@ jobs:
         with:
           go-version-file: go/go.mod
           cache: false          # the module is stdlib-only: there is no go.sum to cache
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           # No version here on purpose: pnpm/action-setup reads packageManager
           # from ts/package.json, so the pin lives in exactly one place.
           package_json_file: ts/package.json
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
@@ -575,8 +575,8 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
         run: scripts/api-surface.py run --base "$BASE_SHA" --head "$HEAD_SHA" --tools "$HOME/.cache/chtypes/api-surface"
-      - name: save the tool cache (push to main only, and only on an exact miss)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.api-tools.outputs.cache-hit != 'true'
+      - name: save the tool cache (push to v2 only, and only on an exact miss)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/v2' && steps.api-tools.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/chtypes/api-surface
@@ -609,11 +609,11 @@ jobs:
         with:
           go-version-file: go/go.mod
           cache: false
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           package_json_file: ts/package.json
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
@@ -638,7 +638,7 @@ jobs:
         run: scripts/parity-surface.py --check-issues
       # The four surfaces as read, for a reviewer checking an allowlist entry.
       # continue-on-error for the same reason as the go job's upload above.
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         continue-on-error: true
         with:
@@ -697,13 +697,13 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           # No version here on purpose: pnpm/action-setup reads packageManager
           # from ts/package.json, so the pin lives in exactly one place. It used
           # to be pinned twice and the two had already drifted.
           package_json_file: ts/package.json
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
       - name: the ABI major this job lints, derived and asserted against the ts binding's compiled-in layer
@@ -788,13 +788,13 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           # No version here on purpose: pnpm/action-setup reads packageManager
           # from ts/package.json, so the pin lives in exactly one place. It used
           # to be pinned twice and the two had already drifted.
           package_json_file: ts/package.json
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
       - name: markdownlint-cli2 (.markdownlint.json)
@@ -841,7 +841,7 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
           cd go && "$(go env GOPATH)/bin/govulncheck" ./...
 
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       - name: "pip-audit (python) — python 3.12, pinned: pip-audit's own venv bootstrap is flaky on very new interpreters"
         id: pip-audit
         continue-on-error: true
@@ -850,13 +850,13 @@ jobs:
           uv export --no-hashes --group dev | grep -v '^-e ' > /tmp/requirements-audit.txt
           uvx --python 3.12 pip-audit==2.10.1 -r /tmp/requirements-audit.txt
 
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           # No version here on purpose: pnpm/action-setup reads packageManager
           # from ts/package.json, so the pin lives in exactly one place. It used
           # to be pinned twice and the two had already drifted.
           package_json_file: ts/package.json
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
