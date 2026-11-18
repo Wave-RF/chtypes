@@ -207,7 +207,7 @@ A body parsed once under a schema, for evaluating many filters without parsing a
 
 #### `chs_cancel`
 
-A cancel token: a one-shot flag a caller fires, from any thread, to stop the calls that were given its id. `chs_cancel_create` returns the token and its id (`c` and 16 lowercase hexadecimal digits); a call names the id in its options document (`insert_options.cancel`, `schema_options.cancel`). The token holds nothing. The library keeps a registry from id to token: a call resolves the id at entry and holds a reference until it returns, so `chs_cancel_free` while a call runs is safe (the one exception to `handle_serial`), and an id that names no live token is `CHS_INVALID_ARGUMENT`, never a silent no-cancel. A token is one-shot: there is no reset, a caller makes a new one. One token may cover many calls, which is how a request's calls are canceled together.
+A cancel token: a one-shot flag a caller fires, from any thread, to stop the calls that were given its id. `chs_cancel_create` returns the token and its id (`c` and 16 lowercase hexadecimal digits); a call names the id in its options document (`insert_options.cancel`, `schema_options.cancel`). The token holds nothing. The library keeps a registry from id to token: a call resolves the id when it reads its options, and holds a reference from then until it returns. Free a token only after every call that names it has returned. A `chs_cancel_free` that races a call's start is the caller's race, with a defined outcome (the one exception to `handle_serial`): the call either runs with the token, and is canceled or completes, or answers `CHS_INVALID_ARGUMENT` because the id names no live token. It is never undefined behavior or a wrong answer. An id that names no live token is always `CHS_INVALID_ARGUMENT`, never a silent no-cancel. A token is one-shot: there is no reset, a caller makes a new one. One token may cover many calls, which is how a request's calls are canceled together.
 
 What a cancel does:
 
@@ -2742,6 +2742,6 @@ CHS_API void chs_cancel_free(chs_cancel *token);
 - Class `api`, thread `handle_serial`, init `any`, FIRM.
 - `token`: handle, `chs_cancel`, nullable.
 
-Releases the caller's reference to a token. Freeing NULL does nothing. Safe while calls that resolved the token's id are running: each holds its own reference until it returns.
+Releases the caller's reference to a token. Freeing NULL does nothing. Free a token only after every call that names it has returned. A call that already resolved the id keeps its own reference until it returns; a free that races a call's start leaves that call either running with the token or answering `CHS_INVALID_ARGUMENT`, never undefined behavior (`chs_cancel`).
 
 <!-- END GENERATED: abi-v2 -->
