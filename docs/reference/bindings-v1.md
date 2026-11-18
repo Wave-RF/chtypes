@@ -505,21 +505,22 @@ A column whose DEFAULT calls one of the random or UUID generators this build adm
 
 `insert` (ABI v2) returns the whole body's answer and nothing per row. Every field has the meaning the field of the same name has in `BatchResult`; a refusal or decline is a result, never an error.
 
-| field                     | from                                                                                                                                | type                     |
-| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
-| `outcome`                 | `outcome`, final                                                                                                                    | `Outcome`                |
-| `err_code`, `err_msg`     | `code`, `err` (rule 5)                                                                                                              | int32, bytes             |
-| `reason`                  | `reason`: the catalog id of a declined call                                                                                         | optional ASCII text      |
-| `refused_at`              | `refused_at`: where a refusal or decline sits                                                                                       | optional `RefusalSite`   |
-| `rows_read`               | `rows_read`                                                                                                                         | unsigned 64-bit          |
-| `rows_skipped`            | `rows_skipped`                                                                                                                      | unsigned 64-bit          |
-| `rows_passed`, `rows_cut` | `rows_passed`, `rows_cut`, present exactly when a filter was attached                                                               | optional unsigned 64-bit |
-| `rows_undecided`          | `rows_undecided`: the rows counted inside `rows_cut` whose verdict was a decline                                                    | optional unsigned 64-bit |
-| `unsupported_settings`    | `unsupported_settings`, name objects (rule 5)                                                                                       | list of bytes            |
-| `framing`                 | `framing`: what the reader decided about the body's framing, as in `BatchResult`                                                    | optional `Framing`       |
-| `partition_count`         | `partition_count`, present on a schema with a partition key                                                                         | optional unsigned 64-bit |
-| `export_columns`          | `export_columns`: the output's one positional column list, present exactly when an output was asked for and the outcome is accepted | list of bytes            |
-| `output`                  | the output buffer: present exactly when the outcome is accepted and an output format was asked for, decided from the outcome        | optional bytes           |
+| field                     | from                                                                                                                                                             | type                                         |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| `outcome`                 | `outcome`, final                                                                                                                                                 | `Outcome`                                    |
+| `err_code`, `err_msg`     | `code`, `err` (rule 5)                                                                                                                                           | int32, bytes                                 |
+| `reason`                  | `reason`: the catalog id of a declined call                                                                                                                      | optional ASCII text                          |
+| `refused_at`              | `refused_at`: where a refusal or decline sits                                                                                                                    | optional `RefusalSite`                       |
+| `rows_read`               | `rows_read`                                                                                                                                                      | unsigned 64-bit                              |
+| `rows_skipped`            | `rows_skipped`                                                                                                                                                   | unsigned 64-bit                              |
+| `rows_passed`, `rows_cut` | `rows_passed`, `rows_cut`, present exactly when a filter was attached                                                                                            | optional unsigned 64-bit                     |
+| `rows_undecided`          | `rows_undecided`: the rows counted inside `rows_cut` whose verdict was a decline (counted by reason in `rows_undecided_reasons`)                                 | optional unsigned 64-bit                     |
+| `rows_undecided_reasons`  | `rows_undecided_reasons`: the `rows_undecided` rows counted by the catalog id of each row's reason, each count at least 1; `{}` when none, absent with no filter | optional map of reason id to unsigned 64-bit |
+| `unsupported_settings`    | `unsupported_settings`, name objects (rule 5)                                                                                                                    | list of bytes                                |
+| `framing`                 | `framing`: what the reader decided about the body's framing, as in `BatchResult`                                                                                 | optional `Framing`                           |
+| `partition_count`         | `partition_count`, present on a schema with a partition key                                                                                                      | optional unsigned 64-bit                     |
+| `export_columns`          | `export_columns`: the output's one positional column list, present exactly when an output was asked for and the outcome is accepted                              | list of bytes                                |
+| `output`                  | the output buffer: present exactly when the outcome is accepted and an output format was asked for, decided from the outcome                                     | optional bytes                               |
 
 The insert call's filter is the INSERT's WHERE: only the rows it passes are output, and an error verdict on a row fails the whole call as a refusal.
 

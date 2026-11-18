@@ -36,6 +36,7 @@ import {
   decodeDiscovery,
   decodeErrorCodes,
   decodeFilterResult,
+  decodeInsert,
   decodeLiveHandles,
   decodeRow,
   decodeSchemaDescription,
@@ -641,5 +642,31 @@ describe('spec batch 2: value_src gains default_deferred and default_override', 
     );
     expect(r.columns.map((c) => c.isStored)).toEqual([false, true]);
     expect(r.values.map((c) => c.column.toString())).toEqual(['b']);
+  });
+});
+
+describe('the insert_result document: rows_undecided_reasons', () => {
+  const body = (extra: Record<string, unknown>): Buffer => enc({ outcome: 'accepted', code: 0, rows_read: 3, ...extra });
+
+  it('reads a two-reason map one to one, keys verbatim, in the document order', () => {
+    const r = decodeInsert(body({ rows_undecided: 3, rows_undecided_reasons: { 'admission-memory-budget': 1, 'drawn-value': 2 } }), undefined);
+    expect(r.rowsUndecidedReasons).toBeInstanceOf(Map);
+    expect([...(r.rowsUndecidedReasons ?? [])]).toEqual([
+      ['admission-memory-budget', 1],
+      ['drawn-value', 2],
+    ]);
+  });
+
+  it('keeps {} (a filter, nothing undecided) apart from absent (no filter)', () => {
+    const empty = decodeInsert(body({ rows_undecided: 0, rows_undecided_reasons: {} }), undefined);
+    expect(empty.rowsUndecidedReasons).toBeInstanceOf(Map);
+    expect(empty.rowsUndecidedReasons?.size).toBe(0);
+    expect(decodeInsert(body({}), undefined).rowsUndecidedReasons).toBeUndefined();
+  });
+
+  it('a wrong type, a wrong value type and a count below 1 are an InternalError', () => {
+    for (const bad of [[1], 'x', { 'drawn-value': 'x' }, { 'drawn-value': 1.5 }, { 'drawn-value': 0 }, { 'drawn-value': -1 }, { 'drawn-value': null }]) {
+      expect(() => decodeInsert(body({ rows_undecided_reasons: bad }), undefined)).toThrow(InternalError);
+    }
   });
 });

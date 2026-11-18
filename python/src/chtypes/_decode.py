@@ -26,6 +26,7 @@ import base64
 import binascii
 import json
 from collections.abc import Callable, Mapping
+from types import MappingProxyType
 from typing import Any
 
 from ._abi2._vocab import (
@@ -155,6 +156,25 @@ def _u64(obj: Mapping[str, Any], key: str, where: str) -> int:
 
 def _opt_u64(obj: Mapping[str, Any], key: str, where: str) -> int | None:
     return _u64(obj, key, where) if obj.get(key) is not None else None
+
+
+def _opt_reason_counts(obj: Mapping[str, Any], key: str, where: str) -> Mapping[str, int] | None:
+    """An object of counts keyed by decline catalog id, each an integer of at
+    least 1: None when absent, a read-only mapping (empty for `{}`) when present.
+    Keys are kept verbatim; as with every other id member they are not checked
+    against the catalog pattern here."""
+    value = obj.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise _wrong(where, key, "an object", value)
+    out: dict[str, int] = {}
+    for reason, count in value.items():
+        n = _u64(value, reason, f"{where}.{key}")
+        if n < 1:
+            raise _wrong(f"{where}.{key}", reason, "an integer of at least 1", count)
+        out[reason] = n
+    return MappingProxyType(out)
 
 
 def _bool(obj: Mapping[str, Any], key: str, where: str, default: bool = False) -> bool:
@@ -512,6 +532,7 @@ def decode_insert_result(raw: bytes, output: bytes | None) -> InsertResult:
         rows_passed=_opt_u64(obj, "rows_passed", where),
         rows_cut=_opt_u64(obj, "rows_cut", where),
         rows_undecided=_opt_u64(obj, "rows_undecided", where),
+        rows_undecided_reasons=_opt_reason_counts(obj, "rows_undecided_reasons", where),
         partition_count=_opt_u64(obj, "partition_count", where),
         unsupported_settings=_name_list(obj, "unsupported_settings", where),
         framing=None

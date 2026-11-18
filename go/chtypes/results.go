@@ -245,10 +245,18 @@ type InsertResult struct {
 	RowsSkipped uint64
 	// RowsPassed (the t rows, which are the output's rows), RowsCut (the f
 	// rows and the d rows) and RowsUndecided (the d rows, counted inside
-	// RowsCut) are present exactly when a filter was attached; nil otherwise.
+	// RowsCut, and itemized by RowsUndecidedReasons) are present exactly when a filter
+	// was attached; nil otherwise.
 	RowsPassed, RowsCut, RowsUndecided *uint64
-	UnsupportedSettings                []string
-	Framing                            *Framing
+	// RowsUndecidedReasons counts the RowsUndecided rows by the catalog id of
+	// each row's reason (the id the batch writes as the row's VerdictReason),
+	// each count at least 1 and the counts summing to RowsUndecided. It is
+	// present with a filter, empty (non-nil) when no row is undecided and for
+	// every outcome but accepted; nil with no filter. It lets a caller of this
+	// call alone tell why rows were withheld.
+	RowsUndecidedReasons map[string]uint64
+	UnsupportedSettings  []string
+	Framing              *Framing
 	// PartitionCount is present on a schema with a partition key; nil otherwise.
 	PartitionCount *uint64
 	// ExportColumns is the output's positional column list: present exactly

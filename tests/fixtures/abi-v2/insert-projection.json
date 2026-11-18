@@ -198,7 +198,10 @@
     ],
     "rows_passed": 2,
     "rows_cut": 2,
-    "rows_undecided": 1
+    "rows_undecided": 1,
+    "rows_undecided_reasons": {
+     "filter-clock-read": 1
+    }
    },
    "insert_rows_b64": "WzEsImFscGhhIl0KWzQsImRlbHRhIl0K",
    "expect": "equal"
@@ -309,7 +312,10 @@
     ],
     "rows_passed": 2,
     "rows_cut": 2,
-    "rows_undecided": 1
+    "rows_undecided": 1,
+    "rows_undecided_reasons": {
+     "filter-clock-read": 1
+    }
    },
    "insert_rows_b64": "MiwiYnJhdm8iCjQsImRlbHRhIgo=",
    "expect": "equal"
@@ -743,7 +749,10 @@
     },
     "rows_passed": 1,
     "rows_cut": 2,
-    "rows_undecided": 1
+    "rows_undecided": 1,
+    "rows_undecided_reasons": {
+     "filter-clock-read": 1
+    }
    },
    "insert_rows_b64": null,
    "expect": "equal"
@@ -929,7 +938,10 @@
     ],
     "rows_passed": 2,
     "rows_cut": 2,
-    "rows_undecided": 1
+    "rows_undecided": 1,
+    "rows_undecided_reasons": {
+     "filter-clock-read": 1
+    }
    },
    "insert_rows_b64": "AgIBbgVVSW50OAEEAXMGU3RyaW5nBWFscGhhBWRlbHRh",
    "expect": "equal"
@@ -1021,7 +1033,8 @@
     "refused_at": "row",
     "rows_passed": 0,
     "rows_cut": 0,
-    "rows_undecided": 0
+    "rows_undecided": 0,
+    "rows_undecided_reasons": {}
    },
    "insert_rows_b64": null,
    "expect": "equal"
@@ -1125,7 +1138,8 @@
     "refused_at": "row",
     "rows_passed": 0,
     "rows_cut": 0,
-    "rows_undecided": 0
+    "rows_undecided": 0,
+    "rows_undecided_reasons": {}
    },
    "insert_rows_b64": null,
    "expect": "equal"
@@ -1275,6 +1289,7 @@
     "rows_passed": 0,
     "rows_cut": 0,
     "rows_undecided": 0,
+    "rows_undecided_reasons": {},
     "refused_at": "body_step",
     "reason": "export-computed-value-not-carried"
    },
@@ -1356,7 +1371,8 @@
     "refused_at": "row",
     "rows_passed": 0,
     "rows_cut": 0,
-    "rows_undecided": 0
+    "rows_undecided": 0,
+    "rows_undecided_reasons": {}
    },
    "insert_rows_b64": null,
    "expect": "equal"
@@ -1431,7 +1447,8 @@
     "refused_at": "row",
     "rows_passed": 0,
     "rows_cut": 0,
-    "rows_undecided": 0
+    "rows_undecided": 0,
+    "rows_undecided_reasons": {}
    },
    "insert_rows_b64": null,
    "expect": "equal"
@@ -1720,7 +1737,10 @@
     },
     "rows_passed": 2,
     "rows_cut": 2,
-    "rows_undecided": 1
+    "rows_undecided": 1,
+    "rows_undecided_reasons": {
+     "filter-clock-read": 1
+    }
    },
    "insert_rows_b64": "WzEsImFscGhhIl0KWzQsImRlbHRhIl0K",
    "expect": {
@@ -1833,7 +1853,10 @@
     ],
     "rows_passed": 2,
     "rows_cut": 2,
-    "rows_undecided": 2
+    "rows_undecided": 2,
+    "rows_undecided_reasons": {
+     "filter-clock-read": 1
+    }
    },
    "insert_rows_b64": "WzEsImFscGhhIl0KWzQsImRlbHRhIl0K",
    "expect": {
@@ -1946,7 +1969,10 @@
     ],
     "rows_passed": 2,
     "rows_cut": 1,
-    "rows_undecided": 1
+    "rows_undecided": 1,
+    "rows_undecided_reasons": {
+     "filter-clock-read": 1
+    }
    },
    "insert_rows_b64": "WzEsImFscGhhIl0KWzQsImRlbHRhIl0K",
    "expect": {
@@ -2195,7 +2221,10 @@
     ],
     "rows_passed": 2,
     "rows_cut": 2,
-    "rows_undecided": 1
+    "rows_undecided": 1,
+    "rows_undecided_reasons": {
+     "filter-clock-read": 1
+    }
    },
    "insert_rows_b64": "WzEtImFscGhhIl0KWzQsImRlbHRhIl0K",
    "expect": {
@@ -2308,7 +2337,10 @@
     ],
     "rows_passed": 2,
     "rows_cut": 2,
-    "rows_undecided": 1
+    "rows_undecided": 1,
+    "rows_undecided_reasons": {
+     "filter-clock-read": 1
+    }
    },
    "insert_rows_b64": "WzEsImFscGhhIl0KWzQsImRlbHRhIl0KWzIsImJyYXZvIl0K",
    "expect": {
@@ -2421,7 +2453,10 @@
     ],
     "rows_passed": 2,
     "rows_cut": 2,
-    "rows_undecided": 1
+    "rows_undecided": 1,
+    "rows_undecided_reasons": {
+     "filter-clock-read": 1
+    }
    },
    "insert_rows_b64": "WzEsImFscGhhIl0KWzQsImRlbHRhIl0KWzMsImNoYXJsaWUiXQo=",
    "expect": {
@@ -2534,7 +2569,10 @@
     ],
     "rows_passed": 2,
     "rows_cut": 2,
-    "rows_undecided": 1
+    "rows_undecided": 1,
+    "rows_undecided_reasons": {
+     "filter-clock-read": 1
+    }
    },
    "insert_rows_b64": "MiwiYnJhdm8iCg==",
    "expect": {
@@ -2641,7 +2679,10 @@
     ],
     "rows_passed": 2,
     "rows_cut": 2,
-    "rows_undecided": 1
+    "rows_undecided": 1,
+    "rows_undecided_reasons": {
+     "filter-clock-read": 1
+    }
    },
    "insert_rows_b64": "AgIBbgVVSW50OAEEAXMGU3RyaW5nBWFscGhhBWRlbHRg",
    "expect": {
@@ -2716,7 +2757,10 @@
     },
     "rows_passed": 1,
     "rows_cut": 2,
-    "rows_undecided": 1
+    "rows_undecided": 1,
+    "rows_undecided_reasons": {
+     "filter-clock-read": 1
+    }
    },
    "insert_rows_b64": "",
    "expect": {
@@ -2902,7 +2946,8 @@
     "refused_at": "row",
     "rows_passed": 0,
     "rows_cut": 0,
-    "rows_undecided": 0
+    "rows_undecided": 0,
+    "rows_undecided_reasons": {}
    },
    "insert_rows_b64": null,
    "expect": {
@@ -2996,7 +3041,8 @@
     "refused_at": "row",
     "rows_passed": 0,
     "rows_cut": 0,
-    "rows_undecided": 0
+    "rows_undecided": 0,
+    "rows_undecided_reasons": {}
    },
    "insert_rows_b64": null,
    "expect": {
@@ -3102,7 +3148,8 @@
     "refused_at": "row",
     "rows_passed": 0,
     "rows_cut": 0,
-    "rows_undecided": 0
+    "rows_undecided": 0,
+    "rows_undecided_reasons": {}
    },
    "insert_rows_b64": null,
    "expect": {
@@ -3196,7 +3243,8 @@
     "refused_at": "row",
     "rows_passed": 2,
     "rows_cut": 0,
-    "rows_undecided": 0
+    "rows_undecided": 0,
+    "rows_undecided_reasons": {}
    },
    "insert_rows_b64": null,
    "expect": {
@@ -3290,7 +3338,8 @@
     "refused_at": "row",
     "rows_passed": 0,
     "rows_cut": 0,
-    "rows_undecided": 1
+    "rows_undecided": 1,
+    "rows_undecided_reasons": {}
    },
    "insert_rows_b64": null,
    "expect": {
@@ -3384,7 +3433,8 @@
     "refused_at": "row",
     "rows_passed": 0,
     "rows_cut": 0,
-    "rows_undecided": 0
+    "rows_undecided": 0,
+    "rows_undecided_reasons": {}
    },
    "insert_rows_b64": "WzEsImFscGhhIl0KWzMsImNoYXJsaWUiXQo=",
    "expect": {
@@ -3478,7 +3528,8 @@
     "refused_at": "body_step",
     "rows_passed": 0,
     "rows_cut": 0,
-    "rows_undecided": 0
+    "rows_undecided": 0,
+    "rows_undecided_reasons": {}
    },
    "insert_rows_b64": null,
    "expect": {
@@ -3572,7 +3623,8 @@
     "refused_at": "row",
     "rows_passed": 0,
     "rows_cut": 0,
-    "rows_undecided": 0
+    "rows_undecided": 0,
+    "rows_undecided_reasons": {}
    },
    "insert_rows_b64": null,
    "expect": {
@@ -3790,6 +3842,7 @@
     "rows_passed": 2,
     "rows_cut": 2,
     "rows_undecided": 1,
+    "rows_undecided_reasons": {},
     "refused_at": "body_step",
     "reason": "export-computed-value-not-carried"
    },
@@ -3849,6 +3902,1257 @@
    "insert_rows_b64": null,
    "expect": {
     "violates": "shared_members"
+   }
+  },
+  {
+   "id": "equal-undecided-reasons-two-reasons-in-key-order",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 15
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 15,
+       "len": 15
+      },
+      "verdict": "f",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 30,
+       "len": 17
+      },
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_reason": "drawn-value",
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 47,
+       "len": 15
+      },
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_reason": "admission-memory-budget",
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 62,
+       "len": 15
+      },
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_reason": "drawn-value",
+      "verdict_err": "declined"
+     }
+    ],
+    "rows_read": 5,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "row_spans": [
+     {
+      "off": 0,
+      "len": 12
+     },
+     null,
+     null,
+     null,
+     null
+    ],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 1,
+    "rows_cut": 4
+   },
+   "batch_export_b64": "WzEsImFscGhhIl0K",
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 5,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 1,
+    "rows_cut": 4,
+    "rows_undecided": 3,
+    "rows_undecided_reasons": {
+     "admission-memory-budget": 1,
+     "drawn-value": 2
+    }
+   },
+   "insert_rows_b64": "WzEsImFscGhhIl0K",
+   "expect": "equal"
+  },
+  {
+   "id": "equal-undecided-reasons-single-reason",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 15
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 15,
+       "len": 15
+      },
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_reason": "drawn-value",
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 30,
+       "len": 17
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "row_spans": [
+     {
+      "off": 0,
+      "len": 12
+     },
+     null,
+     {
+      "off": 12,
+      "len": 12
+     }
+    ],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 1
+   },
+   "batch_export_b64": "WzEsImFscGhhIl0KWzMsImFscGhhIl0K",
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 1,
+    "rows_undecided": 1,
+    "rows_undecided_reasons": {
+     "drawn-value": 1
+    }
+   },
+   "insert_rows_b64": "WzEsImFscGhhIl0KWzMsImFscGhhIl0K",
+   "expect": "equal"
+  },
+  {
+   "id": "equal-undecided-reasons-filter-none-undecided-is-empty",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 15
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 15,
+       "len": 15
+      },
+      "verdict": "f",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 30,
+       "len": 17
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "row_spans": [
+     {
+      "off": 0,
+      "len": 12
+     },
+     null,
+     {
+      "off": 12,
+      "len": 12
+     }
+    ],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 1
+   },
+   "batch_export_b64": "WzEsImFscGhhIl0KWzMsImFscGhhIl0K",
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 1,
+    "rows_undecided": 0,
+    "rows_undecided_reasons": {}
+   },
+   "insert_rows_b64": "WzEsImFscGhhIl0KWzMsImFscGhhIl0K",
+   "expect": "equal"
+  },
+  {
+   "id": "equal-undecided-reasons-no-filter-member-absent",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 15
+      }
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 15,
+       "len": 15
+      }
+     }
+    ],
+    "rows_read": 2,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "row_spans": [
+     {
+      "off": 0,
+      "len": 12
+     },
+     {
+      "off": 12,
+      "len": 12
+     }
+    ],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ]
+   },
+   "batch_export_b64": "WzEsImFscGhhIl0KWzIsImFscGhhIl0K",
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 2,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ]
+   },
+   "insert_rows_b64": "WzEsImFscGhhIl0KWzIsImFscGhhIl0K",
+   "expect": "equal"
+  },
+  {
+   "id": "red-undecided-reasons-wrong-count",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 15
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 15,
+       "len": 15
+      },
+      "verdict": "f",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 30,
+       "len": 17
+      },
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_reason": "drawn-value",
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 47,
+       "len": 15
+      },
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_reason": "admission-memory-budget",
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 62,
+       "len": 15
+      },
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_reason": "drawn-value",
+      "verdict_err": "declined"
+     }
+    ],
+    "rows_read": 5,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "row_spans": [
+     {
+      "off": 0,
+      "len": 12
+     },
+     null,
+     null,
+     null,
+     null
+    ],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 1,
+    "rows_cut": 4
+   },
+   "batch_export_b64": "WzEsImFscGhhIl0K",
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 5,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 1,
+    "rows_cut": 4,
+    "rows_undecided": 3,
+    "rows_undecided_reasons": {
+     "admission-memory-budget": 2,
+     "drawn-value": 1
+    }
+   },
+   "insert_rows_b64": "WzEsImFscGhhIl0K",
+   "expect": {
+    "violates": "counts"
+   }
+  },
+  {
+   "id": "red-undecided-reasons-missing-key",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 15
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 15,
+       "len": 15
+      },
+      "verdict": "f",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 30,
+       "len": 17
+      },
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_reason": "drawn-value",
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 47,
+       "len": 15
+      },
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_reason": "admission-memory-budget",
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 62,
+       "len": 15
+      },
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_reason": "drawn-value",
+      "verdict_err": "declined"
+     }
+    ],
+    "rows_read": 5,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "row_spans": [
+     {
+      "off": 0,
+      "len": 12
+     },
+     null,
+     null,
+     null,
+     null
+    ],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 1,
+    "rows_cut": 4
+   },
+   "batch_export_b64": "WzEsImFscGhhIl0K",
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 5,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 1,
+    "rows_cut": 4,
+    "rows_undecided": 3,
+    "rows_undecided_reasons": {
+     "drawn-value": 2
+    }
+   },
+   "insert_rows_b64": "WzEsImFscGhhIl0K",
+   "expect": {
+    "violates": "counts"
+   }
+  },
+  {
+   "id": "red-undecided-reasons-extra-key",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 15
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 15,
+       "len": 15
+      },
+      "verdict": "f",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 30,
+       "len": 17
+      },
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_reason": "drawn-value",
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 47,
+       "len": 15
+      },
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_reason": "admission-memory-budget",
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 62,
+       "len": 15
+      },
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_reason": "drawn-value",
+      "verdict_err": "declined"
+     }
+    ],
+    "rows_read": 5,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "row_spans": [
+     {
+      "off": 0,
+      "len": 12
+     },
+     null,
+     null,
+     null,
+     null
+    ],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 1,
+    "rows_cut": 4
+   },
+   "batch_export_b64": "WzEsImFscGhhIl0K",
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 5,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 1,
+    "rows_cut": 4,
+    "rows_undecided": 3,
+    "rows_undecided_reasons": {
+     "admission-memory-budget": 1,
+     "call-memory-budget": 1,
+     "drawn-value": 2
+    }
+   },
+   "insert_rows_b64": "WzEsImFscGhhIl0K",
+   "expect": {
+    "violates": "counts"
+   }
+  },
+  {
+   "id": "red-undecided-reasons-absent-with-a-filter",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 15
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 15,
+       "len": 15
+      },
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_reason": "drawn-value",
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 30,
+       "len": 17
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "row_spans": [
+     {
+      "off": 0,
+      "len": 12
+     },
+     null,
+     {
+      "off": 12,
+      "len": 12
+     }
+    ],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 1
+   },
+   "batch_export_b64": "WzEsImFscGhhIl0KWzMsImFscGhhIl0K",
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 1,
+    "rows_undecided": 1
+   },
+   "insert_rows_b64": "WzEsImFscGhhIl0KWzMsImFscGhhIl0K",
+   "expect": {
+    "violates": "counts"
+   }
+  },
+  {
+   "id": "red-undecided-reasons-present-with-no-filter",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 15
+      }
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 15,
+       "len": 15
+      }
+     }
+    ],
+    "rows_read": 2,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "row_spans": [
+     {
+      "off": 0,
+      "len": 12
+     },
+     {
+      "off": 12,
+      "len": 12
+     }
+    ],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ]
+   },
+   "batch_export_b64": "WzEsImFscGhhIl0KWzIsImFscGhhIl0K",
+   "insert": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows_read": 2,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_undecided_reasons": {}
+   },
+   "insert_rows_b64": "WzEsImFscGhhIl0KWzIsImFscGhhIl0K",
+   "expect": {
+    "violates": "counts"
+   }
+  },
+  {
+   "id": "red-undecided-reasons-not-empty-on-a-not-accepted-outcome",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "rejected",
+    "code": 27,
+    "err": "Cannot parse input: expected ',' before: ']'",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 10
+      },
+      "verdict": "d",
+      "verdict_code": 0,
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 10,
+       "len": 10
+      },
+      "verdict": "d",
+      "verdict_code": 0,
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "rejected",
+      "code": 27,
+      "input_span": {
+       "off": 20,
+       "len": 6
+      },
+      "err": "Cannot parse input: expected ',' before: ']'",
+      "verdict": "d",
+      "verdict_code": 0,
+      "verdict_err": "declined"
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row",
+    "refused_row": 2,
+    "export_declined": "batch outcome is 'rejected'",
+    "export_declined_reason": "export-batch-not-accepted",
+    "rows_passed": 0,
+    "rows_cut": 0
+   },
+   "batch_export_b64": null,
+   "insert": {
+    "outcome": "rejected",
+    "code": 27,
+    "err": "Cannot parse input: expected ',' before: ']': (at row 3)\n",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row",
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "rows_undecided": 0,
+    "rows_undecided_reasons": {
+     "drawn-value": 1
+    }
+   },
+   "insert_rows_b64": null,
+   "expect": {
+    "violates": "counts"
+   }
+  },
+  {
+   "id": "red-e-row-undecided-reasons-not-empty",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 15
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 15,
+       "len": 15
+      },
+      "verdict": "e",
+      "verdict_code": 395,
+      "verdict_err": "Value passed to 'throwIf' function is non-zero"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 30,
+       "len": 17
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "row_spans": [
+     {
+      "off": 0,
+      "len": 12
+     },
+     null,
+     {
+      "off": 12,
+      "len": 14
+     }
+    ],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 0
+   },
+   "batch_export_b64": "WzEsImFscGhhIl0KWzMsImNoYXJsaWUiXQo=",
+   "insert": {
+    "outcome": "rejected",
+    "code": 395,
+    "err": "Value passed to 'throwIf' function is non-zero",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row",
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "rows_undecided": 0,
+    "rows_undecided_reasons": {
+     "drawn-value": 1
+    }
+   },
+   "insert_rows_b64": null,
+   "expect": {
+    "violates": "e_row_rejects"
+   }
+  },
+  {
+   "id": "red-declined-output-undecided-reasons-not-empty",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 13
+      },
+      "verdict": "f",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 13,
+       "len": 13
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 26,
+       "len": 15
+      },
+      "verdict": "d",
+      "verdict_code": -2,
+      "verdict_reason": "filter-clock-read",
+      "verdict_err": "declined"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 41,
+       "len": 13
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     }
+    ],
+    "rows_read": 4,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "rows_passed": 2,
+    "rows_cut": 2,
+    "export_declined": "a column's value is computed and not carried",
+    "export_declined_reason": "export-computed-value-not-carried"
+   },
+   "batch_export_b64": null,
+   "insert": {
+    "outcome": "unsupported",
+    "code": -2,
+    "err": "a column's value is computed and not carried",
+    "rows_read": 4,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "rows_undecided": 0,
+    "rows_undecided_reasons": {
+     "drawn-value": 1
+    },
+    "refused_at": "body_step",
+    "reason": "export-computed-value-not-carried"
+   },
+   "insert_rows_b64": null,
+   "expect": {
+    "violates": "export_decline_is_call_decline"
    }
   }
  ]

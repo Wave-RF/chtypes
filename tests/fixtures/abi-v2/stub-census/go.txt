@@ -51,6 +51,7 @@ github.com/wave-rf/chtypes/go/v2/chtypes TestDecodeErrorCodesAndLiveHandles
 github.com/wave-rf/chtypes/go/v2/chtypes TestDecodeFilterResult
 github.com/wave-rf/chtypes/go/v2/chtypes TestDecodeFilterResultRefusalMembers
 github.com/wave-rf/chtypes/go/v2/chtypes TestDecodeInsertResultEveryMember
+github.com/wave-rf/chtypes/go/v2/chtypes TestDecodeInsertResultRowsUndecidedReasons
 github.com/wave-rf/chtypes/go/v2/chtypes TestDecodeNameLists
 github.com/wave-rf/chtypes/go/v2/chtypes TestDecodeRow
 github.com/wave-rf/chtypes/go/v2/chtypes TestDecodeRowAbsentIsDefault
@@ -87,6 +88,10 @@ github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/equal-nativ
 github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/equal-native-no-filter
 github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/equal-not-accepted-batch-with-d-rows-counts-zero
 github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/equal-refused-err-suffix
+github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/equal-undecided-reasons-filter-none-undecided-is-empty
+github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/equal-undecided-reasons-no-filter-member-absent
+github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/equal-undecided-reasons-single-reason
+github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/equal-undecided-reasons-two-reasons-in-key-order
 github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/exception-generator-draw-bytes-differ
 github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/red-count-cut-wrong-in-both
 github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/red-count-undecided-wrong
@@ -94,6 +99,7 @@ github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/red-csv-out
 github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/red-declined-output-counts-carried-from-the-batch
 github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/red-declined-output-insert-stays-accepted
 github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/red-declined-output-reason-differs
+github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/red-declined-output-undecided-reasons-not-empty
 github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/red-e-row-code-from-a-later-e-row
 github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/red-e-row-counts-not-zero
 github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/red-e-row-insert-accepted
@@ -102,6 +108,7 @@ github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/red-e-row-o
 github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/red-e-row-refused-at-not-row
 github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/red-e-row-rows-read-differs
 github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/red-e-row-undecided-not-zero
+github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/red-e-row-undecided-reasons-not-empty
 github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/red-err-not-a-prefix
 github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/red-err-suffix-doubled-line-feed
 github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/red-err-suffix-not-clickhouses
@@ -114,6 +121,12 @@ github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/red-output-
 github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/red-output-missing-for-accepted
 github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/red-shared-member-missing-export-columns
 github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/red-shared-member-rows-read
+github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/red-undecided-reasons-absent-with-a-filter
+github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/red-undecided-reasons-extra-key
+github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/red-undecided-reasons-missing-key
+github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/red-undecided-reasons-not-empty-on-a-not-accepted-outcome
+github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/red-undecided-reasons-present-with-no-filter
+github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/red-undecided-reasons-wrong-count
 github.com/wave-rf/chtypes/go/v2/chtypes TestInternWordBounded
 github.com/wave-rf/chtypes/go/v2/chtypes TestJSONStringMatchesStdlib
 github.com/wave-rf/chtypes/go/v2/chtypes TestLoaderRefusalsAreOneFamilyWithFetch

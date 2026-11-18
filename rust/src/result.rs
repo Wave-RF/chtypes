@@ -329,9 +329,18 @@ pub struct InsertResult {
     /// attached.
     pub rows_cut: Option<u64>,
     /// The `d` rows, those the library declined to evaluate the WHERE for
-    /// (counted inside [`InsertResult::rows_cut`]); `None` with no filter
+    /// (counted inside [`InsertResult::rows_cut`], and by reason in
+    /// [`InsertResult::rows_undecided_reasons`]); `None` with no filter
     /// attached.
     pub rows_undecided: Option<u64>,
+    /// The [`InsertResult::rows_undecided`] rows counted by the catalog id of
+    /// each row's reason (the id the batch writes as the row's
+    /// `verdict_reason`): each count at least 1, the counts summing to
+    /// `rows_undecided`. `None` with no filter attached; `Some` of an empty map
+    /// when a filter is attached and no row is undecided, and for every outcome
+    /// but accepted. It lets a caller of this call alone tell why rows were
+    /// withheld.
+    pub rows_undecided_reasons: Option<BTreeMap<String, u64>>,
     /// The call's own settings the library declined (name objects), as bytes.
     /// Empty when it names none.
     pub unsupported_settings: Vec<RawText>,

@@ -267,8 +267,10 @@ export interface InsertResult {
   readonly rowsPassed: number | undefined;
   /** The rows withheld, the `f` rows and the `d` rows, from `rows_cut`; `undefined` when the call carried no filter. */
   readonly rowsCut: number | undefined;
-  /** The `d` rows, those the library declined to evaluate the WHERE for, counted inside `rowsCut`, from `rows_undecided`; `undefined` when the call carried no filter. An `e` row is in no count: it fails the call. */
+  /** The `d` rows, those the library declined to evaluate the WHERE for, counted inside `rowsCut` and by reason in `rowsUndecidedReasons`, from `rows_undecided`; `undefined` when the call carried no filter. An `e` row is in no count: it fails the call. */
   readonly rowsUndecided: number | undefined;
+  /** The `rowsUndecided` rows counted by the catalog id of each row's reason (the id the batch writes as the row's `verdictReason`), from `rows_undecided_reasons`: a `Map` in the document's key order, each count at least 1, the counts summing to `rowsUndecided`, so a caller of this call alone can tell why rows were withheld. Empty when a filter is attached and none is undecided (and for every outcome but `accepted`); `undefined` when the call carried no filter. */
+  readonly rowsUndecidedReasons: ReadonlyMap<string, number> | undefined;
   /** The call's own settings the library declined, from the top-level list; empty when it names none. */
   readonly unsupportedSettings: readonly Buffer[];
   readonly framing: Framing | undefined;
@@ -488,6 +490,20 @@ function intOr(doc: string, o: Obj, key: string, dflt: number): number {
 function optInt(doc: string, o: Obj, key: string): number | undefined {
   const v = o[key];
   return v === undefined || v === null ? undefined : intOf(doc, key, v);
+}
+
+/** An object of counts keyed by decline catalog id, each an integer of at least 1, as a `Map` in the document's key order: `undefined` when absent, an empty map for `{}`. Keys are kept verbatim; as with every other id member they are not checked against the catalog pattern here. */
+function optReasonCounts(doc: string, o: Obj, key: string): ReadonlyMap<string, number> | undefined {
+  const v = o[key];
+  if (v === undefined || v === null) return undefined;
+  const entries = asObject(doc, key, v);
+  const out = new Map<string, number>();
+  for (const [reason, count] of Object.entries(entries)) {
+    const n = intOf(doc, `${key}.${reason}`, count);
+    if (n < 1) bad(doc, `${key}.${reason}`, 'an integer of at least 1', count);
+    out.set(reason, n);
+  }
+  return out;
 }
 
 function decodeB64(doc: string, key: string, text: string): Buffer {
@@ -737,6 +753,7 @@ export function decodeInsert(bytes: Uint8Array, output: Buffer | undefined): Ins
     rowsPassed: optInt(doc, o, 'rows_passed'),
     rowsCut: optInt(doc, o, 'rows_cut'),
     rowsUndecided: optInt(doc, o, 'rows_undecided'),
+    rowsUndecidedReasons: optReasonCounts(doc, o, 'rows_undecided_reasons'),
     unsupportedSettings: bytesListOf(doc, o, 'unsupported_settings'),
     framing: o.framing === undefined ? undefined : framingOf(doc, o.framing),
     partitionCount: optInt(doc, o, 'partition_count'),

@@ -47,6 +47,11 @@ const violates = (rule: (typeof RULES)[number]): ProjectionVerdict => ({ kind: '
 // text with no trimming, and `$` without the m flag matches only at the very end in JavaScript.
 const SUFFIX = /^: \(at row [0-9]+\)\n$/;
 
+/** A present, empty map (the document's `{}`), never `undefined`. */
+function isEmptyMap(m: ReadonlyMap<string, number> | undefined): boolean {
+  return m !== undefined && m.size === 0;
+}
+
 function buffersEqual(a: readonly Buffer[], b: readonly Buffer[]): boolean {
   return a.length === b.length && a.every((x, i) => x.equals(b[i] as Buffer));
 }
@@ -94,6 +99,7 @@ export function projectionVerdict(
         ins.rowsPassed === 0 &&
         ins.rowsCut === 0 &&
         ins.rowsUndecided === 0 &&
+        isEmptyMap(ins.rowsUndecidedReasons) &&
         ins.rowsRead === batch.rowsRead &&
         out === undefined
       )
@@ -115,7 +121,7 @@ export function projectionVerdict(
         ins.exportColumns === undefined &&
         out === undefined &&
         ins.errMsg.equals(batch.exportDeclined) &&
-        (!filtered || (ins.rowsPassed === 0 && ins.rowsCut === 0 && ins.rowsUndecided === 0))
+        (!filtered || (ins.rowsPassed === 0 && ins.rowsCut === 0 && ins.rowsUndecided === 0 && isEmptyMap(ins.rowsUndecidedReasons)))
       )
     ) {
       return violates('export_decline_is_call_decline');
@@ -146,12 +152,37 @@ export function projectionVerdict(
   // counts
   const t = verdicts.filter((v) => v === 't').length;
   const f = verdicts.filter((v) => v === 'f').length;
-  const d = verdicts.filter((v) => v === 'd').length;
+  // The d rows are the accepted rows whose verdict is d, counted by verdict_reason (a record skipped under
+  // the error allowance is in rows_skipped only).
+  const dRows = rows.filter((r) => r.verdict === 'd' && r.outcome === 'accepted');
+  const d = dRows.length;
   if (filtered) {
     const good = batch.outcome === 'accepted' ? batch.rowsPassed === t && batch.rowsCut === f + d : batch.rowsPassed === 0 && batch.rowsCut === 0;
     const want = ins.outcome === 'accepted' ? [t, f + d, d] : [0, 0, 0];
-    if (!(good && ins.rowsPassed === want[0] && ins.rowsCut === want[1] && ins.rowsUndecided === want[2])) return violates('counts');
-  } else if (ins.rowsPassed !== undefined || ins.rowsCut !== undefined || ins.rowsUndecided !== undefined) {
+    const wantReasons = new Map<string, number>();
+    if (ins.outcome === 'accepted') {
+      for (const r of dRows) {
+        const k = r.verdictReason ?? '';
+        wantReasons.set(k, (wantReasons.get(k) ?? 0) + 1);
+      }
+    }
+    const got = ins.rowsUndecidedReasons;
+    const sum = got === undefined ? 0 : [...got.values()].reduce((a, b) => a + b, 0);
+    if (
+      !(
+        good &&
+        ins.rowsPassed === want[0] &&
+        ins.rowsCut === want[1] &&
+        ins.rowsUndecided === want[2] &&
+        got !== undefined &&
+        got.size === wantReasons.size &&
+        [...wantReasons].every(([k, n]) => got.get(k) === n) &&
+        sum === ins.rowsUndecided
+      )
+    ) {
+      return violates('counts');
+    }
+  } else if (ins.rowsPassed !== undefined || ins.rowsCut !== undefined || ins.rowsUndecided !== undefined || ins.rowsUndecidedReasons !== undefined) {
     return violates('counts');
   }
 

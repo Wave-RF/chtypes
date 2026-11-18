@@ -273,6 +273,36 @@ func (r *reader) u64Of(v any, path string) uint64 {
 	return u
 }
 
+// reasonCounts reads an object of counts keyed by decline catalog id, each
+// value an integer of at least 1: nil when absent, a non-nil map, even an empty
+// one, when present, so absent and {} stay apart. Keys are kept verbatim; like
+// every other id member (reason, verdict_reason) they are not checked against
+// the catalog pattern here.
+func (r *reader) reasonCounts(m map[string]any, key, path string) map[string]uint64 {
+	v := r.field(m, key)
+	if v == nil {
+		return nil
+	}
+	om := r.object(v, path+"."+key)
+	if om == nil {
+		return nil
+	}
+	out := make(map[string]uint64, len(om))
+	for k, e := range om {
+		p := path + "." + key + "." + k
+		n := r.u64Of(e, p)
+		if r.err != nil {
+			return nil
+		}
+		if n < 1 {
+			r.fail(p, "want an integer of at least 1, got %d", n)
+			return nil
+		}
+		out[k] = n
+	}
+	return out
+}
+
 // optU64 reads an unsigned 64-bit integer that may be absent: nil when absent.
 func (r *reader) optU64(m map[string]any, key, path string) *uint64 {
 	v := r.field(m, key)
@@ -726,21 +756,22 @@ func decodeInsertResult(raw []byte, output []byte) (InsertResult, error) {
 	r := &reader{doc: "insert_result"}
 	m := r.object(v, "$")
 	res := InsertResult{
-		Outcome:             parseBatchOutcome(r.text(m, "outcome", "$")),
-		ErrCode:             r.i32(m, "code", "$"),
-		ErrMsg:              r.bytes(m, "err", "$"),
-		Reason:              r.text(m, "reason", "$"),
-		RefusedAt:           RefusalSite(r.text(m, "refused_at", "$")),
-		RowsRead:            r.u64(m, "rows_read", "$"),
-		RowsSkipped:         r.u64(m, "rows_skipped", "$"),
-		RowsPassed:          r.optU64(m, "rows_passed", "$"),
-		RowsCut:             r.optU64(m, "rows_cut", "$"),
-		RowsUndecided:       r.optU64(m, "rows_undecided", "$"),
-		UnsupportedSettings: r.nameList(m, "unsupported_settings", "$"),
-		PartitionCount:      r.optU64(m, "partition_count", "$"),
-		ExportColumns:       r.nameList(m, "export_columns", "$"),
-		Framing:             r.framing(m, "$"),
-		Output:              output,
+		Outcome:              parseBatchOutcome(r.text(m, "outcome", "$")),
+		ErrCode:              r.i32(m, "code", "$"),
+		ErrMsg:               r.bytes(m, "err", "$"),
+		Reason:               r.text(m, "reason", "$"),
+		RefusedAt:            RefusalSite(r.text(m, "refused_at", "$")),
+		RowsRead:             r.u64(m, "rows_read", "$"),
+		RowsSkipped:          r.u64(m, "rows_skipped", "$"),
+		RowsPassed:           r.optU64(m, "rows_passed", "$"),
+		RowsCut:              r.optU64(m, "rows_cut", "$"),
+		RowsUndecided:        r.optU64(m, "rows_undecided", "$"),
+		RowsUndecidedReasons: r.reasonCounts(m, "rows_undecided_reasons", "$"),
+		UnsupportedSettings:  r.nameList(m, "unsupported_settings", "$"),
+		PartitionCount:       r.optU64(m, "partition_count", "$"),
+		ExportColumns:        r.nameList(m, "export_columns", "$"),
+		Framing:              r.framing(m, "$"),
+		Output:               output,
 	}
 	if res.Outcome != Accepted {
 		res.Output = nil
