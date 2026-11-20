@@ -297,6 +297,12 @@ func runHandshakeCase(tbl *Table, c caseJSON) (bool, string) {
 			problems = append(problems, "expected a non-empty string result")
 		}
 	}
+	if raw, ok := c.Expect["equals"]; ok {
+		want, _ := raw.(string)
+		if res.Str == nil || *res.Str != want {
+			problems = append(problems, fmt.Sprintf("want the string %q", want))
+		}
+	}
 	if len(problems) > 0 {
 		return false, strings.Join(problems, "; ")
 	}

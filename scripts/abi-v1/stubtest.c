@@ -829,6 +829,47 @@ static void test_unbound_refuses_rtld_now(const char *dir) {
     if (h != NULL) dlclose(h);
 }
 
+#if CHS_ABI_VERSION >= 2
+/* The CPU floor's three handshake exports: what the ok stub answers, what the
+   cpu-floor-refused plant answers, and that cpu-floor-absent exports none of
+   them, as a library from before the check does. */
+static const char *cpu_answer(void *h, const char *name) {
+    const char *(*fn)(void) = (const char *(*)(void)) dlsym(h, name);
+    return fn == NULL ? NULL : fn();
+}
+
+static void test_cpu_floor(const char *dir) {
+    char path[4096];
+    snprintf(path, sizeof path, "%s/ok.so", dir);
+    void *ok = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+    CHECK(ok != NULL, "ok: %s", dlerror());
+    const char *floor = cpu_answer(ok, "chs_cpu_floor");
+    const char *missing = cpu_answer(ok, "chs_cpu_missing");
+    const char *message = cpu_answer(ok, "chs_cpu_message");
+    CHECK(floor != NULL && floor[0] != 0, "ok: chs_cpu_floor(): empty");
+    CHECK(missing != NULL && missing[0] == 0, "ok: chs_cpu_missing() = %s, want \"\"", missing ? missing : "(null)");
+    CHECK(message != NULL && message[0] == 0, "ok: chs_cpu_message() = %s, want \"\"", message ? message : "(null)");
+
+    snprintf(path, sizeof path, "%s/cpu-floor-refused.so", dir);
+    void *refused = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+    CHECK(refused != NULL, "cpu-floor-refused: %s", dlerror());
+    floor = cpu_answer(refused, "chs_cpu_floor");
+    missing = cpu_answer(refused, "chs_cpu_missing");
+    message = cpu_answer(refused, "chs_cpu_message");
+    CHECK(floor != NULL && strcmp(floor, "x86-64-v3+pclmul") == 0, "cpu-floor-refused: chs_cpu_floor() = %s", floor ? floor : "(null)");
+    CHECK(missing != NULL && strcmp(missing, "avx2,bmi2") == 0, "cpu-floor-refused: chs_cpu_missing() = %s", missing ? missing : "(null)");
+    CHECK(message != NULL && strstr(message, "missing avx2,bmi2") != NULL, "cpu-floor-refused: chs_cpu_message() = %s", message ? message : "(null)");
+
+    snprintf(path, sizeof path, "%s/cpu-floor-absent.so", dir);
+    void *absent = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+    CHECK(absent != NULL, "cpu-floor-absent: %s", dlerror());
+    const char *names[] = {"chs_cpu_floor", "chs_cpu_missing", "chs_cpu_message"};
+    for (size_t i = 0; i < sizeof names / sizeof names[0]; i++) {
+        CHECK(dlsym(absent, names[i]) == NULL, "cpu-floor-absent: exports %s", names[i]);
+    }
+}
+#endif
+
 int main(int argc, char **argv) {
     if (argc != 2) {
         fprintf(stderr, "usage: stubtest <dir containing ok.so and ok-b.so>\n");
@@ -855,6 +896,9 @@ int main(int argc, char **argv) {
 #if CHS_ABI_VERSION >= 2
     test_server_profile(&a);
     test_cancel(&a);
+#endif
+#if CHS_ABI_VERSION >= 2
+    test_cpu_floor(argv[1]);
 #endif
     test_unbound_refuses_rtld_now(argv[1]);
 

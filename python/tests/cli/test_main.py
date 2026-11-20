@@ -161,6 +161,9 @@ def test_every_code_in_the_table_maps_to_its_status(code_name, monkeypatch, caps
     """The exit status of each error code is the table's, never a number held here."""
     if code_name == "CHTYPES_ARTIFACT_INCOMPATIBLE":
         error: Exception = ArtifactIncompatibleError("boom", reason="x")
+    elif code_name == "CHTYPES_CPU_UNSUPPORTED":
+        error = ArtifactIncompatibleError("boom", reason="cpu_floor")
+        error.code = code_name
     elif code_name == "CHTYPES_CACHE_UNUSABLE":
         error = fetch_errors.CacheUnusableError("boom", path="/x", reason="unwritable")
     else:

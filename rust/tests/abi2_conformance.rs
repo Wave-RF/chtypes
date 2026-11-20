@@ -340,6 +340,14 @@ fn check_handshake(outcome: &Outcome, expect: &Value) -> Result<(), String> {
             _ => Err("expected a string outcome".to_string()),
         };
     }
+    if let Some(want) = expect.get("equals") {
+        let want_s = want.as_str().ok_or("expect.equals is not a string")?;
+        return match outcome {
+            Outcome::Str(s) if s == want_s => Ok(()),
+            Outcome::Str(s) => Err(format!("want {want_s:?}, got {s:?}")),
+            _ => Err("expected a string outcome".to_string()),
+        };
+    }
     Err(format!("unrecognized handshake expectation: {expect}"))
 }
 

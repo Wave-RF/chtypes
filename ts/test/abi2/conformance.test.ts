@@ -406,6 +406,9 @@ describe.skipIf(!stubsAvailable)('abi v2 conformance (ts)', () => {
           const v = call.outcome === 'value' ? call.value : null;
           expect(typeof v).toBe('string');
           expect((v as string).length > 0).toBe(true);
+        } else if ('equals' in c.expect) {
+          expect(call.outcome).toBe('value');
+          expect(call.outcome === 'value' ? call.value : undefined).toBe(c.expect?.equals);
         } else {
           throw new Error(`conformance: ${c.id}: unrecognized handshake expect shape`);
         }

@@ -48,6 +48,10 @@ def _run_handshake(api, case: dict) -> None:
         assert result.bytes_value, (
             f"{case['id']}: expected a non-empty value, got {result.bytes_value!r}"
         )
+    elif "equals" in expect:
+        assert result.bytes_value == expect["equals"].encode(), (
+            f"{case['id']}: want {expect['equals']!r}, got {result.bytes_value!r}"
+        )
     else:
         raise AssertionError(f"{case['id']}: unrecognized handshake expect shape {expect!r}")
 

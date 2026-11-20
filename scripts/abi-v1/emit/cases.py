@@ -1052,6 +1052,15 @@ def build_cases(model) -> list[dict]:
         {**c, "expect": {"int": model.abi}} if c["id"] == "chs_abi_version.handshake" else c
         for c in HANDWRITTEN_CASES
     ]
+    refusal = model.library_refusal()
+    if refusal is not None:
+        # What the ok stub's handshake answers at the loader's step 2b: a floor,
+        # and "" for the two a CPU at or above it leaves empty.
+        cases += [
+            {"id": f"{refusal['want']}.handshake", "kind": "handshake", "fn": refusal["want"], "expect": {"non_empty": True}},
+            {"id": f"{refusal['got']}.handshake", "kind": "handshake", "fn": refusal["got"], "expect": {"equals": ""}},
+            {"id": f"{refusal['message']}.handshake", "kind": "handshake", "fn": refusal["message"], "expect": {"equals": ""}},
+        ]
     for fn in model.functions:
         if kinds.get(fn.name) != "generic":
             continue

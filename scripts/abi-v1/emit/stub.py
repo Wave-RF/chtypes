@@ -109,7 +109,8 @@ buffer), `chs_error_status` (CHS_INVALID_ARGUMENT on a bad error) and
 error or allocation failure), and `chs_live_handles` (the real per-kind
 counters, not an echo of its own argument-less call). Generation 2 adds the
 cancel token's four (`chs_cancel_create`, `_fire`, `_fired`, `_free`: see THE
-CANCEL TOKEN above) and `chs_error_reason`. Every free function
+CANCEL TOKEN above), `chs_error_reason` and the CPU floor's three handshake
+calls (`_stubshared.CPU_FLOOR`). Every free function
 (five handles plus `chs_shutdown`) is ALSO generated, by one shared
 structural template (`_gen_free`/`is_free_like`), not hand-written, since all
 six share one shape. Everything else — about HALF of the described functions
@@ -1349,6 +1350,30 @@ static void chs_stub_zone_release(void) {
 """
 
 
+def _cpu_floor_refused(model, fn) -> list[str]:
+    """What the setup call answers in the `cpu-floor-refused` variant
+    (_stubshared.CPU_FLOOR), as a real library below its floor does: so a
+    binding that gets as far as step 7 fails as an internal error, not as the
+    refusal, and its test for the refusal fails."""
+    rule = _stubshared.CPU_FLOOR
+    if model.library_refusal() is None or fn.name != _stubshared.IMAGE_ZONE["fn"]:
+        return []
+    return [
+        f"#if defined({rule['define']})",
+        "    {",
+        f"        static const char msg[] = {_c_str(rule['message'])};",
+        f"        static const char reason[] = {_c_str(rule['reason'])};",
+        '        chs_error *e = chs_stub_make_error(CHS_INTERNAL, 0, "", 0, msg, sizeof(msg) - 1);',
+        "        e->reason = (char *) malloc(sizeof(reason) - 1);",
+        "        memcpy(e->reason, reason, sizeof(reason) - 1);",
+        "        e->reason_len = sizeof(reason) - 1;",
+        "        chs_stub_set_err(err, e);",
+        "        return CHS_INTERNAL;",
+        "    }",
+        "#endif",
+    ]
+
+
 def _image_zone(fn) -> list[str]:
     """The stub's stand-in for the image zone's process-once rule
     (_stubshared.IMAGE_ZONE): after the input checks and any status
@@ -1860,6 +1885,7 @@ def _gen_generic(model, fn) -> str:
     body += _cancel(model, fn)
     body += _cancel_probe(model, fn)
     body += _one_create(fn)
+    body += _cpu_floor_refused(model, fn)
     body += _image_zone(fn)
     body += _zone_probe(fn)
     body += _document_mode(model, fn)
@@ -1901,6 +1927,21 @@ def _special(model) -> dict[str, str]:
     s["chs_abi_version"] = f"{sig('chs_abi_version')} {{\n    return CHS_ABI_VERSION;\n}}"
     s["chs_clickhouse_version"] = f'{sig("chs_clickhouse_version")} {{\n    return "26.8.15.10-lts";\n}}'
     s["chs_abi_revision"] = f"{sig('chs_abi_revision')} {{\n    return CHS_ABI_REVISION_TOMBSTONE;\n}}"
+    refusal = model.library_refusal()
+    if refusal is not None:
+        # The handshake a loader's step 2b reads: see _stubshared.CPU_FLOOR.
+        rule = _stubshared.CPU_FLOOR
+        s[refusal["want"]] = f'{sig(refusal["want"])} {{\n    return {_c_str(rule["floor"])};\n}}'
+        for member, answer in (("got", rule["missing"]), ("message", rule["message"])):
+            s[refusal[member]] = (
+                f"{sig(refusal[member])} {{\n"
+                f"#if defined({rule['define']})\n"
+                f"    return {_c_str(answer)};\n"
+                "#else\n"
+                '    return "";\n'
+                "#endif\n"
+                "}"
+            )
     # Not a generic echo: this is the one function whose whole job is to
     # report real state (the five live-kind counters), which is exactly what
     # a zero-live-after-close conformance case reads.

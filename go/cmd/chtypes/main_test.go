@@ -85,7 +85,7 @@ func TestExitStatusIsTheGeneratedTable(t *testing.T) {
 		ocifetch.CodeArtifactPinned: 1, ocifetch.CodeArtifactUnpublished: 4, ocifetch.CodeSourceUnreachable: 3,
 		ocifetch.CodeSourceUnauthorized: 5, ocifetch.CodeSourceForbidden: 6, ocifetch.CodeSourceIncompatible: 7,
 		ocifetch.CodeArtifactIncompatible: 8, ocifetch.CodeCacheUnusable: 9, ocifetch.CodeSourceRetired: 10,
-		ocifetch.CodeArtifactRevoked: 11,
+		ocifetch.CodeArtifactRevoked: 11, ocifetch.CodeCPUUnsupported: 12,
 	}
 	if len(want) != len(ocifetch.ErrorExitCodes) {
 		t.Fatalf("the generated table has %d codes, this test %d", len(ocifetch.ErrorExitCodes), len(want))

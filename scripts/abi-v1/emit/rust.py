@@ -194,6 +194,63 @@ def render_fn_type(fn) -> str:
 # --------------------------------------------------------------- decls.rs
 
 
+def _library_refusal_reader(model) -> list[str]:
+    """`read_<reason>`: what a loader reads for the refusal the library answers
+    for itself (sdk.json's row with want, got and message), each symbol optional
+    so a library that predates it is not a missing symbol. Nothing for a
+    description with no such row."""
+    r = model.library_refusal()
+    if r is None:
+        return []
+    answers = "".join(word.capitalize() for word in r["reason"].split("_")) + "Answers"
+
+    def lookup(name: str) -> str:
+        return f'lib.get::<{fn_type_name(name)}>(concat!({_rust_str(name)}, "\\0").as_bytes())'
+
+    return [
+        f"// {' the ' + r['reason'] + ' refusal ':-^76}",
+        "",
+        f"/// The library's own answers for the `{r['reason']}` refusal, verbatim.",
+        f"pub(crate) struct {answers} {{",
+        "    pub(crate) want: String,",
+        "    pub(crate) got: String,",
+        "    pub(crate) message: String,",
+        "}",
+        "",
+        f"/// `None` when the library does not export `{r['got']}`: an older library, which",
+        f"/// the later steps refuse by its fingerprint. A `{r['want']}` or",
+        f"/// `{r['message']}` it lacks, or a NULL answer, reads as empty.",
+        "///",
+        "/// # Safety",
+        "/// `lib` must be a library this process just `dlopen`'d and will never",
+        "/// `dlclose`, as for [`Handshake::resolve`].",
+        f"pub(crate) unsafe fn read_{r['reason']}(lib: &UnixLibrary) -> Option<{answers}> {{",
+        "    fn copied(p: *const c_char) -> String {",
+        "        if p.is_null() {",
+        "            return String::new();",
+        "        }",
+        "        // SAFETY: a handshake string is a compiled-in, NUL-terminated constant.",
+        "        unsafe { std::ffi::CStr::from_ptr(p) }",
+        "            .to_string_lossy()",
+        "            .into_owned()",
+        "    }",
+        "    // SAFETY: the caller's `# Safety` clause covers the symbols; each call takes",
+        "    // no arguments and is a handshake call, callable straight after opening.",
+        "    unsafe {",
+        f"        let got = {lookup(r['got'])}.ok()?;",
+        f"        let want = {lookup(r['want'])}.ok();",
+        f"        let message = {lookup(r['message'])}.ok();",
+        f"        Some({answers} {{",
+        "            want: want.map_or_else(String::new, |f| copied(f())),",
+        "            got: copied(got()),",
+        "            message: message.map_or_else(String::new, |f| copied(f())),",
+        "        })",
+        "    }",
+        "}",
+        "",
+    ]
+
+
 def render_decls(model) -> str:
     out: list[str] = [
         f"// {banner(model)}",
@@ -340,6 +397,7 @@ def render_decls(model) -> str:
             f".map_err(|_| {_rust_str(name)})?,"
         )
     out += ["            })", "        }", "    }", "}", ""]
+    out += _library_refusal_reader(model)
 
     out += [
         "// ------------------------------------------------------------------- api",
@@ -711,6 +769,17 @@ def render_invoke(model) -> str:
             "Ok(Outcome::Str(unsafe { cstr_to_string(p) }))",
         ],
     )
+    refusal = model.library_refusal()
+    for member in ("want", "got", "message") if refusal else ():
+        out += arm(
+            refusal[member],
+            [
+                "// SAFETY: same as chs_build_info: a static, NUL-terminated string.",
+                f"let p = unsafe {{ (api.{refusal[member]})() }};",
+                "// SAFETY: see the comment above; cstr_to_string's own contract is the same one.",
+                "Ok(Outcome::Str(unsafe { cstr_to_string(p) }))",
+            ],
+        )
 
     for fn in generic:
         has_inputs = any(not p.is_out for p in fn.params)
@@ -2108,6 +2177,17 @@ def render_errmap(model) -> str:
     for reason, cls in sorted(by_reason.items()):
         out.append(f"        {_rust_str_any(reason)} => RefusalClass::{_words(cls[len('artifact_'):])},")
     out += ["        _ => RefusalClass::Incompatible,", "    }", "}", ""]
+    refusal_codes = model.refusal_codes()
+    if refusal_codes:
+        out += [
+            "/// The code `sdk.json`'s `loader.refusals` gives a refusal in place of its",
+            "/// class's own; `None` for every refusal that carries its class's.",
+            "pub(crate) fn refusal_code(reason: &str) -> Option<&'static str> {",
+            "    match reason {",
+        ]
+        for reason, code in refusal_codes.items():
+            out.append(f"        {_rust_str_any(reason)} => Some({_rust_str_any(code)}),")
+        out += ["        _ => None,", "    }", "}", ""]
     out += [
         "/// The environment variable that is the second opt-in of an unverified open.",
         f"pub(crate) const UNVERIFIED_ENV: &str = {_rust_str_any(model.sdk['loader']['unverified_env'])};",

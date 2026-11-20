@@ -72,7 +72,18 @@
               "step": {"type": "integer", "minimum": 1, "maximum": 7},
               "reason": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
               "suffix": {"enum": ["field", "symbol"]},
-              "error": {"type": "string"}
+              "error": {"type": "string"},
+              "code": {
+                "type": "string",
+                "description": "A key of errors.codes: the code this refusal carries instead of its error class's own. The class stays `error`, so a handler of that class still catches it."
+              },
+              "want": {
+                "type": "string",
+                "pattern": "^chs_[a-z0-9_]+$",
+                "description": "With got and message: the refusal is the library's own answer. Each names a no-argument handshake function returning a static string, whose answer is this field of the refusal, verbatim; the function got names decides it, and may be absent from an older library."
+              },
+              "got": {"type": "string", "pattern": "^chs_[a-z0-9_]+$"},
+              "message": {"type": "string", "pattern": "^chs_[a-z0-9_]+$"}
             }
           }
         }

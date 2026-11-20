@@ -4,7 +4,7 @@
 //! # Safety invariants this module owns
 //!
 //! * **Steps run in order, exactly as §3.2**: glibc (Linux only, before
-//!   `dlopen`), `dlopen(RTLD_NOW | RTLD_LOCAL)`, `chs_abi_version`,
+//!   `dlopen`), `dlopen(RTLD_NOW | RTLD_LOCAL)`, the CPU floor, `chs_abi_version`,
 //!   `chs_build_info`'s fingerprint, the nine-field cross-check, then (and
 //!   only then) resolve every remaining symbol.
 //! * **No `dlclose`, ever** (D2), refused or accepted. `libloading`'s
@@ -17,8 +17,9 @@
 //!   built without `-z nodelete`, which `dlclose` really unmaps: a library
 //!   that starts background threads at `dlopen` leaves thread-key destructors
 //!   pointing into the unmapped code, and the host can crash seconds later. So
-//!   a library this binding refuses (another fingerprint, a failed
-//!   cross-check, a missing symbol) stays mapped for the life of the process,
+//!   a library this binding refuses (a CPU below its floor, another
+//!   fingerprint, a failed cross-check, a missing symbol) stays mapped for the
+//!   life of the process,
 //!   exactly as an accepted one does. `rust/tests/no_unload.rs` pins it.
 //! * **`open_unverified`** is this loader with no signed statement: steps 1
 //!   and 5 are skipped (`LoadInput::predicate` is `None`), and the two-gate
@@ -49,7 +50,7 @@ use super::calls_gen::RawCallError;
 use super::decls::{self, Api, CrossCheckKind, Handshake};
 
 /// One loader refusal: the `sdk.json` reason WORD, EXACTLY (`glibc_floor`,
-/// `no_glibc`, `predicate_malformed`, `dlopen`, `not_v1`, `abi_version`,
+/// `no_glibc`, `predicate_malformed`, `dlopen`, `cpu_floor`, `not_v1`, `abi_version`,
 /// `build_info_malformed`, `fingerprint`, `build_info_mismatch:<field>` or
 /// `missing_symbol:<name>` — never a sentence built around one), the library
 /// path, and — where applicable — what was wanted and what was found, as in
@@ -74,8 +75,9 @@ pub struct Refusal {
     /// What the check found: beside `want` where the refusal names both, or
     /// alone (the `dlopen` error, what a malformed `build_info` lacks).
     pub got: Option<String>,
-    /// A sentence the display adds after the fields, or the whole display of
-    /// the fetch layer's own corruption.
+    /// A sentence the display adds after the fields (a `cpu_floor` refusal's is
+    /// the library's own, verbatim), or the whole display of the fetch layer's
+    /// own corruption.
     pub(crate) message: Option<String>,
 }
 
@@ -331,6 +333,19 @@ fn load_checked(input: LoadInput<'_>) -> Result<Checked, Refusal> {
         unsafe { UnixLibrary::open(Some(path), RTLD_NOW | RTLD_LOCAL) }
             .map_err(|e| Refusal::found("dlopen", path, e.to_string()))?,
     );
+
+    // Step 2b: the CPU floor, before anything else of the library is called.
+    // A library that does not export the list predates the check and goes on:
+    // steps 3 and 4 refuse it by its fingerprint. An empty list goes on too. Any
+    // other list refuses, with the library's three answers verbatim; it is never
+    // parsed, and the image stays mapped inside its `ManuallyDrop`.
+    // SAFETY: `lib` was just opened above and is never dlclose'd.
+    let answers = unsafe { decls::read_cpu_floor(&lib) };
+    if let Some(answers) = answers.filter(|answers| !answers.got.is_empty()) {
+        let mut refusal = Refusal::naming("cpu_floor", path, answers.want, answers.got);
+        refusal.message = Some(answers.message).filter(|sentence| !sentence.is_empty());
+        return Err(refusal);
+    }
 
     // Step 3: chs_abi_version. `Handshake::resolve` also resolves
     // chs_build_info (step 4 needs it next), so its error names whichever of

@@ -31,6 +31,7 @@ __all__ = [
     "CODE_ARTIFACT_UNPUBLISHED",
     "CODE_ARTIFACT_UNTRUSTED",
     "CODE_CACHE_UNUSABLE",
+    "CODE_CPU_UNSUPPORTED",
     "CODE_SOURCE_FORBIDDEN",
     "CODE_SOURCE_INCOMPATIBLE",
     "CODE_SOURCE_RETIRED",
@@ -72,6 +73,7 @@ from ._codes import (
     CODE_ARTIFACT_UNPUBLISHED,
     CODE_ARTIFACT_UNTRUSTED,
     CODE_CACHE_UNUSABLE,
+    CODE_CPU_UNSUPPORTED,
     CODE_SOURCE_FORBIDDEN,
     CODE_SOURCE_INCOMPATIBLE,
     CODE_SOURCE_RETIRED,
@@ -232,8 +234,9 @@ class ArtifactUnpublishedError(ArtifactError):
 
 class ArtifactIncompatibleError(ArtifactError):
     """The library cannot be this process's ABI v1 artifact: wrong glibc, a
-    failed dlopen, not a v1 artifact, a version or fingerprint mismatch, or a
-    missing described symbol."""
+    failed dlopen, a CPU below the build's floor (this class, with the code
+    `CODE_CPU_UNSUPPORTED`), not a v1 artifact, a version or fingerprint
+    mismatch, or a missing described symbol."""
 
     code = CODE_ARTIFACT_INCOMPATIBLE
 

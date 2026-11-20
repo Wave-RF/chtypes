@@ -78,6 +78,19 @@ Pick a line you actually need. Each artifact is 160–300 MB on disk and about 1
 
 **Or let the first open fetch it.** A registry fetches a missing version on demand when its `autofetch` option is on, or when `CHTYPES_AUTOFETCH=1` is set for the process. It is off by default, because a production process should not begin a 250 MB download inside a request.
 
+## CPU requirements
+
+Each library is built for a CPU floor, which depends on the architecture and the ClickHouse line. On a CPU below it the library cannot run: opening it fails with the ordinary error `CHTYPES_CPU_UNSUPPORTED` (in the artifact-incompatible class, so a handler of a failed open already catches it), and your process keeps running. The error names the floor and the features this CPU lacks, in the library's own sentence. The other platform requirements are in [`support-v2.md`](support-v2.md#platforms).
+
+| Platform       | Lines             | Floor                           | Requires                                                                           | CPUs                                                                                                      |
+| -------------- | ----------------- | ------------------------------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `linux-amd64`  | 26.3              | `x86-64-v2+pclmul`              | sse3, ssse3, sse4.1, sse4.2, popcnt, pclmul, cx16, lahf-sahf                       | Westmere and later; Nehalem is refused (no PCLMUL)                                                        |
+| `linux-amd64`  | 26.8, 26.9, 26.10 | `x86-64-v3+pclmul`              | the above, and xsave, avx, avx-os-state, avx2, bmi1, bmi2, f16c, fma, lzcnt, movbe | Haswell / Excavator and later                                                                             |
+| `linux-arm64`  | all               | `armv8.2-a+crypto+dotprod+rcpc` | atomics, crc32, aes, pmull, sha1, sha2, asimddp, asimdrdm, lrcpc                   | AWS Graviton2 (Neoverse N1) and later, Apple M1 and later; not Graviton1, not Raspberry Pi 4 (Cortex-A72) |
+| `darwin-arm64` | all               | -                               | -                                                                                  | every arm64 Mac: none is below the floor                                                                  |
+
+The named CPUs follow from the feature lists: the features are the requirement, and a CPU that has them all runs the library whatever its name. An x86-64 library under Rosetta is unsupported on 26.8, 26.9 and 26.10: use `darwin-arm64`, or `linux-arm64`. A line this table does not name still carries its own floor and reports it at open, the same way.
+
 ## Check it worked
 
 <details open><summary><b>Go</b></summary>

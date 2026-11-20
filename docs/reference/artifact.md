@@ -37,7 +37,7 @@ A fetch lands in a standard OCI image layout at `${XDG_CACHE_HOME:-~/.cache}/cht
 A loader never opens bytes the fetch layer has not verified, and never trusts a path. The load steps, in order, are [`abi-v1.md` § Loading a library](abi-v1.md#loading-a-library); in outline:
 
 1. the fetch layer resolves the request and returns a verified, unpacked library (or a cache hit, after re-checking the request against the signed statement);
-2. the loader `dlopen`s it with `RTLD_NOW | RTLD_LOCAL`;
+2. the loader `dlopen`s it with `RTLD_NOW | RTLD_LOCAL`, and under ABI v2 refuses it if this CPU is below the build's floor ([`abi-v2.md`](abi-v2.md), the Preamble's "Loading");
 3. it reads the library's own `chs_build_info` and refuses the library on any mismatch with the verified statement or with the binding's compiled-in ABI fingerprint, naming both sides;
 4. it applies the process setup (image zone and defaults) once per image.
 

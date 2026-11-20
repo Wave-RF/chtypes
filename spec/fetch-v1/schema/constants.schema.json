@@ -261,7 +261,8 @@
         "CHTYPES_ARTIFACT_PINNED", "CHTYPES_ARTIFACT_UNPUBLISHED", "CHTYPES_SOURCE_UNREACHABLE",
         "CHTYPES_SOURCE_UNAUTHORIZED", "CHTYPES_SOURCE_FORBIDDEN", "CHTYPES_SOURCE_INCOMPATIBLE",
         "CHTYPES_ARTIFACT_INCOMPATIBLE",
-        "CHTYPES_CACHE_UNUSABLE", "CHTYPES_SOURCE_RETIRED", "CHTYPES_ARTIFACT_REVOKED"
+        "CHTYPES_CACHE_UNUSABLE", "CHTYPES_SOURCE_RETIRED", "CHTYPES_ARTIFACT_REVOKED",
+        "CHTYPES_CPU_UNSUPPORTED"
       ],
       "properties": {
         "CHTYPES_ARTIFACT_MISSING": {"type": "integer", "minimum": 1, "maximum": 255},
@@ -276,7 +277,8 @@
         "CHTYPES_ARTIFACT_INCOMPATIBLE": {"type": "integer", "minimum": 1, "maximum": 255},
         "CHTYPES_CACHE_UNUSABLE": {"type": "integer", "minimum": 1, "maximum": 255},
         "CHTYPES_SOURCE_RETIRED": {"type": "integer", "minimum": 1, "maximum": 255},
-        "CHTYPES_ARTIFACT_REVOKED": {"type": "integer", "minimum": 1, "maximum": 255}
+        "CHTYPES_ARTIFACT_REVOKED": {"type": "integer", "minimum": 1, "maximum": 255},
+        "CHTYPES_CPU_UNSUPPORTED": {"type": "integer", "minimum": 1, "maximum": 255}
       }
     }
   }

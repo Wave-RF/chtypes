@@ -798,6 +798,19 @@ class Model:
         export list names. Sorted."""
         return sorted(f.name for f in self.functions)
 
+    def library_refusal(self) -> dict | None:
+        """The refusal the library answers for itself: the loader.refusals row
+        whose want, got and message each name a handshake function (ABI v2's
+        `cpu_floor`). None for a description with no such row, so an emitter
+        that reads it leaves ABI v1's output unchanged."""
+        return next((r for r in self.sdk["loader"]["refusals"] if "got" in r), None)
+
+    def refusal_codes(self) -> dict[str, str]:
+        """A loader refusal's reason -> the CHTYPES_ code its row gives it in
+        place of its error class's own."""
+        codes = self.sdk["errors"]["codes"]
+        return {r["reason"]: codes[r["code"]] for r in self.sdk["loader"]["refusals"] if "code" in r}
+
 
 # --------------------------------------------------------------------- docs
 
@@ -1687,6 +1700,18 @@ def load(root: Path, major: int = 1) -> Model:
     for r in sdk["loader"]["refusals"]:
         if r["error"] not in sdk["errors"]["classes"]:
             problems.append(f"{sp.sdk_json} loader refusal {r['reason']}: unknown class {r['error']!r}")
+        if "code" in r and r["code"] not in sdk["errors"]["codes"]:
+            problems.append(f"{sp.sdk_json} loader refusal {r['reason']}: code {r['code']!r} is not in errors.codes")
+        answers = [m for m in ("want", "got", "message") if m in r]
+        if answers and len(answers) != 3:
+            problems.append(f"{sp.sdk_json} loader refusal {r['reason']}: want, got and message come together")
+        for m in answers:
+            fn = fmap.get(r[m])
+            if fn is None or fn.cls != "handshake" or fn.params or fn.returns.type != "cstr_static":
+                problems.append(
+                    f"{sp.sdk_json} loader refusal {r['reason']}: {m} {r[m]!r} is not a handshake function "
+                    "returning a static string"
+                )
 
     # ---- the v0 tombstone (D1.2), and why D1.3 depends on it.
     #
