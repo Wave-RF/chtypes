@@ -273,7 +273,8 @@ insert-projection.test.ts :: the insert projection gate over the shared fixture 
 insert-projection.test.ts :: the insert projection gate over the shared fixture red-e-row-insert-accepted: {"violates":"e_row_rejects"}
 insert-projection.test.ts :: the insert projection gate over the shared fixture red-e-row-message-altered: {"violates":"e_row_rejects"}
 insert-projection.test.ts :: the insert projection gate over the shared fixture red-e-row-output-present: {"violates":"e_row_rejects"}
-insert-projection.test.ts :: the insert projection gate over the shared fixture red-e-row-refused-at-not-row: {"violates":"e_row_rejects"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-e-row-refused-at-body-step: {"violates":"e_row_rejects"}
+insert-projection.test.ts :: the insert projection gate over the shared fixture red-e-row-refused-at-row: {"violates":"e_row_rejects"}
 insert-projection.test.ts :: the insert projection gate over the shared fixture red-e-row-rows-read-differs: {"violates":"e_row_rejects"}
 insert-projection.test.ts :: the insert projection gate over the shared fixture red-e-row-undecided-not-zero: {"violates":"e_row_rejects"}
 insert-projection.test.ts :: the insert projection gate over the shared fixture red-err-not-a-prefix: {"violates":"err_prefix"}

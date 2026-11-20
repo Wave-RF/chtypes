@@ -424,6 +424,9 @@
         },
         {
           "value": "body_step"
+        },
+        {
+          "value": "where"
         }
       ]
     },
@@ -3098,7 +3101,8 @@
               "call",
               "body_read",
               "row",
-              "body_step"
+              "body_step",
+              "where"
             ]
           },
           "rows_read": {

@@ -1018,7 +1018,7 @@
      "container": null,
      "header": null
     },
-    "refused_at": "row",
+    "refused_at": "where",
     "rows_passed": 0,
     "rows_cut": 0,
     "rows_undecided": 0
@@ -1122,7 +1122,7 @@
      "container": null,
      "header": null
     },
-    "refused_at": "row",
+    "refused_at": "where",
     "rows_passed": 0,
     "rows_cut": 0,
     "rows_undecided": 0
@@ -1428,7 +1428,7 @@
      "container": null,
      "header": null
     },
-    "refused_at": "row",
+    "refused_at": "where",
     "rows_passed": 0,
     "rows_cut": 0,
     "rows_undecided": 0
@@ -2899,7 +2899,7 @@
      "container": null,
      "header": null
     },
-    "refused_at": "row",
+    "refused_at": "where",
     "rows_passed": 0,
     "rows_cut": 0,
     "rows_undecided": 0
@@ -2993,7 +2993,7 @@
      "container": null,
      "header": null
     },
-    "refused_at": "row",
+    "refused_at": "where",
     "rows_passed": 0,
     "rows_cut": 0,
     "rows_undecided": 0
@@ -3099,7 +3099,7 @@
      "container": null,
      "header": null
     },
-    "refused_at": "row",
+    "refused_at": "where",
     "rows_passed": 0,
     "rows_cut": 0,
     "rows_undecided": 0
@@ -3193,7 +3193,7 @@
      "container": null,
      "header": null
     },
-    "refused_at": "row",
+    "refused_at": "where",
     "rows_passed": 2,
     "rows_cut": 0,
     "rows_undecided": 0
@@ -3287,7 +3287,7 @@
      "container": null,
      "header": null
     },
-    "refused_at": "row",
+    "refused_at": "where",
     "rows_passed": 0,
     "rows_cut": 0,
     "rows_undecided": 1
@@ -3381,7 +3381,7 @@
      "container": null,
      "header": null
     },
-    "refused_at": "row",
+    "refused_at": "where",
     "rows_passed": 0,
     "rows_cut": 0,
     "rows_undecided": 0
@@ -3392,7 +3392,7 @@
    }
   },
   {
-   "id": "red-e-row-refused-at-not-row",
+   "id": "red-e-row-refused-at-body-step",
    "output_format": "JSONCompactEachRow",
    "batch": {
     "outcome": "accepted",
@@ -3486,6 +3486,100 @@
    }
   },
   {
+   "id": "red-e-row-refused-at-row",
+   "output_format": "JSONCompactEachRow",
+   "batch": {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "rows": [
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 0,
+       "len": 15
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 15,
+       "len": 15
+      },
+      "verdict": "e",
+      "verdict_code": 395,
+      "verdict_err": "Value passed to 'throwIf' function is non-zero"
+     },
+     {
+      "outcome": "accepted",
+      "code": 0,
+      "input_span": {
+       "off": 30,
+       "len": 17
+      },
+      "verdict": "t",
+      "verdict_code": 0
+     }
+    ],
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "unconsumed": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "row_spans": [
+     {
+      "off": 0,
+      "len": 12
+     },
+     null,
+     {
+      "off": 12,
+      "len": 14
+     }
+    ],
+    "export_columns": [
+     {
+      "name": "n"
+     },
+     {
+      "name": "s"
+     }
+    ],
+    "rows_passed": 2,
+    "rows_cut": 0
+   },
+   "batch_export_b64": "WzEsImFscGhhIl0KWzMsImNoYXJsaWUiXQo=",
+   "insert": {
+    "outcome": "rejected",
+    "code": 395,
+    "err": "Value passed to 'throwIf' function is non-zero",
+    "rows_read": 3,
+    "rows_skipped": 0,
+    "unsupported_settings": [],
+    "framing": {
+     "bom_skipped": false,
+     "container": null,
+     "header": null
+    },
+    "refused_at": "row",
+    "rows_passed": 0,
+    "rows_cut": 0,
+    "rows_undecided": 0
+   },
+   "insert_rows_b64": null,
+   "expect": {
+    "violates": "e_row_rejects"
+   }
+  },
+  {
    "id": "red-e-row-rows-read-differs",
    "output_format": "JSONCompactEachRow",
    "batch": {
@@ -3569,7 +3663,7 @@
      "container": null,
      "header": null
     },
-    "refused_at": "row",
+    "refused_at": "where",
     "rows_passed": 0,
     "rows_cut": 0,
     "rows_undecided": 0

@@ -237,7 +237,9 @@ type InsertResult struct {
 	ErrCode int32
 	ErrMsg  string
 	// Reason is the catalog id of a decline; RefusedAt says where a refusal or
-	// decline sits. Both are "" when the document carries none.
+	// decline sits. Both are "" when the document carries none. An e row, one
+	// the INSERT's WHERE threw on, fails the call at RefusedAtWhere, a site no
+	// other result carries: the code alone cannot tell it from a parse error.
 	Reason    string
 	RefusedAt RefusalSite
 	RowsRead  uint64

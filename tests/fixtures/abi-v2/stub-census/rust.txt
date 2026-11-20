@@ -51,6 +51,7 @@ lib decode::tests::a_transform_reads_its_lossy_fact_from_the_vocabulary
 lib decode::tests::a_wrong_json_type_names_the_document_and_the_key
 lib decode::tests::absent_at_merge_and_unsupported_settings_are_empty
 lib decode::tests::an_at_merge_that_breaks_its_schema_is_internal
+lib decode::tests::an_insert_whose_where_threw_is_refused_at_where
 lib decode::tests::an_unknown_outcome_is_its_unknown_and_unknown_keys_are_ignored
 lib decode::tests::an_unlisted_source_is_its_unknown_and_the_row_decodes_on
 lib decode::tests::default_override_is_a_stored_source_and_default_deferred_is_not

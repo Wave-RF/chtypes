@@ -316,7 +316,10 @@ pub struct InsertResult {
     /// [`InsertResult::err_code`] is `CHS_CODE_DECLINED` (-2). ASCII.
     pub reason: Option<String>,
     /// Where a refusal or decline sits (`refused_at`), present whenever the
-    /// outcome is not accepted. The document has no `refused_row`.
+    /// outcome is not accepted. The document has no `refused_row`. An `e` row,
+    /// one the INSERT's WHERE threw on, fails the call at
+    /// [`RefusalSite::Where`], a site no other result carries: the code alone
+    /// cannot tell it from a parse error.
     pub refused_at: Option<RefusalSite>,
     /// Rows the reader read.
     pub rows_read: u64,

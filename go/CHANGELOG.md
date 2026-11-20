@@ -42,6 +42,7 @@ The four bindings in this repository are released together and give one answer, 
 
 ### Changed
 
+- **Breaking (ABI v2 dev; moves the dev fingerprint):** an `InsertResult` whose INSERT's WHERE threw on a row (an `e` row) is `RefusedAt` `RefusedAtWhere`, the new `RefusalSite` value `where`, where it was `RefusedAtRow`. The code and the message are unchanged, ClickHouse's own and verbatim. One code can come from the body's parse and from the filter alike, so the site is how a caller tells its own filter failing from a malformed body (`RefusedAtBodyRead` or `RefusedAtRow`). No other result carries `where`, and a site the description does not list still decodes as the vocabulary's unknown(n) (`Known()` false).
 - **Breaking (vs the 2.0.0-dev releases):** the batch preview's default `doc_flags` is now 0 (the lean result): `(*Schema).Rows` without `WithDocFlags` returns no per-value documents. Pass `WithDocFlags(DocAll)` explicitly to get every column's per-value documents.
 - **Breaking: the public surface the parity gate carried as exceptions is resolved, before the v2 lock (#499, #500).** A convenience exists in every binding or in none (`docs/reference/bindings-v1.md` §1, principle 2). Migration, old → new:
   - `ArtifactError.Msg` → `err.Error()`. `ArtifactError.Err` → `errors.Unwrap(err)`, `errors.Is` or `errors.As` (`Unwrap` stays).

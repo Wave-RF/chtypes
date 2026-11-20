@@ -51,6 +51,7 @@ github.com/wave-rf/chtypes/go/v2/chtypes TestDecodeErrorCodesAndLiveHandles
 github.com/wave-rf/chtypes/go/v2/chtypes TestDecodeFilterResult
 github.com/wave-rf/chtypes/go/v2/chtypes TestDecodeFilterResultRefusalMembers
 github.com/wave-rf/chtypes/go/v2/chtypes TestDecodeInsertResultEveryMember
+github.com/wave-rf/chtypes/go/v2/chtypes TestDecodeInsertResultWhereSite
 github.com/wave-rf/chtypes/go/v2/chtypes TestDecodeNameLists
 github.com/wave-rf/chtypes/go/v2/chtypes TestDecodeRow
 github.com/wave-rf/chtypes/go/v2/chtypes TestDecodeRowAbsentIsDefault
@@ -99,7 +100,8 @@ github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/red-e-row-c
 github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/red-e-row-insert-accepted
 github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/red-e-row-message-altered
 github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/red-e-row-output-present
-github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/red-e-row-refused-at-not-row
+github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/red-e-row-refused-at-body-step
+github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/red-e-row-refused-at-row
 github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/red-e-row-rows-read-differs
 github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/red-e-row-undecided-not-zero
 github.com/wave-rf/chtypes/go/v2/chtypes TestInsertProjectionFixture/red-err-not-a-prefix

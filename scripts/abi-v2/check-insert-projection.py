@@ -17,9 +17,10 @@ A case: id, output_format (a chs_format name, or NONE), batch, batch_export_b64
 
 Rules, checked in this order (the first that fails is the answer):
   e_row_rejects    a batch with an `e` verdict (outcome accepted): the insert is
-                   rejected with the FIRST e row's code and err, refused_at row,
-                   rows_passed, rows_cut and rows_undecided 0, rows_read the
-                   batch's, and no output
+                   rejected with the FIRST e row's code and err, refused_at
+                   `where` (the INSERT's WHERE threw on a row; never `row`,
+                   which is the body's parse), rows_passed, rows_cut and
+                   rows_undecided 0, rows_read the batch's, and no output
   export_decline_is_call_decline
                    a batch that is accepted with `export_declined` R (reason id
                    I): the insert is `unsupported`, reason I, code -2, refused_at
@@ -205,7 +206,7 @@ def evaluate(case: dict):
         first = rows[verdicts.index("e")]
         want_err = _bytes(first, "verdict_err")
         if not (ins["outcome"] == "rejected" and ins["code"] == first["verdict_code"]
-                and _bytes(ins, "err") == want_err and ins.get("refused_at") == "row"
+                and _bytes(ins, "err") == want_err and ins.get("refused_at") == "where"
                 and ins.get("rows_passed") == 0 and ins.get("rows_cut") == 0 and ins.get("rows_undecided") == 0
                 and ins["rows_read"] == batch["rows_read"] and out is None):
             return "violates", "e_row_rejects"
