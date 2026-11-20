@@ -218,7 +218,7 @@ if batch.outcome == Outcome::Rejected && batch.err_code == 252 {
 
 </details>
 
-The verdict is the one a **synchronous** insert of this body gets. Under `async_insert` the server counts partitions over a coalesced flush of which this body is only a part, so a refusal here means the server refuses too, while an acceptance here does not guarantee the server accepts.
+The verdict is the one a **synchronous** insert of this body gets. Under `async_insert` the server counts partitions over a coalesced flush of which this body is only a part, so a refusal here means the server refuses too, while an acceptance here does not guarantee the server accepts. The same holds for a filtered insert (`INSERT … SELECT … WHERE`) on 26.10, which goes through the asynchronous queue by default: the server can group it with other clients' inserts into one flush that the call cannot see, and such grouping can refuse a body that the call, and the same body inserted alone, would accept.
 
 ## The pairing rule for a gateway and a worker
 
